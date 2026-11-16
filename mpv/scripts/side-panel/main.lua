@@ -1364,6 +1364,26 @@ local function crop_part(u, x, w, y)
         swinir = "Draws detail that wasn't in the frame: plausible texture, sometimes things that were never there. A minute or two",
     }
     if UP_NOTES[up] then y = u:caption(x, w, y, UP_NOTES[up], { color = C.label }) end
+    -- The photo rendered ahead (the gyroflow plugin's export.lua, docs/photo-upscaling.md): its progress and Cancel,
+    -- then what it is; Save writes it
+    local r = type(g.photo_render) == "table" and g.photo_render or {}
+    if r.state == "running" then
+        local bw = w - 88 * s
+        local stage = r.stage == "upscale" and string.format("Drawing detail, %d %%", r.done or 0)
+            or r.stage == "download" and string.format("Downloading the model, %d %%", r.done or 0)
+            or r.stage == "preview" and "Fitting the preview" or "Rendering the frame"
+        u:text(x, y + 8 * s, (r.saving and "Saves when done · " or "") .. stage, { size = 12, color = C.label })
+        u:box(x, y + 20 * s, bw, 6 * s, 3, C.field)
+        local share = math.max(0, math.min(1, (r.done or 0) / 100))
+        if share > 0 then u:box(x, y + 20 * s, math.max(6 * s, bw * share), 6 * s, 3, C.accent) end
+        y = u:button(x + bw + 8 * s, 80 * s, y + 4 * s, "photo-render-cancel", "Cancel", "script-message-to gyroflow photo-render-cancel")
+    elseif r.state == "ready" then
+        y = u:caption(x, w, y, "Shown over the frame: " .. (r.label or "rendered") .. ". Save writes it")
+    elseif r.state == "failed" then
+        y = u:caption(x, w, y, "The render failed: " .. (r.error or "?"))
+    elseif up ~= "none" then
+        y = u:caption(x, w, y, "Paused, the photo is rendered and shown over the frame; playing, nothing runs", { color = C.dim })
+    end
     y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
     local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
               or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"

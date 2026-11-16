@@ -204,7 +204,13 @@ QuickTime location): the camera's GPS at that time, else the clip's location in 
   --upscale <auto|none|fsr|realesrgan|swinir>  what makes the pixels a crop stretched past the camera's has
                    (docs/photo-upscaling.md): none, the warp's interpolation (the default); FSR 1; Real-ESRGAN x4plus
                    or SwinIR-L, neural networks that draw detail that wasn't in the frame (macOS: afp-upscale, models
-                   in the app's data folder); auto: none up to a stretch of 1.1, FSR to 2.4, SwinIR-L past it";
+                   in the app's data folder); auto: none up to a stretch of 1.1, FSR to 2.4, SwinIR-L past it
+  --render-to <dir>  the photo made (upscaled too) but not saved: its two renditions and what it is into <dir>, with
+                   --preview-size <WxH>'s picture of it as 8-bit BGRA (preview.bgra, for mpv's overlay-add); no motion. The
+                   player's Save frame renders the photo ahead of Save this way (docs/photo-upscaling.md)
+  --from-render <dir>  the photo saved from a --render-to's renditions, as they are: no frame rendered, nothing
+                   upscaled again (the rest as given: --live's motion, where it goes). With --render-to the same <dir>:
+                   only the preview made again, at --preview-size's";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
 const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
@@ -268,6 +274,10 @@ struct Options {
     live: bool,
     /// --upscale (upscale.rs)
     upscale: vs_gyroflow::upscale::Choice,
+    /// --render-to, --from-render, --preview: the photo rendered ahead of saving, and saved from that
+    render_to: Option<PathBuf>,
+    from_render: Option<PathBuf>,
+    render_preview: Option<(usize, usize)>,
     // --youtube: the SDR look of the LUT inside (None: auto), and its levels
     youtube: Option<Option<vs_gyroflow::youtube::Look>>,
     youtube_levels: vs_gyroflow::youtube::Levels,
@@ -323,6 +333,7 @@ fn main() {
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
                              upscale: vs_gyroflow::upscale::Choice::Fixed(vs_gyroflow::upscale::Upscaler::None),
+                             render_to: None, from_render: None, render_preview: None,
                              youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None };
     let mut files = Vec::new();
     let mut args = std::env::args().skip(1);
@@ -426,6 +437,10 @@ fn main() {
             "--image" => opts.image = Some(PathBuf::from(value("--image"))),
             "--upscale" => { let v = value("--upscale"); opts.upscale = vs_gyroflow::upscale::Choice::parse(&v)
                 .unwrap_or_else(|| fail(&format!("unknown upscaler {v} (auto, none, fsr, realesrgan, swinir)"))); }
+            "--render-to" => opts.render_to = Some(PathBuf::from(value("--render-to"))),
+            "--from-render" => opts.from_render = Some(PathBuf::from(value("--from-render"))),
+            "--preview-size" => opts.render_preview = Some(value("--preview-size").split_once('x').and_then(|(w, h)| Some((w.parse::<usize>().ok()?, h.parse::<usize>().ok()?)))
+                .filter(|&(w, h)| w > 0 && h > 0 && w <= 16384 && h <= 16384).unwrap_or_else(|| fail("--preview-size takes WxH"))),
             "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
                 v @ ("maker" | "nbcu" | "macos") => v.to_string(),
                 v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
@@ -2262,6 +2277,41 @@ fn photo_link(clip: &Path, opts: &Options, t: f64) -> String {
     ws::with_fingerprint(&serde_json::Value::Object(o).to_string(), clip)
 }
 
+/// --render-to's files: the renditions (photo.rs's rgb16) and what they are (render.json)
+fn write_render(dir: &Path, sdr: &vs_gyroflow::photo::Image, hdr: Option<&vs_gyroflow::photo::Image>, label: &str, cleaned: usize, upscaled: &str) -> Result<(), String> {
+    use vs_gyroflow::photo as ph;
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    ph::write_rgb16(&dir.join("sdr.rgb16"), sdr)?;
+    match hdr { Some(h) => ph::write_rgb16(&dir.join("hdr.rgb16"), h)?, None => { let _ = std::fs::remove_file(dir.join("hdr.rgb16")); } }
+    let meta = serde_json::json!({ "width": sdr.width, "height": sdr.height, "hdr": hdr.is_some(), "label": label, "cleaned": cleaned, "upscaled": upscaled });
+    std::fs::write(dir.join("render.json"), meta.to_string()).map_err(|e| format!("{}: {e}", dir.display()))
+}
+
+/// A --render-to's renditions back, as image() and upscale_photo() made them
+fn read_render(dir: &Path) -> Result<(vs_gyroflow::photo::Image, Option<vs_gyroflow::photo::Image>, String, usize, String), String> {
+    use vs_gyroflow::photo as ph;
+    let meta: serde_json::Value = std::fs::read_to_string(dir.join("render.json")).ok().and_then(|t| serde_json::from_str(&t).ok())
+        .ok_or_else(|| format!("{}: no render there", dir.display()))?;
+    let (w, h) = (meta["width"].as_u64().unwrap_or(0) as usize, meta["height"].as_u64().unwrap_or(0) as usize);
+    let sdr = ph::read_rgb16(&dir.join("sdr.rgb16"), w, h)?;
+    let hdr = if meta["hdr"].as_bool() == Some(true) { Some(ph::read_rgb16(&dir.join("hdr.rgb16"), w, h)?) } else { None };
+    Ok((sdr, hdr, meta["label"].as_str().unwrap_or("").to_string(), meta["cleaned"].as_u64().unwrap_or(0) as usize, meta["upscaled"].as_str().unwrap_or("").to_string()))
+}
+
+/// The preview mpv shows over the frame: the SDR rendition at `size`, 8-bit BGRA (overlay-add's format)
+fn write_render_preview(path: &Path, sdr: &vs_gyroflow::photo::Image, (w, h): (usize, usize)) -> Result<(), String> {
+    use vs_gyroflow::upscale::{ resize, Filter };
+    let small = resize(sdr, w, h, Filter::Lanczos3);
+    let mut bytes = Vec::with_capacity(w * h * 4);
+    for p in &small.pixels {
+        let c = p.map(|v| (v.clamp(0.0, 1.0) * 255.0).round() as u8);
+        bytes.extend_from_slice(&[c[2], c[1], c[0], 255]);
+    }
+    // Written beside it, then renamed: the player never reads half of one
+    let tmp = path.with_extension("part");
+    std::fs::write(&tmp, bytes).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| format!("{}: {e}", path.display()))
+}
+
 /// --upscale: the photo's renditions upscaled as it says (upscale.rs), and what was done, for the summary line. A
 /// failure leaves them as the warp drew them, said on stderr
 fn upscale_photo(opts: &Options, sdr: vs_gyroflow::photo::Image, hdr: Option<vs_gyroflow::photo::Image>, stretch: Option<f64>)
@@ -2281,7 +2331,7 @@ fn upscale_photo(opts: &Options, sdr: vs_gyroflow::photo::Image, hdr: Option<vs_
             let model = up::ensure_model(u.model().ok_or("no model")?, &|f| progress("download", f))?;
             let (sw, sh) = up::source_size((sdr.width, sdr.height), s);
             eprintln!("  upscaling by {}: {sw}x{sh} (the source's pixels) x4, then to {}x{}", u.label(), sdr.width, sdr.height);
-            up::neural(&model, &helper, &std::env::temp_dir(), &sdr, hdr.as_ref(), s, &|f| progress("upscale", f))
+            up::neural(&model, &helper, &std::env::temp_dir(), &sdr, hdr.as_ref(), s, &|f| progress("upscale", f), &stopped)
         })(),
     };
     match tried {
@@ -2639,7 +2689,8 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
 
     std::thread::scope(|scope| {
         // The motion: the part of the video around it, exported as it plays, at the same time as the image
-        let motion = opts.live.then(|| {
+        // Rendered ahead of saving (--render-to): the image alone
+        let motion = (opts.live && opts.render_to.is_none()).then(|| {
             let half = LIVE_SECONDS / 2.0;
             // From a frame the photo's is a whole number of steps after, so the video has the photo's frame
             let step = frame_step(fps, LIVE_MAX_FPS);
@@ -2658,14 +2709,28 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
                 done
             })
         });
-        let made = image();
+        // The image, upscaled (--upscale: a neural one takes a minute or more, the motion is done by then); or as a
+        // --render-to made it
+        let made = match &opts.from_render {
+            Some(dir) => read_render(dir),
+            None => image().map(|(sdr, hdr, label, cleaned, stretch)| {
+                let (sdr, hdr, upscaled) = upscale_photo(opts, sdr, hdr, stretch);
+                lap("upscaled");
+                (sdr, hdr, label, cleaned, upscaled)
+            }),
+        };
         // No image: the motion is of no use either
         // (said here: the stop makes the caller say only "cancelled")
         if let Err(e) = &made { eprintln!("  no photo: {e}"); STOP.store(libc::SIGTERM, Relaxed); }
-        let (sdr, hdr, label, cleaned, stretch) = made?;
-        // Upscaled (--upscale): a neural one takes a minute or more, the motion is done by then
-        let (sdr, hdr, upscaled) = upscale_photo(opts, sdr, hdr, stretch);
-        lap("upscaled");
+        let (sdr, hdr, label, cleaned, upscaled) = made?;
+        if stopped() { return Err("cancelled".into()); }
+        // Rendered ahead: kept for Save, with its preview
+        if let Some(dir) = &opts.render_to {
+            if opts.from_render.as_deref() != Some(dir.as_path()) { write_render(dir, &sdr, hdr.as_ref(), &label, cleaned, &upscaled)?; }
+            if let Some(size) = opts.render_preview { write_render_preview(&dir.join("preview.bgra"), &sdr, size)?; }
+            eprintln!("  {label} · {}x{}{upscaled} · rendered, not saved", sdr.width, sdr.height);
+            return Ok(Outcome::Done(dir.clone()));
+        }
         let live = match motion.map(|m| m.join()) {
             None => None,
             Some(Ok(Ok(v))) => Some(v),

@@ -295,8 +295,8 @@ pub fn source_size((w, h): (usize, usize), stretch: f64) -> (usize, usize) {
 }
 
 /// The photo's renditions through a neural model (x4) by afp-upscale (`helper`), as the module's comment says.
-/// `dir` for its scratch files; `progress` gets the share done
-pub fn neural(model: &Path, helper: &Path, dir: &Path, sdr: &Image, hdr: Option<&Image>, stretch: f64, progress: &dyn Fn(f64)) -> Result<(Image, Option<Image>), String> {
+/// `dir` for its scratch files; `progress` gets the share done; `stop` true: afp-upscale is stopped (between its tiles)
+pub fn neural(model: &Path, helper: &Path, dir: &Path, sdr: &Image, hdr: Option<&Image>, stretch: f64, progress: &dyn Fn(f64), stop: &dyn Fn() -> bool) -> Result<(Image, Option<Image>), String> {
     let (w, h) = (sdr.width, sdr.height);
     let (sw, sh) = source_size((w, h), stretch);
     let sdr_s = clamp01(resize(sdr, sw, sh, Filter::Lanczos3));
@@ -309,6 +309,11 @@ pub fn neural(model: &Path, helper: &Path, dir: &Path, sdr: &Image, hdr: Option<
         .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| format!("{}: {e}", helper.display()))?;
     let mut said = Vec::new();
     for line in BufReader::new(child.stderr.take().unwrap()).lines().map_while(Result::ok) {
+        if stop() {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err("cancelled".into());
+        }
         let mut f = line.split_whitespace();
         match (f.next(), f.next().and_then(|v| v.parse::<f64>().ok()), f.next().and_then(|v| v.parse::<f64>().ok())) {
             (Some("progress"), Some(a), Some(b)) if b > 0.0 => progress(a / b),

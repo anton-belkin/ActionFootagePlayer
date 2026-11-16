@@ -28,6 +28,30 @@ dolphin clip with Save frame's camera at 160 % (stretch 2.50, Auto: SwinIR-L), a
 
 ![Weak crop, each upscaler](img/photo-upscaling/weak-crop.png)
 
+## The render ahead
+
+In Save frame, with an upscaler chosen (anything but None) and the frame paused, the photo is rendered before Save
+(Anton, 2026-11-16): a moment after the last change, `gyroflow-export --render-to` makes it, upscaled, into a folder of
+its own in the temporary folder (`afp-photo-render-<pid>-<n>`: never the project's `_Stills`), with a preview the
+frame's size on screen that mpv shows over the frame (`overlay-add`). The panel shows its progress ("Drawing detail,
+40 %") with **Cancel** beside it, then what it is ("stretched 2.50x, SwinIR-L"). **Save** writes that render
+(`--from-render`: the HEIC and a Live Photo's motion, a few seconds, nothing upscaled again).
+
+- What drops it: anything that changes the photo's arguments: the time (a seek, a frame step), Save frame's frame,
+  aspect or camera, the upscaler, the look, the stabilization (level, view, horizon, lens), the denoise switch. It's
+  hidden at once and rendered again a moment after the last change. Live Photo or still doesn't matter (the render
+  is the image; the motion is made at Save).
+- Playing on drops it: a neural upscaler never runs while the video plays. (Measured live before this: SwinIR-L
+  running beside playback dropped 154 of ~240 frames in 4 s, the GPU being shared.) Save while playing (Alt+s, Enter)
+  still makes the photo the old way, upscaler included.
+- Save while it renders: the photo is saved when the render is done (the panel says "Saves when done"), not rendered a
+  second time.
+- Cancel stops it (gyroflow-export stops afp-upscale between tiles) and shows the plain frame; nothing is rendered
+  again until something changes.
+- Another window or panel size: the preview is made again from the render (a fraction of a second).
+- The preview is the SDR rendition: on an HDR screen in an HDR look it shows dimmer than the video around it; the
+  HEIC has its gain map as before.
+
 ## The stretch, and Auto
 
 The stretch is output pixels per source pixel across the crop. `upscale::stretch` takes a 64x36 grid of the source's
@@ -126,4 +150,3 @@ it is not settled. (From the projects' READMEs and the datasets' pages as rememb
 
 - Windows and Linux: FSR and none only (the panel shows only those); a neural runtime there (ONNX Runtime) would be a
   separate step.
-- The live player wasn't driven with this (the panel was rendered headless, the photos made by gyroflow-export).

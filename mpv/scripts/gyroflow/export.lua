@@ -787,20 +787,20 @@ local function watch_photo(file, saving)
     end)
 end
 
-local function photo()
+-- What a photo of the frame on screen is made from, as gyroflow-export's arguments: the clip and its time, the look,
+-- the stabilization, Save frame's camera and frame, the upscaler; not where it goes, how it reports, nor whether it's a
+-- Live or Motion Photo. Also the key a render ahead is kept by (pr below). nil when there's no clip
+local function photo_base()
     local path = local_path()
-    if not path or not installed("Photo") then return end
+    if not path then return nil end
     local t = shown_time()
-    if not t then return end
+    if not t then return nil end
     -- A moment plays as a video of its own: its time plus where it starts in the clip
     local ws = mp.get_property_native("user-data/workspace")
     if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then t = t + ws.offset end
     local args = { EXPORT, "--photo", string.format("%.4f", t) }
     local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
     local live = mode == "live" or mode == "motion"
-    if live then table.insert(args, "--live") end
-    -- A Motion Photo is a JPEG (the default off macOS)
-    if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     as_it_plays(args, false, true, live)
     -- A moment stabilized on its own (by its part's motion alone, the gyroflow plugin's fixed()), as it plays: its
     -- part of the clip; one with a project of its own, the project's "only within the trim range" as it's viewed
@@ -828,15 +828,181 @@ local function photo()
             table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", x0, y0, x1 - x0, y1 - y0))
         end
     end
+    upscale_args(args)
+    return { args = args, path = path, t = t, mode = mode, live = live, key = table.concat(args, "\0") .. "\0" .. path }
+end
+
+-- The photo rendered ahead of Save (docs/photo-upscaling.md, "The render ahead"): in Save frame, paused, with an
+-- upscaler chosen, gyroflow-export --render-to makes the photo into a folder of its own in the temporary folder (never
+-- the project's _Stills) and a preview of it the frame's size on screen, shown over the frame (mpv's overlay-add). Save
+-- writes that render (--from-render: seconds, not the upscaler's minute); asked while it renders, it waits for it.
+-- Whatever changes the photo's arguments (the time, the frame, the camera, the look, the stabilization, the upscaler)
+-- or playing on drops it at once: a neural upscaler never runs while the video plays. Cancel drops it and keeps it
+-- dropped until something changes. pr: key (the photo's it's for), state (running, ready, failed), dir, job, ...
+local pr = { n = 0, OVERLAY = 61, DELAY = 0.7 }
+-- (Save, below: a render asked to be saved when done calls it)
+local photo
+function pr.publish()
+    mp.set_property_native("user-data/gyroflow/photo_render", pr.state and { state = pr.state, done = pr.done or 0, stage = pr.stage,
+        label = pr.label, error = pr.error, saving = pr.save == true } or {})
+end
+-- The frame's place on screen, in OSD pixels (osd-dimensions' video rectangle, crop.lua's frame in shares of it)
+function pr.rect()
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    local f, d = crop.active and crop.frame, mp.get_property_native("osd-dimensions") or {}
+    if not f or not d.w then return nil end
+    local vw, vh = d.w - (d.ml or 0) - (d.mr or 0), d.h - (d.mt or 0) - (d.mb or 0)
+    local w, h = math.floor(f.w * vw + 0.5), math.floor(f.h * vh + 0.5)
+    if w < 8 or h < 8 then return nil end
+    return math.floor((d.ml or 0) + f.x * vw + 0.5), math.floor((d.mt or 0) + f.y * vh + 0.5), w, h
+end
+function pr.hide()
+    if pr.shown then mp.command_native({ "overlay-remove", pr.OVERLAY }); pr.shown = false end
+end
+function pr.show()
+    local x, y, w, h = pr.rect()
+    if not x or pr.state ~= "ready" then return pr.hide() end
+    -- Another size on screen (the window, the panel): the preview made again from the render, a moment
+    if pr.size ~= w .. "x" .. h then return pr.run({ "--from-render", pr.dir }, w, h) end
+    mp.command_native({ "overlay-add", pr.OVERLAY, x, y, utils.join_path(pr.dir, "preview.bgra"), 0, "bgra", w, h, w * 4 })
+    pr.shown = true
+end
+-- Stops a render: gyroflow-export told to stop (it stops afp-upscale between tiles), else killed
+function pr.stop()
+    local job, progress = pr.job, pr.progress
+    if not job then return end
+    pr.job = nil
+    local f = progress and io.open(progress, "r")
+    local p = f and utils.parse_json(f:read("*a") or "")
+    if f then f:close() end
+    if type(p) == "table" and p.pid and not platform.windows then
+        mp.command_native({ name = "subprocess", args = { "kill", "-TERM", tostring(p.pid) }, playback_only = false })
+    else
+        mp.abort_async_command(job)
+    end
+end
+function pr.drop()
+    pr.stop()
+    pr.hide()
+    if pr.dir then
+        for _, n in ipairs({ "sdr.rgb16", "hdr.rgb16", "render.json", "preview.bgra", "preview.part" }) do os.remove(utils.join_path(pr.dir, n)) end
+        os.remove(pr.dir)
+    end
+    pr.key, pr.state, pr.dir, pr.label, pr.error, pr.done, pr.stage, pr.save, pr.size = nil
+    pr.publish()
+end
+-- gyroflow-export --render-to with the photo's arguments and `extra`, its preview w x h; the result shown when it's
+-- still the photo's
+function pr.run(extra, w, h)
+    local base = photo_base()
+    if not base or base.key ~= pr.key then return end
+    if not pr.dir then
+        pr.n = pr.n + 1
+        pr.dir = utils.join_path(platform.temp_dir(), string.format("afp-photo-render-%d-%d", utils.getpid(), pr.n))
+    end
+    local args = {}
+    for _, a in ipairs(base.args) do table.insert(args, a) end
+    for _, a in ipairs(extra) do table.insert(args, a) end
+    local progress = temp_name("json")
+    for _, a in ipairs({ "--render-to", pr.dir, "--preview-size", w .. "x" .. h, "--progress", progress }) do table.insert(args, a) end
+    -- Rendered anew: on the GPU path the frame as it's on screen, as Save takes it
+    local frame_file
+    if #extra == 0 then
+        local frame_args
+        frame_args, frame_file = gpu_frame()
+        for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
+    end
+    table.insert(args, base.path)
+    pr.stop()
+    pr.state, pr.error, pr.size, pr.progress = "running", nil, w .. "x" .. h, progress
+    pr.done, pr.stage = 0, #extra == 0 and "render" or "preview"
+    pr.publish()
+    local key = pr.key
+    local watch = mp.add_periodic_timer(0.3, function()
+        local f = io.open(progress, "r")
+        local p = f and utils.parse_json(f:read("*a") or "")
+        if f then f:close() end
+        if type(p) == "table" and p.stage and p.done and pr.key == key then pr.stage, pr.done = p.stage, p.done; pr.publish() end
+    end)
+    mp.msg.info("photo render: " .. table.concat(args, " "))
+    local job
+    job = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
+        watch:kill()
+        os.remove(progress)
+        if frame_file then os.remove(frame_file) end
+        -- Dropped or replaced meanwhile: nothing to do
+        if pr.job ~= job or pr.key ~= key then return end
+        pr.job = nil
+        local err = r and r.stderr or ""
+        if r and r.status == 0 and err:find("rendered, not saved", 1, true) then
+            pr.state, pr.done = "ready", 100
+            pr.label = err:match("\n  [^\n]-· %d+x%d+ · ([^\n]-) · rendered, not saved") or err:match("· (stretched [^\n·]+)")
+            pr.show()
+            pr.publish()
+            if pr.save then pr.save = false; photo() end
+        else
+            pr.state, pr.error, pr.save = "failed", last_line(err) or "gyroflow-export failed", false
+            mp.msg.warn("photo render: " .. err)
+            pr.publish()
+        end
+    end)
+    pr.job = job
+end
+-- What the frame is now against what's rendered: a change drops the render at once, a render starts a moment after the
+-- last change (dragging the frame doesn't start one each step)
+function pr.check()
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    local up = mp.get_property_native("user-data/gyroflow/photo_upscaler") or "auto"
+    local want = crop.active == true and mp.get_property_native("pause") == true and up ~= "none" and (utils.file_info(EXPORT) or {}).is_file == true
+    local base = want and photo_base()
+    local key = base and base.key or nil
+    if key ~= pr.key then
+        if pr.key then pr.drop() end
+        pr.key = key
+        if pr.timer then pr.timer:kill() end
+        if key and key ~= pr.cancelled then
+            pr.timer = mp.add_timeout(pr.DELAY, function()
+                pr.timer = nil
+                local x, y, w, h = pr.rect()
+                if x and not pr.state then pr.run({}, w, h) end
+            end)
+        end
+    elseif pr.state == "ready" then
+        local x, y, w, h = pr.rect()
+        if x and pr.size ~= w .. "x" .. h then pr.show() end
+    end
+end
+
+function photo()
+    local base = photo_base()
+    if not base or not installed("Photo") then return end
+    local path, t, mode, live = base.path, base.t, base.mode, base.live
+    -- Rendered ahead for this very photo: saved from it; still rendering, saved when it's done
+    local from = pr.key == base.key and pr.state == "ready" and pr.dir
+    if pr.key == base.key and pr.state == "running" and not pr.save then
+        pr.save = true
+        pr.publish()
+        mp.osd_message("The photo saves when its render is done", 3)
+        return
+    end
+    local args = base.args
+    if live then table.insert(args, "--live") end
+    -- A Motion Photo is a JPEG (the default off macOS)
+    if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     local dir = photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
-    upscale_args(args)
     -- Its progress, while a neural upscaler draws (a minute or two)
     local progress = temp_name("json")
     table.insert(args, "--progress"); table.insert(args, progress)
-    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
-    local frame_args, frame_file = gpu_frame()
-    for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
+    local frame_file
+    if from then
+        table.insert(args, "--from-render"); table.insert(args, from)
+    else
+        -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
+        local frame_args
+        frame_args, frame_file = gpu_frame()
+        for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
+    end
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
@@ -870,6 +1036,22 @@ local function photo()
         end
     end)
 end
+
+-- The render ahead follows the frame: at once where it can be told (Save frame's frame and camera, the upscaler,
+-- playing on), else within half a second (anything else in the photo's arguments)
+for _, prop in ipairs({ "user-data/gyroflow/crop", "user-data/gyroflow/photo_upscaler", "pause", "osd-dimensions" }) do
+    mp.observe_property(prop, "native", function() pr.check() end)
+end
+mp.register_event("playback-restart", function() pr.check() end)
+mp.add_periodic_timer(0.5, function()
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    if crop.active or pr.key then pr.check() end
+end)
+mp.register_event("shutdown", function() pr.drop() end)
+mp.register_script_message("photo-render-cancel", function()
+    pr.cancelled = pr.key
+    pr.drop()
+end)
 
 mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
