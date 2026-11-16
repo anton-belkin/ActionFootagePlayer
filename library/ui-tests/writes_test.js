@@ -259,7 +259,7 @@ test("a change to something just renamed, when the rename fails: taken back with
 test("an album renamed: what's in it follows at once, its moments and its clips' links", async () => {
   const { page, views } = await start({ delay: { rename_item: 120 } });
   await inMoments(page);
-  page.get("S.path = []; renderAll()");
+  page.get("S.path = [AV_MARK + 'My albums']; renderAll()"); // the user's albums are in My albums
   const albums = () => val(page, "DATA.footage.dirs").filter((d) => !d.startsWith("Other folders"));
   assert.deepEqual(albums(), ["Day 1", "Day 2", "Reef"]);
   // An album of moments: its folder in _Moments

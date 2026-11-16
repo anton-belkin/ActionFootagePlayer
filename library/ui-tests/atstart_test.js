@@ -59,7 +59,7 @@ const EGYPT = "/Volumes/Trips/Egypt 2026", NORWAY = "/Volumes/Trips/Norway 2025"
   expect("at start: the tabs Originals and Albums", [p.qa('#top [role="tab"][data-a="view"]').map((b) => b.textContent), p.q('#top [data-a="view"][aria-selected="true"]').dataset.v, p.ev("S.view")], [["Originals", "Albums"], "sources", "sources"]);
   expect("at start: the originals and the albums are there", [p.ev("DATA.sources.items.length"), p.ev("DATA.footage.dirs.slice(0, 2)")], [8, ["Day 1", "Day 2"]]);
   await p.click(p.q('#top [data-a="view"][data-v="footage"]'));
-  expect("at start: Albums opens", [p.ev("S.view"), p.ev("VISIBLE.slice(0, 2)")], ["footage", ["f:Day 1", "f:Day 2"]]);
+  expect("at start: Albums opens", [p.ev("S.view"), p.ev("VISIBLE.slice(0, 3)")], ["footage", ["f:Other folders"]]); // (the user's albums are in My albums)
   // Its menu: the tick on, and the way to the start screen
   await p.click(p.q('#top [data-a="menu"]'));
   const item = () => p.q('#top .menu [data-s="start"]');

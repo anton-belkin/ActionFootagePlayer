@@ -409,3 +409,28 @@ span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
 .pill.ok{background:var(--ok-bg);color:var(--ok)}
 .pill.bad{background:var(--st-bg);color:var(--st)}
 .sharejob ul{margin:4px 0 0;padding-left:18px}
+/* The bars above the list (breadcrumbs, the filters' line, the selection's bar, the list's head): pinned to the top of
+   #main, the scrolling box, while the list scrolls (app.js pinBar). Plain sticky positioning: Safari/WKWebView has it
+   unprefixed since 13; the prefixed line is for older WebKit. What sticks below it uses --mbar-h, its height. */
+.main>.mbar{position:-webkit-sticky;position:sticky;top:0;z-index:3;background:var(--win);flex:none}
+.main.scrolled>.mbar{box-shadow:0 1px 0 var(--line),0 6px 10px -8px rgba(0,0,0,.25)}
+.mbar>.selbar:last-child,.mbar>.scope:last-child{padding-bottom:8px}
+/* Timeline: a day's header sticks below the bar while its day scrolls (its block lets it out: no overflow clip) */
+.tlb.tlday{overflow:visible}
+.tlday header{position:-webkit-sticky;position:sticky;top:var(--mbar-h,0px);z-index:2;background:var(--win)}
+.mapbox{z-index:0}
+/* Albums' top: one list. Headings between its groups; the views' rows look as folders' do, an icon for a picture */
+.lgroup{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);padding:12px 9px 4px;font-weight:600}
+.list>.lgroup:first-child{padding-top:4px}
+.grid>.lgroup{grid-column:1/-1;padding:8px 6px 0}
+.th.avic{display:flex;align-items:center;justify-content:center;background:var(--accent-soft);color:var(--accent)}
+.card .th.avic svg{width:34px;height:34px}
+/* Filters: what's ticked in a collapsed list, said on its row; a long list's "N more" and its finding box */
+.opt .onv{margin-left:6px;color:var(--accent);font-size:12px}
+.opt .onv::before{content:"· "}
+.fmore{border:0;background:transparent;color:var(--accent);padding:4px 6px 4px 42px;font-size:12px;min-height:26px;text-align:left;width:100%;border-radius:6px}
+.fmore:hover{background:var(--hover)}
+.ffind{display:block;width:calc(100% - 12px);margin:2px 6px 4px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit;font-size:12px;background:var(--win);color:var(--fg);outline:0}
+.ffind:focus{border-color:var(--accent-line)}
+.fnone{padding:2px 6px 4px 42px;font-size:12px;color:var(--muted)}
+.mbar>.head{padding:6px 23px}

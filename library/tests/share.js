@@ -37,6 +37,7 @@ const sheet = () => $("sheet").textContent;
   // Albums: a mixed selection (a moment rendered already, a photo link, a clip, a rendered photo's neighbours)
   click(tab("footage")); await tick(120);
   ok(!by("share"), "nothing selected: no Share… on the bar");
+  click(by("aview", "mine")); await tick();
   dbl(by("pick", "f:Best of the year")); await tick();
   await pick("Turtle");
   ok(!!w.document.querySelector('.selbar [data-a="share"]'), "a moment selected: Share… on the bar");
@@ -108,7 +109,7 @@ const sheet = () => $("sheet").textContent;
   ok(sheet().includes("Share 2 items") && sheet().includes("2 clips") && sheet().includes("whole"), "clips are shared whole");
   click(by("closesheet")); await tick();
   // The Renders filter knows photo links
-  click(tab("footage")); await tick(120); dbl(by("pick", "f:Best of the year")); await tick();
+  click(tab("footage")); await tick(120); click(by("aview", "mine")); await tick(); dbl(by("pick", "f:Best of the year")); await tick();
   T.S.filtersOpen = true; T.renderAll(); await tick();
   ok($("fpanel").textContent.includes("Renders"), "the Renders filter is there for an album with a photo link and a moment");
   // Project settings, General: the render cache's room and its Clear (never by itself)
