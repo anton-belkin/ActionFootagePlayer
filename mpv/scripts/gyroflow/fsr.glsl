@@ -56,12 +56,13 @@
 //!BIND HOOKED
 //!SAVE AFP_FSR_EASU
 //!DESC FSR 1 EASU (upscale)
-//!WHEN afp_fsr OUTPUT.w MAIN.w > OUTPUT.h MAIN.h > + *
-//!WIDTH OUTPUT.w MAIN.w 2 * < OUTPUT.w * 1 OUTPUT.w MAIN.w 2 * < - MAIN.w 2 * * +
-//!HEIGHT OUTPUT.h MAIN.h 2 * < OUTPUT.h * 1 OUTPUT.h MAIN.h 2 * < - MAIN.h 2 * * +
+//!WHEN afp_fsr OUTPUT.w HOOKED.w > OUTPUT.h HOOKED.h > + *
+//!WIDTH OUTPUT.w HOOKED.w 2 * < OUTPUT.w * 1 OUTPUT.w HOOKED.w 2 * < - HOOKED.w 2 * * +
+//!HEIGHT OUTPUT.h HOOKED.h 2 * < OUTPUT.h * 1 OUTPUT.h HOOKED.h 2 * < - HOOKED.h 2 * * +
 //!COMPONENTS 4
 
 // The size is the smaller of the target and twice the picture, per axis: AMD's EASU is made for up to 2x a side.
+// HOOKED, not MAIN: in mpv MAIN's size in these expressions is the video's own, not the warp's output.
 
 // Approximations from AMD's ffx_a.h
 float APrxLoRcpF1(float a) { return uintBitsToFloat(uint(0x7ef07ebb) - floatBitsToUint(a)); }
@@ -200,7 +201,7 @@ vec4 hook() {
 //!HOOK MAIN
 //!BIND AFP_FSR_EASU
 //!DESC FSR 1 RCAS (sharpen)
-//!WHEN afp_fsr OUTPUT.w MAIN.w > OUTPUT.h MAIN.h > + *
+//!WHEN afp_fsr OUTPUT.w HOOKED.w > OUTPUT.h HOOKED.h > + *
 //!WIDTH AFP_FSR_EASU.w
 //!HEIGHT AFP_FSR_EASU.h
 //!COMPONENTS 4

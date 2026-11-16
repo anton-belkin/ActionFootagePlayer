@@ -133,7 +133,8 @@
 --   edges=sphere what fills the edges: sphere (what was last seen in that direction, the rest the colors around
 --                spread in), smooth (the frame's colors spread out), off (the project's background color)
 --   edges_blur=2 blur of the edge fill, % of the frame height
---   resolution=auto  the stabilized frame no bigger than the display shows it (above); on the GPU path at most 1080p
+--   resolution=auto  the stabilized frame no bigger than the display shows it (above); on the GPU path 0.8 of that,
+--                FSR taking it up to the screen (upscaler below), and at most 1080p
 --                while the temporal denoise is on (at the screen's size it doesn't keep up full screen on a Retina
 --                display: on the M1 Pro's XDR 31 % of the frames dropped, at 1080p 4 %). display: no bigger than the
 --                display shows it, denoise or not. video: at the video's own size (up to 4K's pixels), whatever the
@@ -1233,12 +1234,16 @@ end
 -- interpolation (PTS is the frame's, not the mix's)
 -- The size the GPU path renders at (warp.glsl's RT: the warp, the edge fill, the denoise, the looks after them), as a
 -- share of the video's rectangle on screen (gyroflow_render_scale); mpv scales it to the screen. resolution=display:
--- as on screen; 1080, 720: its short side at most that; auto: as on screen, at most 1080 while the denoise is in the
--- shader (paused too: a new size starts its ring of frames again, and the paused frame would have none around it);
--- video: the video's own, at most 4K's (the denoise's frames and the warp's grid are made for that much)
+-- as on screen; 1080, 720: its short side at most that; auto: 0.8 of it, FSR (or mpv's scaler) taking it up
+-- (AUTO_SHARE), at most 1080 while the denoise is in the shader (paused too: a new size starts its ring
+-- of frames again, and the paused frame would have none around it); video: the video's own, at most 4K's (the
+-- denoise's frames and the warp's grid are made for that much)
 -- scale: gyroflow_render_scale as set; short: the short side it renders at, for quality.lua (nil: not the GPU path);
 -- logged: the size last said in the log
 local render_at = { scale = 1, short = nil, logged = nil }
+-- resolution=auto without the denoise: this share of the size shown, FSR taking it up (Anton, 2026-11-16: what he
+-- liked in the upscaling probe; docs/gpu-render.md, "The upscale to the screen: FSR 1"). resolution=display: all of it
+local AUTO_SHARE = 0.8
 local function gpu_render_scale()
     if not gpu or not gpu.shader or gpu.sphere then return end
     local d = mp.get_property_native("osd-dimensions") or {}
@@ -1253,6 +1258,9 @@ local function gpu_render_scale()
         s = math.min(s, 3840 / dw, 2160 / dh)
     elseif short then
         s = math.min(1, short / math.min(dw, dh))
+    elseif o.resolution == "auto" and fsr.available then
+        -- With upscaler=mpv too: quality.lua's step to mpv's scaler is then lighter, not the full size again
+        s = AUTO_SHARE
     end
     s = math.max(0.1, math.min(4, s))
     render_at.short = math.floor(math.min(dw, dh) * s + 0.5)
@@ -2303,7 +2311,7 @@ end)
 -- setting of this computer's, and the chain set up again for a new rate or size
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
-    resolution = { auto = "auto: fits the display, at most 1080p while the temporal denoise is on", display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
+    resolution = { auto = "auto: 0.8 of the display's size with FSR, at most 1080p while the temporal denoise is on", display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
     upscaler = { fsr = "upscale to the screen: FSR 1, sharp", mpv = "upscale to the screen: mpv's scaler, lighter" },
     edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
     chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
@@ -2326,6 +2334,7 @@ local function set_quality(key, value)
     elseif key == "upscaler" then
         o.upscaler = value
         fsr.params()
+        gpu_render_scale()
     elseif key == "edge_fill_rate" then
         o.edge_fill_rate = value
         write_edge_control()

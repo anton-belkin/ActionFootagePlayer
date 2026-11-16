@@ -492,9 +492,17 @@ local function sdr_target(target)
 end
 
 -- The file's shaders: the user's own, the noise reduction's when it's on, and the look's (paths, in order)
+-- The gyroflow plugin's upscale to the screen (its fsr.glsl): after the look. Its name too, not only its message: the
+-- plugin may put it in the list before this plugin takes the list as the file's own (on_preloaded)
+local function is_upscale(path)
+    return path == base.after or path:match("[/\\]gyroflow[/\\]fsr%.glsl$") ~= nil
+end
+
 local function shader_list(look)
-    local shaders = {}
-    for _, s in ipairs(base.shaders) do table.insert(shaders, s) end
+    local shaders, after = {}, nil
+    for _, s in ipairs(base.shaders) do
+        if is_upscale(s) then after = s else table.insert(shaders, s) end
+    end
     if denoise then
         local shader = plugin_file(DENOISE)
         if shader then
@@ -505,7 +513,8 @@ local function shader_list(look)
     end
     for _, s in ipairs(look or {}) do table.insert(shaders, s) end
     -- The gyroflow plugin's upscale to the screen (fsr.glsl), after the look
-    if base.after then table.insert(shaders, base.after) end
+    after = base.after or after
+    if after then table.insert(shaders, after) end
     return shaders
 end
 

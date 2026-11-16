@@ -606,7 +606,8 @@ With #153's lighter denoise (the same screen, the panel hidden): at the screen's
 Light 14 % (11.8 ms); at 1080p neither drops (6.9 and 6.0 ms). With the panel open (the video ~2340x1320) Light held
 at the screen's size, but full screen it doesn't, so Auto caps both.
 
-So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader;
+So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader
+(since FSR, 2026-11-16: at 0.8 of the screen's size without the denoise, below);
 paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
 When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
 denoise.
@@ -665,15 +666,22 @@ in place of mpv's scaler into 3024x1701 cost 0.4 ms more from 1440p and 0.8 of i
 (where mpv's scaler still runs after it). EASU took ~1.2 ms there against ~2.6 inside the chain: the same pass, so
 part of what the chain shows is the GPU shared with the rest (another process's load, the clocks).
 
-**Not measured yet: the player itself** (vo-passes with the window full screen; it takes the screen, so it waits for
-a time Anton gives). Until then the chain's +1.7 ms (0.8 and 1080p), +2.8 ms (720p) is the figure.
+**In the player** (2026-11-16, a copy of the app with this branch's plugins, full screen on the XDR, clip 0021 looping,
+vo-passes' per-render samples summed, 25 s after 12 s of warming up; other sessions were working on the Mac, so the
+numbers are noisy): rendered at the screen's size without the denoise, 7.9 / 10.2 / 13.6 ms (mean / p95 / max over
+1500 renders). The FSR runs came out empty: in mpv a `MAIN.w` in a pass's `WHEN` is the video's own size (3840), not
+the warp's output, so FSR never ran there (libplacebo offscreen gave the warp's; mpv's binding differs). The passes
+now read `HOOKED.w`, the size of the texture as it reaches them, the same offscreen; and the dlogm plugin keeps the
+file after the look even when it took the list before the gyroflow plugin's message (it went before the look at
+first). The player's FSR runs are still to do (the screen time for the rest wasn't available); until then the
+chain's offscreen +1.7 ms (0.8 and 1080p), +2.8 ms (720p) is the figure.
 
 **The quality ladder.** FSR's +1.7 ms is about what the lighter denoise saves (14.2 → 11.8 ms above), and it only runs
 where the render is already lowered because frames were short. So quality.lua offers "Plain upscale to the screen"
 (`upscaler=mpv`) when FSR is running, after the lighter denoise and before the frame rate: a little softer, and every
 frame stays.
 
-**Open: 0.8 of the size with FSR, or the full size?** What Anton liked in the probe was the frame rendered at 0.8 and
+**0.8 of the size with FSR, or the full size?** What Anton liked in the probe was the frame rendered at 0.8 and
 taken up by MetalFX, against the full-size warp. The same here, from the real chain at the real settings (each image:
 the screen's size | 0.8 + FSR | 0.8 + mpv's scaler, 640x400 at 1:1 of the 3024x1701 picture, HLG's coded values as
 they are, flatter than on an HDR screen):
@@ -693,9 +701,13 @@ scaler:
 - The cost: without the denoise 0.8 + FSR costs more than the full size (9.0 against 7.6 ms): the warp, the fill and
   the look at 0.8 save less than FSR adds. With the denoise, whose composite grows with the pixels, it costs less
   (17.1 against 20.8 to the GPU done).
-- So 0.8 + FSR isn't a way to save time without the denoise; it's a look. If the sharper picture is what's wanted at
-  the full size too, RCAS alone on the full-size frame is the cheap way (one pass, ~0.9 ms) **(to try, if wanted)**.
-  `resolution`'s default stays as it is until Anton decides.
+- So 0.8 + FSR isn't a way to save time without the denoise; it's a look. (RCAS alone on the full-size frame would
+  give the sharpening for one pass, ~0.9 ms **(not tried)**.)
+- **Anton's answer (2026-11-16): "сделай включен по-умолчанию".** Read as: `resolution=auto` renders at 0.8 of the
+  size shown (main.lua's `AUTO_SHARE`) whenever it would otherwise render at the screen's size, FSR taking it up; with
+  the denoise on it stays at most 1080p, FSR taking it up, as before. With `upscaler=mpv` auto keeps the 0.8, so
+  quality.lua's step to mpv's scaler is lighter rather than the full size again. The way back to the full size:
+  `resolution=display`.
 
 ### Choosing them
 
