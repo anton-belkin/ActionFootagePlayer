@@ -69,4 +69,124 @@ Share + render cache (stacked on #238) was still being built when this was writt
 - **Timeline's tiles show the verdict**: a small ✓ / ✕ and the stars on the thumbnail (`cullBadge`; the tiles have
   no room for chips). "Add to an album…" (not "another") in Timeline and Map.
 
-SECTIONS_BELOW
+## Tests (all on 48c2016 and after)
+
+| What | Result |
+|---|---|
+| `cd library && cargo test` | 51 pass, 0 fail, 13 ignored (the ones needing a player or a NAS) |
+| `cd catalog && cargo test` | 32 pass (9 + 1 + 22) |
+| Windows: `PATH=/opt/homebrew/opt/llvm@19/bin:$PATH cargo check --target x86_64-pc-windows-msvc` in `library/` | compiles (one warning, an unused variable) |
+| The player's Lua tests named in `.github/workflows/release.yml` (18 files, luajit) | all pass |
+| `node library/tests/albums.js library/ui` (#235, #238) | 78 checks pass |
+| `node library/tests/views.js library/ui` (#239) | 44 checks pass |
+| `library/ui-tests`: `node --test *_test.js` (#236, #237 + `merged_test.js`) | 31 tests pass |
+| `node library/ui-tests/culling_test.js` (#233) | 87 checks pass (was 72) |
+| `node library/ui-tests/atstart_test.js` (#234) | 27 checks pass (was 24) |
+
+jsdom and puppeteer-core were installed in a scratch folder (`NODE_PATH` / `JSDOM` / `PUPPETEER`), as the branches'
+notes say; nothing was added to the repo for them.
+
+**Expectations changed because of the merge** (the test still checks the same thing, in its new place):
+- `tests/albums.js`, `tests/views.js`: the list of scripts in `index.html` (more scripts, `writes.js` first).
+- `tests/views.js`: Timeline's menu says "Add to an album…".
+- `tests/sidepanel_test.lua`: the Project tab's button is "Take this clip out of its album", not the preview button.
+- `ui-tests/writes_test.js`, `pinpoint_test.js`: clips are acted on in Originals, moments in an album (the Footage /
+  Moments / Photos tabs they clicked are gone); the Tags part's buttons are culling's; "a folder renamed" is "an
+  album renamed"; a clip's link deleted elsewhere expects one read of Footage (links aren't said item by item).
+- `ui-tests/culling_test.js`: clips culled in Originals, moments and photos in Albums; no read of the views after a
+  change; a write that failed is said in the "Not saved" strip, not the error box; the Exports-tab half is dropped.
+- `ui-tests/atstart_test.js`: plus "opened at start on Originals + Albums".
+- New `ui-tests/merged_test.js` (8): a tag / P / stars on a clip's link in an album shows there and in Originals at
+  once with no view read; the same on a moment and a photo; P / X / digits in Timeline; Take out of the album.
+
+One real bug found by the tests and fixed (`timeline.js`): Hide rejected changed nothing in Timeline until some item
+changed (its cached model didn't know the switch).
+
+**Pictures**: a headless Chrome walk of the merged page against the mock, light and dark, 60 pictures: the albums
+walk (`tests/shots.js`), Timeline and Map (`tests/views_shots.js`), and a culling walk (Originals, Albums' top, the
+album Egypt with a clip, a moment and a photo, the Tags part, X and 4 stars on the three, Hide rejected, P and 5 in
+Timeline). All looked at. No page error, no "Not saved", nothing overlapping, the top bar holds both branches'
+controls on one line at 1320 px, the map's tiles loaded. Seen and left:
+- the Info part's head says the count twice for several items selected ("3 items" / "3 items"): from #238, not the merge;
+- with the Filters panel open in an album, "Take out of the album" wraps to a second row of the bar (clean);
+- in `timeline-trip-selected` a day's header is half under the bar after a scroll (as in #239's own picture).
+They were not committed (the branches' own pictures are in `docs/img/`).
+
+## The trial build
+
+`~/afp-night-build/ActionFootageLibrary.app`, built by `tools/make_library_app.sh` from 48c2016 (release, signed ad
+hoc). **The Library alone**: the app, `afp-thumbs`, `afp-quicklook`, `afp-photos`. Not in `~/Applications`, never
+launched. macOS registered it with Launch Services by itself when it was signed; it was unregistered right after
+(`lsregister -u`), and the folder has `.metadata_never_index`, so `Project.afproject` still opens the installed app.
+Launching it will register it again: after trying, `lsregister -u ~/afp-night-build/ActionFootageLibrary.app` (or
+delete the folder) if a double click on a project starts opening this copy.
+
+To start it:
+
+```bash
+open ~/afp-night-build/ActionFootageLibrary.app
+```
+
+What to know before starting it:
+- **It uses the installed player** (`~/Applications/ActionFootagePlayer.app`: the Library looks beside itself, then
+  there) for probing, frames, renders and for opening clips. That player is the released one: it has **none of the
+  night's player changes** (P / X / U and the stars in the player, a photo link opening at its frame, the album
+  button). Building the player was left out: `tools/dev_app.sh` builds mpv and the plugins and registers the result.
+  To try those, run `APPS_DIR=~/afp-night-build tools/dev_app.sh` from this branch (it registers that copy).
+- **It shares this computer's data with the installed Library**: the projects opened before (`recent.json`), the
+  thumbnails, this computer's file for each project. "Open at start" marked here is kept in `recent.json`; the
+  installed (older) Library was not checked against a `recent.json` that has the mark.
+- **It writes to the project it opens**: links in `_Clips/`, tags in the originals' own files and the links. The
+  project's version is not bumped by any of the branches, so the installed Library opens the project afterwards.
+  For a first look, a copy of a small project (or a new one over a folder of clips) is the safe way; on the real
+  library start with things that only read (Timeline, Map, Originals).
+
+## What to click first, for each of the six
+
+1. **Albums, clip links (#235)**: Originals → select a few clips → *Add to an album…* → a new name. Albums → the
+   album: the clips are there in a moment, each a 20 KB link with its picture. Finder: `<project>/_Clips/<album>`.
+2. **Photos as links, moments and photos in albums, two tabs (#238)**: the top bar has Originals and Albums only.
+   Albums → Generated: the moments and photos made before. Select a moment → *Move to an album…*. In Originals
+   select a clip with marks → the side panel's Moments & Photos → *Photos of the marks*: links, at once.
+3. **Timeline and Map (#239)**: Albums → the two tiles at the top. Timeline: Days / Months / Years, a trip's line.
+   Map: pins, zoom, a click on a pin lists its items; *Places* for the list.
+4. **Culling (#233)**: select anything (Originals, an album, Timeline) → `P` accept, `X` reject, `U` undecided,
+   `1`–`5` stars, `0` none; the Tags part of the side panel has the same as buttons; *Hide rejected* and *★ first*
+   in the top bar; Filters → Keep it? / Stars.
+5. **Open at start (#234)**: the project menu (top left) → the tick beside a project; quit and start again: it
+   opens by itself, on Originals.
+6. **The Library answers at once (#236, #237)**: on a project on the NAS, tag a clip, rate it, rename a moment,
+   delete one: it shows at once, "Not saved: …" appears only if the write failed; closing the window while changes
+   are being written waits for them.
+
+## Broken, unfinished, not verified
+
+Not verified at all (night rules: no window, no NAS, no real library):
+- **The app's real window.** Nothing was launched. Everything above is jsdom and headless Chrome against mocks, and
+  Rust tests on temp folders. In particular: the map's tiles through the app's CSP, the keys in WKWebView, the
+  window's close while changes are written, the file-open event against "Open at start".
+- **The NAS and real data**: speed of anything over SMB, the catalog's own thread feeding `changes_since`, Finder
+  tags on the share, real place names and counts, 10-bit HEVC frames for photo links.
+- **The player's side** of culling and photo links: compiled (`luajit -b`) and unit-tested, never run with a window;
+  and not in the trial build (see above).
+- **Windows**: compiles; nothing run.
+- The one-off script `tools/one_off/photos_to_links.py` was not run on anything real.
+
+Unfinished, known:
+- **Share + render cache is not merged** (its branch wasn't ready). Photo links have no render / Share until it is.
+- **Adding to an album, copying, moving, photo links are not screen-first**: the page waits for the command, then
+  reads the views it touched (Footage: one scan; as a NAS that was measured at seconds). Only taking a clip out,
+  deleting and renaming show at once. The commands should answer what they made (`Changed` with the new links).
+- After `album_add` the catalog's notice may make the page read Footage a second time (the command's own files).
+- Renaming a tag over the whole project (`rename_tag`) and Sync tags still end with `refresh()`.
+- Renaming an album that is three folders is three writes: if the second fails, the album shows as two until read again.
+- A clip's second link made **elsewhere** while its first is unchanged is seen (Footage is read again); a link
+  **renamed** elsewhere relies on the same path and was not tested.
+- The Info part's count said twice; the side panel still offers clip parts (Source, Location, Stabilize) for a
+  moment selected in Timeline or Map (as #239's note says).
+- `library/ui-tests/page_perf.js` and `shot.js` (#237's measuring and pictures) still click the removed tabs: not
+  adapted, not run. The numbers in `docs/library-responsiveness.md` are #237's own, not this branch's.
+- The star chip and "In an album" use the tags' chip style (`chip tag`).
+
+For the PRs: the cross-feature fixes above belong after the seven are merged in the order of the table; the
+conflicts will come back in that order and this branch's merge commits show each resolution.
