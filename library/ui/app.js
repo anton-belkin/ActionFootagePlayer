@@ -2147,6 +2147,7 @@ async function removeSources(labels) {
 function renameStem(it) {
   if (it.kind === "folder" || it.kind === "moment") return it.name;
   const n = it.name;
+  if (/\.afplink\.jpg$/i.test(n)) return n.slice(0, -12);
   if (/\.mp\.jpg$/i.test(n)) return n.slice(0, -7);
   const i = n.lastIndexOf(".");
   return i > 0 ? n.slice(0, i) : n;

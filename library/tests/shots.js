@@ -31,6 +31,32 @@ const [ui, out, scheme] = process.argv.slice(2);
   await click('[data-a="crumb"][data-v="0"]');
   if (!(await page.$('#side .pane[data-tab="moments"]'))) await click('[data-a="tab"][data-v="moments"]');
   await shot("side-moments");
+  // Moments, photos and exports. Before (the tabs they had): each tab. Now: items of albums
+  for (const v of ["moments", "stills", "exports"]) {
+    if (!(await click('[data-a="view"][data-v="' + v + '"]'))) continue;
+    await click('[data-a="layout"][data-v="grid"]');
+    await dbl('[data-a="pick"][data-v^="f:"]');
+    await shot("tab-" + v);
+  }
+  await click('[data-a="view"][data-v="footage"]'); await click('[data-a="layout"][data-v="grid"]'); await click('[data-a="crumb"][data-v="0"]');
+  const pickName = (name, meta) => page.evaluate((n, meta) => { const el = Array.from(document.querySelectorAll('#main [data-a="pick"]')).find((e) => e.querySelector(".nm") && e.querySelector(".nm").textContent === n); if (el) el.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, metaKey: !!meta })); return !!el; }, name, meta);
+  if (await dbl('[data-a="pick"][data-v="f:Best of the year"]')) {
+    if (await pickName("Turtle")) {
+      await wait();
+      await click('[data-a="tab"][data-v="export"]');
+      await shot("album-mixed-moment");
+      await pickName("GX010123_14.00s.afplink.jpg", true); await pickName("GX010123.MP4", true); await wait();
+      await click('[data-a="tab"][data-v="info"]');
+      await shot("album-mixed-selected");
+      if (await click('.selbar [data-a="albumadd"]')) { await shot("add-items-to-album"); await click('[data-a="closesheet"]'); }
+      await click('[data-a="filters"]');
+      await shot("album-kind-filter");
+      await click('[data-a="filters"]');
+    }
+    await click('[data-a="crumb"][data-v="0"]');
+    if (await dbl('[data-a="pick"][data-v="f:Generated"]')) await shot("generated");
+    await click('[data-a="crumb"][data-v="0"]');
+  }
   // Originals: a selection, and Add to an album…
   await click('[data-a="view"][data-v="sources"]'); await click('[data-a="layout"][data-v="list"]');
   await dbl('[data-a="pick"][data-v="f:Egypt 2026"]'); await dbl('[data-a="pick"][data-v="f:Egypt 2026/Day 2"]');
