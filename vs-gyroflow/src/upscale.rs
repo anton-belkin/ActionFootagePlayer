@@ -99,8 +99,9 @@ pub const MODELS: &[Model] = &[
             source: "SwinIR-L x4 real-world SR (GAN), Jingyun Liang et al., Apache-2.0: https://github.com/JingyunLiang/SwinIR" },
 ];
 
-/// Where the models are fetched from: nowhere yet (where to host them is Anton's call); $AFP_MODELS_URL for a test
-pub const MODELS_URL: Option<&str> = None;
+/// Where the models are fetched from: the repository's upscaler-models release (a pre-release, not an app version, as
+/// windows-deps is); $AFP_MODELS_URL in its place for a test
+pub const MODELS_URL: Option<&str> = Some("https://github.com/anton-belkin/ActionFootagePlayer/releases/download/upscaler-models");
 
 /// The app's data folder's models/ (macOS: ~/Library/Application Support/ActionFootagePlayer/models), or
 /// $AFP_MODELS_DIR

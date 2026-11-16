@@ -49,7 +49,7 @@ So the lens correction and the stabilization's crop already stretch an unzoomed 
 water the lens sees a narrower angle and stretches less. Auto's thresholds (`upscale.rs`):
 
 - `WEAK_STRETCH = 1.1`: below it, nothing (the warp's pixels are about the camera's)
-- `STRONG_STRETCH = 2.4`: from it on, SwinIR-L; between the two, FSR. Not 2: an unzoomed photo above water would
+- `STRONG_STRETCH = 2.4` (Anton: start with these): from it on, SwinIR-L; between the two, FSR. Not 2: an unzoomed photo above water would
   flip between FSR and SwinIR-L around 2 by where it's framed, and only a real zoom should start a minute of drawing.
 
 Off macOS Auto is FSR past 1.1.
@@ -86,8 +86,9 @@ The models are Core ML conversions made by `tools/upscalers/convert.py` (coremlt
 macOS 13+), 31 and 52 MB zipped. They're kept out of git and out of the app: afp-upscale loads them from
 the app's data folder, `~/Library/Application Support/ActionFootagePlayer/models/` ($AFP_MODELS_DIR), compiles each
 once (`.mlmodelc` beside it). `upscale::ensure_model` fetches a missing one on first use, zipped, with progress and its
-SHA-256 checked (`MODELS`), from `MODELS_URL`, which is empty until it's decided where they're hosted; till then the
-photo says where to put the package ($AFP_MODELS_URL points it at a test server).
+SHA-256 checked (`MODELS`), from `MODELS_URL`: the repository's `upscaler-models` release, a pre-release kept apart
+from the app's versions as `windows-deps` is, its notes saying where each model comes from and under which license
+($AFP_MODELS_URL points it elsewhere for a test). A new conversion means new zips there and new checksums in `MODELS`.
 
 The Neural Engine was tried: compiling Real-ESRGAN's graph for it took more than ten minutes and SwinIR-L's did not
 finish in more than ten minutes either, so the GPU it is.
@@ -125,5 +126,4 @@ it is not settled. (From the projects' READMEs and the datasets' pages as rememb
 
 - Windows and Linux: FSR and none only (the panel shows only those); a neural runtime there (ONNX Runtime) would be a
   separate step.
-- Where the models are hosted (MODELS_URL) is Anton's call; their checksums are in MODELS.
 - The live player wasn't driven with this (the panel was rendered headless, the photos made by gyroflow-export).
