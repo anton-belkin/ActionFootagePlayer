@@ -149,49 +149,59 @@ Tests, all passing:
 | `node library/tests/albums.js` / `share.js` / `views.js library/ui` | 77 / 35 (+4: Clear the render cache) / 45 |
 | `library/ui-tests`: `node --test`, `culling_test.js`, `atstart_test.js` | 31 / 87 / 27 |
 
-## Installing the trial (Anton)
+## Installing (Anton)
 
-Built from this branch into `~/afp-night-build/`, unregistered from Launch Services, never launched by me (except
-the player headless, for the check above; unregistered again after):
-- `ActionFootageLibrary.app`: `tools/make_library_app.sh` from this branch (release, ad hoc signed).
-- `ActionFootagePlayer.app`: **your installed player (0.13.0-dev.26+bc0b756, its mpv with the GPU path, its
-  binaries) with this branch's Lua scripts put in**, version `0.13.0-dev.26+bc0b756+share-fixes.<commit>`. Why not
-  `tools/dev_app.sh`: no `build/mpv-afp` exists here (it would bundle Homebrew's mpv, without the GPU path). Also,
-  your installed build has lens-pick work (`local/test-230-231-232`) that this branch hasn't. Only Lua changed in
-  the player tonight, so its binaries are the right ones. Its `gyroflow/main.lua` is this branch's three-way-merged
-  with that build's (no conflict).
+Your instruction, relayed by the managing session: install the player and the Library straight into `~/Applications`.
+**This session's permission check refused the install itself** (the instruction reached it through another session,
+not from you directly). So both apps are **built and waiting**, and the install is one command for you.
 
-The Library uses the player beside it, so the two together try everything. To try them **without installing**:
+**What they're built from.** Local branch `local/test-242-230-231-232`, commit **`dbbf269`**, in the worktree
+`.claude/worktrees/install-242`. It is never pushed, and #242's branch is unchanged. It merges, in order:
+1. this PR's tip `f7015f8` (#242);
+2. `origin/main` `5847beb` (#241 merged): no conflict;
+3. `bc0b756` (your `local/test-230-231-232`: open PRs #230, #231, #232, what your installed apps were built from).
+   Without it, installing would have taken the lens-pick and offline-project work away. Conflicts, all resolved by
+   keeping both sides:
+   - `library/src/main.rs` `recent()`: #230's guessed share (`known.share`, `guess`'s names) **and** #234's
+     `at_start: e.at_start`;
+   - `library/src/main.rs` the command list: #231's `save_project_lens` **and** the night's `albums::…`, `share`;
+   - `library/ui/app.js` `poll()`: the screen-first `catalogChanged(s.changes)` (#237) **and** #230's look at the
+     recent list every 3 s when no project is open;
+4. `origin/claude/fix-library-ui-0e9b94` `2ef6ef1` (#243, the page's layout): **no conflict** (#243 doesn't touch
+   the settings sheet).
 
-```bash
-open ~/afp-night-build/ActionFootageLibrary.app
-```
+Tests on `dbbf269`: `cargo test` (library 59, catalog 32), the 19 Lua tests, page tests albums 81, share 35, views 45,
+ui_fixes 51, ui-tests 31, culling 87, at start 27: all pass.
 
-Opening a clip from it (or double-clicking one) uses the trial player. Afterwards, so a double-click on an MP4 or a
-project doesn't open a trial copy:
+Built by the repo's own path, `tools/dev_app.sh --no-install`: the player `0.13.0-dev.70+dbbf269` with
+`tools/build_mpv.sh`'s mpv (`mpv v0.41.0-1453-gc1f37caa2`, the patched one, as in your installed app; not Homebrew's),
+and the Library from the same commit. They're in `.claude/worktrees/install-242/build/`, signed ad hoc, unregistered.
+`~/afp-night-build/` (the earlier trial) is deleted.
 
-```bash
-LS=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister; $LS -u ~/afp-night-build/ActionFootageLibrary.app; $LS -u ~/afp-night-build/ActionFootagePlayer.app
-```
-
-To **install** them over the ones in `~/Applications` (quit both first; the old ones are kept beside):
-
-```bash
-cd ~/Applications && mv ActionFootagePlayer.app ActionFootagePlayer-before-share-fixes.app && mv ActionFootageLibrary.app ActionFootageLibrary-before-share-fixes.app && cp -cR ~/afp-night-build/ActionFootagePlayer.app ~/afp-night-build/ActionFootageLibrary.app ~/Applications/
-```
-
-Then, as after every install, only the `~/Applications` copies registered, and MP4 still opening the player:
-
-```bash
-LS=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister; for a in ~/Applications/*-before-share-fixes.app ~/afp-night-build/*.app; do $LS -u "$a"; done; $LS -f ~/Applications/ActionFootagePlayer.app ~/Applications/ActionFootageLibrary.app; $LS -dump | grep -E "path: .*ActionFootage(Player|Library)\.app" | sort -u
-```
+**To install** (quit the player and the Library first). This rebuilds in a minute from cache, puts both in
+`~/Applications` in place of the ones there (the old player is kept as `build/ActionFootagePlayer-previous.app` in
+that worktree), and makes the player the default for MP4 again:
 
 ```bash
-swift -e 'import AppKit; import UniformTypeIdentifiers; print(NSWorkspace.shared.urlForApplication(toOpen: UTType.mpeg4Movie)?.path ?? "none")'
+cd "$HOME/VSCode workspaces/dlogm-gyroflow-player__local/.claude/worktrees/install-242" && PATH="$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$PATH" tools/dev_app.sh
 ```
 
-The second command should print `…/Applications/ActionFootagePlayer.app`; if not, the player's menu → Setup makes
-it the default again. To go back: delete the two new apps and rename the `-before-share-fixes` ones.
+Then only the `~/Applications` copies registered. These are the others registered now: `~/ActionFootageLibrary-test/…`,
+`~/ActionFootagePlayer-360/ActionFootagePlayer 360.app`, `~/Applications/ActionFootagePlayer.app.broken`, and the
+`build/` copies of the worktrees `cranky-hertz-4c523c`, `merge-1111` and `install-242`. Keep any you still use off this
+list:
+
+```bash
+LS=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister; $LS -dump | grep -oE "/Users/[^()]*ActionFootage(Player|Library)[^/()]*\.app" | sort -u | grep -v "^$HOME/Applications/ActionFootage\(Player\|Library\)\.app$" | while read -r a; do $LS -u "$a"; done; $LS -f ~/Applications/ActionFootagePlayer.app ~/Applications/ActionFootageLibrary.app
+```
+
+And the check that MP4 and `Project.afproject` open the `~/Applications` copies (it opens nothing). Before the
+install it printed exactly these two lines, `…/Applications/ActionFootagePlayer.app` and
+`…/Applications/ActionFootageLibrary.app`:
+
+```bash
+printf 'import AppKit\nimport UniformTypeIdentifiers\nlet w = NSWorkspace.shared\nprint(w.urlForApplication(toOpen: UTType.mpeg4Movie)?.path ?? "none")\nprint(w.urlForApplication(toOpen: URL(fileURLWithPath: CommandLine.arguments[1]))?.path ?? "none")\n' > /tmp/afp-assoc.swift && touch /tmp/x.afproject && swift /tmp/afp-assoc.swift /tmp/x.afproject
+```
 
 Note: the first Share with the new Library renders everything again (recipe v3). The player writes
 `~/Library/Application Support/ActionFootagePlayer/gyroflow/render-defaults.json` on every start. One is there
