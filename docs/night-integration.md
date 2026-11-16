@@ -15,7 +15,7 @@ Cut from `claude/night-media-types-703c0e`, then merged in this order, each a re
 | `claude/night-responsive-894fc6` (screen first) → `claude/night-responsive-pinpoint` (pinpoint update) | #236, #237 | e58ef55, 670fd4a | 48724da |
 | `claude/night-culling-249140` (culling) → `claude/night-default-library` (Open at start) | #233, #234 | 3a8f9e6, 2b276f9 | 61384b1 |
 
-Share + render cache (stacked on #238) was still being built when this was written: **not in the branch**.
+| `claude/night-share-ca5050` (Share, the render cache) | #240 | e735616 | 5c221ee |
 
 ## Conflicts, and how each was resolved
 
@@ -50,6 +50,15 @@ Share + render cache (stacked on #238) was still being built when this was writt
   "Remove / Make this clip's preview" is gone with the previews themselves (albums replaced them).
   `tests/sidepanel_test.lua` and `footage-menu/main.lua` follow.
 
+**Share and the render cache (#240)**:
+- `index.html`, `style.css`: both sides (`share.js` after `albums.js`).
+- `index.rs` `read_json`: shared with `renders.rs` (#240) and still counted by the NAS model (#237).
+- `main.rs` `delete_renders`: the render cache's delete (#240), answering with the moments and photo links as they
+  are now (#237). `changed.rs`, `perf.rs` call `renders::delete`.
+- `app.js` filters: culling's Keep it? and Stars, then Share's Renders filter with its Photo column.
+- `app.js` `delrenders`: `Writes.run("renders", …)` on the moments **and photo links** selected.
+- `tests/albums.js`: the scripts' check names both sides' scripts.
+
 ## Cross-feature work done here (not in any PR)
 
 - **The pinpoint update knows albums** (`changes.js`): `showItems("footage", …)` patches the clip in Originals and
@@ -66,19 +75,22 @@ Share + render cache (stacked on #238) was still being built when this was writt
   `pick` and `rating`; `set_pick` and `set_rating` answer with `Changed`. No `refresh()` after a key any more.
 - **Culling without the removed tabs**: no `S.view === "exports"` left; exports are not cullable by their kind.
   Works on album items of every kind, in Timeline and in a Map place's list (they are the same items).
+- **Share from Timeline and from a Map place's list**: "Share…" is on their bar (`albumviews.js`) and in the menu;
+  it takes the selection by kind, so it works there and on an album's mixed selection as it is.
 - **Timeline's tiles show the verdict**: a small ✓ / ✕ and the stars on the thumbnail (`cullBadge`; the tiles have
   no room for chips). "Add to an album…" (not "another") in Timeline and Map.
 
-## Tests (all on 48c2016 and after)
+## Tests (all on c58326d, with Share merged)
 
 | What | Result |
 |---|---|
-| `cd library && cargo test` | 51 pass, 0 fail, 13 ignored (the ones needing a player or a NAS) |
+| `cd library && cargo test` | 56 pass, 0 fail, 13 ignored (the ones needing a player or a NAS) |
 | `cd catalog && cargo test` | 32 pass (9 + 1 + 22) |
 | Windows: `PATH=/opt/homebrew/opt/llvm@19/bin:$PATH cargo check --target x86_64-pc-windows-msvc` in `library/` | compiles (one warning, an unused variable) |
 | The player's Lua tests named in `.github/workflows/release.yml` (18 files, luajit) | all pass |
-| `node library/tests/albums.js library/ui` (#235, #238) | 78 checks pass |
-| `node library/tests/views.js library/ui` (#239) | 44 checks pass |
+| `node library/tests/albums.js library/ui` (#235, #238) | 77 checks pass (#240 turned its Export checks into Share's) |
+| `node library/tests/share.js library/ui` (#240) | 31 checks pass |
+| `node library/tests/views.js library/ui` (#239) | 45 checks pass (one added: Share… in Timeline) |
 | `library/ui-tests`: `node --test *_test.js` (#236, #237 + `merged_test.js`) | 31 tests pass |
 | `node library/ui-tests/culling_test.js` (#233) | 87 checks pass (was 72) |
 | `node library/ui-tests/atstart_test.js` (#234) | 27 checks pass (was 24) |
@@ -102,8 +114,25 @@ notes say; nothing was added to the repo for them.
 One real bug found by the tests and fixed (`timeline.js`): Hide rejected changed nothing in Timeline until some item
 changed (its cached model didn't know the switch).
 
-**Pictures**: a headless Chrome walk of the merged page against the mock, light and dark, 60 pictures: the albums
-walk (`tests/shots.js`), Timeline and Map (`tests/views_shots.js`), and a culling walk (Originals, Albums' top, the
+**A share run the whole way, with the player and no window** (`share_e2e::a_share_with_the_player` in `main.rs`,
+skipped without `AFL_PLAYER` and `AFL_SHARE_TRIP`). Run once here on a scratch copy of the installed player with
+this branch's Lua scripts put in (only Lua changed in the player tonight) and a 4 s generated 1080p clip, sharing a
+moment, a photo link and the whole clip to a folder:
+- **The photo link: worked end to end.** The Library planned it, the player's `share` batch rendered it
+  (`photo-at` with the link), it was renamed out of `.making/` to `_Renders/<hash>.Photo.heic` (1920×1080 HEIC,
+  108 KB) and copied to the folder as `A_1.00s.heic`. Run twice (two recipes): both times in 2–3 s.
+- **The moment and the whole clip: not rendered.** The batch asked the exporter for both, and `gyroflow-export`
+  refused each: "Unsupported file format, and not log: nothing to change" (the generated clip has no motion data
+  and no log curve). The refusal came back per item and the share ended Done with two failures, as designed. So
+  the video path is proven up to the exporter's call and back, **not** a video actually landing in the cache: that
+  needs a real camera clip. Two things this showed: (1) Share of a clip or moment with nothing to change fails
+  instead of copying the original; (2) with `source.curve` set in the clip's own file the Library's recipe changed
+  but the batch still treated the clip as not log, so the recipe and what the player renders can differ (as #240's
+  note suspects).
+The scratch player copy was deleted and unregistered after.
+
+**Pictures**: a headless Chrome walk of the merged page against the mock, light and dark, 70 pictures (the Share
+sheet, its progress, its row in Tasks and Share from Originals among them): the albums walk (`tests/shots.js`), Timeline and Map (`tests/views_shots.js`), and a culling walk (Originals, Albums' top, the
 album Egypt with a clip, a moment and a photo, the Tags part, X and 4 stars on the three, Hide rejected, P and 5 in
 Timeline). All looked at. No page error, no "Not saved", nothing overlapping, the top bar holds both branches'
 controls on one line at 1320 px, the map's tiles loaded. Seen and left:
@@ -114,7 +143,7 @@ They were not committed (the branches' own pictures are in `docs/img/`).
 
 ## The trial build
 
-`~/afp-night-build/ActionFootageLibrary.app`, built by `tools/make_library_app.sh` from 48c2016 (release, signed ad
+`~/afp-night-build/ActionFootageLibrary.app`, built by `tools/make_library_app.sh` from c58326d (Share included) (release, signed ad
 hoc). **The Library alone**: the app, `afp-thumbs`, `afp-quicklook`, `afp-photos`. Not in `~/Applications`, never
 launched. macOS registered it with Launch Services by itself when it was signed; it was unregistered right after
 (`lsregister -u`), and the folder has `.metadata_never_index`, so `Project.afproject` still opens the installed app.
@@ -141,7 +170,7 @@ What to know before starting it:
   For a first look, a copy of a small project (or a new one over a folder of clips) is the safe way; on the real
   library start with things that only read (Timeline, Map, Originals).
 
-## What to click first, for each of the six
+## What to click first, for each of the seven
 
 1. **Albums, clip links (#235)**: Originals → select a few clips → *Add to an album…* → a new name. Albums → the
    album: the clips are there in a moment, each a 20 KB link with its picture. Finder: `<project>/_Clips/<album>`.
@@ -155,6 +184,10 @@ What to know before starting it:
    in the top bar; Filters → Keep it? / Stars.
 5. **Open at start (#234)**: the project menu (top left) → the tick beside a project; quit and start again: it
    opens by itself, on Originals.
+7. **Share and the render cache (#240)**: select anything in an album (or in Timeline) → *Share…* on the bar →
+   HDR or SDR → *Save to a folder…*. The sheet lists each item; closing it leaves the share in Tasks. Shared again,
+   what was rendered is copied at once. With the installed player a share that needs rendering will not work (its
+   scripts don't know the `share` batch): only what is already rendered, rendered photos and exports are copied.
 6. **The Library answers at once (#236, #237)**: on a project on the NAS, tag a clip, rate it, rename a moment,
    delete one: it shows at once, "Not saved: …" appears only if the write failed; closing the window while changes
    are being written waits for them.
@@ -173,7 +206,8 @@ Not verified at all (night rules: no window, no NAS, no real library):
 - The one-off script `tools/one_off/photos_to_links.py` was not run on anything real.
 
 Unfinished, known:
-- **Share + render cache is not merged** (its branch wasn't ready). Photo links have no render / Share until it is.
+- **Share needs this branch's player to render** (see the trial build); no video render was seen landing in the
+  cache (above). Renders nothing refers to any more stay in `_Renders` (no cleaning yet, #240's note).
 - **Adding to an album, copying, moving, photo links are not screen-first**: the page waits for the command, then
   reads the views it touched (Footage: one scan; as a NAS that was measured at seconds). Only taking a clip out,
   deleting and renaming show at once. The commands should answer what they made (`Changed` with the new links).
