@@ -18,6 +18,7 @@ mod checks;
 mod geo;
 mod index;
 mod locations;
+mod renders;
 mod seen;
 mod tags;
 mod takein;
@@ -1422,7 +1423,7 @@ async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_o
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let (n, problems) = index::delete_renders(&root, &moments, stale_only);
+    let (n, problems) = renders::delete(&root, &moments, stale_only);
     Ok(json!({ "deleted": n, "problems": problems }))
 }).await.map_err(|e| e.to_string())?
 }
@@ -2824,7 +2825,7 @@ mod audit {
         assert!(checks::apply(found.as_array().unwrap(), &relink).is_empty());
         row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
         // Renders deleted
-        let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
+        let (n, problems) = renders::delete(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
         assert!(n == 1 && problems.is_empty(), "{problems:?}");
         row("Delete renders", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["renders"].to_string());
         // New folder, rename a moment, rename a folder
