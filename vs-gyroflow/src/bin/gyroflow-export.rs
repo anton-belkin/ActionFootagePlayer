@@ -889,12 +889,20 @@ fn tool(name: &str) -> PathBuf {
         if let Some(p) = here { return p; }
     }
     if cfg!(target_os = "macos") {
+        // In the app: its own (Contents/Helpers), whoever runs this
+        if let Some(p) = app_contents().map(|c| c.join("Helpers").join(&name)).filter(|p| p.is_file()) { return p; }
         for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
             let p = Path::new(dir).join(&name);
             if p.is_file() { return p; }
         }
     }
     PathBuf::from(name)
+}
+
+/// The app's Contents folder when this runs from inside ActionFootagePlayer.app (Contents/Resources/plugins/gyroflow/)
+fn app_contents() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    exe.ancestors().find(|a| a.file_name().is_some_and(|n| n == "Contents") && a.join("Helpers").is_dir()).map(Path::to_path_buf)
 }
 
 // Run without a console window of its own on Windows: mpv runs this one without a console, and each ffmpeg would
@@ -2134,10 +2142,9 @@ fn gpu_ffmpeg() -> Command {
     let mut cmd = match std::env::var_os("AFP_GPU_FFMPEG") { Some(p) => ffmpeg_at(PathBuf::from(p)), None => ffmpeg_command("ffmpeg") };
     if cfg!(target_os = "macos") {
         let mut dirs: Vec<PathBuf> = std::env::var_os("DYLD_FALLBACK_LIBRARY_PATH").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
-        // The app's: its Helpers (GYROFLOW_TOOLS, where its ffmpeg is) beside Frameworks and Resources
-        let helpers = std::env::var_os("GYROFLOW_TOOLS").map(PathBuf::from)
-            .or_else(|| std::env::current_exe().ok().and_then(|e| Some(e.parent()?.to_path_buf())));
-        if let Some(contents) = helpers.as_deref().and_then(Path::parent) {
+        // The app's (its ffmpeg's libraries are in Frameworks, relinked; MoltenVK's manifest in Resources)
+        let contents = app_contents().or_else(|| std::env::var_os("GYROFLOW_TOOLS").and_then(|t| Some(Path::new(&t).parent()?.to_path_buf())));
+        if let Some(contents) = contents {
             dirs.push(contents.join("Frameworks"));
             // MoltenVK for the Vulkan loader, as macos/player.sh points mpv to it, when this runs without it
             let icd = contents.join("Resources/vulkan/icd.d/MoltenVK_icd.json");
