@@ -1597,9 +1597,11 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             if opts.with_translation { gpu_setup(&path).map_err(|e| format!("--with-translation needs the GPU path: {e}"))?; }
             if opts.crop.is_some() { return Err("--crop".to_string()); }
             if dv_rpus.is_some() && opts.dv_live_l1 { return Err("each frame's Dolby Vision L1 is measured on the pipes' GPU LUT".to_string()); }
-            if engine.is_none() && look_cube.is_none() { return Err("nothing for the GPU to change".to_string()); }
-            if engine.is_none() && !turn.is_empty() { return Err("a turned clip without stabilization".to_string()); }
+            if engine.is_none() && look_cube.is_none() && turn.is_empty() { return Err("nothing for the GPU to change".to_string()); }
             let setup = gpu_setup(&path)?;
+            // Without the warp, the turn and the cut (--rotation, --aspect, the file's own) on the GPU too: VideoToolbox's
+            // transpose before the filter, the filter's crop
+            let (pre, crop) = if engine.is_none() { gpu_turn(&opts.frame.for_video(display_rotation(&path), None), (w, h)) } else { (String::new(), String::new()) };
             let first_decoded = if denoise > 0 { dec_first } else { first_frame };
             let mut text = String::new();
             if let Some(e) = &engine {
@@ -1615,7 +1617,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             // frames with fewer after them: only those differ)
             let short = (last_frame + denoise as u64).saturating_sub(dec_last);
             let pad = (denoise > 0 && short > 0).then_some((dec_last - dec_first, short));
-            Ok(GpuPlan { setup, shader: text, first_decoded, skip: if denoise > 0 { first_frame + denoise as u64 - dec_first } else { 0 }, pad })
+            Ok(GpuPlan { setup, shader: text, pre, crop, first_decoded, skip: if denoise > 0 { first_frame + denoise as u64 - dec_first } else { 0 }, pad })
         })();
         match why {
             Ok(plan) => {
@@ -2126,7 +2128,27 @@ struct GpuSetup {
 
 /// `skip`: the filter's first frames not exported (the denoise's frames before); `pad`: (the decoded frame, how many
 /// times) repeated at the end, the denoise's frames after the clip's last
-struct GpuPlan { setup: GpuSetup, shader: String, first_decoded: u64, skip: u64, pad: Option<(u64, u64)> }
+/// `pre`: filters before libplacebo (a turn), `crop`: the filter's own crop options (`:crop_w=…`); `shader` empty: none
+struct GpuPlan { setup: GpuSetup, shader: String, pre: String, crop: String, first_decoded: u64, skip: u64, pad: Option<(u64, u64)> }
+
+/// A clip turned (and cut) without the warp, on the GPU: the turn as filters on the decoder's frames (VideoToolbox's
+/// transpose_vt on a Mac, Vulkan's transpose elsewhere; a 180 degree turn as two flips there), the cut as the
+/// libplacebo filter's crop of the upright frame. `size`: the decoded frame's, as the sensor has it
+fn gpu_turn(frame: &vs_gyroflow::Frame, size: (usize, usize)) -> (String, String) {
+    let mac = cfg!(target_os = "macos");
+    let pre = match (frame.rotation, mac) {
+        (90, true) => "transpose_vt=dir=clock,", (180, true) => "transpose_vt=dir=reversal,", (270, true) => "transpose_vt=dir=cclock,",
+        (90, false) => "transpose_vulkan=dir=clock,", (180, false) => "transpose_vulkan=dir=clock,transpose_vulkan=dir=clock,",
+        (270, false) => "transpose_vulkan=dir=cclock,",
+        _ => "",
+    }.to_string();
+    let (w, h) = frame.size(size);
+    let crop = if (w, h) != frame.rotated(size) {
+        let (x, y) = frame.offset(size);
+        format!(":crop_x={x}:crop_y={y}:crop_w={w}:crop_h={h}")
+    } else { String::new() };
+    (pre, crop)
+}
 
 /// The GPU path's ffmpeg: AFP_GPU_FFMPEG, else the one the export runs. On a Mac it loads Vulkan (MoltenVK) at run
 /// time: the app's Frameworks, else Homebrew's
@@ -2228,8 +2250,9 @@ fn export_gpu(job: GpuJob, plan: GpuPlan) -> Result<Outcome, String> {
     // The frames tagged as what the shaders' output is: libplacebo then passes MAIN through (as the dlogm plugin tags
     // the video for mpv); the matrix and range stay the source's, for its conversion to RGB
     let mut vf = plan.pad.map(|(at, n)| format!("loop=loop={n}:size=1:start={at},")).unwrap_or_default();
-    vf += &format!("setparams=color_primaries={}:color_trc={},libplacebo=w={w}:h={h}:format={pix_fmt}:colorspace={}:color_primaries={}:color_trc={}:\
-                          range={range}:dithering=none:custom_shader_path={}", tags[0], tags[1], tags[2], tags[0], tags[1], filter_path(&shader_path));
+    let shader_opt = if plan.shader.is_empty() { String::new() } else { format!(":custom_shader_path={}", filter_path(&shader_path)) };
+    vf += &format!("{}setparams=color_primaries={}:color_trc={},libplacebo=w={w}:h={h}:format={pix_fmt}:colorspace={}:color_primaries={}:color_trc={}:\
+                          range={range}:dithering=none{}{shader_opt}", plan.pre, tags[0], tags[1], tags[2], tags[0], tags[1], plan.crop);
     // The denoise shows a frame `denoise` frames behind the newest: its first ones are the frames before the export's
     if plan.skip > 0 { vf += &format!(",trim=start_frame={}", plan.skip); }
     vf += ",setpts=PTS-STARTPTS";

@@ -120,6 +120,9 @@
 #ifndef RT
 #define RT round(target_size * gyroflow_render_scale)
 #endif
+#ifndef LENS_BLEND
+#define LENS_BLEND 0
+#endif
 
 // The table: frame i's block of BLOCK texels at (i % COLS) * BLOCK, row i / COLS. Texels 0 to PARAM_TEXELS - 1 the
 // frame's parameters, then KNOTS quaternions (x, y, z, w) of the row rotations, the knots evenly over the rows
@@ -463,10 +466,132 @@ bool frame_setup()
 // no new table) turns it first, and zooms by the FOV: gyroflow-core's view_rotation multiplies each row's rotation on
 // the right by the view's quaternion in its matrices' axes (gpu_table::camera_quat), the world's too, and its zoom is
 // the FOV's (Camera::apply)
+// False where output_ray's pixel has no ray (a lens correction below 100 %: past the lens's own image)
+bool ray_ok = true;
+
+#if LENS_BLEND
+// A lens correction below 100 % (Gyroflow's output_ray in the fork, its wgpu_undistort.wgsl): a ray of angle theta lands
+// at (1 - a) R(theta) + a P(theta) of the output plane, where the source lens images it mixed with where the output
+// projection wants it. Inverted per pixel by regula falsi (Illinois), bracketed by the two maps' own answers.
+float proj_radius(float theta)
+{
+#if PROJ == 1
+    return 2.0 * tan(theta * 0.5);
+#elif PROJ == 2
+    return theta;
+#elif PROJ == 3
+    return 2.0 * sin(theta * 0.5);
+#elif PROJ == 4
+    return sin(theta);
+#else
+    return theta < 1.5707 ? tan(theta) : 1e9;
+#endif
+}
+
+float proj_theta(float r)
+{
+#if PROJ == 1
+    return 2.0 * atan(r * 0.5);
+#elif PROJ == 2
+    return r;
+#elif PROJ == 3
+    return 2.0 * asin(min(r * 0.5, 1.0));
+#elif PROJ == 4
+    return asin(min(r, 1.0));
+#else
+    return atan(r);
+#endif
+}
+
+// Green's index under water (Gyroflow's own coefficient): the blend is where the picture goes, the same for each
+// color; each color's own index is applied after, in rotate_and_distort
+bool refracts() { return lens.z != 1.0 && lens.z > 0.0; }
+float to_water(float th) { return refracts() ? asin(clamp(sin(min(th, 1.5707963)) / lens.z, -1.0, 1.0)) : th; }
+
+float blend_residual(float theta, vec2 u, float t, float a)
+{
+    float th = theta;
+    if (refracts()) th = asin(clamp(sin(th) * lens.z, -1.0, 1.0));
+    float s = sin(th), c = cos(th);
+    vec2 p = distort_point(u.x * s, u.y * s, c);
+    return (1.0 - a) * length(p) + a * proj_radius(theta) - t;
+}
+
+// The ray of output point out_pos (out_c the middle, out_f the focal length, fov the zoom), for correction a < 1
+bool blend_ray(vec2 out_pos, vec2 out_c, vec2 out_f, float fov, float a, out vec2 ray)
+{
+    vec2 n_raw = (out_pos - out_c) / out_f;
+    ray = unproject(n_raw);
+    vec2 n = n_raw;
+#if HAS_DIGITAL
+    // The digital warp in the un-zoomed (fov 1) frame, so it doesn't depend on the FOV
+    vec2 dp = digital_undistort_point((out_pos - out_c) * fov + out_c);
+    n = ((dp - out_c) / fov) / out_f;
+#endif
+    vec2 nb = n * (1.0 - a) + n_raw * a;
+    float t = length(nb);
+    if (t <= 1e-9) return true;
+    vec2 u = nb / t;
+    float lo = length(ray);
+    vec2 src = undistort_point(n);
+    bool has_src = src.x > -99998.0;
+    if (!has_src && !(lens.w > 0.0)) return false;
+    float hi = to_water(has_src ? length(src) : lens.w);
+    bool edge = !has_src;
+    if (a > 0.0) hi = min(hi, proj_theta(t / a));
+    if (a <= 0.0) {
+        if (!has_src) return false;
+        // Exactly the source lens's own ray, with the refraction rotate_and_distort applies undone
+        ray = src;
+        float th = length(src);
+        if (refracts() && th > 1e-12) ray = src * (to_water(th) / th);
+        return true;
+    }
+    float l = min(lo, hi), h = max(lo, hi);
+    float cap = to_water(lens.w > 0.0 ? lens.w : PI);
+    if (h > cap) { h = cap; l = min(l, cap); edge = true; }
+    float gl = blend_residual(l, u, t, a), gh = blend_residual(h, u, t, a);
+    float theta = h;
+    if (gh < 0.0) {
+        if (edge) return false;
+    } else {
+        if (gl >= 0.0) { l = 0.0; gl = -t; }
+        int side = 0;
+        for (int i = 0; i < 6; i++) {
+            float d = gh - gl;
+            theta = abs(d) > 1e-12 ? clamp(l - gl * (h - l) / d, l, h) : 0.5 * (l + h);
+            float gt = blend_residual(theta, u, t, a);
+            if (gt < 0.0) {
+                l = theta; gl = gt;
+                if (side == -1) gh *= 0.5;
+                side = -1;
+            } else {
+                h = theta; gh = gt;
+                if (side == 1) gl *= 0.5;
+                side = 1;
+            }
+        }
+    }
+    // The source lens's tangential offset belongs to its leg and fades out with it
+    vec2 dir = u;
+    if (has_src) {
+        float sl = length(src), nl = length(n);
+        if (sl > 1e-12 && nl > 1e-12) {
+            vec2 dd = u + (1.0 - a) * (src / sl - n / nl);
+            float dl = length(dd);
+            if (dl > 1e-12) dir = dd / dl;
+        }
+    }
+    ray = dir * theta;
+    return true;
+}
+#endif
+
 vec3 output_ray(vec2 j)
 {
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_pos = j * size / RT + t2.xy;
+    ray_ok = true;
 #if PROJ == 5
     // The equirect (a 360 camera's sphere): its plane is the sphere's, all of it 360 x 180 degrees at zoom (fov) 1;
     // longitude across, latitude down, +z at the middle, +x at +90 degrees, up (-y) at the top (the fork's
@@ -476,7 +601,14 @@ vec3 output_ray(vec2 j)
     vec3 d = vec3(cl * sin(n.x), sin(n.y), cl * cos(n.x));
 #else
     vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * gyroflow_cam_zoom);
+#if LENS_BLEND
+    vec2 ray;
+    if (lens.y < 0.999) ray_ok = blend_ray(out_pos, 0.5 * size, out_f, lens.x * gyroflow_cam_zoom, lens.y, ray);
+    else ray = unproject((out_pos - 0.5 * size) / out_f);
+    vec3 d = ray_to_dir(ray);
+#else
     vec3 d = ray_to_dir(unproject((out_pos - 0.5 * size) / out_f));
+#endif
 #endif
     return qrot(vec4(gyroflow_cam_x, gyroflow_cam_y, gyroflow_cam_z, gyroflow_cam_w), d);
 }
@@ -484,6 +616,7 @@ vec3 output_ray(vec2 j)
 bool source_coord(vec2 j, out vec2 uv)
 {
     vec3 d = output_ray(j);
+    if (!ray_ok) { uv = vec2(0.0); boundary_uv = false; return false; }
     // The rolling shutter's row: where the middle row's rotation puts the ray, then that row's rotation
     float rows = t2.z;
     int idx = 0;
