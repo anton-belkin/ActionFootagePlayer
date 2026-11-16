@@ -276,6 +276,77 @@ fn dark() -> Vec<u8> {
 
 // ---------- the albums ----------
 
+// ---------- a photo in an album: a small JPEG with the link in its XMP ----------
+
+/// A photo's link file: `<name>.afplink.jpg` (docs/albums-photos-share-concept.md, "Photos as objects")
+pub const PHOTO_EXT: &str = ".afplink.jpg";
+const AFP_NS: &str = "https://actionfootageplayer.ch/ns/1.0/";
+/// The longest side of a photo link's picture
+const PHOTO_SIDE: u32 = 1280;
+
+fn xml(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }
+
+/// A photo's link file: the picture (a JPEG, as it is) with `afp:link` in an XMP packet of its own, put where the
+/// photos the player renders have theirs (an APP1 segment before the image data, within the first 64 KiB), so the
+/// Library (`index::link`), the catalog (`inspect::photo_meta`) and the player (`link.photo`) read it as they read a
+/// rendered photo's. An XMP packet the picture had is dropped
+pub fn photo_file(jpeg: &[u8], link: &str) -> Result<Vec<u8>, String> {
+    jpeg_size(jpeg).ok_or("The picture isn't a JPEG")?;
+    const HEAD: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
+    let packet = format!("<?xpacket begin=\"\u{feff}\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?><x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\
+<rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\"><rdf:Description rdf:about=\"\" xmlns:afp=\"{AFP_NS}\">\
+<afp:link>{}</afp:link></rdf:Description></rdf:RDF></x:xmpmeta><?xpacket end=\"w\"?>", xml(link));
+    let len = 2 + HEAD.len() + packet.len();
+    if len > 0xffff { return Err("The link is too long for a photo".into()); }
+    let mut out = Vec::with_capacity(jpeg.len() + len + 2);
+    out.extend_from_slice(&jpeg[..2]);
+    // The segments before the image data: JFIF's and Exif's kept first (where readers expect them), ours after, an
+    // older XMP left out
+    let mut i = 2;
+    let mut ours = Some((len, packet));
+    while i + 4 <= jpeg.len() && jpeg[i] == 0xff {
+        let m = jpeg[i + 1];
+        let n = u16::from_be_bytes([jpeg[i + 2], jpeg[i + 3]]) as usize;
+        let seg = jpeg.get(i..i + 2 + n).ok_or("The picture is cut short")?;
+        let first = m == 0xe0 || (m == 0xe1 && seg[4..].starts_with(b"Exif\0"));
+        if !first {
+            if let Some((len, packet)) = ours.take() {
+                out.extend_from_slice(&[0xff, 0xe1]);
+                out.extend_from_slice(&(len as u16).to_be_bytes());
+                out.extend_from_slice(HEAD);
+                out.extend_from_slice(packet.as_bytes());
+            }
+        }
+        if m == 0xe1 && seg[4..].starts_with(HEAD) { i += 2 + n; continue; }
+        if m == 0xda { break; }
+        out.extend_from_slice(seg);
+        i += 2 + n;
+    }
+    if ours.is_some() { return Err("The picture has no image data".into()); }
+    out.extend_from_slice(&jpeg[i..]);
+    Ok(out)
+}
+
+/// The clip's frame at `t` seconds, a JPEG at most PHOTO_SIDE wide: by the player's ffmpeg (a seek to the keyframe
+/// before, then decoded up to the frame). As the camera recorded it: not stabilized, not cropped (the render is)
+fn frame_at(path: &Path, t: f64, scratch: &Path) -> Option<Vec<u8>> {
+    use std::process::{ Command, Stdio };
+    static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    std::fs::create_dir_all(scratch).ok()?;
+    let out = scratch.join(format!("frame-{}-{}.jpg", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+    let ffmpeg = crate::player_ffmpeg();
+    let mut cmd = Command::new(ffmpeg.as_deref().unwrap_or(Path::new("ffmpeg")));
+    cmd.args(["-v", "error", "-y", "-ss", &format!("{:.3}", t.max(0.0)), "-i"]).arg(path)
+        .args(["-an", "-sn", "-dn", "-frames:v", "1", "-vf", &format!("scale='min({PHOTO_SIDE},iw)':-2"), "-q:v", "3", "-f", "mjpeg"]).arg(&out)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); } // no console window
+    let ok = cmd.status().is_ok_and(|s| s.success());
+    let bytes = if ok { std::fs::read(&out).ok().filter(|b| jpeg_size(b).is_some()) } else { None };
+    let _ = std::fs::remove_file(&out);
+    bytes
+}
+
 fn rel_of(root: &Path, path: &Path) -> String { path.strip_prefix(root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default() }
 
 /// A folder of the project's own for links, from its path in the project ("_Clips/Egypt/Day 1"): not the project's
@@ -392,31 +463,140 @@ pub fn add(root: &Path, album: &str, clips: &[Add], cache: &Path, luts: Option<&
                "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64 }))
 }
 
-/// Links (their files, of the project's own) moved into another album, a link's own Gyroflow project with it; a name
-/// taken there gets a number. { moved, problems }
+/// One photo to make: its clip (as `Add`), the frame's time in it, and the part of the frame wanted when one is set
+/// (`crop`: x, y, w, h in shares of the frame; `camera`: the crop mode's yaw, pitch, roll, zoom), kept in the link
+pub struct Photo { pub clip: Add, pub t: f64, pub crop: Option<Value>, pub camera: Option<Value> }
+
+/// Photos made in an album, each a link file `<clip>_<seconds>s.afplink.jpg`: the clip's frame at that time, small,
+/// with `{ v: 1, kind: "photo", clip, t, size, roots, created, crop, camera }` in its XMP. Nothing is rendered: the
+/// picture is the frame as recorded (in normal colour when the clip's curve is known), the render comes when the
+/// photo is shared. One at that time of that clip already in the album is left as it is.
+/// { made: [paths], already, album, failed: [[clip, why]], ms }
+pub fn add_photos(root: &Path, album: &str, photos: &[Photo], cache: &Path, luts: Option<&Path>) -> Result<Value, String> {
+    let started = std::time::Instant::now();
+    let dir = album_dir(root, album)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut names: HashSet<String> = HashSet::new();
+    let mut there: Vec<(String, f64)> = Vec::new();
+    for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.to_lowercase().ends_with(PHOTO_EXT) {
+            if let Some(l) = crate::index::link(&e.path()).filter(|l| l["kind"] == "photo") {
+                if let (Some(c), Some(t)) = (l["clip"].as_str(), l["t"].as_f64()) { there.push((c.to_string(), t)); }
+            }
+        }
+        names.insert(name.to_lowercase());
+    }
+    let mut jobs: Vec<(&Photo, PathBuf)> = Vec::new();
+    let mut already = 0usize;
+    for p in photos {
+        if there.iter().any(|(c, t)| *c == p.clip.tree && (t - p.t).abs() < 0.05) { already += 1; continue; }
+        there.push((p.clip.tree.clone(), p.t));
+        let stem = Path::new(p.clip.tree.rsplit('/').next().unwrap_or(&p.clip.tree)).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "clip".into());
+        let stem = format!("{stem}_{:.2}s", p.t);
+        let mut name = format!("{stem}{PHOTO_EXT}");
+        let mut n = 2;
+        while !names.insert(name.to_lowercase()) { name = format!("{stem} {n}{PHOTO_EXT}"); n += 1; }
+        jobs.push((p, dir.join(name)));
+    }
+    let next = Mutex::new(0usize);
+    let made = Mutex::new(Vec::new());
+    let failed = Mutex::new(Vec::new());
+    let root_text = root.display().to_string();
+    let scratch = cache.join("frames");
+    std::thread::scope(|sc| {
+        // Fewer at once than clip links: each is a decode of the clip up to the frame
+        for _ in 0..jobs.len().clamp(1, 4) {
+            sc.spawn(|| loop {
+                let i = { let mut n = next.lock().unwrap(); let i = *n; *n += 1; i };
+                let Some((p, out)) = jobs.get(i) else { break };
+                let a = &p.clip;
+                let mut link = json!({ "v": 1, "kind": "photo", "clip": a.tree, "t": (p.t * 1000.0).round() / 1000.0, "size": a.size, "roots": [root_text] });
+                if let Some(t) = a.created { link["created"] = json!(iso(t)); }
+                if let Some(c) = p.crop.as_ref().filter(|c| !c.is_null()) { link["crop"] = c.clone(); }
+                if let Some(c) = p.camera.as_ref().filter(|c| !c.is_null()) { link["camera"] = c.clone(); }
+                // The frame itself; a clip that can't be read now (offline, no ffmpeg): its thumbnail, so the photo is
+                // made all the same (its link is what matters, the picture is a reminder)
+                let lut = a.curve.as_deref().zip(luts).and_then(|(c, d)| lut_for(d, c));
+                let picture = match frame_at(&a.path, p.t, &scratch) {
+                    Some(f) => lut.and_then(|l| recolour(&f, &l)).unwrap_or(f),
+                    None => thumbnail(a, cache, luts),
+                };
+                let r = photo_file(&picture, &link.to_string()).and_then(|bytes| {
+                    let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| e.to_string())?;
+                    f.write_all(&bytes).map_err(|e| { let _ = std::fs::remove_file(out); e.to_string() })
+                });
+                match r { Ok(()) => made.lock().unwrap().push(out.clone()), Err(e) => failed.lock().unwrap().push(json!([a.tree, e])) }
+            });
+        }
+    });
+    let mut made = made.into_inner().unwrap();
+    made.sort();
+    let mut noted = made.clone();
+    noted.push(dir.clone());
+    crate::seen::note_now(&noted);
+    Ok(json!({ "made": made.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "already": already, "album": rel_of(root, &dir),
+               "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64 }))
+}
+
+/// What an album's item is, from its file: "clip" or "moment" (a link MP4), "still" (a photo: its link file, or a
+/// rendered one with a link or in the project's own folders), and its name split into the part that's renamed and
+/// its ending (`.afplink.mp4`, `.afplink.jpg`, a Motion Photo's `.MP.jpg`, else the extension)
+fn item_of(root: &Path, file: &Path) -> Option<(&'static str, String, String)> {
+    let name = file.file_name()?.to_string_lossy().into_owned();
+    let lower = name.to_lowercase();
+    let cut = |n: usize| (name[..name.len() - n].to_string(), name[name.len() - n..].to_string());
+    if lower.ends_with(crate::index::LINK_EXT) {
+        let l = crate::index::link(file)?;
+        let kind = if l["kind"] == "moment" { "moment" } else if l["kind"] == "clip" { "clip" } else { return None };
+        let (stem, ext) = cut(crate::index::LINK_EXT.len());
+        return Some((kind, stem, ext));
+    }
+    if [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) {
+        if crate::index::link(file).is_none() && !crate::index::own_area(root, file, &crate::index::footage_dirs(root)) { return None; }
+        let n = if lower.ends_with(PHOTO_EXT) { PHOTO_EXT.len() } else if lower.ends_with(".mp.jpg") { 7 } else { name.len() - name.rfind('.')? };
+        let (stem, ext) = cut(n);
+        return Some(("still", stem, ext));
+    }
+    // A moment made before 0.11 (a video with the moment's link, any name)
+    crate::index::link(file).filter(|l| l["kind"] == "moment")?;
+    let (stem, ext) = cut(name.len() - name.rfind('.')?);
+    Some(("moment", stem, ext))
+}
+
+/// An album's items (clip links, moments, photos: their files, of the project's own) moved into another album, each
+/// with what belongs to it: a link's own Gyroflow project, a moment's renders (found by its path: they follow it), a
+/// Live Photo's video. A name taken there gets a number. { moved, problems }
 pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, String> {
     let dir = album_dir(root, album)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let (mut moved, mut problems, mut touched) = (0usize, Vec::<String>::new(), vec![dir.clone()]);
     for from in files {
-        let name = from.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        if !from.starts_with(root) || !name.to_lowercase().ends_with(crate::index::LINK_EXT) || crate::index::link(from).is_none() {
-            problems.push(format!("{}: not a link of this project", from.display()));
+        let Some((kind, stem, ext)) = (if from.starts_with(root) { item_of(root, from) } else { None }) else {
+            problems.push(format!("{}: not a clip link, a moment or a photo of this project", from.display()));
             continue;
-        }
+        };
         if from.parent() == Some(dir.as_path()) { continue; }
-        let stem = name[..name.len() - crate::index::LINK_EXT.len()].to_string();
-        let mut to = dir.join(&name);
+        let mut new_stem = stem.clone();
         let mut n = 2;
-        while to.exists() { to = dir.join(format!("{stem} {n}{}", crate::index::LINK_EXT)); n += 1; }
+        while dir.join(format!("{new_stem}{ext}")).exists() { new_stem = format!("{stem} {n}"); n += 1; }
+        let to = dir.join(format!("{new_stem}{ext}"));
+        // A moment's renders, at the paths its place gives them, before it goes
+        let rel = |p: &Path| p.strip_prefix(root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
+        let renders: Vec<(PathBuf, PathBuf)> = if kind == "moment" {
+            crate::index::RENDER_PROFILES.iter().map(|p| (crate::index::render_path(root, &rel(from), p), crate::index::render_path(root, &rel(&to), p))).collect()
+        } else { Vec::new() };
         match std::fs::rename(from, &to) {
             Ok(()) => {
                 moved += 1;
                 touched.extend([from.clone(), to.clone()]);
-                let g = from.with_file_name(format!("{stem}.gyroflow"));
-                if g.is_file() {
-                    let tg = to.with_file_name(format!("{}.gyroflow", to.file_name().unwrap().to_string_lossy().trim_end_matches(crate::index::LINK_EXT)));
-                    if !tg.exists() && std::fs::rename(&g, &tg).is_ok() { touched.extend([g, tg]); }
+                let mut also: Vec<(PathBuf, PathBuf)> = renders;
+                if kind != "still" { also.push((from.with_file_name(format!("{stem}.gyroflow")), dir.join(format!("{new_stem}.gyroflow")))); }
+                else { for e in [".mov", ".MOV"] { also.push((from.with_file_name(format!("{stem}{e}")), dir.join(format!("{new_stem}{e}")))); } }
+                for (a, b) in also {
+                    if !a.is_file() || b.exists() { continue; }
+                    if let Some(d) = b.parent() { let _ = std::fs::create_dir_all(d); }
+                    if std::fs::rename(&a, &b).is_ok() { touched.extend([a, b]); }
                 }
             }
             Err(e) => problems.push(format!("{}: {e}", from.display())),
@@ -424,6 +604,40 @@ pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
     }
     crate::seen::note_now(&touched);
     Ok(json!({ "moved": moved, "album": rel_of(root, &dir), "problems": problems }))
+}
+
+/// Moments and photos put in another album too: a copy of each link file (a moment's `.afplink.mp4` with its own
+/// Gyroflow project, a photo's `.afplink.jpg`), a separate item from then on, with its own name and tags (the concept:
+/// "One item in two albums"). A rendered photo isn't copied (it's the pixels, not a link): it's moved, or shared.
+/// { copied, problems }
+pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, String> {
+    let dir = album_dir(root, album)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let (mut copied, mut problems, mut touched) = (0usize, Vec::<String>::new(), vec![dir.clone()]);
+    for from in files {
+        let item = if from.starts_with(root) { item_of(root, from) } else { None };
+        let Some((kind, stem, ext)) = item.filter(|(_, _, ext)| ext.eq_ignore_ascii_case(crate::index::LINK_EXT) || ext.eq_ignore_ascii_case(PHOTO_EXT)) else {
+            problems.push(format!("{}: not a link (a rendered photo is moved, not copied)", from.display()));
+            continue;
+        };
+        if from.parent() == Some(dir.as_path()) { continue; }
+        let mut new_stem = stem.clone();
+        let mut n = 2;
+        while dir.join(format!("{new_stem}{ext}")).exists() { new_stem = format!("{stem} {n}"); n += 1; }
+        let to = dir.join(format!("{new_stem}{ext}"));
+        match std::fs::copy(from, &to) {
+            Ok(_) => {
+                copied += 1;
+                touched.push(to.clone());
+                let g = from.with_file_name(format!("{stem}.gyroflow"));
+                let tg = dir.join(format!("{new_stem}.gyroflow"));
+                if kind != "still" && g.is_file() && !tg.exists() && std::fs::copy(&g, &tg).is_ok() { touched.push(tg); }
+            }
+            Err(e) => problems.push(format!("{}: {e}", from.display())),
+        }
+    }
+    crate::seen::note_now(&touched);
+    Ok(json!({ "copied": copied, "album": rel_of(root, &dir), "problems": problems }))
 }
 
 // ---------- the page's commands ----------
@@ -451,6 +665,32 @@ pub async fn album_move(shared: tauri::State<'_, crate::Shared>, album: String, 
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     tauri::async_runtime::spawn_blocking(move || move_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()))
         .await.map_err(|e| e.to_string())?
+}
+
+/// "Add to another album…" for moments and photos: a copy of each link file there
+#[tauri::command]
+pub async fn album_copy(shared: tauri::State<'_, crate::Shared>, album: String, files: Vec<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || copy_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()))
+        .await.map_err(|e| e.to_string())?
+}
+
+/// "Photos of the marks, as links" and a mark's "Make a photo": photo link files, made at once. `photos`: what the
+/// page knows of each, { tree, path, thumb, size, created, curve, t, crop, camera }
+#[tauri::command]
+pub async fn photo_add(app: tauri::AppHandle, shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>,
+                       album: String, photos: Vec<Value>) -> Result<Value, String> {
+    use tauri::Manager;
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
+    let luts = luts_dir(probes.lock().unwrap().tool.as_deref());
+    tauri::async_runtime::spawn_blocking(move || {
+        let list: Vec<Photo> = photos.iter().filter_map(|c| Some(Photo {
+            clip: Add { tree: c["tree"].as_str()?.to_string(), path: PathBuf::from(c["path"].as_str()?), thumb: c["thumb"].as_str().map(PathBuf::from),
+                        size: c["size"].as_u64().unwrap_or(0), created: c["created"].as_i64(), curve: c["curve"].as_str().map(str::to_string) },
+            t: c["t"].as_f64()?, crop: c.get("crop").cloned(), camera: c.get("camera").cloned() })).collect();
+        add_photos(&root, &album, &list, &cache, luts.as_deref())
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -575,6 +815,76 @@ mod tests {
         assert!(view["clips_dirs"].as_array().unwrap().iter().any(|d| d == "_Clips/Egypt/Dives"));
         let links = clip_links(&root, &files);
         assert_eq!(links.iter().map(|l| l["clip"].as_str().unwrap()).collect::<Vec<_>>(), ["Day 1/A.MP4", "Day 2/B.MP4", "Day 2/A.MP4", "Day 3/C.MP4"]);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn photos_as_links_and_every_kind_moved_and_copied() {
+        let root = scratch("photos");
+        std::fs::write(root.join("Project.afproject"), "{}").unwrap();
+        let cache = root.join("cache");
+        let clip = root.join("footage/Day 1/A & B.MP4");
+        std::fs::create_dir_all(clip.parent().unwrap()).unwrap();
+        std::fs::write(&clip, b"clip").unwrap();
+        let thm = clip.with_extension("THM");
+        std::fs::write(&thm, jpeg(64, 36, [10, 200, 10])).unwrap();
+        let add_of = || Add { tree: "Day 1/A & B.MP4".into(), path: clip.clone(), thumb: Some(thm.clone()), size: 4, created: Some(1_761_139_722), curve: None };
+        // A photo: not a frame to be had of this "clip", so its thumbnail is the picture; the link all the same
+        let photos = [Photo { clip: add_of(), t: 12.3456, crop: Some(json!([0.1, 0.2, 0.5, 0.5])), camera: None }, Photo { clip: add_of(), t: 40.0, crop: None, camera: None }];
+        let r = add_photos(&root, "_Stills/Generated", &photos, &cache, None).unwrap();
+        assert_eq!(r["made"].as_array().unwrap().len(), 2, "{r}");
+        let file = root.join("_Stills/Generated/A & B_12.35s.afplink.jpg");
+        assert!(file.is_file(), "{r}");
+        // Read as a rendered photo's link is: by the Library, and by the catalog
+        let l = crate::index::link(&file).unwrap();
+        assert_eq!((l["kind"].as_str(), l["clip"].as_str(), l["t"].as_f64(), l["size"].as_u64()), (Some("photo"), Some("Day 1/A & B.MP4"), Some(12.346), Some(4)));
+        assert_eq!(l["crop"], json!([0.1, 0.2, 0.5, 0.5]));
+        assert_eq!(afp_catalog::inspect::read(&file).unwrap().unwrap()["link"], l);
+        // Still a picture: the frame is the one put in, an XMP segment more
+        let bytes = std::fs::read(&file).unwrap();
+        assert_eq!(jpeg_size(&bytes), Some((64, 36)));
+        assert_eq!(bytes.len(), std::fs::read(&thm).unwrap().len() + photo_file(&jpeg(64, 36, [0, 0, 0]), &l.to_string()).unwrap().len() - jpeg(64, 36, [0, 0, 0]).len());
+        // A link written again replaces the one there
+        let twice = photo_file(&bytes, "{\"v\":1}").unwrap();
+        assert_eq!(String::from_utf8_lossy(&twice).matches("<afp:link>").count(), 1);
+        // Again: there already
+        assert_eq!(add_photos(&root, "_Stills/Generated", &photos, &cache, None).unwrap()["already"], 2);
+        // The photos' view lists it, as a link
+        let view = crate::index::scan(&root, "stills", false);
+        let it = view["items"].as_array().unwrap().iter().find(|i| i["name"] == "A & B_12.35s.afplink.jpg").unwrap();
+        assert_eq!((it["kind"].as_str(), it["form"].as_str(), it["linked"].as_bool()), (Some("still"), Some("Photo link"), Some(true)));
+        // Renamed: its ending kept whole
+        let renamed = crate::rename_in(&root, "stills", "still", &root.join("_Stills/Generated/A & B_40.00s.afplink.jpg").display().to_string(), "Reef").unwrap();
+        assert!(renamed.ends_with("Reef.afplink.jpg"), "{renamed}");
+
+        // A moment with its own Gyroflow project and a render, and a Live Photo: moved into an album whole
+        let moment = root.join("_Moments/Generated/Turtle.afplink.mp4");
+        std::fs::create_dir_all(moment.parent().unwrap()).unwrap();
+        std::fs::write(&moment, link_file(&jpeg(64, 36, [1, 2, 3]), &json!({ "v": 1, "kind": "moment", "clip": "Day 1/A & B.MP4", "in": 1.0, "out": 4.0 }).to_string()).unwrap()).unwrap();
+        std::fs::write(moment.with_file_name("Turtle.gyroflow"), "{}").unwrap();
+        let render = crate::index::render_path(&root, "_Moments/Generated/Turtle.afplink.mp4", "HDR");
+        std::fs::create_dir_all(render.parent().unwrap()).unwrap();
+        std::fs::write(&render, b"render").unwrap();
+        let live = root.join("_Stills/Generated/Ray.heic");
+        std::fs::write(&live, b"heic").unwrap();
+        std::fs::write(live.with_extension("mov"), b"mov").unwrap();
+        let moved = move_to(&root, "_Clips/Egypt", &[moment.clone(), live.clone(), file.clone()]).unwrap();
+        assert_eq!((moved["moved"].as_u64(), moved["problems"].as_array().unwrap().len()), (Some(3), 0), "{moved}");
+        for f in ["Turtle.afplink.mp4", "Turtle.gyroflow", "Ray.heic", "Ray.mov", "A & B_12.35s.afplink.jpg"] { assert!(root.join("_Clips/Egypt").join(f).is_file(), "{f}"); }
+        assert!(!render.exists() && crate::index::render_path(&root, "_Clips/Egypt/Turtle.afplink.mp4", "HDR").is_file(), "the render follows its moment");
+        // Found where they are now, by what they are
+        assert_eq!(crate::index::scan(&root, "moments", false)["items"][0]["id"], "_Clips/Egypt/Turtle.afplink.mp4");
+        assert_eq!(crate::index::scan(&root, "moments", false)["items"][0]["renders"]["HDR"], "stale");
+        let stills = crate::index::scan(&root, "stills", false);
+        let ids: Vec<&str> = stills["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
+        assert!(ids.contains(&"_Clips/Egypt/Ray.heic") && ids.contains(&"_Clips/Egypt/A & B_12.35s.afplink.jpg"), "{ids:?}");
+        assert_eq!(stills["items"].as_array().unwrap().iter().find(|i| i["id"] == "_Clips/Egypt/Ray.heic").unwrap()["form"], "Live Photo");
+        // In another album too: links are copied (separate items), a rendered photo isn't
+        let c = copy_to(&root, "_Clips/Best", &[root.join("_Clips/Egypt/Turtle.afplink.mp4"), root.join("_Clips/Egypt/A & B_12.35s.afplink.jpg"), root.join("_Clips/Egypt/Ray.heic")]).unwrap();
+        assert_eq!((c["copied"].as_u64(), c["problems"].as_array().unwrap().len()), (Some(2), 1), "{c}");
+        assert!(root.join("_Clips/Best/Turtle.gyroflow").is_file() && root.join("_Clips/Egypt/Turtle.afplink.mp4").is_file());
+        // Footage is neither moved nor copied
+        assert_eq!(move_to(&root, "_Clips/Best", &[clip.clone()]).unwrap()["moved"], 0);
         let _ = std::fs::remove_dir_all(&root);
     }
 

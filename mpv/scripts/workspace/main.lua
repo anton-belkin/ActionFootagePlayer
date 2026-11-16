@@ -670,6 +670,29 @@ end
 
 -- A moment's file: its original instead, from its in, looping its part (one after another in a playlist)
 local function open_moment(path)
+    -- A photo's link file (<name>.afplink.jpg: a small picture with the link in its XMP, made by the Library): its
+    -- original instead, paused at the photo's frame. A rendered photo (a HEIC, a JPEG without that name) opens as
+    -- the picture it is. (Here, not a function of its own: the file is at Lua's 200 local variables)
+    if state.clip:lower():match("%.afplink%.jpg$") then
+        local praw = fs.read_photo_link(state.clip)
+        local p = praw and utils.parse_json(praw)
+        if type(p) ~= "table" or p.v ~= 1 or p.kind ~= "photo" or type(p.t) ~= "number" then return end
+        if before_autocreate() then return end
+        local file = state.clip
+        local original = original_of(p, moments.project_of(file), file)
+        if not original then
+            mp.osd_message(moments_lib.display_name(file) .. ": the clip isn't at " .. tostring(p.clip), 6)
+            return
+        end
+        mp.set_property("stream-open-filename", original)
+        mp.set_property("file-local-options/start", string.format("%.3f", p.t))
+        mp.set_property("file-local-options/pause", "yes")
+        state = describe(original)
+        state.path = path
+        state.redirected = true
+        state.photo = { file = file, t = p.t, crop = p.crop, camera = p.camera }
+        return
+    end
     local raw = fs.read_link(state.clip)
     if not raw then return end
     local l = utils.parse_json(raw)
@@ -797,6 +820,8 @@ mp.add_hook("on_load", 10, function()
             open_folder(state.clip)
         elseif info and (state.clip:lower():match("%.mp4$") or state.clip:lower():match("%.mov$")) then
             open_moment(path)
+        elseif info and state.clip:lower():match("%.afplink%.jpg$") then
+            open_moment(path) -- a photo's link
         end
     end
     -- Other own files of this clip (beside its copies in other locations): the main one plays and is saved, they're

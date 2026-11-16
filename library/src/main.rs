@@ -1648,7 +1648,8 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
         _ => {
             // A photo or an export: its extension kept (a Motion Photo's .MP.jpg whole), a Live Photo's video along
             let lower = fname.to_lowercase();
-            let ext = if lower.ends_with(".mp.jpg") { fname[fname.len() - 7..].to_string() } else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
+            let ext = if lower.ends_with(albums::PHOTO_EXT) { fname[fname.len() - albums::PHOTO_EXT.len()..].to_string() }
+                else if lower.ends_with(".mp.jpg") { fname[fname.len() - 7..].to_string() } else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
             let stem = &fname[..fname.len() - ext.len()];
             let to = dir.join(format!("{name}{ext}"));
             mv(&from, &to)?;
@@ -2259,7 +2260,7 @@ fn main() {
                                                  choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
-                                                 albums::album_add, albums::album_move])
+                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

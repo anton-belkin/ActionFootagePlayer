@@ -550,7 +550,8 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         let keep = match view {
             "moments" => video && (l.as_ref().is_some_and(|k| k["kind"] == "moment") || (lower.starts_with("_moments/") && lower.ends_with(LINK_EXT) && l.is_none())),
             "exports" => video && (l.as_ref().is_some_and(|k| k["kind"] == "export") || (lower.starts_with("_exports/") && l.is_none())),
-            _ => photo && (l.is_some() || lower.starts_with("_stills/")),
+            // (a photo of before links, moved into an album of the user's: still a photo there)
+            _ => photo && (l.is_some() || lower.starts_with("_stills/") || lower.starts_with("_clips/")),
         };
         if keep { if let Some(k) = l { links.insert(rel.to_string(), k); } }
         keep
@@ -591,7 +592,9 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
                 }
                 it["tags"] = json!(tags);
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
-                it["form"] = json!(if lower.ends_with(".mp.jpg") { "Motion Photo" }
+                // A photo that's a link (albums.rs: a small picture, rendered when shared), or the rendered file
+                it["linked"] = json!(lower.ends_with(crate::albums::PHOTO_EXT));
+                it["form"] = json!(if lower.ends_with(crate::albums::PHOTO_EXT) { "Photo link" } else if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
                     else if lower.ends_with(".heic") { "HEIC with gain map" } else { "Ultra HDR JPEG" });
                 // Its clip and time, from the photo itself (older ones have none: their name tells)
