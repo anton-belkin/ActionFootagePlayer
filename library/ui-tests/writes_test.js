@@ -23,15 +23,24 @@ async function start(o) {
 }
 // A value of the page's as this side's own (the page's arrays are its window's)
 const val = (page, expr) => JSON.parse(page.get("JSON.stringify(" + expr + ")"));
-const row = (page, id) => page.$('#main [data-v="' + page.window.CSS.escape("i:" + id) + '"]');
-const chips = (page, id) => Array.from(row(page, id).querySelectorAll(".chips .chip.tag")).map((e) => e.textContent);
-const shown = (page, view, id) => page.get("(DATA." + view + ".items.find((x) => x.id === " + JSON.stringify(id) + ") || null)");
-// Footage, in Day 1, the Tags part open, these clips selected
+// (an item's row where the page is, by its id: Originals and Albums key a clip differently, page.js's keyOf)
+const row = (page, id) => page.row(id);
+// Its tags as its row shows them (Originals' "In an album" is drawn as one more such chip: not a tag)
+const chips = (page, id) => Array.from(row(page, id).querySelectorAll(".chips .chip.tag")).map((e) => e.textContent).filter((t) => !/^In (an album|\d+ albums)$/.test(t));
+// An item as shown: a clip ("footage") as Originals has it, a moment, photo or export as its own scan has it…
+const shown = (page, view, id) => page.get("(DATA." + (view === "footage" ? "sources" : view) + ".items.find((x) => x.id === " + JSON.stringify(id) + ") || null)");
+// …and as Albums show it (a clip: its link in an album)
+const inAlbums = (page, id) => page.get("(DATA.footage.items.find((x) => x.id === " + JSON.stringify(id) + ") || null)");
+// Originals (the tab the page opens on; the clips' list that was Footage's), in Day 1, the Tags part open, these
+// clips selected
 function inDay1(page, ids, tab) {
-  page.get("S.view = 'footage'; S.path = ['Day 1']; showTab(" + JSON.stringify(tab || "tags") + "); renderAll()");
+  page.get("S.view = 'sources'; S.path = ['Day 1']; showTab(" + JSON.stringify(tab || "tags") + "); renderAll()");
   page.select(ids);
 }
-function addTag(page, tag) { page.type("#tagdraft", tag); page.click('[data-a="tag"]'); }
+// The Tags part is culling.js's since the merge: the new tag's field and its Add; a tag in use is a button, a click
+// on one all of the selection has takes it off
+function addTag(page, tag) { page.type("#tagdraft", tag); page.click('#side [data-c="add"]'); }
+function untag(page, tag) { page.click('#side [data-c="tag"][data-v="' + tag + '"]'); }
 const unsaved = (page) => (page.$("#unsaved").hidden ? "" : page.$("#unsaved .lines").textContent);
 
 test("a tag shows before the app has answered, and no view is read to show it", async () => {
@@ -78,7 +87,7 @@ test("quick changes to one item: written in the order made, a failed one doesn't
   inDay1(page, [B]);
   addTag(page, "first");
   addTag(page, "second");
-  page.click('[data-a="untag"][data-v="second"]');
+  untag(page, "second");
   addTag(page, "third");
   assert.deepEqual(chips(page, B), ["first", "third"]);
   await page.until(() => page.get("Writes.pending()") === 0);
@@ -161,6 +170,8 @@ test("a location by hand shows at once, its place when it's looked up; taken off
   await page.quiet(80);
   assert.equal(views.footage.items.find((x) => x.id === B).own.location.lat, 27.7333);
   assert.equal(it().country, "Egypt");
+  // …and on its link in its album
+  assert.equal(inAlbums(page, B).geo.lat, 27.7333);
   assert.match(page.text("#toastMsg"), /South Sinai, Egypt: set for 2 clips/);
   // Taken off
   page.get("renderAll()");
@@ -182,11 +193,13 @@ test("Source settings show at once", async () => {
   await page.quiet(80);
   assert.deepEqual(views.footage.items.find((x) => x.id === B).own.source, { rotation: 180 });
   assert.equal(shown(page, "footage", A).turned, true);
+  assert.equal(inAlbums(page, A).turned, true);
 });
 
+// The moments, where they are since the merge (the Moments tab is gone): in Albums, the album Reef (_Moments/Reef)
 async function inMoments(page) {
-  page.click('[data-a="view"][data-v="moments"]');
-  await page.until(() => page.get("S.view === 'moments' && !S.scanning.moments"));
+  page.click('[data-a="view"][data-v="footage"]');
+  await page.until(() => page.get("S.view === 'footage' && !S.scanning.moments"));
   await page.quiet(30);
   page.get("S.path = ['Reef']; renderAll()");
 }
@@ -243,26 +256,34 @@ test("a change to something just renamed, when the rename fails: taken back with
   assert.match(unsaved(page), /the tag “best” on Angel\. it follows a change that wasn’t saved|the tag “best” on Angel/);
 });
 
-test("a folder renamed: what's in it follows at once, in Moments and in Footage", async () => {
+test("an album renamed: what's in it follows at once, its moments and its clips' links", async () => {
   const { page, views } = await start({ delay: { rename_item: 120 } });
   await inMoments(page);
   page.get("S.path = []; renderAll()");
+  const albums = () => val(page, "DATA.footage.dirs").filter((d) => !d.startsWith("Other folders"));
+  assert.deepEqual(albums(), ["Day 1", "Day 2", "Reef"]);
+  // An album of moments: its folder in _Moments
   rename(page, "Reef", "Sea", "f");
+  assert.deepEqual(albums(), ["Day 1", "Day 2", "Sea"]);
   assert.deepEqual(val(page, "DATA.moments.dirs"), ["Sea"]);
   assert.equal(shown(page, "moments", "_Moments/Sea/Turtle.afplink.mp4").path, "/P/_Moments/Sea/Turtle.afplink.mp4");
-  assert.deepEqual(page.calls("rename_item")[0].args, { view: "moments", kind: "folder", path: "/P/_Moments/Reef", name: "Sea" });
+  assert.equal(page.get("DATA.footage.items.find((x) => x.key === 'm:_Moments/Sea/Turtle.afplink.mp4').dir"), "Sea");
+  // (asked from Albums: the folder is named by its path)
+  assert.deepEqual(page.calls("rename_item")[0].args, { view: "footage", kind: "folder", path: "/P/_Moments/Reef", name: "Sea" });
   await page.quiet(80);
-  assert.deepEqual(val(page, "DATA.moments.dirs"), ["Sea"]);
+  assert.deepEqual(albums(), ["Day 1", "Day 2", "Sea"]);
   assert.deepEqual(views.moments.dirs, ["_Moments", "_Moments/Sea"]);
-  // Footage's folders are its previews'
-  page.click('[data-a="view"][data-v="footage"]');
-  await page.quiet(40);
+  // An album of clips: its folder in _Clips, the links in it. The clip itself stays where it is in Originals
   rename(page, "Day 1", "First day", "f");
-  assert.equal(shown(page, "footage", A).dir, "First day");
-  assert.equal(shown(page, "footage", A).preview, "/P/_Clips/First day/A.afplink.mp4");
+  assert.deepEqual(albums(), ["Day 2", "First day", "Sea"]);
+  assert.equal(inAlbums(page, A).dir, "First day");
+  assert.equal(inAlbums(page, A).key, "a:_Clips/First day/A.afplink.mp4");
+  assert.equal(inAlbums(page, A).link_file, "/P/_Clips/First day/A.afplink.mp4");
+  assert.equal(shown(page, "footage", A).dir, "Day 1");
   await page.quiet(80);
-  assert.equal(views.footage.items.find((x) => x.id === A).pdir, "_Clips/First day");
-  assert.equal(shown(page, "footage", A).dir, "First day");
+  assert.equal(views.footage.links.find((l) => l.clip === A).rel, "_Clips/First day/A.afplink.mp4");
+  assert.equal(inAlbums(page, A).dir, "First day");
+  assert.equal(inAlbums(page, A).link_file, "/P/_Clips/First day/A.afplink.mp4");
   assert.equal(unsaved(page), "");
 });
 
@@ -275,6 +296,7 @@ test("deleted: gone at once; what couldn't be comes back", async () => {
   assert.equal(page.calls("delete_items")[0].took, null);
   // Its clip's count of moments, at once too
   assert.equal(shown(page, "footage", A).moments, 0);
+  assert.equal(inAlbums(page, A).moments, 0);
   await page.quiet(80);
   assert.ok(!views.moments.items.some((x) => x.id === TURTLE));
   assert.match(page.text("#toastMsg"), /1 moved to the Trash/);

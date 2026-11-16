@@ -146,7 +146,7 @@ function avSelBar(n, c) {
 function avCard(it, cls, sub) {
   const key = keyOf(it), sel = !!S.sel[key];
   return '<button type="button" class="card' + (cls || "") + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' +
-    '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>' +
+    '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + (cls && typeof cullBadge === "function" ? cullBadge(it) : "") + '</span>' +
     '<span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(sub != null ? sub : it.sub) + '</span>' + (cls ? "" : '<span class="chips">' + chips(it) + '</span>') + '</button>';
 }
 // A list of items in the ordinary grid, the first AV.more of a long one and a button for the next

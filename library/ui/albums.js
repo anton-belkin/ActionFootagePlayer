@@ -139,13 +139,13 @@ function albumSel(c) {
 }
 function albumMenu(c, b) {
   const a = albumSel(c);
-  return (a.n ? b("albumadd", S.view === "footage" ? "Add to another album…" : "Add to an album…") : "") + (a.files.length ? b("albummove", "Move to an album…") : "") +
+  return (a.n ? b("albumadd", S.view === "footage" && !(typeof albumViewOpen === "function" && albumViewOpen()) ? "Add to another album…" : "Add to an album…") : "") + (a.files.length ? b("albummove", "Move to an album…") : "") +
     (a.out.length && a.out.some((x) => x.kind !== "clip") ? b("albumout", "Take out of the album") : "");
 }
 // The same on the bar above the list, once something is selected
 function albumBar(c) {
   const a = albumSel(c);
-  return (a.n ? '<button type="button" class="btn sm" data-a="albumadd">' + (S.view === "footage" ? "Add to another album…" : "Add to an album…") + '</button>' : "") +
+  return (a.n ? '<button type="button" class="btn sm" data-a="albumadd">' + (S.view === "footage" && !(typeof albumViewOpen === "function" && albumViewOpen()) ? "Add to another album…" : "Add to an album…") + '</button>' : "") +
     (a.files.length ? '<button type="button" class="btn sm" data-a="albummove">Move to an album…</button>' : "") +
     (a.out.length ? '<button type="button" class="btn sm" data-a="albumout">Take out of the album</button>' : "");
 }

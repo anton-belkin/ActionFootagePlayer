@@ -48,6 +48,35 @@ function fake(views, o) {
     return list.filter((x) => !remove.some((r) => r.toLowerCase() === x.toLowerCase()));
   };
   const parent = (p) => (p.lastIndexOf("/") < 0 ? "" : p.slice(0, p.lastIndexOf("/")));
+  // A clip's link in an album gone (the scan's `links`): the clip's `preview` is then its next link's, or none
+  const linkGone = (path) => {
+    const f = views.footage, l = (f.links || []).find((x) => x.path === path);
+    if (!l) return null;
+    f.links = f.links.filter((x) => x !== l);
+    const it = f.items.find((c) => c.id === l.clip);
+    if (it && it.preview === path) {
+      const next = f.links.find((x) => x.clip === it.id);
+      it.preview = next ? next.path : null; it.pdir = next ? parent(next.rel) : null; delete it.draft;
+    }
+    return it || null;
+  };
+  // Accept / Reject and the stars (src/tags.rs), as set_tags: on originals, moments and photos
+  const cull = (cmd, a, set) => {
+    refuse(cmd, a);
+    const problems = [];
+    for (const x of a.items) {
+      const it = find(x.kind, x.id);
+      if (!it) { if (VIEW_OF[x.kind]) problems.push(x.id + " isn't in the project's locations"); continue; }
+      const why = bad(cmd, x.id);
+      if (why) { problems.push(why); continue; }
+      set(it);
+      if (it.kind === "clip") ownOf(it);
+    }
+    app.done.push([cmd, a]);
+    const what = a.items.filter((x) => VIEW_OF[x.kind]).map((x) => [VIEW_OF[x.kind], x.id]);
+    told(what);
+    return answer(problems, what);
+  };
   // The folders of a view of the project's own files, from its items (and the ones made empty)
   const redirs = (v) => {
     const set = new Set(v.empty || []);
@@ -72,6 +101,8 @@ function fake(views, o) {
       told(what);
       return answer(problems, what);
     },
+    set_pick(a) { return cull("set_pick", a, (it) => { if (a.pick) it.pick = a.pick; else delete it.pick; }); },
+    set_rating(a) { return cull("set_rating", a, (it) => { if (a.rating) it.rating = a.rating; else delete it.rating; }); },
     set_locations(a) {
       refuse("set_locations", a);
       const problems = [];
@@ -118,23 +149,32 @@ function fake(views, o) {
     },
     rename_item(a) {
       refuse("rename_item", a);
-      const v = views[a.view];
+      // (a moment, photo or export renamed from Albums: by its kind; a folder: by its path)
+      const v = views[VIEW_OF[a.kind]] || views[a.view] || views.footage;
       const root = (views.footage || v).root;
       const rel = a.path.slice(root.length + 1);
       if (/[\/\\:*?"<>|]/.test(a.name)) throw "A name can't have / \\ : * ? \" < > |";
       if (a.kind === "folder") {
+        // A folder of the project's, by its path (src/main.rs's rename_in: whatever the view asked from): what's in
+        // it follows in every view. Footage: the clips' links in it (and the clips whose preview is one of them)
         const to = (parent(rel) ? parent(rel) + "/" : "") + a.name;
-        if (v.dirs.includes(to)) throw root + "/" + to + " exists already";
+        const taken = (x) => x && ((x.dirs || []).includes(to) || (x.clips_dirs || []).includes(to));
+        if (ALL.some((n) => taken(views[n]))) throw root + "/" + to + " exists already";
         const move = (p) => (p === rel ? to : p.startsWith(rel + "/") ? to + p.slice(rel.length) : p);
-        if (a.view === "footage") {
-          // Footage's folders are its previews': the clips whose preview is in it follow
-          v.clips_dirs = v.clips_dirs.map(move).sort();
-          for (const it of v.items) if (it.preview && it.pdir != null && (it.pdir === rel || it.pdir.startsWith(rel + "/"))) { it.pdir = move(it.pdir); it.preview = root + "/" + it.pdir + "/" + it.preview.split("/").pop(); }
-        } else {
-          v.empty = (v.empty || []).map(move);
-          for (const it of v.items) if (it.dir === rel || it.dir.startsWith(rel + "/")) { it.dir = move(it.dir); it.id = it.dir + "/" + it.id.split("/").pop(); it.path = root + "/" + it.id; }
-          redirs(v);
-          v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+        const inside = (p) => p != null && (p === rel || p.startsWith(rel + "/"));
+        for (const n of ALL) {
+          const x = views[n];
+          if (!x) continue;
+          if (n === "footage") {
+            x.clips_dirs = (x.clips_dirs || []).map(move).sort();
+            for (const l of x.links || []) if (inside(parent(l.rel))) { l.rel = move(parent(l.rel)) + "/" + l.rel.split("/").pop(); l.path = root + "/" + l.rel; }
+            for (const it of x.items) if (it.preview && inside(it.pdir)) { it.pdir = move(it.pdir); it.preview = root + "/" + it.pdir + "/" + it.preview.split("/").pop(); }
+          } else {
+            x.empty = (x.empty || []).map(move);
+            let any = (x.dirs || []).some(inside);
+            for (const it of x.items) if (inside(it.dir)) { it.dir = move(it.dir); it.id = it.dir + "/" + it.id.split("/").pop(); it.path = root + "/" + it.id; any = true; }
+            if (any) { x.dirs = Array.from(new Set((x.dirs || []).map(move))); redirs(x); x.items.sort((p, q) => (p.id < q.id ? -1 : p.id > q.id ? 1 : 0)); }
+          }
         }
         app.done.push(["rename_item", a]);
         told(null);
@@ -159,13 +199,14 @@ function fake(views, o) {
       const problems = [];
       let done = 0;
       const what = [], files = [];
-      let folders = false;
+      let folders = false, links = false;
       for (const x of a.items) {
         const why = bad("delete_items", x.path);
         if (why) { problems.push(why); continue; }
         if (x.kind === "preview") {
-          const it = views.footage.items.find((c) => c.preview === x.path);
-          if (it) { it.preview = null; it.pdir = null; delete it.draft; done++; what.push(["footage", it.id]); files.push(x.path); }
+          // A clip's link in an album: the link goes, the clip stays (in Originals, and in its other albums)
+          const it = linkGone(x.path);
+          if (it) { done++; what.push(["footage", it.id]); files.push(x.path); links = true; }
           continue;
         }
         if (x.kind === "folder") {
@@ -177,6 +218,10 @@ function fake(views, o) {
             v.empty = (v.empty || []).filter((d) => !(d === rel || d.startsWith(rel + "/")));
             if (n !== v.items.length || v.dirs.includes(rel)) { redirs(v); }
           }
+          // …and the clips' links in it
+          const f = views.footage, frel = x.path.slice(f.root.length + 1);
+          for (const l of (f.links || []).slice()) if (parent(l.rel) === frel || parent(l.rel).startsWith(frel + "/")) linkGone(l.path);
+          f.clips_dirs = (f.clips_dirs || []).filter((d) => !(d === frel || d.startsWith(frel + "/")));
           done++;
           folders = true;
           continue;
@@ -191,7 +236,8 @@ function fake(views, o) {
       }
       app.done.push(["delete_items", a]);
       told(folders ? null : what, files);
-      return answer({ done, to: done ? ["the Trash"] : [], problems }, folders ? [] : what, folders ? { reload: ALL } : null);
+      // (which links an album has left isn't said item by item: Footage is read again, docs/night-handover-responsive.md)
+      return answer({ done, to: done ? ["the Trash"] : [], problems }, folders ? [] : what, folders ? { reload: ALL } : links ? { reload: ["footage"] } : null);
     },
   };
   // What changed since the page's count, as items; null when a change among them can't be said item by item

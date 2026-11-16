@@ -38,6 +38,11 @@ function cullSort(list) {
   const at = new Map(list.map((it, i) => [it, i]));
   return list.sort((a, b) => (b.kind === "folder") - (a.kind === "folder") || (a.kind === "folder" ? 0 : (b.rating || 0) - (a.rating || 0)) || at.get(a) - at.get(b));
 }
+// Accepted / Rejected and the stars on a small tile that has no room for chips (Timeline's: albumviews.js)
+function cullBadge(it) {
+  const p = it.pick === "accept" ? '<b class="ok" title="Accepted">✓</b>' : it.pick === "reject" ? '<b class="no" title="Rejected">✕</b>' : "";
+  return p || it.rating ? '<span class="cb">' + p + (it.rating ? '<b>' + stars(it.rating) + '</b>' : "") + '</span>' : "";
+}
 // The two switches, at the end of the top bar
 function cullTop() {
   const top = $("top");

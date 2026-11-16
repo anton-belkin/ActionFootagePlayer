@@ -106,7 +106,7 @@ async function bigRun() {
   ok(Object.keys(T.S.sel).length === 4, "shift-click selects the run between, across days");
   tiles()[0].dispatchEvent(new w.MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); await tick();
   const menu = w.document.querySelector(".cmenu");
-  ok(menu && menu.textContent.includes("Open in the player") && menu.textContent.includes("Add to another album…"), "the context menu: " + (menu ? menu.textContent.slice(0, 60) : "none"));
+  ok(menu && menu.textContent.includes("Open in the player") && menu.textContent.includes("Add to an album…"), "the context menu: " + (menu ? menu.textContent.slice(0, 60) : "none"));
   click(w.document.body); await tick();
   // Months and Years
   click(by("tlevel", "months")); await tick();

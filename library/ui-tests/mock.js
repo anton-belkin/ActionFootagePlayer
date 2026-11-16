@@ -21,15 +21,21 @@
     clip(7, "Day 2", { tags: [], pick: "reject" }),
   ];
   for (const c of clips) c.path = ROOT + "/" + c.id;
+  // Each clip's link in the album of its day (_Clips/Day 1, _Clips/Day 2): what Albums show of the clips
+  const links = clips.map((c) => { const rel = c.pdir + "/" + c.name.replace(/\.MP4$/, ".afplink.mp4"); return { path: ROOT + "/" + rel, rel, clip: c.id, draft: false, size: 21000, mtime: c.mtime }; });
+  for (const c of clips) c.preview = links.find((l) => l.clip === c.id).path;
   const moment = (name, c, a, b, more) => Object.assign({ kind: "moment", id: "_Moments/" + name + ".afplink.mp4", dir: "_Moments", name, path: ROOT + "/_Moments/" + name + ".afplink.mp4", size: 4e6, mtime: 1793880000,
     tags: [], link: { v: 1, kind: "moment", clip: c.id, in: a, out: b }, original: c.path, renders: {} }, more || {});
   const moments = [moment("Turtle close", clips[0], 12, 31, { tags: ["Turtle", "for family"], pick: "accept", rating: 5 }), moment("Wreck bow", clips[4], 40, 58, { tags: ["Wreck"], rating: 3 }), moment("Dolphins far", clips[2], 5, 14, { pick: "reject" })];
   const still = (name, more) => Object.assign({ kind: "still", id: "_Stills/" + name, dir: "_Stills", name, path: ROOT + "/_Stills/" + name, size: 3e6, mtime: 1793881000, tags: [], form: "HEIC with gain map", link: { v: 1, kind: "still" } }, more || {});
   const stills = [still("Turtle 1.heic", { tags: ["Turtle"], rating: 5, pick: "accept" }), still("Reef 2.heic", { tags: ["Reef"] }), still("Blurry 3.heic", { pick: "reject" })];
+  // One export (Albums › Other folders › _Exports): never culled
+  const exports = [{ kind: "export", id: "_Exports/Turtle close.mov", dir: "_Exports", name: "Turtle close.mov", path: ROOT + "/_Exports/Turtle close.mov", size: 9e7, mtime: 1793882000, tags: [],
+    link: { v: 1, kind: "export", clip: clips[0].id, in: 12, out: 31, look: "hlg" } }];
   const probes = {};
   for (const c of clips) probes[c.path] = { camera: "DJI OsmoAction6", color: "dlogm", mode: "gyro", movie: { duration: 95, created: c.mtime } };
   const M = window.MOCK = {
-    root: "project" in opts ? opts.project : ROOT, clips, moments, stills, calls: [], recentTags: ["Turtle", "Night dive"],
+    root: "project" in opts ? opts.project : ROOT, clips, moments, stills, exports, links, calls: [], recentTags: ["Turtle", "Night dive"],
     recent: [{ path: ROOT, name: "Egypt 2026", here: true }, { path: "/Volumes/Trips/Norway 2025", name: "Norway 2025", here: false, share: "//nas.local/Trips", connect: true, names: ["nas.local"] },
       { path: "/Users/me/Movies/Garden", name: "Garden", here: true }],
     atStart: opts.atStart || null, settings: { tag_stores: [] },
@@ -47,9 +53,10 @@
     cached_view: () => null,
     scan: (a) => {
       const v = a.view;
-      if (v === "footage") return { root: M.root, items: copy(clips), dirs: ["Day 1", "Day 2"], clips_dirs: ["_Clips/Day 1", "_Clips/Day 2"], locations: [{ name: "Trips", path: "." }], probes: { items: copy(probes), version: 1, pending: 0 } };
+      if (v === "footage") return { root: M.root, items: copy(clips), dirs: ["Day 1", "Day 2"], clips_dirs: ["_Clips", "_Clips/Day 1", "_Clips/Day 2"], links: copy(links), locations: [{ name: "Trips", path: "." }], probes: { items: copy(probes), version: 1, pending: 0 } };
       if (v === "moments") return { root: M.root, items: copy(moments), dirs: ["_Moments"] };
       if (v === "stills") return { root: M.root, items: copy(stills), dirs: ["_Stills"] };
+      if (v === "exports") return { root: M.root, items: copy(exports), dirs: ["_Exports"] };
       return { root: M.root, items: [], dirs: [] };
     },
     probes_since: () => ({ items: {}, version: 1, pending: 0 }),

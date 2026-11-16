@@ -14,7 +14,9 @@ const vm = require("vm");
 const UI = path.join(__dirname, "..", "ui");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// A small project, for the tests that need no more: two folders of clips, moments, photos, an export
+// A small project, for the tests that need no more: two folders of clips, each clip with a link in the album of its
+// folder's name (_Clips/Day 1, _Clips/Day 2: the scan's `links`), moments (the album Reef), photos (in _Stills itself:
+// Albums' top), an export (Other folders › _Exports)
 function smallViews(root) {
   root = root || "/P";
   const clip = (dir, name, extra) => Object.assign({ id: dir + "/" + name, dir, name, path: "/F/" + dir + "/" + name, size: 8, mtime: 1700000000, kind: "clip", loc: "Archive",
@@ -31,9 +33,12 @@ function smallViews(root) {
       clip("Day 1", "B.MP4"), clip("Day 1", "C.MP4"), clip("Day 2", "D.MP4"), clip("Day 2", "E.MP4")],
     probes: { version: 1, pending: 0, items: {} },
   };
+  footage.links = footage.items.map((it) => ({ path: it.preview, rel: it.preview.slice(root.length + 1), clip: it.id, draft: false, size: 2100, mtime: 1700000050 }));
   for (const it of footage.items) footage.probes.items[it.path] = { camera: "DJI OsmoAction6", color: "dlogm", mode: "default", movie: { duration: 30, created: 1735700000 }, marks: { times: [] } };
   const moments = { root, view: "moments", dirs: ["_Moments", "_Moments/Reef"], items: [moment("Reef", "Ray", "Day 2/D.MP4"), moment("Reef", "Shark", "Day 1/B.MP4"), moment("Reef", "Turtle", "Day 1/A.MP4")],
     probes: { version: 1, pending: 0, items: {} } };
+  // (the moments' scan answers with their originals' probes, as the app's does: what a moment is, is its clip's)
+  for (const m of moments.items) if (footage.probes.items[m.original]) moments.probes.items[m.original] = footage.probes.items[m.original];
   const stills = { root, view: "stills", dirs: ["_Stills"], items: [still("A_1.5s.jpg", "Day 1/A.MP4"), still("B_1.5s.jpg", "Day 1/B.MP4")], probes: { version: 1, pending: 0, items: {} } };
   const exports = { root, view: "exports", dirs: ["_Exports"], items: [{ id: "_Exports/E.mov", dir: "_Exports", name: "E.mov", path: root + "/_Exports/E.mov", size: 900, mtime: 1700000300, kind: "export", tags: [],
     link: { v: 1, kind: "export", clip: "Day 1/A.MP4", in: 1, out: 4, look: "hlg" } }], probes: { version: 1, pending: 0, items: {} } };
@@ -60,6 +65,7 @@ async function open(o) {
     project: () => ({ path: root, name: root.split("/").pop(), legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false, clip_previews: 0, moments: 0, stills: 0, exports: 0 }),
     engine: () => "/Applications/ActionFootagePlayer.app",
     recent: () => [],
+    recent_tags: () => [],
     cached_view: () => null,
     scan: (a) => { const v = views[a.view]; if (!v) return { root, view: a.view, dirs: [], items: [] }; return copy(v); },
     probes_since: () => ({ version: 1, items: {}, pending: 0 }),
@@ -130,8 +136,14 @@ async function open(o) {
     },
     key: (key, init, target) => (target || w.document.body).dispatchEvent(new w.KeyboardEvent("keydown", Object.assign({ key, bubbles: true, cancelable: true }, init || {}))),
     type: (sel, value) => { const e = w.document.querySelector(sel); e.value = value; e.dispatchEvent(new w.Event("input", { bubbles: true })); },
-    // An item of the list selected (as a click on its row), by its id in its view
-    select: (ids, kind) => { ids = [].concat(ids); w.eval("S.sel = {}; S.anchor = null;"); for (const id of ids) w.eval("S.sel[" + JSON.stringify((kind || "i") + ":" + id) + "] = true"); w.eval("renderMain(); renderSide();"); },
+    // The key of an item where the page is now, by its id (a clip's path in the tree, a moment's or photo's path in the
+    // project) or by its own key there ("a:<link>", "s:<clip>", "m:<moment>", "p:<photo>"): Originals and Albums key
+    // the same clip differently
+    keyOf: (id) => w.eval("(() => { const id = " + JSON.stringify(id) + "; const it = items().find((x) => x.key === id) || items().find((x) => x.id === id); return it ? keyOf(it) : 'i:' + id; })()"),
+    // Its row in the list
+    row: (id) => w.document.querySelector('#main [data-v="' + w.CSS.escape(page.keyOf(id)) + '"]'),
+    // Items of the list selected (as a click on each row), by id or key; `kind` "f": folders, by their path as shown
+    select: (ids, kind) => { ids = [].concat(ids); w.eval("S.sel = {}; S.anchor = null;"); for (const id of ids) w.eval("S.sel[" + JSON.stringify(kind ? kind + ":" + id : page.keyOf(id)) + "] = true"); w.eval("renderMain(); renderSide();"); },
     until: async (f, ms, what) => {
       const end = Date.now() + (ms || 5000);
       for (;;) {

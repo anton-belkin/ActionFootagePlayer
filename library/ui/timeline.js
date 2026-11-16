@@ -141,7 +141,8 @@ function tlCover(a, v, cover, title, sub) {
 function drawTimeline(main) {
   const v = albumViewOpen(), c = ctx();
   const all = avEverything(), list = avShown(all);
-  const sig = S.q + "\u0000" + Object.keys(S.filters).filter((k) => S.filters[k]).sort().join(",");
+  // (Hide rejected is a filter too: culling.js)
+  const sig = S.q + "\u0000" + Object.keys(S.filters).filter((k) => S.filters[k]).sort().join(",") + (typeof CULL === "object" && CULL.hide ? "\u0000hide" : "");
   if (!TL.model || TL.model.src !== all || TL.model.sig !== sig) { TL.model = tlModel(list); TL.model.src = all; TL.model.sig = sig; }
   const m = TL.model;
   const ready = !!DATA.sources;

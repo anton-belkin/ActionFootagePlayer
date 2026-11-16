@@ -14,6 +14,8 @@ function expect(what, got, want) {
   if (a !== b) { failures++; console.log("FAILED " + what + ": got " + a + ", wanted " + b); }
 }
 const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
+// The page's own scripts, as index.html names them, in its order
+const SCRIPTS = Array.from(fs.readFileSync(path.join(ui, "index.html"), "utf8").matchAll(/<script src="([^"]+)"><\/script>/g)).map((m) => path.join(ui, m[1]));
 const pages = [];
 // The page started over the stand-in with these options
 async function page(opts) {
@@ -25,7 +27,7 @@ async function page(opts) {
   if (!w.CSS) w.CSS = { escape: (x) => String(x).replace(/["\\]/g, "\\$&") };
   w.MOCK_OPTS = opts;
   const ctx = dom.getInternalVMContext();
-  for (const f of [path.join(__dirname, "mock.js"), path.join(ui, "culling.js"), path.join(ui, "atstart.js"), path.join(ui, "app.js")]) new vm.Script(fs.readFileSync(f, "utf8"), { filename: f }).runInContext(ctx);
+  for (const f of [path.join(__dirname, "mock.js")].concat(SCRIPTS)) new vm.Script(fs.readFileSync(f, "utf8"), { filename: f }).runInContext(ctx);
   await tick(150);
   const doc = w.document;
   return { w, doc, M: w.MOCK, ev: (c) => vm.runInContext(c, ctx), q: (s) => doc.querySelector(s), qa: (s) => Array.from(doc.querySelectorAll(s)),
@@ -53,6 +55,11 @@ const EGYPT = "/Volumes/Trips/Egypt 2026", NORWAY = "/Volumes/Trips/Norway 2025"
   // Started with no file, one marked and reachable: opened at once, no start screen
   p = await page({ project: null, atStart: GARDEN });
   expect("at start: opened at once", [p.ev("S.root"), p.q("#empty").hidden, p.M.calls.some((c) => c[0] === "open_at_start")], [GARDEN, true, true]);
+  // …on the two tabs, Originals in front (the tabs since the merge of the night of 2026-11-16), its clips read
+  expect("at start: the tabs Originals and Albums", [p.qa('#top [role="tab"][data-a="view"]').map((b) => b.textContent), p.q('#top [data-a="view"][aria-selected="true"]').dataset.v, p.ev("S.view")], [["Originals", "Albums"], "sources", "sources"]);
+  expect("at start: the originals and the albums are there", [p.ev("DATA.sources.items.length"), p.ev("DATA.footage.dirs.slice(0, 2)")], [8, ["Day 1", "Day 2"]]);
+  await p.click(p.q('#top [data-a="view"][data-v="footage"]'));
+  expect("at start: Albums opens", [p.ev("S.view"), p.ev("VISIBLE.slice(0, 2)")], ["footage", ["f:Day 1", "f:Day 2"]]);
   // Its menu: the tick on, and the way to the start screen
   await p.click(p.q('#top [data-a="menu"]'));
   const item = () => p.q('#top .menu [data-s="start"]');
