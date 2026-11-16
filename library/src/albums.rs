@@ -347,6 +347,16 @@ fn frame_at(path: &Path, t: f64, scratch: &Path) -> Option<Vec<u8>> {
     bytes
 }
 
+/// The catalog told at once of what an album command wrote (the views read the links from it), and that these are
+/// the window's own: the window shows them from the command's answer (changed.rs's of_album), so the catalog's notice
+/// of them asks it for nothing (seen.rs's ours). A folder made for the album: told too (its listing is its files)
+fn noted(files: &[PathBuf], new_dir: Option<&PathBuf>) {
+    let mut all = files.to_vec();
+    if let Some(d) = new_dir { all.push(d.clone()); }
+    crate::seen::ours(&all);
+    crate::seen::note_now(&all);
+}
+
 fn rel_of(root: &Path, path: &Path) -> String { path.strip_prefix(root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default() }
 
 /// A folder of the project's own for links, from its path in the project ("_Clips/Egypt/Day 1"): not the project's
@@ -413,6 +423,7 @@ fn thumbnail(a: &Add, cache: &Path, luts: Option<&Path>) -> Vec<u8> {
 pub fn add(root: &Path, album: &str, clips: &[Add], cache: &Path, luts: Option<&Path>) -> Result<Value, String> {
     let started = std::time::Instant::now();
     let dir = album_dir(root, album)?;
+    let new_dir = !dir.is_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     // What the album has: its names, and the clips linked from it
     let mut names: HashSet<String> = HashSet::new();
@@ -455,12 +466,11 @@ pub fn add(root: &Path, album: &str, clips: &[Add], cache: &Path, luts: Option<&
     });
     let mut made = made.into_inner().unwrap();
     made.sort();
-    // The catalog told at once: the views read the links from it
-    let mut noted = made.clone();
-    noted.push(dir.clone());
-    crate::seen::note_now(&noted);
+    // The catalog told at once: the views read the links from it (the album's folder too when it's new)
+    noted(&made, new_dir.then_some(&dir));
     Ok(json!({ "made": made.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "already": already, "album": rel_of(root, &dir),
-               "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64 }))
+               "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64,
+               "items": made.iter().map(|p| json!(["clip", null, p.display().to_string()])).collect::<Vec<_>>() }))
 }
 
 /// One photo to make: its clip (as `Add`), the frame's time in it, and the part of the frame wanted when one is set
@@ -475,6 +485,7 @@ pub struct Photo { pub clip: Add, pub t: f64, pub crop: Option<Value>, pub camer
 pub fn add_photos(root: &Path, album: &str, photos: &[Photo], cache: &Path, luts: Option<&Path>) -> Result<Value, String> {
     let started = std::time::Instant::now();
     let dir = album_dir(root, album)?;
+    let new_dir = !dir.is_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     let mut names: HashSet<String> = HashSet::new();
     let mut there: Vec<(String, f64)> = Vec::new();
@@ -532,11 +543,10 @@ pub fn add_photos(root: &Path, album: &str, photos: &[Photo], cache: &Path, luts
     });
     let mut made = made.into_inner().unwrap();
     made.sort();
-    let mut noted = made.clone();
-    noted.push(dir.clone());
-    crate::seen::note_now(&noted);
+    noted(&made, new_dir.then_some(&dir));
     Ok(json!({ "made": made.iter().map(|p| p.display().to_string()).collect::<Vec<_>>(), "already": already, "album": rel_of(root, &dir),
-               "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64 }))
+               "failed": failed.into_inner().unwrap(), "ms": started.elapsed().as_millis() as u64,
+               "items": made.iter().map(|p| json!(["still", null, p.display().to_string()])).collect::<Vec<_>>() }))
 }
 
 /// What an album's item is, from its file: "clip" or "moment" (a link MP4), "still" (a photo: its link file, or a
@@ -569,8 +579,9 @@ fn item_of(root: &Path, file: &Path) -> Option<(&'static str, String, String)> {
 /// Live Photo's video. A name taken there gets a number. { moved, problems }
 pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, String> {
     let dir = album_dir(root, album)?;
+    let new_dir = !dir.is_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let (mut moved, mut problems, mut touched) = (0usize, Vec::<String>::new(), vec![dir.clone()]);
+    let (mut moved, mut problems, mut touched, mut items) = (0usize, Vec::<String>::new(), Vec::<PathBuf>::new(), Vec::<Value>::new());
     for from in files {
         let Some((kind, stem, ext)) = (if from.starts_with(root) { item_of(root, from) } else { None }) else {
             problems.push(format!("{}: not a clip link, a moment or a photo of this project", from.display()));
@@ -590,6 +601,7 @@ pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
             Ok(()) => {
                 moved += 1;
                 touched.extend([from.clone(), to.clone()]);
+                items.push(json!([kind, from.display().to_string(), to.display().to_string()]));
                 let mut also: Vec<(PathBuf, PathBuf)> = renders;
                 if kind != "still" { also.push((from.with_file_name(format!("{stem}.gyroflow")), dir.join(format!("{new_stem}.gyroflow")))); }
                 else { for e in [".mov", ".MOV"] { also.push((from.with_file_name(format!("{stem}{e}")), dir.join(format!("{new_stem}{e}")))); } }
@@ -602,8 +614,8 @@ pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
             Err(e) => problems.push(format!("{}: {e}", from.display())),
         }
     }
-    crate::seen::note_now(&touched);
-    Ok(json!({ "moved": moved, "album": rel_of(root, &dir), "problems": problems }))
+    noted(&touched, new_dir.then_some(&dir));
+    Ok(json!({ "moved": moved, "album": rel_of(root, &dir), "problems": problems, "items": items }))
 }
 
 /// Moments and photos put in another album too: a copy of each link file (a moment's `.afplink.mp4` with its own
@@ -612,8 +624,9 @@ pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
 /// { copied, problems }
 pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, String> {
     let dir = album_dir(root, album)?;
+    let new_dir = !dir.is_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    let (mut copied, mut problems, mut touched) = (0usize, Vec::<String>::new(), vec![dir.clone()]);
+    let (mut copied, mut problems, mut touched, mut items) = (0usize, Vec::<String>::new(), Vec::<PathBuf>::new(), Vec::<Value>::new());
     for from in files {
         let item = if from.starts_with(root) { item_of(root, from) } else { None };
         let Some((kind, stem, ext)) = item.filter(|(_, _, ext)| ext.eq_ignore_ascii_case(crate::index::LINK_EXT) || ext.eq_ignore_ascii_case(PHOTO_EXT)) else {
@@ -629,6 +642,7 @@ pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
             Ok(_) => {
                 copied += 1;
                 touched.push(to.clone());
+                items.push(json!([kind, null, to.display().to_string()]));
                 let g = from.with_file_name(format!("{stem}.gyroflow"));
                 let tg = dir.join(format!("{new_stem}.gyroflow"));
                 if kind != "still" && g.is_file() && !tg.exists() && std::fs::copy(&g, &tg).is_ok() { touched.push(tg); }
@@ -636,42 +650,58 @@ pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
             Err(e) => problems.push(format!("{}: {e}", from.display())),
         }
     }
-    crate::seen::note_now(&touched);
-    Ok(json!({ "copied": copied, "album": rel_of(root, &dir), "problems": problems }))
+    noted(&touched, new_dir.then_some(&dir));
+    Ok(json!({ "copied": copied, "album": rel_of(root, &dir), "problems": problems, "items": items }))
 }
 
 // ---------- the page's commands ----------
+
+/// An album command's answer as the window takes it (docs/library-responsiveness.md, the pinpoint update): what it
+/// made, each as the views have it now (changed.rs's of_album), its own answer kept as `answer` (without the list),
+/// what it couldn't do in words
+pub fn changed_of(root: &Path, answer: Value, probes: &crate::index::SharedProbes) -> crate::changed::Changed { album_changed(root, answer).with_probes(probes) }
+
+pub fn album_changed(root: &Path, mut answer: Value) -> crate::changed::Changed {
+    let items: Vec<(String, Option<PathBuf>, PathBuf)> = answer.as_object_mut().and_then(|o| o.remove("items")).and_then(|v| v.as_array().cloned()).unwrap_or_default().iter()
+        .filter_map(|x| Some((x[0].as_str()?.to_string(), x[1].as_str().map(PathBuf::from), PathBuf::from(x[2].as_str()?)))).collect();
+    let mut problems: Vec<String> = answer["problems"].as_array().into_iter().flatten().filter_map(|p| p.as_str().map(str::to_string)).collect();
+    for f in answer["failed"].as_array().into_iter().flatten() { problems.push(format!("{}: {}", f[0].as_str().unwrap_or(""), f[1].as_str().unwrap_or(""))); }
+    crate::changed::of_album(root, &items, problems, answer)
+}
 
 /// "Add to an album…": links to the selected clips, made at once. `clips`: what the page knows of each,
 /// { tree, path, thumb, size, created, curve }; `album`: its path in the project's folder ("_Clips/Egypt")
 #[tauri::command]
 pub async fn album_add(app: tauri::AppHandle, shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>,
-                       album: String, clips: Vec<Value>) -> Result<Value, String> {
+                       album: String, clips: Vec<Value>) -> Result<crate::changed::Changed, String> {
     use tauri::Manager;
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
     let luts = luts_dir(probes.lock().unwrap().tool.as_deref());
+    let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let list: Vec<Add> = clips.iter().filter_map(|c| Some(Add {
             tree: c["tree"].as_str()?.to_string(), path: PathBuf::from(c["path"].as_str()?), thumb: c["thumb"].as_str().map(PathBuf::from),
             size: c["size"].as_u64().unwrap_or(0), created: c["created"].as_i64(), curve: c["curve"].as_str().map(str::to_string) })).collect();
-        add(&root, &album, &list, &cache, luts.as_deref())
+        add(&root, &album, &list, &cache, luts.as_deref()).map(|v| changed_of(&root, v, &probes))
     }).await.map_err(|e| e.to_string())?
 }
 
 /// "Move to an album…": the selected links' files into another album
 #[tauri::command]
-pub async fn album_move(shared: tauri::State<'_, crate::Shared>, album: String, files: Vec<String>) -> Result<Value, String> {
+pub async fn album_move(shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>, album: String, files: Vec<String>) -> Result<crate::changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    tauri::async_runtime::spawn_blocking(move || move_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()))
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || move_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()).map(|v| changed_of(&root, v, &probes)))
         .await.map_err(|e| e.to_string())?
 }
 
 /// "Add to another album…" for moments and photos: a copy of each link file there
 #[tauri::command]
-pub async fn album_copy(shared: tauri::State<'_, crate::Shared>, album: String, files: Vec<String>) -> Result<Value, String> {
+pub async fn album_copy(shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>, album: String, files: Vec<String>) -> Result<crate::changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    tauri::async_runtime::spawn_blocking(move || copy_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()))
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || copy_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()).map(|v| changed_of(&root, v, &probes)))
         .await.map_err(|e| e.to_string())?
 }
 
@@ -679,17 +709,18 @@ pub async fn album_copy(shared: tauri::State<'_, crate::Shared>, album: String, 
 /// page knows of each, { tree, path, thumb, size, created, curve, t, crop, camera }
 #[tauri::command]
 pub async fn photo_add(app: tauri::AppHandle, shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>,
-                       album: String, photos: Vec<Value>) -> Result<Value, String> {
+                       album: String, photos: Vec<Value>) -> Result<crate::changed::Changed, String> {
     use tauri::Manager;
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
     let luts = luts_dir(probes.lock().unwrap().tool.as_deref());
+    let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let list: Vec<Photo> = photos.iter().filter_map(|c| Some(Photo {
             clip: Add { tree: c["tree"].as_str()?.to_string(), path: PathBuf::from(c["path"].as_str()?), thumb: c["thumb"].as_str().map(PathBuf::from),
                         size: c["size"].as_u64().unwrap_or(0), created: c["created"].as_i64(), curve: c["curve"].as_str().map(str::to_string) },
             t: c["t"].as_f64()?, crop: c.get("crop").cloned(), camera: c.get("camera").cloned() })).collect();
-        add_photos(&root, &album, &list, &cache, luts.as_deref())
+        add_photos(&root, &album, &list, &cache, luts.as_deref()).map(|v| changed_of(&root, v, &probes))
     }).await.map_err(|e| e.to_string())?
 }
 

@@ -36,6 +36,11 @@ pub struct Changed {
     pub problems: Vec<String>,
     /// The command's own answer (a renamed file's path, how many went to the Trash)
     pub answer: Value,
+    /// Clips' links made or moved here (albums.rs): each as the Footage scan's `links` has it ({ path, rel, clip,
+    /// draft, size, mtime }); the page puts them into its list of links, no view read
+    pub links: Vec<Value>,
+    /// Clips' links that are gone from where they were (moved): their files
+    pub links_gone: Vec<String>,
 }
 
 /// Whether the project's clip previews are laid out flat (main.rs's project_info, without counting its files)
@@ -112,6 +117,33 @@ pub fn of_rename(root: &Path, view: &str, kind: &str, from: &Path, to: &str) -> 
     let view = view_of(kind).unwrap_or(view);
     let flat = flat_previews(root);
     for p in [from, Path::new(to)] { if let Some(rel) = rel_in(root, p) { c.add(root, flat, view, &[rel]); } }
+    c
+}
+
+/// What an album command made (albums.rs: add, add_photos, copy_to, move_to): for each item, its kind ("clip" for a
+/// clip's link, "moment", "still"), the file it was (a move) and the file it is now. The links are said as the Footage
+/// scan says them, a moment or a photo as its view's item (the one it was: gone), a clip whose link it is as it is now
+/// (its picture in Originals is its first link's)
+pub fn of_album(root: &Path, made: &[(String, Option<PathBuf>, PathBuf)], problems: Vec<String>, answer: Value) -> Changed {
+    let mut c = Changed { answer, problems, ..Default::default() };
+    let flat = flat_previews(root);
+    let mut by: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (kind, from, to) in made {
+        let (Some(rel), Some(view)) = (rel_in(root, to), view_of(kind)) else { continue };
+        if kind == "clip" {
+            if let Some(f) = from { c.links_gone.push(f.display().to_string()); }
+            let Some(l) = index::link(to).filter(|l| l["kind"] == "clip") else { continue };
+            let m = std::fs::metadata(to).ok();
+            let mtime = m.as_ref().and_then(|m| m.modified().ok()).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs() as i64).unwrap_or(0);
+            c.links.push(json!({ "path": to.display().to_string(), "rel": rel, "clip": l["clip"], "draft": l["draft"].as_bool() == Some(true),
+                                 "size": m.map(|m| m.len()).unwrap_or(0), "mtime": mtime }));
+            if let Some(clip) = l["clip"].as_str() { by.entry("footage").or_default().push(clip.to_string()); }
+        } else {
+            if let Some(f) = from.as_ref().and_then(|f| rel_in(root, f)) { by.entry(view).or_default().push(f); }
+            by.entry(view).or_default().push(rel);
+        }
+    }
+    for (v, ids) in by { c.add(root, flat, v, &ids); }
     c
 }
 
@@ -339,6 +371,76 @@ mod tests {
         // The page's count of changes, and what's logged for it
         assert!(seen::since(0, 1).is_none());
         *seen::SEEN.write().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    /// The scan's own entry for a clip's link (its `links`)
+    fn link_in_scan(root: &Path, path: &str) -> Option<Value> {
+        index::scan(root, "footage", false)["links"].as_array().unwrap().iter().find(|l| l["path"] == path).cloned()
+    }
+
+    // The album commands (docs/library-responsiveness.md): what each says it made is what a reading of the views shows
+    // after it, its links as the Footage scan lists them; a link moved is said gone from where it was
+    #[test]
+    fn album_commands_say_what_a_reading_shows() {
+        use crate::albums::{ self, Add, Photo };
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("afl-changed-albums-{}", std::process::id()));
+        let r = build(&base, 60);
+        let p = &r.p;
+        let cache = base.join("cache");
+        let add = |i: usize| Add { tree: r.clips[i].clone(), path: r.f.join(&r.clips[i]), thumb: None, size: 8, created: Some(1_700_000_000), curve: None };
+        // Two clips into a new album: clip 0 had no link (its picture in Originals becomes this one), clip 1 had one
+        let answer = albums::add(p, "_Clips/Egypt", &[add(0), add(1)], &cache, None).unwrap();
+        let c = albums::album_changed(p, answer);
+        assert_eq!(c.links.len(), 2, "{c:?}");
+        for l in &c.links { assert_eq!(Some(l.clone()), link_in_scan(p, l["path"].as_str().unwrap()), "link {}", l["path"]); }
+        assert_eq!(c.answer["made"].as_array().unwrap().len(), 2);
+        assert!(c.answer.get("items").is_none(), "the list is said as links and items, not twice");
+        same_as_a_reading(p, &c, &[("footage", &r.clips[0]), ("footage", &r.clips[1])], "album_add");
+        assert_eq!(c.items["footage"].iter().find(|it| it["id"] == r.clips[0].as_str()).unwrap()["preview"], c.links[0]["path"]);
+        // Again: "already", nothing made, nothing said
+        let c2 = albums::album_changed(p, albums::add(p, "_Clips/Egypt", &[add(0)], &cache, None).unwrap());
+        assert_eq!((c2.answer["already"].clone(), c2.links.len(), c2.items.len()), (json!(1), 0, 0));
+        // A photo link of a mark
+        let ph = Photo { clip: add(2), t: 1.5, crop: None, camera: None };
+        let c = albums::album_changed(p, albums::add_photos(p, "_Stills/Generated", &[ph], &cache, None).unwrap());
+        let still = c.items["stills"][0]["id"].as_str().unwrap().to_string();
+        assert!(still.starts_with("_Stills/Generated/") && still.ends_with(".afplink.jpg"), "{still}");
+        same_as_a_reading(p, &c, &[("stills", &still)], "photo_add");
+        // A moment and the photo copied into the album: new items of their own
+        let moment = r.moments[0].clone();
+        let c = albums::album_changed(p, albums::copy_to(p, "_Clips/Egypt", &[p.join(&moment), p.join(&still)]).unwrap());
+        assert_eq!((c.items["moments"].len(), c.items["stills"].len()), (1, 1));
+        let (m2, s2) = (c.items["moments"][0]["id"].as_str().unwrap().to_string(), c.items["stills"][0]["id"].as_str().unwrap().to_string());
+        same_as_a_reading(p, &c, &[("moments", &m2), ("stills", &s2)], "album_copy");
+        // Moved: a clip's link, the moment's copy: gone from Egypt, in Best
+        let link = c2.answer["album"].as_str().map(|_| p.join("_Clips/Egypt").join(Path::new(&r.clips[1]).file_stem().unwrap().to_string_lossy().to_string() + index::LINK_EXT)).unwrap();
+        assert!(link.is_file(), "{}", link.display());
+        let c = albums::album_changed(p, albums::move_to(p, "_Clips/Best", &[link.clone(), p.join(&m2)]).unwrap());
+        assert_eq!(c.links_gone, vec![link.display().to_string()]);
+        assert_eq!(c.links.len(), 1);
+        assert_eq!(Some(c.links[0].clone()), link_in_scan(p, c.links[0]["path"].as_str().unwrap()));
+        assert!(link_in_scan(p, &link.display().to_string()).is_none());
+        assert_eq!(c.gone["moments"], vec![m2.clone()]);
+        same_as_a_reading(p, &c, &[("moments", &m2), ("footage", &r.clips[1])], "album_move");
+
+        // The window's own files: the catalog's notice of them asks for nothing, once; a later change is seen
+        let (a, b) = (p.join("x.afplink.mp4"), p.join("y.afplink.mp4"));
+        seen::ours(std::slice::from_ref(&a));
+        assert_eq!(seen::not_ours(vec![a.clone(), b.clone()]), vec![b.clone()]);
+        assert_eq!(seen::not_ours(vec![a.clone()]), vec![a.clone()]);
+
+        // An album of three folders renamed as one: the third can't be (the name is taken there), the first two are
+        // given their old name back
+        for d in ["_Clips/Trip", "_Moments/Trip", "_Stills/Trip", "_Stills/Reef"] { std::fs::create_dir_all(p.join(d)).unwrap(); }
+        let paths: Vec<String> = ["_Clips/Trip", "_Moments/Trip", "_Stills/Trip"].iter().map(|d| p.join(d).display().to_string()).collect();
+        assert!(crate::rename_album_in(p, &paths, "Reef").is_err());
+        for d in ["_Clips/Trip", "_Moments/Trip", "_Stills/Trip"] { assert!(p.join(d).is_dir(), "{d} named back"); }
+        assert!(!p.join("_Clips/Reef").exists() && !p.join("_Moments/Reef").exists());
+        let to = crate::rename_album_in(p, &paths, "Dives").unwrap();
+        assert_eq!(to.len(), 3);
+        for d in ["_Clips/Dives", "_Moments/Dives", "_Stills/Dives"] { assert!(p.join(d).is_dir(), "{d}"); }
         let _ = std::fs::remove_dir_all(&base);
     }
 }

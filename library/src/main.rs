@@ -1087,7 +1087,7 @@ async fn changes_since(shared: State<'_, Shared>, probes: State<'_, index::Share
     let (root, now) = { let g = shared.lock().unwrap(); (g.project.clone().ok_or("Open a project first")?, g.watch.as_ref().map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0)) };
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let changed = seen::since(since, now).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
+        let changed = seen::since(since, now).map(seen::not_ours).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
         json!({ "upto": now, "changed": changed })
     }).await.map_err(|e| e.to_string())
 }
@@ -1846,6 +1846,36 @@ async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedP
     }).await.map_err(|e| e.to_string())?
 }
 
+/// An album renamed: each of its folders (in _Clips, _Moments, _Stills: up to three) given the name, as one change.
+/// When one can't be, the ones renamed already get their old name back, and nothing is changed (the window then
+/// shows the album as it was, whole); the folders are read again after it, as for a folder renamed
+#[tauri::command]
+async fn rename_album(shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let to = rename_album_in(&root, &paths, &name)?;
+        Ok(changed::Changed { answer: json!(to), ..Default::default() }.reload_all())
+    }).await.map_err(|e| e.to_string())?
+}
+
+pub(crate) fn rename_album_in(root: &Path, paths: &[String], name: &str) -> Result<Vec<String>, String> {
+    let mut done: Vec<(String, String)> = Vec::new();
+    for p in paths {
+        match rename_in(root, "footage", "folder", p, name) {
+            Ok(to) => done.push((p.clone(), to)),
+            Err(e) => {
+                // Back as it was, the last first
+                let was = |p: &str| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut also = Vec::new();
+                for (from, to) in done.iter().rev() { if let Err(b) = rename_in(root, "footage", "folder", to, &was(from)) { also.push(b); } }
+                return Err(if also.is_empty() { e } else { format!("{e}; and couldn't be named back: {}", also.join(" · ")) });
+            }
+        }
+    }
+    Ok(done.into_iter().map(|(_, t)| t).collect())
+}
+
 fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Result<String, String> {
     let root = root.to_path_buf();
     let name = good_name(name)?;
@@ -2134,16 +2164,20 @@ async fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
 // A new folder in a view's own folder (_Clips, _Moments, _Stills, _Exports), inside `parent` (its path there): its
 // path there, named "untitled folder" (" 2"… when taken), for renaming at once
 #[tauri::command]
-async fn new_folder(shared: State<'_, Shared>, view: String, parent: String) -> Result<String, String> {
+async fn new_folder(shared: State<'_, Shared>, view: String, parent: String, name: Option<String>) -> Result<String, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        new_folder_in(&root, &view, &parent)
+        new_folder_named(&root, &view, &parent, name.as_deref())
     }).await.map_err(|e| e.to_string())?
 }
 
-fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String> {
+fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String> { new_folder_named(root, view, parent, None) }
+
+/// …named as the window already shows it (screen first: it showed the folder before asking), when that name is free
+/// and one a file can have; else "untitled folder" as before. Its path in the project's folder is the answer
+fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -> Result<String, String> {
     let root = root.to_path_buf();
     // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
     if !matches!(view, "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
@@ -2152,6 +2186,7 @@ fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String
     let mut name = "untitled folder".to_string();
     let mut n = 1;
     while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
+    if let Some(w) = want.and_then(|w| good_name(w).ok()).filter(|w| !dir.join(w).exists()) { name = w; }
     std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
     // In the catalog at once: the views list folders from it
     seen::note_now(&[dir.join(&name)]);
@@ -2633,7 +2668,7 @@ fn main() {
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
-                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
+                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
