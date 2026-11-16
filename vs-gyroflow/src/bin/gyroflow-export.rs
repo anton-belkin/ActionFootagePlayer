@@ -601,6 +601,9 @@ fn catch_signals() {
 }
 
 fn stopped() -> bool { STOP.load(Relaxed) != 0 }
+// AFP_TIMES: the GPU workers' time in the engine and the LUT, summed over the workers
+static ENGINE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LUT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // --control: the word in the file, as the signals would set it
 fn read_control(path: &Path) {
@@ -1517,6 +1520,18 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         Some(e) if preview.is_none() => Post::new(e, opts, &info, (ow, oh), fps, (dec_first, dec_last), view, camera, denoise),
         _ => None,
     };
+    // Stage-1 experiment (docs/export-gpu-path.md): AFP_GPU_SHADER=<file> writes the player's warp shader for this
+    // export (and <file>.lp.glsl for ffmpeg's libplacebo filter, AFP_CHROMA_PLANES chroma planes) and stops
+    if let (Some(out), Some(e)) = (std::env::var_os("AFP_GPU_SHADER"), &engine) {
+        let planes: usize = std::env::var("AFP_CHROMA_PLANES").ok().and_then(|v| v.parse().ok()).unwrap_or(1);
+        let (text, size) = warp_shader(e, opts, view, camera, fps, first_frame, edges)?;
+        let lp = vs_gyroflow::gpu_table::for_libplacebo(&text, vs_gyroflow::gpu_table::passes_per_frame(&text, planes))?;
+        std::fs::write(&out, &text).map_err(|e| e.to_string())?;
+        std::fs::write(format!("{}.lp.glsl", out.to_string_lossy()), lp).map_err(|e| e.to_string())?;
+        println!("{{\"output\": [{}, {}], \"first_frame\": {first_frame}, \"npass\": {}}}", size.0, size.1,
+                 vs_gyroflow::gpu_table::passes_per_frame(&text, planes));
+        return Ok(Outcome::Skipped("shader written".into()));
+    }
     // With the denoise, every frame goes through it (its frames are each other's neighbours), a part at a lower frame
     // rate too; and the frames before and after the export's
     let all_frames = post.as_ref().is_some_and(|p| p.radius > 0);
@@ -1631,6 +1646,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
         if prores {
             enc_cmd.args(["-tag:v", "apch"]);
+        } else if enc.name == "ffv1" {
+            // Lossless, for comparing pictures (docs/export-gpu-path.md)
+            enc_cmd.args(["-level", "3"]);
         } else {
             enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
         }
@@ -1743,10 +1761,15 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        engine.process(timestamp_us, planes, !full_range, marker).map(|_| dst)
+                        let t = Instant::now();
+                        let r = engine.process(timestamp_us, planes, !full_range, marker).map(|_| dst);
+                        ENGINE_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+                        r
                     }
                 };
+                let t = Instant::now();
                 let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|l1| (f, l1)), None => Ok((f, None)) });
+                LUT_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
                 if done_tx.send((n, result)).is_err() { break; }
             }
         })
@@ -1947,6 +1970,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
+    if std::env::var_os("AFP_TIMES").is_some() && frames > 0 {
+        eprintln!("  GPU workers ({workers}): engine {:.1} ms a frame, LUT {:.1} ms a frame (summed over the workers)",
+                  ENGINE_NS.load(Relaxed) as f64 / 1e6 / frames as f64, LUT_NS.load(Relaxed) as f64 / 1e6 / frames as f64);
+    }
     Ok(Outcome::Done(out_path))
 }
 
@@ -1986,6 +2013,26 @@ fn youtube_mux(mov: &Path, mkv: &Path, cube: &Path, cube_name: &str, light: Opti
 // has on both sides. In the player's order: the fringes, then the denoise (on the GPU path both follow the warp)
 
 const CHROMATIC_GLSL: &str = include_str!("../../../mpv/scripts/gyroflow/chromatic.glsl");
+
+/// The player's GPU warp (gyroflow-gpu-table --player, gpu_table::Options::player) for this export's clip as the
+/// engine renders it: its view at the level, the camera, the interpolation and edges asked for, the fringes where some
+/// frame has the lens under water; the first frame at `first_frame`. Returns the shader and its output size
+#[allow(clippy::too_many_arguments)]
+fn warp_shader(engine: &Engine, opts: &Options, view: u8, camera: vs_gyroflow::Camera, fps: f64, first_frame: u64, edges: EdgeMode) -> Result<(String, (usize, usize)), String> {
+    use vs_gyroflow::gpu_table::{ self, Clip, Table };
+    let index = engine.views.index(view, opts.level).min(engine.views.params.len() - 1);
+    let params = camera.apply(&engine.views.params[index]);
+    let clip = Clip { size: (params.width, params.height), output_size: (params.output_width, params.output_height), fps,
+                      frame_count: params.frame_count.max(1), frame_offset_us: engine.frame_offset_us, params };
+    if let Some(why) = gpu_table::unsupported(&clip) { return Err(format!("the GPU warp can't: {why}")); }
+    let interp = match opts.interpolation { Interpolation::Bilinear => 0, Interpolation::Bicubic => 2, _ => 3 };
+    let wet = opts.chromatic && (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
+    let edge_fill = match edges { EdgeMode::Off => None, _ => Some(opts.edge_settings.blur) };
+    let mut o = gpu_table::Options::player(interp, wet, edge_fill, false, false, first_frame as f64 / fps);
+    if std::env::var_os("AFP_GPU_GRID").is_some() { o.mode = gpu_table::Mode::Grid; }
+    let table = Table::build(&clip, &o)?;
+    Ok((gpu_table::shader(&clip, &o, &table), clip.output_size))
+}
 
 struct Post {
     shaders: vs_gyroflow::user_shader::Shaders,

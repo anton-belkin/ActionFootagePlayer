@@ -636,6 +636,34 @@ pub fn dn_layout(slot: (usize, usize), max: usize) -> Option<(usize, usize)> {
 
 impl Options {
     fn chromatic_bilinear_planes(&self) -> bool { self.chroma_bilinear }
+
+    /// The player's GPU path (gyroflow-gpu-table --player) for these choices: `interp` warp.glsl's INTERP, `wet` the
+    /// color fringes taken out (some frame under water), `edge_fill` the smooth fill's blur, `sphere` the sphere trail.
+    /// The colors read apart (fringes, sphere) need the RGB layout (grid at MAIN), else the planes. gyroflow-export's
+    /// libplacebo path asks for the same shader (export_shader)
+    pub fn player(interp: i32, wet: bool, edge_fill: Option<f32>, sphere: bool, denoise: bool, time_offset: f64) -> Options {
+        let rgb = wet || sphere;
+        Options { mode: if rgb { Mode::Grid } else { Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
+                  chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset, denoise, knots: 33, interp, shrink: false, range: None }
+    }
+}
+
+/// The hook passes a frame runs through, in a shader made by shader_with (each `//!HOOK` once; CHROMA's once for each
+/// chroma plane libplacebo hooks: 1 for NV12/P010, 2 for planar 4:2:0). Every pass has `//!WHEN gyroflow_gpu_on`, on
+/// by default
+pub fn passes_per_frame(shader: &str, chroma_planes: usize) -> usize {
+    shader.lines().filter(|l| l.starts_with("//!HOOK ")).map(|l| if l.trim_end() == "//!HOOK CHROMA" { chroma_planes } else { 1 }).sum()
+}
+
+/// The player's shader for ffmpeg's libplacebo filter (gyroflow-export's GPU path), which feeds no PTS: each pass finds
+/// its frame by libplacebo's own counter instead, `frame` (1, 2, ... over every pass this shader's hook runs, from the
+/// first frame the filter renders: `npass` of them a frame). The first frame is the clip's at `time_offset`
+pub fn for_libplacebo(shader: &str, npass: usize) -> Result<String, String> {
+    const PTS_PARAM: &str = "//!PARAM PTS\n//!TYPE DYNAMIC float\n0.0\n";
+    if !shader.contains(PTS_PARAM) { return Err("warp.glsl: no PTS parameter where it's expected".into()); }
+    if npass == 0 { return Err("no passes".into()); }
+    // In every pass, after libplacebo's own #define frame: the defines come first in each pass's text (hook_pass)
+    Ok(shader.replace(PTS_PARAM, "").replace("#define SRC_W ", &format!("#define PTS (float((frame - 1) / {npass}) / FPS)\n#define SRC_W ")))
 }
 
 /// The shader file mpv loads
@@ -988,6 +1016,22 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let (head2, common2, passes2) = split_sections(&normalized);
         assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
         assert!(!pass_body(passes[0].0).is_empty());
+    }
+
+    #[test]
+    fn libplacebo_counts_passes_for_pts() {
+        // ffmpeg's libplacebo filter feeds no PTS: each pass takes its frame from libplacebo's pass counter
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let body = "//!HOOK LUMA\n//!DESC a\n#define SRC_W 1\nx\n//!HOOK CHROMA\n//!DESC b\n#define SRC_W 1\ny\n//!HOOK MAIN\n#define SRC_W 1\n";
+        let text = fill_head(&t, "", body, 0.0);
+        assert_eq!((passes_per_frame(&text, 1), passes_per_frame(&text, 2)), (3, 4));
+        let lp = for_libplacebo(&text, 3).unwrap();
+        assert!(!lp.contains("//!PARAM PTS"));
+        assert_eq!(lp.matches("#define PTS (float((frame - 1) / 3) / FPS)\n#define SRC_W ").count(), 3);
+        // Still a file libplacebo's parser takes, its other parameters intact
+        let params = crate::user_shader::param_values(&lp).expect("parses");
+        assert!(params.iter().any(|(n, _)| n == "gyroflow_time_offset") && !params.iter().any(|(n, _)| n == "PTS"));
+        assert!(for_libplacebo("no param", 3).is_err());
     }
 
     #[test]
