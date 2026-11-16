@@ -549,9 +549,11 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         let l = if video || photo { link(path) } else { None };
         let keep = match view {
             "moments" => video && (l.as_ref().is_some_and(|k| k["kind"] == "moment") || (lower.starts_with("_moments/") && lower.ends_with(LINK_EXT) && l.is_none())),
-            "exports" => video && (l.as_ref().is_some_and(|k| k["kind"] == "export") || (lower.starts_with("_exports/") && l.is_none())),
+            // (a render saved into a folder of the project by Share is a file of the user's, as an export is; the
+            // cache itself, _Renders, is the Library's own: never listed)
+            "exports" => video && !lower.starts_with("_renders/") && (l.as_ref().is_some_and(|k| k["kind"] == "export" || k["kind"] == "render") || (lower.starts_with("_exports/") && l.is_none())),
             // (a photo of before links, moved into an album of the user's: still a photo there)
-            _ => photo && (l.is_some() || lower.starts_with("_stills/") || lower.starts_with("_clips/")),
+            _ => photo && !lower.starts_with("_renders/") && (l.is_some() || lower.starts_with("_stills/") || lower.starts_with("_clips/")),
         };
         if keep { if let Some(k) = l { links.insert(rel.to_string(), k); } }
         keep

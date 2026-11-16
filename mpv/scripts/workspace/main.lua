@@ -2909,6 +2909,15 @@ local function export_next()
         end
     end
     m.output = output
+    -- A photo's render (a photo link shared): the frame as its clip's saved view has it, into a folder of its own
+    -- first (gyroflow-export names a photo itself), then into its place in the cache (export-batch-done)
+    if m.photo then
+        m.making = output .. ".making"
+        mkdir(m.making)
+        return mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
+            id = tostring(j.id), clip = m.original, t = m.photo.t, view = m.rendered, crop = m.photo.crop, camera = m.photo.camera,
+            link = utils.format_json(l), still = true, out_dir = m.making, reply = mp.get_script_name(), done = "export-batch-done" }))
+    end
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
         from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr,
@@ -2920,6 +2929,18 @@ mp.register_script_message("export-batch-done", function(id, json)
     local j = export_job
     if not j or tostring(j.id) ~= id then return end
     local r = utils.parse_json(json or "") or {}
+    -- A photo's render: from the folder it was made in to its file in the cache, <hash>.<profile>.<heic or jpg>
+    local photo = j.queue[j.done + 1]
+    if r.ok and photo and photo.photo and type(r.out) == "string" then
+        local final = photo.render_out .. "." .. (r.out:lower():match("%.heic$") and "heic" or "jpg")
+        os.remove(final)
+        if os.rename(r.out, final) then
+            catalog.note(j.root, { r.out, final })
+        else
+            r = { ok = false, error = "couldn't put the photo into the cache" }
+        end
+        os.remove(photo.making)
+    end
     if r.ok then j.made = j.made + 1 end
     -- A render made again failed: the stale one it replaced is gone (what's made is noted by the gyroflow plugin)
     local m = j.queue[j.done + 1]
@@ -2982,11 +3003,36 @@ end
 
 -- Renders of the moments (Action Footage Library's Render, kept to its selection): each moment in each profile asked
 -- for whose render isn't current, made (again) in _Renders/. The ones current are left as they are
-local function render_moments(root, profiles)
+-- `items` (Action Footage Library's Share, its batch `share`): the renders the Library's cache lacks, each
+-- { of (moment, photo or clip), name, file (a moment's link file), clip (the original), t / crop / camera (a photo),
+-- sdr, out (its file in the cache, _Renders/<hash>.<profile>.mov; a photo's without its extension), link (what the
+-- render carries: its recipe and hash, worked out by the Library, renders.rs) }. Made as they are asked for: what's
+-- current is the Library's to know
+local function render_moments(root, profiles, items)
     if export_job then return end
     if batch then batch.looking() end
     local queue, failures = {}, {}
-    for _, m in ipairs(moments.scan(root, nil).list) do
+    for _, it in ipairs(items or {}) do
+        local name = tostring(it.name or it.file or it.clip or "")
+        local l = it.of == "moment" and it.file and utils.parse_json(fs.read_link(it.file) or "") or {}
+        local original = it.of == "moment" and type(l) == "table" and original_of(l, root, it.file) or it.clip
+        if type(l) ~= "table" or type(it.out) ~= "string" or type(it.link) ~= "table" then
+            failures[#failures + 1] = { name, "not a render the player knows how to make" }
+        elseif not original or not fs.is_file(original) then
+            failures[#failures + 1] = { name, "its original isn't found" }
+        else
+            local movie = markers and markers.movie and markers.movie(original) or nil
+            local _, rendered = made_view_of(original, movie, it.of == "moment" and l.stab or nil)
+            local own = it.of == "moment" and own_project(it.file) or nil
+            queue[#queue + 1] = {
+                name = name, link = l, original = original, rendered = rendered,
+                project = own and fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
+                sdr = it.sdr == true, render_out = it.out, render_link = it.link,
+                photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
+            }
+        end
+    end
+    for _, m in ipairs(items and {} or moments.scan(root, nil).list) do
         local l = m.link
         if type(l["in"]) == "number" and type(l.out) == "number" and l.out > l["in"] and in_only(ws.relative(m.file, root) or "") then
             local original = original_of(l, root, m.file)
@@ -3119,7 +3165,7 @@ end
 -- { kind, project, status, stop, photo, sdr, only, layout, alone }: kind clips or clips-again (previews of the clips
 -- without one; layout: tree, flat or trips), moments (moments of all marks; alone: stabilized on their own), photos
 -- (photos of all marks; photo: no, live or motion), export (all moments; sdr: in SDR), render (renders of the moments
--- in _Renders/; profiles: HDR, SDR). What a run makes goes into Generated/<date> <time> <what>/. The player makes them for that project as the menu used to, writes how far it is to `status`
+-- in _Renders/; profiles: HDR, SDR), share (the renders the Library's Share needs: items, see render_moments). What a run makes goes into Generated/<date> <time> <what>/. The player makes them for that project as the menu used to, writes how far it is to `status`
 -- (a JSON written whole: { kind, state, done, total, failed, fraction, current, message, failures }, state starting,
 -- looking, running, done, stopped or failed), stops when the file `stop` appears (after the one being made; an export
 -- is cancelled) and quits when it's done. `only`: the paths in the project it's kept to (clips, folders, moment files):
@@ -3239,6 +3285,10 @@ do
                 elseif kind == "render" then
                     local profiles = type(req.profiles) == "table" and req.profiles or { "HDR" }
                     render_moments(root, profiles)
+                elseif kind == "share" then
+                    -- Stills: a Live or Motion Photo is a pair, not what the cache keeps for a photo
+                    mp.set_property_native("user-data/gyroflow/live_photo", "no")
+                    render_moments(root, {}, type(req.items) == "table" and req.items or {})
                 else
                     batch.finished({ error = "no such batch: " .. tostring(kind) })
                 end

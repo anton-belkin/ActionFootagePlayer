@@ -694,10 +694,10 @@ pub async fn photo_add(app: tauri::AppHandle, shared: tauri::State<'_, crate::Sh
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn jpeg(w: u16, h: u16, rgb: [u8; 3]) -> Vec<u8> {
+    pub(crate) fn jpeg(w: u16, h: u16, rgb: [u8; 3]) -> Vec<u8> {
         let px: Vec<u8> = (0..w as usize * h as usize).flat_map(|_| rgb).collect();
         let mut out = Vec::new();
         jpeg_encoder::Encoder::new(&mut out, 90).encode(&px, w, h, jpeg_encoder::ColorType::Rgb).unwrap();

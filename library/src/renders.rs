@@ -108,11 +108,16 @@ impl Ctx {
         facts
     }
 
+    /// The clip's file an item is rendered from, when it's here
+    pub fn original(&self, item: &Item) -> Option<PathBuf> { item.tree().and_then(|t| self.clip(t).file) }
+
 }
 
 /// The player's own defaults that decide the pixels where a clip or a moment doesn't say (its gyroflow.conf: the
-/// transform's keys, and how much of the denoise this computer does). As they're written there; none: {}
+/// transform's keys, how much of the denoise this computer does, what fills the edges). As they're written there; none: {}
 fn player_defaults() -> Value {
+    // (tests never read this computer's player)
+    if cfg!(test) { return json!({}); }
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let file = env("AFL_PLAYER_OPTS").or_else(|| {
         let base = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
@@ -124,8 +129,8 @@ fn player_defaults() -> Value {
 }
 
 fn defaults_of(conf: &str) -> Value {
-    const KEYS: [&str; 11] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "still", "denoise_strong",
-                              "temporal_denoise"];
+    const KEYS: [&str; 13] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "still", "denoise_strong",
+                              "temporal_denoise", "edges", "edges_blur"];
     let mut out = serde_json::Map::new();
     for line in conf.lines() {
         let Some((k, v)) = line.trim().split_once('=') else { continue };
@@ -201,6 +206,9 @@ fn canonical(v: &Value, out: &mut String) {
         x => out.push_str(&x.to_string()),
     }
 }
+
+/// What the player is asked for, as its JSON has it (nothing empty)
+pub fn trimmed_request(v: &Value) -> Value { trimmed(v).unwrap_or(Value::Null) }
 
 /// A recipe's hash: what its render's file is called
 pub fn hash(recipe: &Value) -> String {
@@ -447,6 +455,14 @@ mod tests {
         assert_eq!(hash(&l["recipe"]), changed.hash);
         let l = link(&look(&root, true), &photo, p, &pf);
         assert_eq!((l["render"]["id"].as_str(), l["kind"].as_str()), (Some(pf.hash.as_str()), None));
+        // The views: a photo link has its render ("rendered" filters on it); the cache's files are never items
+        std::fs::create_dir_all(root.join("_Stills")).unwrap();
+        std::fs::write(root.join("_Stills/A_2.50s.afplink.jpg"), crate::albums::photo_file(&crate::albums::tests::jpeg(16, 8, [9, 9, 9]), &photo.link.to_string()).unwrap()).unwrap();
+        std::fs::write(root.join(format!("_Renders/{}.Photo.jpg", pf.hash)), crate::albums::photo_file(&crate::albums::tests::jpeg(16, 8, [9, 9, 9]), &l.to_string()).unwrap()).unwrap();
+        let stills = index::scan(&root, "stills", false);
+        let listed: Vec<&str> = stills["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap()).collect();
+        assert_eq!(listed, ["_Stills/A_2.50s.afplink.jpg"]);
+        assert_eq!(stills["items"][0]["renders"], json!({ "Photo": "current" }));
         assert_eq!(readable(&moment, profile("SDR").unwrap(), "mov"), "Best turtle (SDR).mov");
         assert_eq!(readable(&photo, p, "heic"), "A_2.50s.heic");
         let _ = std::fs::remove_dir_all(&root);
