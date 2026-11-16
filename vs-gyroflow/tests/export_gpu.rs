@@ -2,7 +2,8 @@
 //
 // gyroflow-export's GPU path against its pipes (docs/export-gpu-path.md), on a real clip: AFP_GPU_CLIP (a stabilized
 // clip, e.g. ~/Movies/afp-perf-clips/DJI_20261022152937_0069_D.MP4) and AFP_GPU_FFMPEG (an ffmpeg the GPU path runs,
-// tools/export-gpu/build_ffmpeg_libplacebo.sh's on a Mac). Without them it's skipped. Two seconds rendered both ways:
+// tools/export-gpu/build_ffmpeg_libplacebo.sh's on a Mac), or AFP_GPU_EXPORT (a gyroflow-export to run instead of this
+// build's, e.g. the one inside a built ActionFootagePlayer.app, which finds the app's own ffmpeg). Without them it's skipped. Two seconds rendered both ways:
 // the same number of frames, each the other's own (not its neighbour's), and the pictures within the warp's own
 // difference (the player's 8 px grid and interpolation against Gyroflow's per-pixel engine: Y about 38-39 dB)
 
@@ -10,7 +11,8 @@ use std::path::Path;
 use std::process::Command;
 
 fn export(clip: &str, out: &Path, gpu: &str) -> std::path::PathBuf {
-    let status = Command::new(env!("CARGO_BIN_EXE_gyroflow-export"))
+    let exe = std::env::var_os("AFP_GPU_EXPORT").unwrap_or_else(|| env!("CARGO_BIN_EXE_gyroflow-export").into());
+    let status = Command::new(exe)
         .args(["--gpu", gpu, "--chromatic", "no", "--from", "3", "--to", "5", "--force", "--out"]).arg(out).arg(clip)
         .status().unwrap();
     assert!(status.success(), "gyroflow-export --gpu {gpu} failed");
@@ -30,8 +32,9 @@ fn mse(a: &[u8], b: &[u8]) -> f64 {
 
 #[test]
 fn the_gpu_path_renders_what_the_pipes_do() {
-    let (Ok(clip), Ok(_)) = (std::env::var("AFP_GPU_CLIP"), std::env::var("AFP_GPU_FFMPEG")) else {
-        eprintln!("AFP_GPU_CLIP / AFP_GPU_FFMPEG not set: skipped");
+    let Ok(clip) = std::env::var("AFP_GPU_CLIP") else { eprintln!("AFP_GPU_CLIP not set: skipped"); return; };
+    if std::env::var_os("AFP_GPU_FFMPEG").is_none() && std::env::var_os("AFP_GPU_EXPORT").is_none() {
+        eprintln!("neither AFP_GPU_FFMPEG nor AFP_GPU_EXPORT set: skipped");
         return;
     };
     let dir = std::env::temp_dir().join(format!("afp-export-gpu-{}", std::process::id()));
