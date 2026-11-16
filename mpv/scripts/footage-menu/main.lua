@@ -63,7 +63,11 @@ local KEY_LABELS = {
     { "ab-loop", "Mark the start of a part, its end, then clear it" },
     { "script-binding gyroflow/export", "Export the clip as it plays, or the marked part" },
     { "script-binding workspace/moment", "Save the marked part as a moment, asking its name (on a moment: update it)" },
-    { "script-binding workspace/not-interesting", "This clip isn't interesting: its preview in _Clips/ to the Trash (again: made again)" },
+    { "script-binding workspace/accept", "Accept the original or moment playing (again: neither)" },
+    { "script-binding workspace/reject", "Reject the original or moment playing (again: neither)" },
+    { "script-binding workspace/unpick", "Neither accepted nor rejected" },
+    { "script-binding workspace/rate-3", "Stars: 1 to 5 (the same again: none), 0 none" },
+    { "script-binding workspace/tags", "A tag of your own on the original or moment playing" },
     { "script-binding workspace/cut-out", "Cut the marked part out of the clip (spoiled), without re-encoding; the original to the Trash" },
     { "script-binding highlights/next", "Next mark (the camera's highlights and yours)" },
     { "script-binding highlights/prev", "Previous mark" },
@@ -410,7 +414,7 @@ local function project_menu(w, key)
             local quoted = '"' .. dir:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
             table.insert(choices, item(name .. "    " .. (dir:match("^(.*)[/\\][^/\\]+[/\\]?$") or ""), "script-message-to workspace init-project " .. quoted))
         end
-        return { info("No project yet: moments, exports and clip previews need one"), SEPARATOR,
+        return { info("No project yet: moments and exports need one"), SEPARATOR,
                  submenu("Initialize the project in", choices, { disabled = #choices == 0 }) }
     end
     local items = { info("Project: " .. (w.project:match("([^/\\]+)[/\\]?$") or w.project)) }
@@ -423,7 +427,14 @@ local function project_menu(w, key)
         table.insert(items, item("Open in Action Footage Library", "script-message-to workspace open-library"))
         table.insert(items, item("New moments stabilized on their own", "script-message-to workspace moments-alone", { checked = w.moments_alone }))
     end
-    table.insert(items, item("This clip isn't interesting", "script-binding workspace/not-interesting", { shortcut = key["script-binding workspace/not-interesting"] }))
+    local t = w.tags
+    if t then
+        table.insert(items, item("Accept", "script-binding workspace/accept", { checked = t.pick == "accept", shortcut = key["script-binding workspace/accept"] }))
+        table.insert(items, item("Reject", "script-binding workspace/reject", { checked = t.pick == "reject", shortcut = key["script-binding workspace/reject"] }))
+        table.insert(items, item("Tag…", "script-binding workspace/tags", { shortcut = key["script-binding workspace/tags"] }))
+    end
+    -- (a clip in an album: its link there, made by Action Footage Library)
+    if w.clip_preview == "made" then table.insert(items, item("Take this clip out of its album", "script-binding workspace/not-interesting")) end
     table.insert(items, SEPARATOR)
     table.insert(items, item(reveal, "script-message-to workspace project-folder", { disabled = not w.project }))
     return items

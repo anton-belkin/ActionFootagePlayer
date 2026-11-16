@@ -13,11 +13,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod albums;
+mod changed;
 mod checks;
 mod geo;
 mod index;
 mod locations;
+mod renders;
 mod seen;
+mod share;
 mod tags;
 mod takein;
 mod thumbs;
@@ -83,6 +87,8 @@ struct Job {
     made_paths: Vec<String>,
     #[serde(skip)]
     request: Value,
+    /// Share: where the selection goes, and each item's state (share.rs)
+    share: Option<share::Share>,
 }
 
 // The batch running: the player, the files it talks through, and macOS's caffeinate keeping the Mac awake meanwhile
@@ -105,6 +111,9 @@ struct Inner {
     next_id: u64,
     // The window's close asked while batches are queued: the page asks whether to stop them
     close_asked: bool,
+    // …or while the page's changes are still being written (WRITES_PENDING): the window stays until they are, the
+    // page saying so
+    close_waits: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
     // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
@@ -252,9 +261,31 @@ fn watch(root: &Path, moved: bool) -> Watch {
     let (c, l) = (changes.clone(), last.clone());
     let runner = seen::start(root, changes.clone(), last.clone(), moved);
     let (events, me) = (runner.events.clone(), root.to_path_buf());
+    // A file's attributes changed (a Finder tag set by hand, FSEvents' ItemXattrMod; this Mac's disks, and this Mac's
+    // own changes on a share): that original or moment synced with the library's tag stores, a second after it settles
+    // (docs/tags-and-culling.md, Sync). Our own writes, noticed again, find nothing to do
+    let (attrs, attrs_rx) = std::sync::mpsc::channel::<PathBuf>();
+    let sync_root = root.to_path_buf();
+    std::thread::spawn(move || {
+        while let Ok(first) = attrs_rx.recv() {
+            let mut paths = vec![first];
+            while let Ok(p) = attrs_rx.recv_timeout(Duration::from_millis(1000)) { paths.push(p); }
+            let stores = tags::Stores::of(&sync_root);
+            if stores.list.is_empty() { continue; }
+            let mut items: Vec<Value> = Vec::new();
+            for p in paths { if let Some(it) = tags::item_of_file(&sync_root, &p) { if !items.contains(&it) { items.push(it); } } }
+            if items.is_empty() { continue; }
+            let tool = link_tool();
+            let (came, problems) = tags::sync(&sync_root, &items, &|f, l| write_link(tool.as_ref(), f, l), &stores);
+            if came > 0 || !problems.is_empty() { eprintln!("tags: {came} item(s) changed in Finder taken in; {problems:?}"); }
+        }
+    });
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(e) = res else { return };
         if matches!(e.kind, notify::EventKind::Access(_)) { return; }
+        if matches!(e.kind, notify::EventKind::Modify(notify::event::ModifyKind::Metadata(_)) | notify::EventKind::Modify(notify::event::ModifyKind::Any)) {
+            for p in &e.paths { let _ = attrs.send(p.clone()); }
+        }
         // Temporary and hidden files (a write through a temporary file shows as its final name too), the NAS's recycle bin
         let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
                                           && !p.to_string_lossy().ends_with(".tmp"));
@@ -298,6 +329,36 @@ struct RecentEntry {
     /// while it's offline)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hosts: Vec<String>,
+    /// "Open at start": the one project of the list the app opens when it's started with no file (start_entry). This
+    /// computer's choice, kept here in the app's own data, never in the project
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    at_start: bool,
+}
+
+/// The project opened at start: the one of the list marked so (the first, should a list edited by hand mark several)
+fn start_entry(list: &[RecentEntry]) -> Option<&RecentEntry> { list.iter().find(|e| e.at_start) }
+
+/// "Open at start" put on the project at `path` (None: on none), taken off every other. false: it isn't in the list
+fn set_start(list: &mut [RecentEntry], path: Option<&str>) -> bool {
+    for e in list.iter_mut() { e.at_start = false; }
+    match path {
+        None => true,
+        Some(p) => list.iter_mut().find(|e| e.path == p).map(|e| e.at_start = true).is_some(),
+    }
+}
+
+/// The list with a project just opened put first: its own entry replaced (its "Open at start" kept), the list kept to
+/// ten, the project opened at start never dropped off its end
+fn remembered(mut list: Vec<RecentEntry>, mut new: RecentEntry) -> Vec<RecentEntry> {
+    new.at_start = list.iter().any(|x| x.path == new.path && x.at_start);
+    list.retain(|x| x.path != new.path);
+    list.insert(0, new);
+    if list.len() > 10 {
+        let start = list.iter().skip(10).find(|e| e.at_start).cloned();
+        list.truncate(10);
+        if let Some(s) = start { list[9] = s; }
+    }
+    list
 }
 
 /// The list as kept: entries, or (before 0.13) the paths alone
@@ -357,12 +418,9 @@ fn recent_names(e: &RecentEntry) -> Vec<String> {
 
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
-    let mut list = recent_list(app);
-    list.retain(|x| x.path != p);
     let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
     let hosts = other_names(root, share.as_deref());
-    list.insert(0, RecentEntry { path: p, share, rel, hosts });
-    list.truncate(10);
+    let list = remembered(recent_list(app), RecentEntry { path: p, share, rel, hosts, at_start: false });
     write_recent(app, &list);
 }
 
@@ -390,6 +448,7 @@ fn project_of(path: &Path) -> Option<PathBuf> {
 }
 
 fn read_doc(root: &Path) -> Value {
+    afp_catalog::store::nas::read();
     std::fs::read_to_string(root.join(PROJECT_FILE)).ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .filter(|v| v.is_object() && v.get("format").is_none_or(|f| f == FORMAT))
@@ -419,6 +478,7 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
 }
 
 fn count_files(dir: &Path, suffixes: &[&str], depth: u32) -> u64 {
+    afp_catalog::store::nas::read();
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let mut n = 0;
     for e in entries.flatten() {
@@ -448,6 +508,8 @@ struct ProjectInfo {
     moments: u64,
     stills: u64,
     exports: u64,
+    // The library's tag stores (docs/tags-and-culling.md): "finder"
+    tag_stores: Vec<String>,
 }
 
 fn project_info(root: &Path) -> ProjectInfo {
@@ -466,6 +528,7 @@ fn project_info(root: &Path) -> ProjectInfo {
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
         stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
+        tag_stores: locations::tag_stores(root),
     }
 }
 
@@ -635,6 +698,12 @@ fn tick(inner: &mut Inner) {
         if let Some(job) = job {
             let had = job.made_paths.len();
             let has_status = read_status(job, &run.dir);
+            // Share: the item being rendered now
+            if let (Some(s), Some(now)) = (job.share.as_mut(), job.current.clone()) {
+                for it in s.items.iter_mut().filter(|i| i.state == "waiting" || i.state == "rendering") {
+                    it.state = if it.name == now { "rendering" } else { "waiting" }.into();
+                }
+            }
             // Stabilize optically: each clip's Gyroflow project, told to the catalog as it lands (the views read it: the
             // clip's motion data and badge change then; gyroflow-optical tells no one)
             if job.made_paths.len() > had {
@@ -681,6 +750,10 @@ fn tick(inner: &mut Inner) {
                     inner.jobs.push(job);
                 }
             }
+            // A share's renders are made (or not): the worker hands them over (share_collect), the job done only then
+            if let Some(job) = inner.jobs.iter_mut().find(|j| j.id == id && j.share.is_some()) {
+                if let Some(s) = job.share.as_mut() { s.ended = true; }
+            }
             // What a batch made, and the clips it looked at, into the catalog: a look at everything
             seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
             if let Some(mut run) = inner.running.take() {
@@ -724,6 +797,7 @@ struct Snapshot {
     project: Option<String>,
     jobs: Vec<Job>,
     close_asked: bool,
+    close_waits: bool,
     macos: bool,
     // Changes seen in the project's folder and locations, and how long since the last one (ms)
     changes: u64,
@@ -775,6 +849,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
+        close_waits: inner.close_waits,
         macos: cfg!(target_os = "macos"),
         changes,
         quiet_ms,
@@ -834,6 +909,8 @@ struct Recent {
     connect: bool,
     /// The names it can be connected by (the NAS's), for Connect's list
     names: Vec<String>,
+    /// The one the app opens when it's started with no file ("Open at start")
+    at_start: bool,
 }
 
 // The projects this computer has opened, the last first: every one, those not reachable now too (offline)
@@ -857,11 +934,48 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
         let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
                  here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
-                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
+                 names: if here.is_none() { recent_names(e) } else { Vec::new() }, at_start: e.at_start }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
 }).await.map_err(|e| e.to_string())
+}
+
+/// "Open at start" put on a project of the list (None: taken off): the one the app opens when it's started with no
+/// file. Kept with the list, in the app's own data on this computer
+#[tauri::command]
+async fn set_start_project(app: tauri::AppHandle, path: Option<String>) -> Result<(), String> {
+    let mut list = recent_list(&app);
+    if !set_start(&mut list, path.as_deref()) { return Err("That project isn't in the list of those opened here".into()); }
+    write_recent(&app, &list);
+    Ok(())
+}
+
+/// The app started with no file (the page asks once, when it's up and no project is open: a Project.afproject double
+/// clicked has opened by then): the project marked "Open at start" opened, when it's reachable. Its path; None: none
+/// marked, one opened already, or it's offline (the start screen then shows it so, with Connect)
+#[tauri::command]
+async fn open_at_start(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Option<String> {
+        if shared.lock().unwrap().project.is_some() { return None; }
+        let list = recent_list(&app);
+        let root = recent_here(start_entry(&list)?, &locations::mounts())?;
+        usable(&root).map_err(|e| eprintln!("{e}")).ok()?;
+        let mut inner = shared.lock().unwrap();
+        // One opened meanwhile (a double click) stays
+        if inner.project.is_some() { return None; }
+        inner.project = Some(root.clone());
+        Some(root.display().to_string())
+    }).await.map_err(|e| e.to_string())
+}
+
+/// The project closed: the start screen, with the projects opened before (tasks queued go on)
+#[tauri::command]
+fn close_project(shared: State<Shared>) {
+    let mut inner = shared.lock().unwrap();
+    inner.project = None;
+    inner.pending_open.clear();
 }
 
 /// A project taken off the list of those opened before (a test one, one moved away)
@@ -965,6 +1079,32 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     }).await.map_err(|e| e.to_string())
 }
 
+/// What changed since the page's count `since` (seen.rs counts, and tells the page: `catalog-changed`), as the items
+/// it changed (changed.rs): { upto: the count now, changed: the items, or null when that can't be said and the views
+/// are to be read again }
+#[tauri::command]
+async fn changes_since(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, since: u64) -> Result<Value, String> {
+    let (root, now) = { let g = shared.lock().unwrap(); (g.project.clone().ok_or("Open a project first")?, g.watch.as_ref().map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0)) };
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let changed = seen::since(since, now).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
+        json!({ "upto": now, "changed": changed })
+    }).await.map_err(|e| e.to_string())
+}
+
+/// These items of a view as they are now (changed.rs): what the page asks for when it knows which items to look at
+/// again (a clip whose preview went)
+#[tauri::command]
+async fn view_items(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, ids: Vec<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut c = changed::Changed::default();
+        c.add(&root, changed::flat_previews(&root), &view, &ids);
+        c.with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
 /// An offline location's share connected (the Sources banner's Connect): its clips show as soon as it's there
 #[tauri::command]
 async fn connect_location(shared: State<'_, Shared>, path: String, host: Option<String>) -> Result<(), String> {
@@ -1065,6 +1205,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
                    "never_rename": locations::never_rename(&root),
+                   "tag_stores": locations::tag_stores(&root), "finder_here": cfg!(target_os = "macos"),
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
@@ -1128,9 +1269,12 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
     // "I never rename my footage": kept, unless this save says otherwise
     let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
-    if clean.is_empty() && !never_rename { let _ = std::fs::remove_file(&file); return Ok(()); }
+    // The tag stores chosen on this computer (save_tag_stores) stay
+    let stores = locations::read_json(&file).map(|d| locations::tag_stores_in(&d)).unwrap_or_default();
+    if clean.is_empty() && !never_rename && stores.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
     let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
     if never_rename { doc["never_rename"] = json!(true); }
+    if !stores.is_empty() { doc["tag_stores"] = json!(stores); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }).await.map_err(|e| e.to_string())?
 }
@@ -1416,27 +1560,128 @@ async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
 // ---------- renders ----------
 
 #[tauri::command]
-async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let (n, problems) = index::delete_renders(&root, &moments, stale_only);
-    Ok(json!({ "deleted": n, "problems": problems }))
+    let (n, problems) = renders::delete(&root, &moments, stale_only);
+    // The moments and photo links as they are now (changed.rs): the page corrects those, and reads no view again
+    let mut c = changed::Changed { answer: json!({ "deleted": n, "problems": problems }), problems, ..Default::default() };
+    let (ms, ps): (Vec<String>, Vec<String>) = moments.iter().cloned().partition(|id| id.to_lowercase().ends_with(index::LINK_EXT));
+    let flat = changed::flat_previews(&root);
+    if !ms.is_empty() { c.add(&root, flat, "moments", &ms); }
+    if !ps.is_empty() { c.add(&root, flat, "stills", &ps); }
+    Ok(c)
 }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- tags ----------
 
 #[tauri::command]
-async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
+async fn set_tags(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
     let meta = meta_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
-                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
-        .await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        tags::remember(&add);
+        let problems = tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t));
+        // The items as they are now (changed.rs): the page corrects those, and reads no view again
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
+
+// 1–5 stars on the selection (None: none), kept where its tags are (stills: designed). Answers with the items as they
+// are now, as set_tags does
+#[tauri::command]
+async fn set_rating(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, rating: Option<u8>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::apply(&root, &items, &tags::Op::Rating(rating), &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
+// Accept or Reject on the selection (None: neither; docs/tags-and-culling.md)
+#[tauri::command]
+async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, pick: Option<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::apply(&root, &items, &tags::Op::Pick(pick.as_deref()), &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
+// The selection (none: every original and moment) synced with the library's tag stores: what changed in Finder comes in
+#[tauri::command]
+async fn sync_tags(shared: State<'_, Shared>, items: Option<Vec<Value>>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = items.filter(|i| !i.is_empty()).unwrap_or_else(|| tags::every_item(&root));
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        json!({ "looked": items.len(), "came": came, "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tag stores this computer syncs (Project settings → Tags): written into this computer's own file for the project
+// (never Project.afproject: it keeps only the locations), its other choices kept; then everything synced once
+#[tauri::command]
+async fn save_tag_stores(shared: State<'_, Shared>, stores: Vec<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = project_id(&root)?;
+        let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
+        write_tag_stores(&file, &root, &stores)?;
+        let items = tags::every_item(&root);
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        Ok(json!({ "looked": items.len(), "came": came, "problems": problems }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// `stores` (the ones known) into this computer's file for the project, what else it keeps left as it is; a file left
+/// with nothing of this computer's is removed
+fn write_tag_stores(file: &Path, root: &Path, stores: &[String]) -> Result<(), String> {
+    let list: Vec<&String> = stores.iter().filter(|s| *s == "finder").collect();
+    let mut doc = locations::read_json(file).filter(Value::is_object).unwrap_or_else(|| json!({ "project": root.display().to_string(), "locations": [] }));
+    let o = doc.as_object_mut().unwrap();
+    if list.is_empty() { o.remove("tag_stores"); } else { o.insert("tag_stores".into(), json!(list)); }
+    let nothing = o.get("locations").and_then(Value::as_array).is_none_or(|l| l.is_empty()) && o.get("never_rename").and_then(Value::as_bool) != Some(true) && list.is_empty();
+    if nothing { let _ = std::fs::remove_file(file); return Ok(()); }
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
+    std::fs::write(file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
+}
+
+// A tag renamed everywhere in the project (every view's items that have it); to a name in use: merged into it
+#[tauri::command]
+async fn rename_tag(shared: State<'_, Shared>, from: String, to: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let (from, to) = (from.trim().to_string(), to.split_whitespace().collect::<Vec<_>>().join(" "));
+    if from.is_empty() || to.is_empty() { return Err("A tag and its new name".into()); }
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = tags::with_tag(&root, &from);
+        let problems = tags::apply(&root, &items, &tags::Op::Rename { from: &from, to: &to }, &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        tags::remember(std::slice::from_ref(&to));
+        json!({ "count": items.len(), "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tags used last on this computer (the player's K writes them too)
+#[tauri::command]
+fn recent_tags() -> Vec<String> { tags::recent() }
 
 // ---------- Stabilize optically: the lens ----------
 
@@ -1498,11 +1743,16 @@ async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::Share
 /// The Source settings of clips (the Source Settings tab, Batch set Source settings): [{ "clip": its path in the
 /// tree, "source": { key: value, or null to take it out } }], each clip's own; only the keys given are written
 #[tauri::command]
-async fn set_source(shared: State<'_, Shared>, entries: Vec<Value>) -> Result<Vec<String>, String> {
+async fn set_source(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, entries: Vec<Value>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let list: Vec<(String, serde_json::Map<String, Value>)> = entries.iter().filter_map(|e| Some((e["clip"].as_str()?.to_string(), e["source"].as_object()?.clone())))
         .filter(|(_, s)| !s.is_empty()).collect();
-    tauri::async_runtime::spawn_blocking(move || tags::set_source(&root, &list)).await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_source(&root, &list);
+        // The clips as they are now (changed.rs)
+        changed::of_clips(&root, &list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------
@@ -1584,12 +1834,15 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        rename_in(&root, &view, &kind, &path, &name)
+        let to = rename_in(&root, &view, &kind, &path, &name)?;
+        // What it is now, and that the old name is gone (changed.rs); its new path is the answer
+        Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1610,7 +1863,9 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
     // comes late or never)
     let touched: std::cell::RefCell<Vec<PathBuf>> = std::cell::RefCell::new(Vec::new());
     let mv = |a: &Path, b: &Path| -> Result<(), String> {
+        afp_catalog::store::nas::stat();
         if b.exists() { return Err(format!("{} exists already", b.display())); }
+        afp_catalog::store::nas::write();
         std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))?;
         touched.borrow_mut().extend([a.to_path_buf(), b.to_path_buf()]);
         Ok(())
@@ -1647,7 +1902,8 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
         _ => {
             // A photo or an export: its extension kept (a Motion Photo's .MP.jpg whole), a Live Photo's video along
             let lower = fname.to_lowercase();
-            let ext = if lower.ends_with(".mp.jpg") { fname[fname.len() - 7..].to_string() } else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
+            let ext = if lower.ends_with(albums::PHOTO_EXT) { fname[fname.len() - albums::PHOTO_EXT.len()..].to_string() }
+                else if lower.ends_with(".mp.jpg") { fname[fname.len() - 7..].to_string() } else { fname.rfind('.').map(|i| fname[i..].to_string()).unwrap_or_default() };
             let stem = &fname[..fname.len() - ext.len()];
             let to = dir.join(format!("{name}{ext}"));
             mv(&from, &to)?;
@@ -1671,6 +1927,7 @@ static TRASH_REMOVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
 // UGREEN or Synology share keeps what's deleted there; Finder can't put a network file in the Trash). Ok: where it went
 fn to_trash(file: &Path) -> Result<String, String> {
+    afp_catalog::store::nas::write();
     // Tests on a local disk: removed (Finder's Trash isn't theirs to fill)
     #[cfg(test)]
     if TRASH_REMOVES.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1714,12 +1971,15 @@ fn to_trash(file: &Path) -> Result<String, String> {
 // Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
 // footage is deleted in Finder), an export. What went where, and what couldn't
 #[tauri::command]
-async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        Ok(delete_in(&root, &items))
+        // What's gone, and the clips whose previews went, as they are now (changed.rs); what went where is the answer
+        let clips = changed::before_delete(&items);
+        let answer = delete_in(&root, &items);
+        Ok(changed::of_delete(&root, &items, &clips, answer))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -2060,7 +2320,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request,
+        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None,
     };
     let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
@@ -2070,12 +2330,110 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
             let request = json!({ "kind": "clips-finish", "project": project });
             let id = inner.next_id;
             inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
-                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request });
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None });
         }
     }
     tick(&mut inner);
     Ok(())
 }).await.map_err(|e| e.to_string())?
+}
+
+// ---------- Share (share.rs) ----------
+
+// A share whose renders the player has made: each handed to the destination, away from the lock (a copy to a share
+// takes its time), then the job says how it went
+fn share_collect(shared: &Shared) {
+    let ended: Vec<(u64, share::Share, Vec<(String, String)>, bool)> = {
+        let mut inner = shared.lock().unwrap();
+        // (ended, or never run: the player isn't installed, the job was taken out of the queue's turn)
+        let pending = |s: &share::Share| s.items.iter().any(|i| i.state == "waiting" || i.state == "rendering");
+        inner.jobs.iter_mut().filter(|j| j.share.as_ref().is_some_and(|s| s.ended || (j.state.finished() && pending(s)))).map(|j| {
+            let s = j.share.as_mut().unwrap();
+            s.ended = false;
+            (j.id, s.clone(), j.failures.clone(), j.state == JobState::Stopped)
+        }).collect()
+    };
+    for (id, mut s, failures, stopped) in ended {
+        let written = share::collect(&mut s, &failures, stopped);
+        seen::note_now(&written);
+        let mut inner = shared.lock().unwrap();
+        if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) { share_sum(j, s); }
+    }
+}
+
+// A share's job as its items are now: how many are saved, which failed and why
+fn share_sum(job: &mut Job, s: share::Share) {
+    let left = s.items.iter().filter(|i| !matches!(i.state.as_str(), "copied" | "failed")).count();
+    job.total = s.items.len() as u64;
+    job.failed = s.items.iter().filter(|i| i.state == "failed").count() as u64;
+    job.done = job.total - left as u64;
+    job.made = Some(s.items.iter().filter(|i| i.state == "copied").count() as u64);
+    job.failures = s.items.iter().filter(|i| i.state == "failed").map(|i| (i.name.clone(), i.message.clone().unwrap_or_default())).collect();
+    if left == 0 {
+        // (stopped, or the player failed and said why: as it is)
+        if !matches!(job.state, JobState::Stopped | JobState::Failed) {
+            job.state = if job.made == Some(0) && job.failed > 0 { JobState::Failed } else { JobState::Done };
+            job.message = (job.state == JobState::Failed).then(|| "Nothing was saved".to_string());
+        }
+        job.fraction = None;
+        job.current = None;
+    }
+    job.share = Some(s);
+}
+
+// Share: the selection (`items`: { kind: moment | photo | clip | file, path, name }) to a destination. For now one,
+// "folder": each item's render copied into `folder` (asked for here when not given) under a readable name. What the
+// render cache has is copied at once; the rest is rendered first by the player, as a job in the queue, and copied when
+// it's made. The folder chosen, or nothing when the choice was cancelled
+#[tauri::command]
+async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folder: Option<String>, look: Option<String>) -> Result<Option<String>, String> {
+    if !share::DESTINATIONS.iter().any(|(id, _)| *id == dest) { return Err(format!("no such destination: {dest}")); }
+    if items.is_empty() { return Err("Select what to share".into()); }
+    let folder = match folder.filter(|f| !f.is_empty()) {
+        Some(f) => PathBuf::from(f),
+        None => match rfd::AsyncFileDialog::new().set_title("Save to a folder").pick_folder().await { Some(f) => f.path().to_path_buf(), None => return Ok(None) },
+    };
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let look = look.unwrap_or_else(|| "HDR".into());
+        // Shown in the queue at once: looking at the cache, then copying what it has
+        let id = {
+            let mut inner = shared.lock().unwrap();
+            inner.next_id += 1;
+            let n = items.len();
+            let title = format!("Share · {} to {}", if n == 1 { "1 item".to_string() } else { format!("{n} items") },
+                                folder.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| folder.display().to_string()));
+            let id = inner.next_id;
+            inner.jobs.push(Job { id, kind: "share".into(), title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                                  project: root.display().to_string(), state: JobState::Looking, done: 0, total: n as u64, failed: 0, made: None, fraction: None,
+                                  current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request: Value::Null,
+                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ended: false }) });
+            id
+        };
+        let (planned, asked) = share::plan(&root, &items, &look);
+        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ended: false };
+        let show = |s: &share::Share, request: Option<Value>| {
+            let mut inner = shared.lock().unwrap();
+            if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) {
+                share_sum(j, s.clone());
+                // What the cache lacks: the player's to make, in its turn
+                if let Some(r) = request { j.request = r; j.state = JobState::Waiting; }
+            }
+            tick(&mut inner);
+        };
+        show(&s, None);
+        let mut written = Vec::new();
+        for i in 0..s.items.len() {
+            if s.items[i].state != "copying" { continue; }
+            written.extend(share::deliver(&dest, &folder, &mut s.items[i]));
+            show(&s, None);
+        }
+        seen::note_now(&written);
+        let request = (!asked.is_empty()).then(|| json!({ "kind": "share", "project": root.display().to_string(), "items": asked }));
+        show(&s, request);
+        Ok(Some(folder.display().to_string()))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // The folders the Library shows now (absolute, on disk): a clip previews' pictures job makes theirs first
@@ -2148,11 +2506,27 @@ async fn reveal(shared: State<'_, Shared>, what: Option<String>) -> Result<(), S
 }).await.map_err(|e| e.to_string())
 }
 
+/// How many of the page's changes are still being written (ui/writes.js: a change shows at once and is written after):
+/// the window isn't closed under them
+static WRITES_PENDING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[tauri::command]
+fn writes_pending(n: u64) { WRITES_PENDING.store(n, std::sync::atomic::Ordering::Relaxed); }
+
+/// What a close of the window does: asked about (batches queued), waited with until the page's changes are written,
+/// or done. Asked a second time while waiting, it closes (a page that never answers mustn't keep the window)
+#[derive(Debug, PartialEq)]
+enum Close { Ask, Wait, Now }
+fn close_decision(batches: bool, writes: u64, waiting: bool) -> Close {
+    if batches { Close::Ask } else if writes > 0 && !waiting { Close::Wait } else { Close::Now }
+}
+
 // The window's close, answered: stop the batches and quit, or keep them going (the window stays)
 #[tauri::command]
 fn answer_close(app: tauri::AppHandle, shared: State<Shared>, quit: bool) {
     let mut inner = shared.lock().unwrap();
     inner.close_asked = false;
+    inner.close_waits = false;
     if quit {
         stop_all(&mut inner);
         drop(inner);
@@ -2217,6 +2591,7 @@ fn main() {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
         tick(&mut worker.lock().unwrap());
+        share_collect(&worker);
     });
 
     // A player here wrote something (afp-catalog note tells): the catalog's journals read at once (live.rs)
@@ -2251,20 +2626,31 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, set_start_project, open_at_start, close_project, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info])
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
+                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if busy(&for_window) {
-                    api.prevent_close();
-                    for_window.lock().unwrap().close_asked = true;
-                    let _ = window.set_focus();
+                let waiting = for_window.lock().unwrap().close_waits;
+                match close_decision(busy(&for_window), WRITES_PENDING.load(std::sync::atomic::Ordering::Relaxed), waiting) {
+                    Close::Ask => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_asked = true;
+                        let _ = window.set_focus();
+                    }
+                    // The page's changes still being written: it closes the window once they are (answer_close)
+                    Close::Wait => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_waits = true;
+                        let _ = window.emit("close-waits", ());
+                    }
+                    Close::Now => {}
                 }
             }
         })
@@ -2285,9 +2671,107 @@ fn main() {
     });
 }
 
+// Where the time goes on each changing command, measured on a project of thousands of clips (perf.rs)
+#[cfg(test)]
+mod perf;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Open at start": one project of the list, kept with it; opening projects keeps it, and never drops it off the list
+    #[test]
+    fn one_project_opens_at_start() {
+        let e = |p: &str| RecentEntry { path: p.into(), ..Default::default() };
+        let mut list = vec![e("/a"), e("/b"), e("/c")];
+        assert!(start_entry(&list).is_none());
+        assert!(set_start(&mut list, Some("/b")));
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Another one: only one at a time
+        assert!(set_start(&mut list, Some("/c")));
+        assert_eq!(list.iter().filter(|x| x.at_start).count(), 1);
+        assert_eq!(start_entry(&list).unwrap().path, "/c");
+        // One that isn't in the list: said, none marked
+        assert!(!set_start(&mut list, Some("/nowhere")));
+        assert!(start_entry(&list).is_none());
+        // As kept in the file: the mark only on the one, older lists (no mark, paths alone) read as before
+        assert!(set_start(&mut list, Some("/b")));
+        let text = serde_json::to_string(&list).unwrap();
+        assert_eq!(text.matches("at_start").count(), 1);
+        assert_eq!(parse_recent(&text), list);
+        assert!(start_entry(&parse_recent(r#"["/a",{"path":"/b","share":"//u@nas/Trips","rel":"b"}]"#)).is_none());
+        // Opened again: first in the list, still the one at start, its share kept as now
+        let list = remembered(list, RecentEntry { path: "/b".into(), share: Some("//u@nas/Trips".into()), rel: "b".into(), ..Default::default() });
+        assert_eq!(list.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/b", "/a", "/c"]);
+        assert!(list[0].at_start && list[0].share.is_some());
+        // Ten others opened after it: it stays in the list (the last place), still marked
+        let mut list = list;
+        for i in 0..12 { list = remembered(list, e(&format!("/p{i}"))); }
+        assert_eq!(list.len(), 10);
+        assert_eq!(list[0].path, "/p11");
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Taken off
+        assert!(set_start(&mut list, None));
+        assert!(start_entry(&list).is_none());
+    }
+
+    /// The project at start, where it is now: reachable at its path; else by its share, mounted now; else offline
+    #[test]
+    fn the_start_project_reachable_or_offline() {
+        let top = std::env::temp_dir().join(format!("afl-atstart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let p = top.join("vol/Trips/Egypt");
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(p.join(PROJECT_FILE), "{}").unwrap();
+        let here = RecentEntry { path: p.display().to_string(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&here, &[]), Some(p.clone()));
+        // Kept at a path that isn't there now, its share mounted elsewhere: found under the mount
+        let moved = RecentEntry { path: "/Volumes/Trips/Egypt".into(), share: Some("//me@nas.local/Trips".into()), rel: "Egypt".into(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&moved, &[("//me@nas.local/Trips".into(), top.join("vol/Trips"))]), Some(p.clone()));
+        // Its share not mounted: offline (the start screen shows it, with Connect)
+        assert_eq!(recent_here(&moved, &[]), None);
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    /// The tag stores chosen on a computer are in its own file for the project, beside its other choices, which stay
+    #[test]
+    fn tag_stores_in_this_computers_file() {
+        let top = std::env::temp_dir().join(format!("afl-tagstores-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        std::fs::create_dir_all(&top).unwrap();
+        let (file, root) = (top.join("abc.json"), top.join("P"));
+        // None yet, none chosen: no file made
+        write_tag_stores(&file, &root, &[]).unwrap();
+        assert!(!file.exists());
+        write_tag_stores(&file, &root, &["finder".into(), "nonsense".into()]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert_eq!(doc["tag_stores"], json!(["finder"]));
+        assert_eq!(locations::tag_stores_in(&doc), vec!["finder".to_string()]);
+        // Its other choices stay
+        std::fs::write(&file, r#"{"project":"/p","locations":[{"name":"SSD","at":"","path":"/ssd"}],"never_rename":true}"#).unwrap();
+        write_tag_stores(&file, &root, &["finder".into()]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert_eq!(doc["locations"][0]["path"], json!("/ssd"));
+        assert_eq!(doc["never_rename"], json!(true));
+        write_tag_stores(&file, &root, &[]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert!(doc.get("tag_stores").is_none() && doc["never_rename"] == json!(true));
+        // Nothing of this computer's left: the file goes
+        std::fs::write(&file, r#"{"project":"/p","locations":[],"tag_stores":["finder"]}"#).unwrap();
+        write_tag_stores(&file, &root, &[]).unwrap();
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn the_window_waits_for_changes_being_written() {
+        assert_eq!(close_decision(false, 0, false), Close::Now);
+        assert_eq!(close_decision(false, 2, false), Close::Wait);
+        // Asked again while it waits (the page not answering): closed
+        assert_eq!(close_decision(false, 2, true), Close::Now);
+        // Batches queued: asked about first (the page then waits for the changes before it quits)
+        assert_eq!(close_decision(true, 2, false), Close::Ask);
+    }
 
     #[test]
     fn changes_seen() {
@@ -2448,7 +2932,7 @@ mod tests {
         // The same share mounted elsewhere now (another name for the NAS too): the project found there
         std::fs::create_dir_all(b.join("Trips/P")).unwrap();
         std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
-        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new() };
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new(), at_start: false };
         assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
         // Not mounted: offline
         assert_eq!(recent_here(&e, &[]), None);
@@ -2587,7 +3071,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: project.clone(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
         });
         let t0 = Instant::now();
         while inner.jobs[0].made_paths.is_empty() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
@@ -2644,7 +3128,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
         });
         let t0 = Instant::now();
         let mut saw_running = false;
@@ -2673,7 +3157,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }), share: None,
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit
@@ -2686,6 +3170,76 @@ EOF\n").unwrap();
         let j = &inner.jobs[0];
         assert_eq!(j.state, JobState::Done, "{:?}", j.message);
         assert!(inner.running.is_none());
+    }
+}
+
+/// Share the whole way, with the player itself rendering what the cache lacks (no window: the batch mode). AFL_PLAYER:
+/// an ActionFootagePlayer.app with this branch's scripts; AFL_SHARE_TRIP: a folder with Project.afproject, a clip
+/// `Day 1/A.MP4` and a small `thumb.jpg`. Without them it's skipped. A moment, a photo link and the whole clip are
+/// shared to `<trip>/../shared`: each rendered into _Renders/<hash>.<profile>.<ext>, then copied
+#[cfg(test)]
+mod share_e2e {
+    use super::*;
+
+    #[test]
+    fn a_share_with_the_player() {
+        let (Some(_), Some(trip)) = (std::env::var_os("AFL_PLAYER"), std::env::var_os("AFL_SHARE_TRIP")) else { return };
+        let root = PathBuf::from(&trip);
+        let clip = "Day 1/A.MP4";
+        let size = std::fs::metadata(root.join(clip)).unwrap().len();
+        let jpeg = std::fs::read(root.join("thumb.jpg")).unwrap();
+        for d in ["_Moments/Reef", "_Stills/Reef"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        let roots = json!([root.display().to_string()]);
+        std::fs::write(root.join("_Moments/Reef/Turtle.afplink.mp4"),
+                       albums::link_file(&jpeg, &json!({ "v": 1, "kind": "moment", "clip": clip, "size": size, "roots": roots, "in": 0.5, "out": 2.5 }).to_string()).unwrap()).unwrap();
+        std::fs::write(root.join("_Stills/Reef/A_1.00s.afplink.jpg"),
+                       albums::photo_file(&jpeg, &json!({ "v": 1, "kind": "photo", "clip": clip, "t": 1.0, "size": size, "roots": roots }).to_string()).unwrap()).unwrap();
+        let folder = root.parent().unwrap().join("shared");
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let items = [json!({ "kind": "moment", "path": "_Moments/Reef/Turtle.afplink.mp4", "name": "Turtle" }),
+                     json!({ "kind": "photo", "path": "_Stills/Reef/A_1.00s.afplink.jpg", "name": "A_1.00s" }),
+                     json!({ "kind": "clip", "path": clip, "name": "A" })];
+        let look = std::env::var("AFL_SHARE_LOOK").unwrap_or_else(|_| "HDR".into());
+        let (planned, asked) = share::plan(&root, &items, &look);
+        println!("planned: {}", serde_json::to_string(&planned.iter().map(|i| (&i.name, &i.state, &i.message)).collect::<Vec<_>>()).unwrap());
+        println!("asked of the player: {}", serde_json::to_string_pretty(&asked).unwrap());
+        let shared: Shared = Arc::new(Mutex::new(Inner::default()));
+        {
+            let mut inner = shared.lock().unwrap();
+            inner.project = Some(root.clone());
+            inner.next_id = 1;
+            inner.jobs.push(Job {
+                id: 1, kind: "share".into(), title: "t".into(), project: root.display().to_string(), project_name: "trip".into(),
+                state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
+                failures: vec![], left_out: vec![], made_paths: vec![],
+                request: json!({ "kind": "share", "project": root.display().to_string(), "items": asked }),
+                share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ended: false }),
+            });
+        }
+        let t0 = Instant::now();
+        loop {
+            {
+                let mut inner = shared.lock().unwrap();
+                tick(&mut inner);
+            }
+            share_collect(&shared);
+            let inner = shared.lock().unwrap();
+            let j = &inner.jobs[0];
+            let left = j.share.as_ref().is_some_and(|s| s.items.iter().any(|i| !matches!(i.state.as_str(), "copied" | "failed")));
+            if (j.state.finished() && inner.running.is_none() && !left) || t0.elapsed() > Duration::from_secs(900) { break; }
+            drop(inner);
+            std::thread::sleep(Duration::from_millis(300));
+        }
+        let inner = shared.lock().unwrap();
+        let j = &inner.jobs[0];
+        println!("after {:.1} s: {:?} {:?} failures {:?}", t0.elapsed().as_secs_f64(), j.state, j.message, j.failures);
+        for i in &j.share.as_ref().unwrap().items { println!("  {} ({}): {} {:?}", i.name, i.kind, i.state, i.message); }
+        let list = |d: &Path| { let mut v: Vec<String> = std::fs::read_dir(d).into_iter().flatten().flatten().map(|e| format!("{} {}", e.file_name().to_string_lossy(), e.metadata().map(|m| m.len()).unwrap_or(0))).collect(); v.sort(); v };
+        println!("_Renders: {:?}", list(&root.join("_Renders")));
+        println!("shared: {:?}", list(&folder));
+        assert!(j.share.as_ref().unwrap().items.iter().all(|i| i.state == "copied"), "not everything was saved");
+        assert_eq!(j.state, JobState::Done, "{:?}", j.message);
     }
 }
 
@@ -2821,7 +3375,7 @@ mod audit {
         assert!(checks::apply(found.as_array().unwrap(), &relink).is_empty());
         row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
         // Renders deleted
-        let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
+        let (n, problems) = renders::delete(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
         assert!(n == 1 && problems.is_empty(), "{problems:?}");
         row("Delete renders", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["renders"].to_string());
         // New folder, rename a moment, rename a folder
@@ -2872,7 +3426,7 @@ mod audit {
     }
 
     fn check(rows: &[(String, String, String)]) {
-        let want = ["[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
+        let want = ["[\"reef\"]", "[\"reef\"]", "[]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
                     "[\"_Moments/Reef/Shark.afplink.mp4\"]", "[\"_Moments/Sea/Shark.afplink.mp4\"]", "true", "true"];
         for ((w, _, a), x) in rows.iter().zip(want) { assert!(a.contains(x), "{w}: {a}, wanted {x}"); }
         let (_, _, del) = rows.last().unwrap();
@@ -2966,7 +3520,7 @@ mod e2e {
             let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
             inner.jobs.push(Job { id: 1, kind: kind.into(), title: kind.into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                                   done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                                  made_paths: Vec::new(), request });
+                                  made_paths: Vec::new(), request, share: None });
             let t = Instant::now();
             let (mut made_at, mut shown_at): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
             let mut done_at = None;
@@ -3058,7 +3612,7 @@ mod live_e2e {
         let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
         inner.jobs.push(Job { id: 1, kind: "moments".into(), title: "moments".into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                               done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) });
+                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) , share: None });
         let moments = |p: &Path| index::scan(p, "moments", false)["items"].as_array().cloned().unwrap_or_default();
         let mut made_at = None;
         until("the moment made and in the view", Duration::from_secs(300), &mut || {

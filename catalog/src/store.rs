@@ -46,6 +46,38 @@ pub trait Store: Send + Sync {
 
 static COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// A share's slowness stood in for, for measuring (library/src/perf.rs): each question to the disk waits as long as one
+/// to a NAS takes. Nothing is set as shipped (one number looked at per question); a measurement sets it, or
+/// AFP_NAS_MS="<a stat>,<a read>,<a write>" (milliseconds) does
+pub mod nas {
+    use std::sync::atomic::{ AtomicU64, Ordering };
+    static MICROS: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+    /// How many questions were asked since the last `take` (stats, reads, writes), delayed or not
+    static ASKED: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
+    static FROM_ENV: std::sync::Once = std::sync::Once::new();
+
+    /// Milliseconds a stat, a read (a folder listed, a file opened and read) and a write (a file written, renamed or
+    /// removed) each take; zeros: as the disk is
+    pub fn set(stat_ms: f64, read_ms: f64, write_ms: f64) {
+        FROM_ENV.call_once(|| {});
+        for (m, v) in MICROS.iter().zip([stat_ms, read_ms, write_ms]) { m.store((v * 1000.0) as u64, Ordering::Relaxed); }
+    }
+    fn wait(i: usize) {
+        FROM_ENV.call_once(|| {
+            let Ok(t) = std::env::var("AFP_NAS_MS") else { return };
+            for (m, v) in MICROS.iter().zip(t.split(',')) { m.store((v.trim().parse::<f64>().unwrap_or(0.0) * 1000.0) as u64, Ordering::Relaxed); }
+        });
+        ASKED[i].fetch_add(1, Ordering::Relaxed);
+        let us = MICROS[i].load(Ordering::Relaxed);
+        if us > 0 { std::thread::sleep(std::time::Duration::from_micros(us)); }
+    }
+    pub fn stat() { wait(0) }
+    pub fn read() { wait(1) }
+    pub fn write() { wait(2) }
+    /// The questions asked since the last time: [stats, reads, writes]
+    pub fn take() -> [u64; 3] { [0, 1, 2].map(|i| ASKED[i].swap(0, Ordering::Relaxed)) }
+}
+
 /// A temporary file's name beside `p`: hidden (walks leave it out), never the same twice
 pub fn temp_name(p: &Path) -> PathBuf {
     let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0);
@@ -156,6 +188,7 @@ fn stat_of(m: &std::fs::Metadata) -> Stat {
 
 impl Store for DiskStore {
     fn stat(&self, p: &Path) -> io::Result<Option<Stat>> {
+        nas::stat();
         match std::fs::metadata(p) {
             Ok(m) => Ok(Some(stat_of(&m))),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -163,6 +196,7 @@ impl Store for DiskStore {
         }
     }
     fn list(&self, p: &Path) -> io::Result<Vec<Item>> {
+        nas::read();
         #[cfg(target_os = "macos")]
         { if let Some(r) = bulk::list(p) { return r; } }
         let mut out = Vec::new();
@@ -180,9 +214,10 @@ impl Store for DiskStore {
         }
         Ok(out)
     }
-    fn read(&self, p: &Path) -> io::Result<Vec<u8>> { std::fs::read(p) }
+    fn read(&self, p: &Path) -> io::Result<Vec<u8>> { nas::read(); std::fs::read(p) }
     fn read_from(&self, p: &Path, offset: u64) -> io::Result<Vec<u8>> {
         use std::io::{ Read, Seek, SeekFrom };
+        nas::read();
         let mut f = std::fs::File::open(p)?;
         // A journal's tail as it is on the disk, not as this Mac's cache last had it (a share's file written by the
         // NAS itself, its watcher, isn't known to Samba to have changed: seen once on the NAS, a few seconds late)
@@ -195,12 +230,14 @@ impl Store for DiskStore {
     }
     fn append(&self, p: &Path, data: &[u8]) -> io::Result<()> {
         use std::io::Write;
+        nas::write();
         let mut f = std::fs::OpenOptions::new().create(true).append(true).open(p)?;
         f.write_all(data)?;
         flush(&f)
     }
     fn put(&self, p: &Path, data: &[u8]) -> io::Result<()> {
         use std::io::Write;
+        nas::write();
         let tmp = temp_name(p);
         let r = (|| {
             let mut f = std::fs::File::create(&tmp)?;
@@ -213,6 +250,7 @@ impl Store for DiskStore {
         r
     }
     fn remove(&self, p: &Path) -> io::Result<()> {
+        nas::write();
         match std::fs::remove_file(p) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
             r => r,

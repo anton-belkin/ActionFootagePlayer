@@ -239,11 +239,11 @@ The settings are in a panel at the right of the window, beside the video (the vi
 covered), as in a photo editor: a rail of icons at the edge, one for each part, and the panel of the one chosen, with
 switches and buttons, scrolled with the wheel:
 
-- **Project**, where it opens: the trip's [moments](#moments), marks and [clip previews](#clip-previews-the-trip-at-a-glance),
+- **Project**, where it opens: the trip's [moments](#moments), marks and [albums](#albums-clips-as-light-links),
   with their keys beside them. At the top, the project: with none yet, what one is and **Initialize the project here**
   in a folder you choose from the clip's folder up to the top of the disk (a project covers every folder in it);
   then its counts, **Open in Action Footage Library** (where the trip's [batches](#action-footage-library) are made:
-  clip previews, moments and photos of all marks, exports of all moments), **Show all clips** and **Show all moments**
+  moments and photos of all marks, exports of all moments; its albums are kept there), **Show all clips** and **Show all moments**
   in Finder. Below, this clip: its marks (the one where it plays highlighted, **Add** or **Remove the mark here**),
   its moments (a click plays one; `⋯`: play, rename, remove, show in Finder) and **Mark this clip as not
   interesting**. At the bottom, the part marked now, with **Save as moment** (or **Update**, on a moment whose ends
@@ -312,7 +312,10 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
-| `X` | This clip isn't interesting: its preview in `_Clips/` to the Trash; again: made again | `workspace/not-interesting` |
+| `P` / `X` / `U` | Culling ([how](docs/tags-and-culling.md)): **Accept** / **Reject** the original or the moment playing (again: neither) / neither. A clip preview playing culls its original; an export isn't culled. Kept with it as the Library keeps it, and as Finder tags when the library has them on (Project settings → Tags, both ways). `X` used to remove the clip preview: that's the menu's *Remove this clip's preview* now | `workspace/accept`, `workspace/reject`, `workspace/unpick` |
+| `1`–`5`, `0` | That many stars on the original or moment playing (the same again: none); `0`: none. These keys were mpv's contrast, brightness, gamma and volume up | `workspace/rate-1` … `workspace/rate-0` |
+| `K` | A tag of your own on the original or moment playing: type it to put it on, or one it has to take it off (`-name` off, `+name` on, commas for several; Tab completes the tags used last). The Project tab has Accept / Reject, the stars, its tags and the recent ones a click away | `workspace/tags` |
+| (menu, the Project tab) | This clip out of its album: its link in `_Clips/` to the Trash (the clip stays) | `workspace/not-interesting` |
 | `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
@@ -708,7 +711,7 @@ a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the
   camera's frame. D-Log M goes through DJI's Rec.709 LUT, other log curves and HLG through NBCU's conversion;
   a clip with nothing to stabilize or convert gets a preview too. Without `--output`, `<name>.afplink.mp4` next
   to the clip (or in `--out`): the double extension says it's a link, and it opens as an MP4 anywhere.
-- `--preview flipbook`: the clip at a glance ([Clip previews](#clip-previews-the-trip-at-a-glance)): a frame at
+- `--preview flipbook`: the clip at a glance (the clip previews made before [albums](#albums-clips-as-light-links); the Library no longer asks for them): a frame at
   each of `--at t1,t2,…` (else about a dozen, 10 s apart at least), the keyframe at or before it, from the `.LRF` or
   `.LRV` beside the clip when there is one, in the same SDR look and not stabilized, 2 a second; `--cover <t>` makes
   the nearest frame its icon. It has the clip's own date.
@@ -912,33 +915,29 @@ or the date and time), and it's saved as a small file in a **_Moments** folder o
 - Sort a _Moments folder by date in Finder: the files have the moment's own date and time, so they come in the
   order things happened, whatever their names.
 
-### Clip previews: the trip at a glance
+### Albums: clips as light links
 
-A folder of log footage is a wall of gray icons. **Make clip previews** in [Action Footage
-Library](#action-footage-library) makes a small file for each clip of the trip in a **_Clips** folder, beside the footage's own folders:
-`_Clips/Day 1/DJI_0068_D.afplink.mp4`.
+An album is a folder of links in the project's **_Clips** folder: `_Clips/Egypt/DJI_0068_D.afplink.mp4`. You make
+them in [Action Footage Library](#action-footage-library): select clips in **Originals**, then **Add to an album…**
+(a new album or one you have). The originals stay where they are.
 
-- **What a preview shows**: a flipbook of the clip, in color. Its frames are its marks, the camera's highlights and
-  yours, or about a dozen frames through it, 2 a second, at 960 pixels. Finder's icons are then the trip in color,
-  and Quick Look (space bar) flips through each clip. A double click in the player plays the clip itself.
-- **How long it takes**: a second or so per clip. Only keyframes are decoded, from the low-resolution copy the
-  camera writes beside the clip when there is one (DJI's `.LRF`, GoPro's `.LRV`). That's far less to read from a
-  NAS. They're made one at a time in the background, and never by themselves: the Library's button makes them for
-  the clips that have none, new footage that is.
-- **Sorting the trip**: delete a preview (in Finder, or `X` in the player) and the clip isn't interesting. *Make
-  clip previews* doesn't bring it back (`Project.afproject` lists what was made). `X` again, or the Library's
-  *Again for removed clips*, does.
-- **Variants**: a clip preview plays as its clip is saved to. **Settings of its own** (the panel, while it plays)
-  gives it its own view, and a copy of the clip's Gyroflow project when it has one: copy the preview in Finder for
-  another, and each is a variant of the same clip.
-- **Rename and group them as you like**: a preview is found by the link inside it, so renamed ("wreck dive"), or moved
-  into folders of your own within Clips, it's still the clip's. (Renaming the clips themselves, the originals, would
-  lose them: their moments and previews point at their names.)
-- **All in _Clips itself** (the Library's checkbox): new previews all go in Clips itself, not in the clips'
-  folders, for a camera's folders by date that mean nothing to the trip. Two clips with the same name get their
-  folder's name in parentheses.
-- A clip under a second long has a single keyframe, at its start: its preview is made from the frames as they are.
-  If some can't be made, the Library lists them, each with why.
+- **What a link is**: a small file (about 20 KB) with one thumbnail of the clip and the link to it, nothing else.
+  Finder and Quick Look show the thumbnail, and a double click plays the original in the player.
+- **Where the thumbnail comes from**: the picture the system or the camera already has for the clip (Finder's, the
+  camera's `.THM` or low-resolution file). No frame is searched for in the original. When the clip's log curve is
+  known already, the thumbnail is turned to normal color with the LUTs the player uses; a clip not read yet keeps
+  the thumbnail as it is.
+- **How long it takes**: about 15 ms a clip on local files (300 clips in 4.5 s; 2.6 s when their thumbnails were
+  shown already). Nothing runs in the player.
+- **Arranging**: albums can hold albums. In the Library's **Albums** tab: **New album**, rename, **Move to an
+  album…**, **Add to another album…** (a second link to the same clip), **Remove from the album** (the link goes to
+  the Trash; the original is untouched). `X` in the player takes the clip playing out of its album.
+- **Rename and move them in Finder as you like**: a link is found by what's inside it. (Renaming the clips
+  themselves, the originals, is followed by the Library's *Find moved files*.)
+- **Variants**: a link plays as its clip is saved to. **Settings of its own** (the panel, while it plays) gives it
+  its own view, and a copy of the clip's Gyroflow project when it has one.
+- **Clip previews made before** (a flipbook of the clip, made by a batch in the player) stay where they are and work
+  as album items. New ones aren't made: the batch took about a second a clip and gave no more than the thumbnail.
 
 ### Action Footage Library
 
@@ -948,12 +947,12 @@ Windows). It opens a project: double-click the trip's `Project.afproject`, drop 
 **Open…**, or **Open in Action Footage Library** in the player (the side panel's Project tab, or right click →
 Project). Then, as buttons:
 
-- **Make clip previews** (and **Again for removed clips**), with **All in _Clips itself**;
+- **Add to an album…** (Originals, Albums): [links](#albums-clips-as-light-links) to the selected clips, made at once by the Library itself;
 - **Make moments**: moments of all marks, with **Stabilized on their own**;
 - **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
-- **Stabilize optically** (Footage, Originals): for the selected clips whose motion the player can't take from the
+- **Stabilize optically** (Albums, Originals): for the selected clips whose motion the player can't take from the
   camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), Gyroflow
   measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
   with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and

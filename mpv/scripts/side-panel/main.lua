@@ -32,6 +32,7 @@ local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
 local exportkind = require 'exportkind'
+local tagchips = require 'tagchips'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -572,7 +573,7 @@ local function project_part(u, x, w, y)
         local st = ws.clips_stats
         local total = ws.moments_total or 0
         local parts = { total == 1 and "1 moment" or (total .. " moments") }
-        if st and st.total > 0 then parts[#parts + 1] = st.previews .. " of " .. st.total .. " clip previews" end
+        if st and st.total > 0 then parts[#parts + 1] = st.previews .. " of " .. st.total .. " clips in albums" end
         y = u:caption(ix, iw, y, table.concat(parts, " · "))
         if card_more then
             y = actions(u, ix, iw, y + 2 * s, "card", {
@@ -584,8 +585,7 @@ local function project_part(u, x, w, y)
         -- The trip's batches (clip previews, moments and photos of all marks, exports of all moments) are made in
         -- Action Footage Library, in the background, whatever plays here
         y = u:button(ix, iw, y + 2 * s, "library", "Open in Action Footage Library", "script-message-to workspace open-library", { primary = true })
-        y = u:caption(ix, iw, y - 2 * s, "Clip previews" .. (st and st.new > 0 and (" (" .. st.new .. " new clips)") or "")
-            .. ", moments and photos of all marks, exports of all moments: made there, in the background")
+        y = u:caption(ix, iw, y - 2 * s, "Albums are kept there (Add to an album…); moments and photos of all marks, exports of all moments are made there, in the background")
         if ws.clips then
             y = u:caption(ix, iw, y + 2 * s, "Making clip previews: " .. ws.clips.done .. " of " .. ws.clips.total, { color = C.text })
             y = u:button(ix, iw, y, "clips-stop", "Stop", "script-message-to workspace clips-stop")
@@ -638,6 +638,12 @@ local function project_part(u, x, w, y)
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
     end
 
+    -- Keep it? Accept / Reject, stars, tags (the original's or the moment's: tagchips.lua, docs/tags-and-culling.md)
+    if ws.tags then
+        y = tagchips.draw(u, ui, x, w, y + 4 * s, ws.tags, { accept = keys["script-binding workspace/accept"], reject = keys["script-binding workspace/reject"],
+                          tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
+    end
+
     local pos = mp.get_property_number("time-pos", 0)
     y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
@@ -679,11 +685,11 @@ local function project_part(u, x, w, y)
         y = u:caption(x, w, y, "None yet: mark a part below, then " .. (keys["script-binding workspace/moment"] or "k"))
     end
 
-    if ws.project and not mo then
-        local label = ws.clip_preview == "made" and "Mark this clip as not interesting"
-            or ws.clip_preview == "removed" and "Not interesting · undo" or "Make this clip's preview"
-        y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting",
-                     { key = keys["script-binding workspace/not-interesting"], disabled = ws.clips ~= nil })
+    -- Only for a clip that is in an album (its link there: Action Footage Library makes them). No key: X is Reject
+    -- (docs/tags-and-culling.md)
+    if ws.project and not mo and ws.clip_preview == "made" then
+        local label = "Take this clip out of its album"
+        y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting", { disabled = ws.clips ~= nil })
     end
 
     -- The part marked now: it goes with the clip

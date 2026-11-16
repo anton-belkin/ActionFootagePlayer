@@ -11,6 +11,7 @@
   <div class="top" id="top"></div>
   <div class="banner bad" id="engine" hidden></div>
   <div class="banner bad" id="error" hidden></div>
+  <div class="banner bad unsaved" id="unsaved" role="alert" hidden></div>
   <div class="body" id="bodyrow">
     <aside class="fpanel" id="fpanel" aria-label="Filters" hidden></aside>
     <section class="main" id="main" aria-label="Browser"></section>
@@ -19,6 +20,7 @@
   <section class="empty" id="empty" hidden>
     <h2>Open a project</h2>
     <p>A project is a folder with <b>Project.afproject</b> in it. Double-click that file, drop it here, or choose it with the project menu.</p>
+    <p class="dim" id="startHint" hidden></p>
     <p class="dim">No project yet? Open one of its clips in ActionFootagePlayer and initialize the project in its side panel's Project tab.</p>
     <div class="btns"><button type="button" class="btn pri" data-a="choose">Open a project…</button></div>
     <div id="recentEmpty"></div>
@@ -32,6 +34,13 @@
     <footer><span class="sp"></span><button type="button" class="btn" data-a="quit">Stop them and quit</button><button type="button" class="btn pri" data-a="keep">Keep them going</button></footer>
   </div>
 </div>
+<div id="closing" class="scrim" hidden>
+  <div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="closingTitle">
+    <header><h2 id="closingTitle">Saving your last changes…</h2></header>
+    <div class="sb"><p class="wrap" id="closingText"></p></div>
+    <footer><span class="sp"></span><button type="button" class="btn" data-a="closenow">Close now, without them</button></footer>
+  </div>
+</div>
 <div id="moving" class="scrim" hidden>
   <div class="sheet narrow" role="dialog" aria-modal="true" aria-labelledby="movingTitle">
     <header><h2 id="movingTitle">Moving the project…</h2><span class="mono" id="movingTo"></span></header>
@@ -40,6 +49,15 @@
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden><span id="toastMsg"></span><button type="button" data-a="toastok">OK</button></div>
+<script src="writes.js"></script>
+<script src="changes.js"></script>
+<script src="albums.js"></script>
+<script src="albumviews.js"></script>
+<script src="timeline.js"></script>
+<script src="map.js"></script>
+<script src="culling.js"></script>
+<script src="atstart.js"></script>
+<script src="share.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

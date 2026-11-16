@@ -65,6 +65,10 @@ a{color:var(--accent)}
 .row.sel,.card.sel{background:var(--accent-soft);border-color:var(--accent-line)}
 .th{width:72px;height:40px;border-radius:5px;position:relative;overflow:hidden;display:block;background:var(--line2)}
 .th img,.mosaic img{width:100%;height:100%;object-fit:cover;display:block}
+.th .cb{position:absolute;left:3px;bottom:2px;display:flex;gap:3px;font-size:10px;color:#FFFFFF}
+.th .cb b{background:rgba(0,0,0,.55);border-radius:3px;padding:0 4px;font-weight:600}
+.th .cb b.ok{background:#1E8E3E}
+.th .cb b.no{background:#C5221F}
 .th .d{position:absolute;right:3px;bottom:2px;font-size:10px;color:#FFFFFF;background:rgba(0,0,0,.55);border-radius:3px;padding:0 3px;font-variant-numeric:tabular-nums}
 .fold{width:72px;height:40px;border-radius:5px;background:var(--line2);display:flex;align-items:center;justify-content:center;color:var(--muted)}
 .nm{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block}
@@ -80,6 +84,40 @@ a{color:var(--accent)}
 .chip.sys{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
 .chip.tag{background:var(--tag-bg)}
 button.chip{cursor:pointer}
+/* Culling and tags (culling.js): Accept / Reject / Undecided, the stars, the tags in use, the new tag's suggestions.
+   A button is on (all of the selection), some (part of it: dashed) or off */
+.stars{display:flex;align-items:center;gap:2px}
+.star{font-size:18px;line-height:24px;min-width:26px;min-height:26px;border:0;background:none;color:var(--muted);cursor:pointer;border-radius:5px;padding:0}
+.star.on{color:var(--accent)}
+.star.some{color:var(--accent-line)}
+.star:hover:not([disabled]),.nostar:hover:not([disabled]){background:var(--tag-bg)}
+.nostar{margin-left:6px;min-height:26px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg2);font-size:12px;cursor:pointer}
+.nostar.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.stars .sub{margin-left:6px}
+.picks{display:flex;align-items:center;gap:6px}
+.pickb{flex:1;min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg2);cursor:pointer;font-weight:600;white-space:nowrap;padding:2px 6px}
+.pickb .n{font-weight:400;opacity:.8}
+.pickb.acc.on{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+.pickb.rej.on{background:var(--wa-bg);border-color:var(--wa-line);color:var(--wa)}
+.pickb.und.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.pickb.some,.tagb.some{border-style:dashed}
+.pickb.acc.some{border-color:var(--ok-line);color:var(--ok)}
+.pickb.rej.some{border-color:var(--wa-line);color:var(--wa)}
+.pickb.und.some{border-color:var(--accent-line);color:var(--accent-deep)}
+.pickb:hover:not([disabled]){border-color:var(--accent-line)}
+.pickb[disabled],.star[disabled],.nostar[disabled],.tagb[disabled]{opacity:.5;cursor:default}
+.tagb{cursor:pointer;font-size:12px;line-height:18px;padding:2px 8px;min-height:24px}
+.tagb.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep);font-weight:600}
+.tagb.some{border-color:var(--accent-line);color:var(--accent-deep)}
+.tagb.sys.on{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
+.tagb:hover:not([disabled]){border-color:var(--accent)}
+.culltags{max-height:156px;overflow:auto}
+.tagwrap{position:relative}
+.tagsugg{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column}
+.tagsugg button{border:0;background:transparent;text-align:left;padding:5px 8px;border-radius:5px;min-height:26px;color:var(--fg);cursor:pointer}
+.tagsugg button:hover{background:var(--hover)}
+.tagsugg button.on{background:var(--accent-soft);color:var(--accent-deep)}
+.cullsw{white-space:nowrap}
 .loc{font-size:12px;color:var(--fg2);display:flex;align-items:center;gap:5px}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 auto}
 .grid{padding:4px 14px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
@@ -231,6 +269,8 @@ button.chip{cursor:pointer}
 .top .ttl{display:flex;flex-direction:column;min-width:0}
 .banner{padding:8px 14px;font-size:12px}
 .banner.bad{background:var(--wa-bg);color:var(--wa);border-bottom:1px solid var(--wa-line)}
+.banner.unsaved:not([hidden]){display:flex;gap:12px;align-items:flex-start}
+.banner.unsaved .lines{flex:1;min-width:0;overflow-wrap:anywhere}
 .empty{flex:1;display:flex;flex-direction:column;gap:10px;align-items:flex-start;padding:48px;max-width:640px}
 .empty h2{margin:0;font-size:20px}
 .empty p{margin:0;line-height:1.5;color:var(--fg2)}
@@ -303,3 +343,64 @@ body.waiting,body.waiting *{cursor:progress}
 .minimap{margin:2px 0 8px}
 .minimap img{display:block;width:100%;max-width:300px;aspect-ratio:300/170;border-radius:8px;border:1px solid var(--line2)}
 .kv dd .blk{display:block}
+/* Add to an album…, Move to an album… (albums.js) */
+.albumlist{display:flex;flex-direction:column;gap:2px;max-height:min(46vh,340px);overflow:auto;border:1px solid var(--line2);border-radius:8px;padding:4px}
+.albumrow{display:flex;align-items:center;gap:8px;border:0;background:transparent;border-radius:6px;padding:7px 10px;min-height:32px;text-align:left;color:var(--fg)}
+.albumrow span:first-of-type{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.albumrow:hover{background:var(--line2)}
+.albumrow.on{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-line)}
+.albumsheet input[type=text]{box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:5px 8px;min-height:30px;background:var(--surface);color:var(--fg);min-width:0;width:100%}
+/* Views inside Albums that aren't folders (albumviews.js): their tiles at the top of Albums */
+.avtiles{display:flex;flex-wrap:wrap;gap:10px;padding:4px 14px 10px}
+.avtile{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;min-width:240px;color:var(--fg)}
+.avtile:hover{background:var(--hover)}
+.avtile svg{color:var(--accent);flex:none}
+/* Timeline (timeline.js): Days is blocks at known places, the tiles of a fixed size (TL in timeline.js has the same numbers) */
+.tlbody{position:relative;flex:none}
+.tlb{position:absolute;left:0;right:0;padding:0 14px;overflow:hidden}
+.tlmonth{display:flex;align-items:flex-end;gap:10px;padding-bottom:6px}
+.tlmonth h3,.tlyear h3{margin:0;font-size:18px;font-weight:650}
+.tlyear{display:flex;align-items:baseline;gap:10px;padding:14px 14px 4px}
+.tltrip{display:flex;align-items:center;gap:8px}
+.tltrip b{background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);border-radius:6px;padding:2px 8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tlday header{height:38px;display:flex;align-items:center;gap:10px;white-space:nowrap}
+.tlday header b{overflow:hidden;text-overflow:ellipsis}
+.tlday.intrip{box-shadow:inset 3px 0 0 var(--accent-line)}
+.tlgrid{display:grid;grid-template-columns:repeat(auto-fill,168px);gap:8px}
+.card.tl{width:168px;height:146px;overflow:hidden}
+.card.tl .th{flex:none}
+.tlcovers{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.card.tlcover .nm{font-size:15px;font-weight:650}
+/* Map (map.js) */
+.mapbox{flex:1 1 auto;min-height:420px;margin:0 14px 14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative;background:var(--line2)}
+.mapbox .leaflet-container{position:absolute;inset:0;font:inherit;background:var(--line2)}
+.mappin{position:relative;width:64px;height:64px;border-radius:10px;border:2px solid #FFFFFF;box-shadow:0 2px 8px rgba(0,0,0,.45);background:#3A3A40;overflow:visible;cursor:pointer;padding:0;display:block}
+.mappin .th{width:100%;height:100%;border-radius:8px}
+.mappin .n{position:absolute;right:-8px;top:-8px;min-width:22px;height:22px;border-radius:11px;padding:0 6px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:650;line-height:22px;text-align:center;border:2px solid #FFFFFF;font-variant-numeric:tabular-nums}
+.mapnote{padding:6px 14px 10px;color:var(--muted);font-size:12px}
+.placelist{padding:0 14px 24px;display:flex;flex-direction:column;gap:2px}
+.placerow{display:flex;align-items:center;gap:12px;text-align:left;border:0;background:transparent;border-radius:8px;padding:6px 8px;color:var(--fg)}
+.placerow:hover{background:var(--hover)}
+.placerow .th{flex:none}
+.placerow .cnt{margin-left:auto;color:var(--fg2);font-variant-numeric:tabular-nums}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}}
+:root[data-theme="dark"] .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}
+/* Open at start (atstart.js): the tick on a row of the projects opened before, the word on the one marked in the menu */
+.rstart{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--fg2);font-size:12px;white-space:nowrap;padding:4px 8px;border-radius:6px;min-height:28px;cursor:pointer;flex:0 0 auto}
+button.rstart:hover{background:var(--hover)}
+.rstart .box{width:15px;height:15px;border:1px solid var(--muted);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface)}
+.rstart.on{color:var(--fg)}
+.rstart.on .box{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
+/* Share (share.js): the destinations, then each item and how it goes */
+.sharedest{align-items:flex-start;padding:10px 12px}
+.sharedest span:first-of-type{white-space:normal;display:flex;flex-direction:column;gap:2px}
+.sharedest[disabled]{opacity:.55}
+.shareitems{display:flex;flex-direction:column;border:1px solid var(--line2);border-radius:8px;max-height:min(50vh,380px);overflow:auto}
+.shareitem{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:7px 10px;border-top:1px solid var(--line2)}
+.shareitem:first-child{border-top:0}
+.shareitem .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.shareitem .why{flex-basis:100%;color:var(--wa)}
+.pill.ok{background:var(--ok-bg);color:var(--ok)}
+.pill.bad{background:var(--st-bg);color:var(--st)}
+.sharejob ul{margin:4px 0 0;padding-left:18px}

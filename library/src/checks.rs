@@ -47,6 +47,13 @@ pub fn fingerprint_kept(path: &Path) -> Option<String> {
     h
 }
 
+/// SHA-256 of some bytes, in hex (a render's recipe: renders.rs)
+pub fn sha256_hex(data: &[u8]) -> String {
+    let mut h = Sha256::new();
+    h.update(data);
+    h.hex()
+}
+
 // ---- SHA-256 (no crate for one hash) ----
 struct Sha256 { h: [u32; 8], buf: Vec<u8>, len: u64 }
 const K: [u32; 64] = [
