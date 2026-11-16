@@ -140,7 +140,7 @@ function avCrumbs(v, more, where) {
 }
 function avSelBar(n, c) {
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
-  return '<span class="sub" style="display:inline">' + (nSel ? nSel + " of " + n + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === n ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c);
+  return '<span class="sub" style="display:inline">' + (nSel ? nSel + " of " + n + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === n ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + (typeof shareBar === "function" ? shareBar(c) : ""); // albums.js, share.js
 }
 // An item as the ordinary grid has it
 function avCard(it, cls, sub) {

@@ -27,7 +27,7 @@ const ok = (cond, what) => { if (!cond) { console.log("FAIL: " + what); process.
 const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
 (async () => {
   await tick(500);
-  ok(scripts.includes("albums.js") && scripts.indexOf("writes.js") < scripts.indexOf("albums.js") && scripts[scripts.length - 1] === "app.js", "the page loads albums.js before app.js");
+  ok(scripts.includes("share.js") && scripts.indexOf("writes.js") < scripts.indexOf("albums.js") && scripts.indexOf("albums.js") < scripts.indexOf("share.js") && scripts[scripts.length - 1] === "app.js", "the page loads albums.js and share.js before app.js");
   const tabs = Array.from(w.document.querySelectorAll('[data-a="view"]')).map((e) => e.textContent);
   ok(tabs[0] === "Originals" && tabs[1] === "Albums" && !tabs.includes("Footage"), "the tabs: " + tabs.join(", "));
   ok(tab("sources").classList.contains("on"), "it opens on Originals");
@@ -138,18 +138,14 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
   ok(["Open in the player", "Go to the footage", "Rename", "Move to Trash", "Add to another album…", "Move to an album…", "Take out of the album", "Info"].every((t) => m.textContent.includes(t)), "a moment's menu: " + m.textContent.replace(/\s+/g, " ").slice(0, 200));
   click(w.document.body); await tick(); // closes the menu
   el = await pick("Turtle");
-  click(by("tab", "export")); await tick();
-  ok($("side").textContent.includes("On 1 moment") && $("side").textContent.includes("1 current") && !!w.document.querySelector('#side [data-a="job"][data-v="export"]'), "Export in the side panel, of the moment selected: " + $("side").textContent.replace(/\s+/g, " ").slice(0, 120));
-  click(w.document.querySelector('#side [data-a="job"][data-v="export"]')); await tick(60);
-  let job = last("add_job")[1];
-  ok(job.kind === "export" && job.only.join() === "_Moments/Best of the year/Turtle.afplink.mp4" && job.label === "1 moment", "the export job takes the moment by its path: " + JSON.stringify(job.only));
+  click(by("tab", "share")); await tick();
+  ok($("side").textContent.includes("On 1 moment") && $("side").textContent.includes("rendered already") && !!w.document.querySelector('#side [data-a="share"]'), "Share in the side panel, of the moment selected (tests/share.js): " + $("side").textContent.replace(/\s+/g, " ").slice(0, 120));
+  let job;
   // A clip and a moment selected: the clip's jobs take the clip, the moments' the moment
   await go("Best of the year");
   await pick("Turtle"); await pick("GX010123.MP4", { metaKey: true });
-  click(by("tab", "export")); await tick();
-  ok($("side").textContent.includes("On 2 items"), "a mixed selection is items: " + $("side").textContent.replace(/\s+/g, " ").slice(0, 60));
-  click(w.document.querySelector('#side [data-a="job"][data-v="render"]')); await tick(60);
-  // (its render is current: nothing to render, the button is off; the job isn't sent)
+  // (the Share part is open still: a click on its tab would close the panel)
+  ok($("side").textContent.includes("On 2 items") && $("side").textContent.includes("1 moment") && $("side").textContent.includes("1 clip"), "a mixed selection is items, shared as such: " + $("side").textContent.replace(/\s+/g, " ").slice(0, 60));
   click(by("tab", "moments")); await tick();
   click(w.document.querySelector('#side [data-a="job"][data-v="moments"]')); await tick(60);
   job = last("add_job")[1];

@@ -296,7 +296,7 @@ mod tests {
         // Renders deleted
         let rendered = r.moments[8].clone();
         assert_eq!(index::scan_only(p, "moments", false, Some(std::slice::from_ref(&rendered)))["items"][0]["renders"], json!({ "HDR": "stale" }));
-        index::delete_renders(p, std::slice::from_ref(&rendered), false);
+        crate::renders::delete(p, std::slice::from_ref(&rendered), false);
         let mut c = Changed::default();
         c.add(p, false, "moments", std::slice::from_ref(&rendered));
         assert_eq!(c.items["moments"][0]["renders"], json!({}));

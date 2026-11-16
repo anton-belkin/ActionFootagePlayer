@@ -107,6 +107,8 @@ async function bigRun() {
   tiles()[0].dispatchEvent(new w.MouseEvent("contextmenu", { bubbles: true, clientX: 10, clientY: 10 })); await tick();
   const menu = w.document.querySelector(".cmenu");
   ok(menu && menu.textContent.includes("Open in the player") && menu.textContent.includes("Add to an album…"), "the context menu: " + (menu ? menu.textContent.slice(0, 60) : "none"));
+  // (share.js: Share… on what's selected here, as in any album)
+  ok(menu && menu.textContent.includes("Share…") && !!w.document.querySelector('#main [data-a="share"]'), "Share… in Timeline: the menu and the bar");
   click(w.document.body); await tick();
   // Months and Years
   click(by("tlevel", "months")); await tick();

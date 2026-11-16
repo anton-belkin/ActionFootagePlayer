@@ -369,7 +369,7 @@ pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
     names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::size(p).is_some_and(|s| s >= 1024))
 }
 
-fn read_json(path: &Path) -> Option<Value> {
+pub(crate) fn read_json(path: &Path) -> Option<Value> {
     afp_catalog::store::nas::read();
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
@@ -568,9 +568,11 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
         let l = if video || photo { link(path) } else { None };
         let keep = match view {
             "moments" => video && (l.as_ref().is_some_and(|k| k["kind"] == "moment") || (lower.starts_with("_moments/") && lower.ends_with(LINK_EXT) && l.is_none())),
-            "exports" => video && (l.as_ref().is_some_and(|k| k["kind"] == "export") || (lower.starts_with("_exports/") && l.is_none())),
+            // (a render saved into a folder of the project by Share is a file of the user's, as an export is; the
+            // cache itself, _Renders, is the Library's own: never listed)
+            "exports" => video && !lower.starts_with("_renders/") && (l.as_ref().is_some_and(|k| k["kind"] == "export" || k["kind"] == "render") || (lower.starts_with("_exports/") && l.is_none())),
             // (a photo of before links, moved into an album of the user's: still a photo there)
-            _ => photo && (l.is_some() || lower.starts_with("_stills/") || lower.starts_with("_clips/")),
+            _ => photo && !lower.starts_with("_renders/") && (l.is_some() || lower.starts_with("_stills/") || lower.starts_with("_clips/")),
         };
         if keep { if let Some(k) = l { links.insert(rel.to_string(), k); } }
         keep
@@ -589,6 +591,8 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
         None => own_files(root, &mut keep),
     };
     let mut items = Vec::new();
+    // The render cache, looked at once for them all
+    let renders = crate::renders::Ctx::new(root, false);
     let files: HashSet<String> = walk_names(root, &entries);
     for (rel, size, mtime) in &entries {
         let rel = rel.as_str();
@@ -606,7 +610,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
                 if let Some(p) = crate::tags::pick_of(&l["pick"]) { it["pick"] = json!(p); }
                 it["gyroflow"] = json!(has_gyroflow(&path));
-                it["renders"] = renders_of(root, rel, &path, &l);
+                it["renders"] = renders_of(&renders, crate::renders::Kind::Moment, rel, &path, &l);
                 let (original, moved_to) = original_of(&l);
                 it["original"] = original.map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
                 // Found away from the path its link names: the new path, written into the link (main.rs's scan)
@@ -633,6 +637,8 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 it["form"] = json!(if lower.ends_with(crate::albums::PHOTO_EXT) { "Photo link" } else if lower.ends_with(".mp.jpg") { "Motion Photo" }
                     else if files.contains(&format!("{stem}.mov")) { "Live Photo" }
                     else if lower.ends_with(".heic") { "HEIC with gain map" } else { "Ultra HDR JPEG" });
+                // A photo link's renders (a rendered photo is its own pixels)
+                if lower.ends_with(crate::albums::PHOTO_EXT) && l["clip"].is_string() { it["renders"] = renders_of(&renders, crate::renders::Kind::Photo, rel, &path, &l); }
                 // Its clip and time, from the photo itself (older ones have none: their name tells)
                 it["link"] = l;
             }
@@ -686,7 +692,7 @@ pub fn trimmed(v: &Value) -> Option<Value> {
     }
 }
 
-fn same(a: &Value, b: &Value) -> bool {
+pub(crate) fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::Number(x), Value::Number(y)) => (x.as_f64().unwrap_or(f64::NAN) - y.as_f64().unwrap_or(f64::NAN)).abs() < 1e-9,
         (Value::Object(x), Value::Object(y)) => x.len() == y.len() && x.iter().all(|(k, v)| y.get(k).is_some_and(|w| same(v, w))),
@@ -695,7 +701,8 @@ fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// The recipe of a moment's render in `profile` now, as the player's render_recipe makes it
+/// The recipe of a moment's render in `profile` as renders were made before the cache by hash (v1, the player's
+/// render_recipe of then): what a render at the moment's path is compared with (renders.rs)
 pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) -> Value {
     let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
     let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -718,38 +725,11 @@ pub fn render_path(root: &Path, rel: &str, profile: &str) -> PathBuf {
     p
 }
 
-/// Each profile's render of a moment: { HDR: "current" | "stale" }, absent: none
-fn renders_of(root: &Path, rel: &str, moment: &Path, link: &Value) -> Value {
-    let mut out = serde_json::Map::new();
-    for p in RENDER_PROFILES {
-        let file = render_path(root, rel, p);
-        if !crate::seen::is_file(&file) { continue; }
-        let ok = crate::index::link(&file).filter(|l| l["kind"] == "render")
-            .and_then(|l| trimmed(&l["recipe"])).is_some_and(|r| same(&r, &render_recipe(root, moment, link, p)));
-        out.insert(p.to_string(), json!(if ok { "current" } else { "stale" }));
-    }
-    Value::Object(out)
-}
-
-/// Renders of these moments (paths in _Moments) removed: the stale ones only, or all of them
-pub fn delete_renders(root: &Path, moments: &[String], stale_only: bool) -> (usize, Vec<String>) {
-    let (mut n, mut problems) = (0, Vec::new());
-    let mut gone: Vec<PathBuf> = Vec::new();
-    for rel in moments {
-        // Its path in the project (since 0.11 moments are anywhere in it: Generated/…); an older one's in _Moments
-        let moment = if crate::seen::is_file(&root.join(rel)) { root.join(rel) } else { root.join("_Moments").join(rel) };
-        let link = link(&moment).unwrap_or(Value::Null);
-        let status = renders_of(root, rel, &moment, &link);
-        for p in RENDER_PROFILES {
-            let Some(st) = status.get(p).and_then(Value::as_str) else { continue };
-            if stale_only && st != "stale" { continue; }
-            let f = render_path(root, rel, p);
-            match std::fs::remove_file(&f) { Ok(_) => { n += 1; gone.push(f); } Err(e) => problems.push(format!("{rel} {p}: {e}")) }
-        }
-    }
-    // The catalog told at once: the views read the renders from it
-    crate::seen::note_now(&gone);
-    (n, problems)
+/// Each profile's render of a moment or a photo link: { HDR: "current" | "stale" }, absent: none (renders.rs: found
+/// by the recipe's hash, the ones of before by the moment's path)
+fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, file: &Path, link: &Value) -> Value {
+    let name = name_of(rel);
+    crate::renders::states(ctx, &crate::renders::Item { kind, file: Some(file.to_path_buf()), rel: rel.to_string(), link: link.clone(), name: name.to_string() })
 }
 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------

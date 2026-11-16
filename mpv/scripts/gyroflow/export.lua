@@ -842,7 +842,7 @@ mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
 
 -- A photo of any clip at a time, with its saved view, for the workspace plugin (the Project tab's photos of marks):
--- { id, clip, t, view, reply }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
+-- { id, clip, t, view, reply, crop, camera, link, still }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
 -- frame on or off; into `out_dir` (the run's Generated/ folder), else the project's Generated/<date> Photos. The
 -- answer: photo-done (or req.done) <id> { ok, error, out }
 mp.register_script_message("photo-at", function(json)
@@ -855,10 +855,21 @@ mp.register_script_message("photo-at", function(json)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--photo", string.format("%.4f", req.t) }
     local mode = mp.get_property_native("user-data/gyroflow/live_photo") or "no"
+    -- `still`: a still whatever Save frame's choice is (a render for the Library's Share)
+    if req.still == true then mode = "no" end
     if mode == "live" or mode == "motion" then table.insert(args, "--live") end
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     local view = type(req.view) == "table" and req.view or {}
     view_args(args, view)
+    -- A photo link's own frame (its crop in shares of the frame, its camera), and what its link is to carry
+    local c, f = req.camera, req.crop
+    if type(c) == "table" and c.yaw and c.pitch and c.roll and c.zoom then
+        table.insert(args, "--camera"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.5f", c.yaw, c.pitch, c.roll, c.zoom))
+    end
+    if type(f) == "table" and f.x and f.y and f.w and f.h then
+        table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h))
+    end
+    if type(req.link) == "string" then table.insert(args, "--link"); table.insert(args, req.link) end
     -- Cleaned up as that clip's transform says (else as the one playing is), where this computer does the denoise
     local denoise = view.denoise
     if type(denoise) ~= "boolean" then denoise = mp.get_property_native("user-data/gyroflow/still") ~= false end

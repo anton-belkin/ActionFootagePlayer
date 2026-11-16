@@ -198,7 +198,7 @@ pub fn commands(r: &Rig, rows: &mut Vec<Row>) {
     timed(rows, "rename_item: a folder of 10 moments", || rename_in(&r.p, "moments", "folder", &d, "Reef").unwrap());
     timed(rows, "new_folder", || new_folder_in(&r.p, "moments", "_Moments").unwrap());
     let rendered: Vec<String> = r.moments.iter().skip(8).step_by(8).take(20).cloned().collect();
-    timed(rows, "delete_renders: 20 moments", || index::delete_renders(&r.p, &rendered, false));
+    timed(rows, "delete_renders: 20 moments", || crate::renders::delete(&r.p, &rendered, false));
     // Saying what changed (changed.rs: what each command now does after its write, instead of the page reading views)
     for n in [1, 200] {
         let ids = trees(n);

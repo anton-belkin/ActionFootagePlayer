@@ -19,7 +19,9 @@ mod checks;
 mod geo;
 mod index;
 mod locations;
+mod renders;
 mod seen;
+mod share;
 mod tags;
 mod takein;
 mod thumbs;
@@ -85,6 +87,8 @@ struct Job {
     made_paths: Vec<String>,
     #[serde(skip)]
     request: Value,
+    /// Share: where the selection goes, and each item's state (share.rs)
+    share: Option<share::Share>,
 }
 
 // The batch running: the player, the files it talks through, and macOS's caffeinate keeping the Mac awake meanwhile
@@ -694,6 +698,12 @@ fn tick(inner: &mut Inner) {
         if let Some(job) = job {
             let had = job.made_paths.len();
             let has_status = read_status(job, &run.dir);
+            // Share: the item being rendered now
+            if let (Some(s), Some(now)) = (job.share.as_mut(), job.current.clone()) {
+                for it in s.items.iter_mut().filter(|i| i.state == "waiting" || i.state == "rendering") {
+                    it.state = if it.name == now { "rendering" } else { "waiting" }.into();
+                }
+            }
             // Stabilize optically: each clip's Gyroflow project, told to the catalog as it lands (the views read it: the
             // clip's motion data and badge change then; gyroflow-optical tells no one)
             if job.made_paths.len() > had {
@@ -739,6 +749,10 @@ fn tick(inner: &mut Inner) {
                     }
                     inner.jobs.push(job);
                 }
+            }
+            // A share's renders are made (or not): the worker hands them over (share_collect), the job done only then
+            if let Some(job) = inner.jobs.iter_mut().find(|j| j.id == id && j.share.is_some()) {
+                if let Some(s) = job.share.as_mut() { s.ended = true; }
             }
             // What a batch made, and the clips it looked at, into the catalog: a look at everything
             seen::look_at_everything(inner.watch.as_ref().map(|w| &w.runner));
@@ -1551,10 +1565,13 @@ async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_o
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-    let (n, problems) = index::delete_renders(&root, &moments, stale_only);
-    // The moments as they are now (changed.rs): the page corrects those, and reads no view again
+    let (n, problems) = renders::delete(&root, &moments, stale_only);
+    // The moments and photo links as they are now (changed.rs): the page corrects those, and reads no view again
     let mut c = changed::Changed { answer: json!({ "deleted": n, "problems": problems }), problems, ..Default::default() };
-    c.add(&root, changed::flat_previews(&root), "moments", &moments);
+    let (ms, ps): (Vec<String>, Vec<String>) = moments.iter().cloned().partition(|id| id.to_lowercase().ends_with(index::LINK_EXT));
+    let flat = changed::flat_previews(&root);
+    if !ms.is_empty() { c.add(&root, flat, "moments", &ms); }
+    if !ps.is_empty() { c.add(&root, flat, "stills", &ps); }
     Ok(c)
 }).await.map_err(|e| e.to_string())?
 }
@@ -2303,7 +2320,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request,
+        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None,
     };
     let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
@@ -2313,12 +2330,110 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
             let request = json!({ "kind": "clips-finish", "project": project });
             let id = inner.next_id;
             inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
-                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request });
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None });
         }
     }
     tick(&mut inner);
     Ok(())
 }).await.map_err(|e| e.to_string())?
+}
+
+// ---------- Share (share.rs) ----------
+
+// A share whose renders the player has made: each handed to the destination, away from the lock (a copy to a share
+// takes its time), then the job says how it went
+fn share_collect(shared: &Shared) {
+    let ended: Vec<(u64, share::Share, Vec<(String, String)>, bool)> = {
+        let mut inner = shared.lock().unwrap();
+        // (ended, or never run: the player isn't installed, the job was taken out of the queue's turn)
+        let pending = |s: &share::Share| s.items.iter().any(|i| i.state == "waiting" || i.state == "rendering");
+        inner.jobs.iter_mut().filter(|j| j.share.as_ref().is_some_and(|s| s.ended || (j.state.finished() && pending(s)))).map(|j| {
+            let s = j.share.as_mut().unwrap();
+            s.ended = false;
+            (j.id, s.clone(), j.failures.clone(), j.state == JobState::Stopped)
+        }).collect()
+    };
+    for (id, mut s, failures, stopped) in ended {
+        let written = share::collect(&mut s, &failures, stopped);
+        seen::note_now(&written);
+        let mut inner = shared.lock().unwrap();
+        if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) { share_sum(j, s); }
+    }
+}
+
+// A share's job as its items are now: how many are saved, which failed and why
+fn share_sum(job: &mut Job, s: share::Share) {
+    let left = s.items.iter().filter(|i| !matches!(i.state.as_str(), "copied" | "failed")).count();
+    job.total = s.items.len() as u64;
+    job.failed = s.items.iter().filter(|i| i.state == "failed").count() as u64;
+    job.done = job.total - left as u64;
+    job.made = Some(s.items.iter().filter(|i| i.state == "copied").count() as u64);
+    job.failures = s.items.iter().filter(|i| i.state == "failed").map(|i| (i.name.clone(), i.message.clone().unwrap_or_default())).collect();
+    if left == 0 {
+        // (stopped, or the player failed and said why: as it is)
+        if !matches!(job.state, JobState::Stopped | JobState::Failed) {
+            job.state = if job.made == Some(0) && job.failed > 0 { JobState::Failed } else { JobState::Done };
+            job.message = (job.state == JobState::Failed).then(|| "Nothing was saved".to_string());
+        }
+        job.fraction = None;
+        job.current = None;
+    }
+    job.share = Some(s);
+}
+
+// Share: the selection (`items`: { kind: moment | photo | clip | file, path, name }) to a destination. For now one,
+// "folder": each item's render copied into `folder` (asked for here when not given) under a readable name. What the
+// render cache has is copied at once; the rest is rendered first by the player, as a job in the queue, and copied when
+// it's made. The folder chosen, or nothing when the choice was cancelled
+#[tauri::command]
+async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folder: Option<String>, look: Option<String>) -> Result<Option<String>, String> {
+    if !share::DESTINATIONS.iter().any(|(id, _)| *id == dest) { return Err(format!("no such destination: {dest}")); }
+    if items.is_empty() { return Err("Select what to share".into()); }
+    let folder = match folder.filter(|f| !f.is_empty()) {
+        Some(f) => PathBuf::from(f),
+        None => match rfd::AsyncFileDialog::new().set_title("Save to a folder").pick_folder().await { Some(f) => f.path().to_path_buf(), None => return Ok(None) },
+    };
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Option<String>, String> {
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let look = look.unwrap_or_else(|| "HDR".into());
+        // Shown in the queue at once: looking at the cache, then copying what it has
+        let id = {
+            let mut inner = shared.lock().unwrap();
+            inner.next_id += 1;
+            let n = items.len();
+            let title = format!("Share · {} to {}", if n == 1 { "1 item".to_string() } else { format!("{n} items") },
+                                folder.file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_else(|| folder.display().to_string()));
+            let id = inner.next_id;
+            inner.jobs.push(Job { id, kind: "share".into(), title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+                                  project: root.display().to_string(), state: JobState::Looking, done: 0, total: n as u64, failed: 0, made: None, fraction: None,
+                                  current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request: Value::Null,
+                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ended: false }) });
+            id
+        };
+        let (planned, asked) = share::plan(&root, &items, &look);
+        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ended: false };
+        let show = |s: &share::Share, request: Option<Value>| {
+            let mut inner = shared.lock().unwrap();
+            if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) {
+                share_sum(j, s.clone());
+                // What the cache lacks: the player's to make, in its turn
+                if let Some(r) = request { j.request = r; j.state = JobState::Waiting; }
+            }
+            tick(&mut inner);
+        };
+        show(&s, None);
+        let mut written = Vec::new();
+        for i in 0..s.items.len() {
+            if s.items[i].state != "copying" { continue; }
+            written.extend(share::deliver(&dest, &folder, &mut s.items[i]));
+            show(&s, None);
+        }
+        seen::note_now(&written);
+        let request = (!asked.is_empty()).then(|| json!({ "kind": "share", "project": root.display().to_string(), "items": asked }));
+        show(&s, request);
+        Ok(Some(folder.display().to_string()))
+    }).await.map_err(|e| e.to_string())?
 }
 
 // The folders the Library shows now (absolute, on disk): a clip previews' pictures job makes theirs first
@@ -2476,6 +2591,7 @@ fn main() {
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
         tick(&mut worker.lock().unwrap());
+        share_collect(&worker);
     });
 
     // A player here wrote something (afp-catalog note tells): the catalog's journals read at once (live.rs)
@@ -2517,7 +2633,7 @@ fn main() {
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
-                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add])
+                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -2955,7 +3071,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: project.clone(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
         });
         let t0 = Instant::now();
         while inner.jobs[0].made_paths.is_empty() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
@@ -3012,7 +3128,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
         });
         let t0 = Instant::now();
         let mut saw_running = false;
@@ -3041,7 +3157,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }),
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }), share: None,
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit
@@ -3189,7 +3305,7 @@ mod audit {
         assert!(checks::apply(found.as_array().unwrap(), &relink).is_empty());
         row("Mend (link follows a moved clip)", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["link"]["clip"].to_string());
         // Renders deleted
-        let (n, problems) = index::delete_renders(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
+        let (n, problems) = renders::delete(&p, &["_Moments/Reef/Turtle.afplink.mp4".into()], false);
         assert!(n == 1 && problems.is_empty(), "{problems:?}");
         row("Delete renders", item(&p, "moments", "_Moments/Reef/Turtle.afplink.mp4")["renders"].to_string());
         // New folder, rename a moment, rename a folder
@@ -3334,7 +3450,7 @@ mod e2e {
             let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
             inner.jobs.push(Job { id: 1, kind: kind.into(), title: kind.into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                                   done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                                  made_paths: Vec::new(), request });
+                                  made_paths: Vec::new(), request, share: None });
             let t = Instant::now();
             let (mut made_at, mut shown_at): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
             let mut done_at = None;
@@ -3426,7 +3542,7 @@ mod live_e2e {
         let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
         inner.jobs.push(Job { id: 1, kind: "moments".into(), title: "moments".into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                               done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) });
+                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) , share: None });
         let moments = |p: &Path| index::scan(p, "moments", false)["items"].as_array().cloned().unwrap_or_default();
         let mut made_at = None;
         until("the moment made and in the view", Duration::from_secs(300), &mut || {

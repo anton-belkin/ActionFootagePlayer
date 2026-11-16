@@ -36,7 +36,7 @@
         ["_Moments/Generated/2026-11-10 14-32/GX010124 0.12.afplink.mp4", { clip: "Egypt 2026/Day 2/GX010124.MP4", in: 12, out: 20, created: "2025-10-22T19:28:42.000000Z" }, { renders: { HDR: "stale" } }],
       ],
       stills: [
-        ["_Clips/Best of the year/GX010123_14.00s.afplink.jpg", { clip: "Egypt 2026/Day 2/GX010123.MP4", t: 14, created: "2025-10-22T17:58:42.000000Z" }, { form: "Photo link", linked: true }],
+        ["_Clips/Best of the year/GX010123_14.00s.afplink.jpg", { clip: "Egypt 2026/Day 2/GX010123.MP4", t: 14, created: "2025-10-22T17:58:42.000000Z" }, { form: "Photo link", linked: true, renders: { Photo: "current" } }],
         ["_Stills/Generated/GX010124_3.00s.heic", { clip: "Egypt 2026/Day 2/GX010124.MP4", t: 3 }, { form: "Live Photo", linked: false }],
         ["_Stills/Generated/GX010125_7.50s.MP.jpg", { clip: "Egypt 2026/Day 2/GX010125.MP4", t: 7.5 }, { form: "Motion Photo", linked: false }],
       ],
@@ -142,6 +142,22 @@
           if (o) o[0] = parent(o[0]) + "/" + args.name + o[0].slice(o[0].lastIndexOf("/") + 1).replace(/^.*?(\.afplink\.(mp4|jpg)|\.MP\.jpg|\.[^.]+)$/, "$1");
           return ROOT + "/" + (o ? o[0] : "");
         }
+        // Share (share.rs): what the cache has is saved at once, the rest waits for the player; state.shareFolder is
+        // the folder "chosen" (null: the dialog cancelled), state.shareEnd(name) ends the run, `name` failing
+        case "share": {
+          if (state.shareFolder === null) return null;
+          const folder = args.folder || state.shareFolder || "/Users/me/Desktop/For Anna";
+          const cached = (it) => it.kind === "file" || (it.kind === "moment" && ((state.moments.find(([rel]) => rel === it.path) || [])[2] || {}).renders || {})[args.look] === "current"
+            || (it.kind === "photo" && (((state.stills.find(([rel]) => rel === it.path) || [])[2] || {}).renders || {}).Photo === "current");
+          const items = args.items.map((it) => cached(it) ? { name: it.name, kind: it.kind, state: "copied", message: null, saved: folder + "/" + it.name } : { name: it.name, kind: it.kind, state: "waiting", message: null, saved: null });
+          const first = items.find((i) => i.state === "waiting");
+          if (first) first.state = "rendering";
+          const made = items.filter((i) => i.state === "copied").length;
+          state.jobs.push({ id: state.jobs.length + 1, kind: "share", title: "Share · " + items.length + " items to " + folder.split("/").pop(), project: ROOT, project_name: "Trips",
+            state: first ? "running" : "done", done: made, total: items.length, failed: 0, made, fraction: first ? 0.4 : null, current: first ? first.name : null, message: null, failures: [], left_out: [],
+            share: { dest: args.dest, folder, items } });
+          return folder;
+        }
         case "add_job": state.jobs.push({ id: state.jobs.length + 1, kind: args.kind, label: args.label, state: "queued" }); return null;
         case "delete_items": {
           const gone = (rel) => args.items.some((x) => x.path === ROOT + "/" + rel || (x.kind === "folder" && (ROOT + "/" + rel).startsWith(x.path + "/")));
@@ -156,7 +172,13 @@
         default: return null;
       }
     };
-    w.__TAURI__ = { core: { invoke }, event: { listen: () => {} }, webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) } };
+    state.shareEnd = (failing) => {
+      const j = state.jobs.filter((x) => x.kind === "share").pop();
+      for (const it of j.share.items) if (it.state !== "copied") { if (it.name === failing) { it.state = "failed"; it.message = "its original isn’t found"; } else { it.state = "copied"; it.saved = j.share.folder + "/" + it.name; } }
+      j.made = j.share.items.filter((i) => i.state === "copied").length; j.failed = j.share.items.length - j.made; j.done = j.total; j.state = "done"; j.fraction = null; j.current = null;
+      j.failures = j.share.items.filter((i) => i.state === "failed").map((i) => [i.name, i.message]);
+    };
+    w.__TAURI__ = { state, core: { invoke }, event: { listen: () => {} }, webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) } };
     return { calls, state, ROOT };
   }
   if (typeof module !== "undefined" && module.exports) module.exports = install;
