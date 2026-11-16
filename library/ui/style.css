@@ -428,3 +428,4 @@ span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
 .ffind{display:block;width:calc(100% - 12px);margin:2px 6px 4px;border:1px solid var(--line);border-radius:6px;padding:4px 8px;font:inherit;font-size:12px;background:var(--win);color:var(--fg);outline:0}
 .ffind:focus{border-color:var(--accent-line)}
 .fnone{padding:2px 6px 4px 42px;font-size:12px;color:var(--muted)}
+.mbar>.head{padding:6px 23px}

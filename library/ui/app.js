@@ -727,10 +727,15 @@ function optRow(id, label, count, checked, ind, isParent, exp, isKid, onNames) {
 // The panel holds still while it's used: which rows show, in which order, is decided when it opens (or the view, the
 // folder or the search changes) and kept while things are ticked: a row whose count falls to 0 stays, greyed, the
 // counts change in place. A long list (more than FMORE_AT rows) is ordered by its counts then, shows its first FTOP
-// rows and "N more", and gets a box to find a value in it. Nested lists (Region in a country, a place in a region)
+// rows and "N more", and a box to find a value in it. Nested lists (Region in a country, a place in a region)
 // are collapsed until opened (S.fexp: kept while the window is open); a collapsed one says what's ticked in it.
-const FTOP = 6, FMORE_AT = 8, FFIND_AT = 12;
-function filtersKey() { return S.view + "\u0000" + dirKey() + "\u0000" + S.q.trim() + "\u0000" + S.scope + "\u0000" + S.flat; }
+const FTOP = 6, FMORE_AT = 8;
+// What the layout is made for: the view, the folder, the search, and the items themselves (a scan or the clips' probes
+// coming in lay it out again; a tick doesn't)
+const ITEMS_ID = new WeakMap();
+let itemsIds = 0;
+function itemsId(list) { if (!ITEMS_ID.has(list)) ITEMS_ID.set(list, ++itemsIds); return ITEMS_ID.get(list); }
+function filtersKey() { return [S.view, dirKey(), S.q.trim(), S.scope, S.flat, probesVersion, itemsId(items())].join("\u0000"); }
 function renderFilters() {
   const el = $("fpanel");
   el.hidden = !S.root || !S.filtersOpen;
@@ -802,7 +807,7 @@ function renderFilters() {
           if (exp) kidsShown.forEach((k) => { out += optRow(k.k.id, k.k.label, k.c, !!S.filters[k.k.id], false, false, false, true); });
         } else out += optRow(x.o.id, x.o.label, x.c, !!S.filters[x.o.id], false, false, false, false);
       }
-      const findBox = rows.length > FFIND_AT || find ? '<input type="search" class="ffind" data-f="' + esc(f.id) + '" value="' + esc(S.ffind[f.id] || "") + '" placeholder="Find a ' + esc(f.title.toLowerCase()) + '…" aria-label="Find in ' + esc(f.title) + '" autocomplete="off" spellcheck="false">' : "";
+      const findBox = long || find ? '<input type="search" class="ffind" data-f="' + esc(f.id) + '" value="' + esc(S.ffind[f.id] || "") + '" placeholder="Find a ' + esc(f.title.toLowerCase()) + '…" aria-label="Find in ' + esc(f.title) + '" autocomplete="off" spellcheck="false">' : "";
       if (find && !out) out = '<div class="fnone">None called that</div>';
       if (more) out += '<button type="button" class="fmore" data-a="fmore" data-v="' + esc(f.id) + '">' + more + ' more…</button>';
       else if (all && !find) out += '<button type="button" class="fmore" data-a="fmore" data-v="' + esc(f.id) + '">Fewer</button>';

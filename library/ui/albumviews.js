@@ -37,7 +37,7 @@ function albumTopRows(layout, filt) {
   const shown = ALBUM_VIEWS.filter((v) => !(v[4] && v[4].optional) || v[3]().length);
   const views = shown.filter((v) => !(v[4] && v[4].media)), media = shown.filter((v) => v[4] && v[4].media);
   const row = (v) => {
-    const m = v[4] && v[4].media;
+    const m = v[4] && v[4].media ? v[4] : null;
     const all = m ? v[3]() : null, its = m && filt ? avShown(all) : all;
     const sub = m ? (filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many)) : (AV_SUB[v[0]] || "");
     const th = m ? avMosaic(its) : '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>';
