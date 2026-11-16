@@ -276,6 +276,11 @@ button.chip{cursor:pointer}
 .empty p{margin:0;line-height:1.5;color:var(--fg2)}
 .dim{color:var(--muted)}
 .off .th{opacity:.45}
+/* An item still being written (albums.js): its picture is the page's meanwhile, a moment until the app's comes */
+.pending .th{opacity:.6}
+.pending .th::after{content:"";position:absolute;inset:auto 6px 6px auto;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85;animation:pendingPulse 1.2s ease-in-out infinite}
+@keyframes pendingPulse{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.pending .th::after{animation:none}}
 .rlist{display:flex;flex-direction:column;gap:2px;margin-top:8px;width:100%}
 .rlist button{border:0;background:transparent;text-align:left;padding:8px 10px;border-radius:8px;color:var(--fg)}
 .rlist button:hover{background:var(--hover)}

@@ -157,7 +157,7 @@ const SCENARIOS = [
     if (only && !only.split("|").some((o) => sc.name.toLowerCase().includes(o.toLowerCase()))) continue;
     for (const mode of modes) {
       const views = readViews();
-      const app = fake(views, { changed: pinpoint });
+      const app = fake(views, { changed: pinpoint, albums: albumsSay });
       // Opening isn't what's measured: the project opens with the app answering at once
       let live = false;
       const d = delayFor(mode);

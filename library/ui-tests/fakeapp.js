@@ -14,7 +14,9 @@ const VIEW_OF = { clip: "footage", moment: "moments", still: "stills", export: "
 // they are now), and `changes_since` says which items the catalog's changes were; without it they answer as before
 // (lists of problems), and the page reads its views again
 function fake(views, o) {
-  const app = { views, fail: {}, failItems: null, page: null, done: [], log: [], changed: !!(o && o.changed) };
+  const app = { views, fail: {}, failItems: null, page: null, done: [], log: [], changed: !!(o && o.changed),
+    // (`o.albums: false`: the album commands answer as before they said what they made, for measuring the older page)
+    albums: !(o && o.albums === false) && !!(o && o.changed) };
   const find = (kind, id) => (views[VIEW_OF[kind]] || { items: [] }).items.find((it) => it.id === id);
   const copy = (v) => JSON.parse(JSON.stringify(v));
   // What a change was, for changes_since: [[view, id]…] (null: can't be said), and the files that went
@@ -256,8 +258,8 @@ function fake(views, o) {
   // What an album command says it made (src/changed.rs's of_album), or its old answer; the catalog told of its own
   // files: the app's notice of them asks for nothing now (seen.rs's ours), before it made Footage be read again
   const albumAnswer = (plain, what, links, linksGone) => {
-    told(app.changed ? [] : null);
-    return app.changed ? changedOf(what, { answer: plain, problems: plain.problems || (plain.failed || []).map((f) => f[0] + ": " + f[1]), links: links || [], links_gone: linksGone || [] }) : plain;
+    told(app.albums ? [] : null);
+    return app.albums ? changedOf(what, { answer: plain, problems: plain.problems || (plain.failed || []).map((f) => f[0] + ": " + f[1]), links: links || [], links_gone: linksGone || [] }) : plain;
   };
   app.commands.album_add = (a) => {
     refuse("album_add", a);

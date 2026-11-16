@@ -623,7 +623,7 @@ function renderMain() {
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
-      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         '<span style="min-width:0">' + (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
@@ -635,7 +635,7 @@ function renderMain() {
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key];
-      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     });
     h += '</div>';
