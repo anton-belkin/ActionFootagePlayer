@@ -6,6 +6,12 @@ build, is **not done**: the reason is in the verdict.
 
 ## Verdict
 
+**Update, the zero-copy spike** (see "The zero-copy spike" below): libplacebo called directly, with VideoToolbox
+IOSurfaces imported into Vulkan, renders the player's shader with its real `PTS` at the encoder's speed. The
+D-Log M clip takes **19.5 s, against 18.1 s for the encoder alone, 24.6 s for the filter and 53.8 s today**. It is the
+same picture as the filter path. That is the route to "render what you see, no longer than encoding takes". The
+filter findings below stand as the comparison.
+
 **It works on a Mac, with limits.** The speed gain is real but smaller than hoped, because on a Mac the frame does
 **not** stay on the GPU.
 
@@ -302,6 +308,81 @@ chromatic.glsl. **The player and today's export already differ there.**
   as mpv does.
 - **The cost:** our own Swift/ObjC or Rust FFI for the IOSurface ↔ Vulkan import and VT encode, and a Windows/Linux
   story of its own: D3D11 or VAAPI interop.
+
+## The zero-copy spike: libplacebo called directly (2026-11-16, evening)
+
+`tools/export-gpu/afp_render_spike.m` is Objective-C, about 250 lines, linking the pinned static libplacebo 7.387 and
+MoltenVK. It is the whole chain with the frame never leaving the GPU:
+
+1. **Decode.** AVAssetReader (VideoToolbox) decodes into IOSurface-backed P010 pixel buffers.
+2. **Import.** Each plane becomes an `MTLTexture` on the IOSurface (`newTextureWithDescriptor:iosurface:plane:`),
+   then a `VkImage` through `VkImportMetalTextureInfoEXT` (MoltenVK's `VK_EXT_metal_objects`), then
+   `pl_vulkan_wrap`.
+3. **Render.** `pl_render_image` runs the player's shader file **with its real `PTS` parameter set per frame**, as
+   mpv's `vo_gpu_next` does, so no pass counter.
+4. **Output.** The result goes into the planes of a pixel buffer taken from the encoder's own pool
+   (`AVAssetWriterInputPixelBufferAdaptor`), imported the same way.
+5. **Encode.** AVAssetWriter encodes HEVC Main10 HLG. MOV tags: bt2020nc / arib-std-b67 / bt2020 / tv.
+
+Imports are kept per IOSurface, since both pools recycle about 25-30 buffers. One frame is in flight: frame *n*
+renders while *n − 1* finishes on the GPU (`pl_tex_poll`) and goes to the encoder.
+
+**Build:**
+```
+clang -O2 -fobjc-arc -o afp_render_spike tools/export-gpu/afp_render_spike.m $(pkg-config --static --cflags --libs libplacebo) \
+  -I/opt/homebrew/include -lc++ -framework AVFoundation -framework CoreMedia -framework CoreVideo -framework Metal \
+  -framework IOSurface -framework VideoToolbox -framework Foundation
+```
+The pkg-config path is the build recipe's prefix.
+
+**Results** (D-Log M 4K60, 926 frames, the same shader as above: grid + fringes + HLG LUT, at the source's bit rate,
+M1 Pro):
+
+| Run | Time | fps | Limited by |
+|---|---|---|---|
+| LUT shader only (≈ the encoder's floor) | **18.1 s** | 51 | the encoder: waits 18.4 ms a frame on it, 0.1 ms on the GPU |
+| Player's warp + fringes + LUT, warm | **19.3-19.6 s** | 47-48 | the GPU: about 19.7 ms a frame; the encoder waits 0.05 ms |
+| The same, first run after a build | 27.0-27.4 s | 34 | cold start: pipeline compile and clocks, and another session's `rustc` was loading the machine (load 13-50) |
+| The same, without the overlap (`pl_gpu_finish` each frame) | 20.1 s | 46 | |
+
+**Against the earlier paths** for the same clip and settings:
+
+| Path | Time |
+|---|---|
+| Today's exporter | 53.8 s |
+| ffmpeg libplacebo filter | 24.6 s |
+| **Spike, warm** | **19.5 s** |
+| Real time | 15.5 s |
+
+So with fringes it is **within 8 % of the encoder alone**, 2.8× faster than today. Without fringes (29.1 s today)
+it should land at the same encoder-bound ~18-19 s; not run.
+
+**Pictures.**
+
+- **Against the filter path:** 120 frames, the spike encoded at 600 Mbps against the filter path's lossless FFV1.
+  Y 55.3 dB (mean 1.0-1.5 codes, max 15-21), U 53.3 dB, V 62.2 dB. That is the HEVC encode's own loss: the same
+  shader through the same libplacebo, frame for frame by the real `PTS`.
+- **Against the player:** the closest thing to mpv's own render. Only the scalers and the dither differ: libplacebo's
+  defaults here, with dither off.
+
+**Open in the spike:**
+
+- **Cold start.** A `pl_cache` saved to disk, as mpv keeps its shader cache, should cut the first run's extra seconds.
+  Not tried.
+- **The GPU's ~19.7 ms a frame:** the shader's own ~10 ms plus libplacebo's conversion to and from YUV and the output's
+  chroma downsampling. The LUT-only render shows that part is about 10 ms with `pl_gpu_finish`. The player pays the
+  same per frame.
+- **Not in it:**
+  - audio and metadata (AVAssetWriter can pass them through);
+  - SDR tags, ProRes, Dolby Vision (the HEVC goes to `dv_mux` as today);
+  - moments (`time_offset` and a reader time range), progress and stop;
+  - layout and ownership hand-over (`pl_vulkan_hold_ex`/`release_ex`). It relies on MoltenVK ignoring layouts.
+- **Not verified:** the MTLTexture import with an AVAssetWriter running on a non-default GPU (Intel Macs with two GPUs).
+
+**What it would take to become the export path:** a helper next to `afp-photo` (`macos/`), fed the shader file and
+the export's settings by `gyroflow-export` (which already writes the shader). It would replace the decoder → engine →
+encoder pipes when the GPU warp can render the clip, falling back as described above. The app already ships
+libplacebo (linked into mpv) and MoltenVK, so **no second ffmpeg**.
 
 ## Shipping an ffmpeg with libplacebo (proposal; release workflow not changed)
 
