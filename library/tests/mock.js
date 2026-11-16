@@ -93,6 +93,10 @@
         case "snapshot": return { project: ROOT, jobs: state.jobs, close_asked: false, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null };
         case "project": return { path: ROOT, name: "Trips", counts: {}, settings: {} };
         case "recent": return [];
+        case "project_settings": return { path: ROOT, name: "Trips", id: "t", hosts: {}, locations: [], local: [], caches: [], never_rename: false, tag_stores: ["library"],
+                                          finder_here: true, generated_runs: false, next_to_footage: true,
+                                          renders: state.rendersCleared ? { files: 0, bytes: 0, others: 1 } : { files: 3, bytes: 52428800, others: 1 } };
+        case "clear_renders": state.rendersCleared = true; return { files: 3, bytes: 52428800, kept: 1 };
         case "engine": return "ok";
         case "cached_view": return null;
         case "scan": return args.view === "footage" ? footage() : own(args.view);

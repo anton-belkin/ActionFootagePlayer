@@ -884,6 +884,29 @@ function publish()
         lens = current_lens or false,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
+    -- What a render takes from this computer's settings, for Action Footage Library's recipes (library/src/renders.rs
+    -- reads it; a batch writes it too): the defaults' bundle, the edge fill, how much temporal denoise, the preset
+    -- used where a clip has no Gyroflow project. Written when it changes (what was written is kept beside the
+    -- presets, a key ipairs doesn't see: the main chunk has no locals to spare)
+    if DATA and DATA ~= "" then
+        local preset
+        for _, p in ipairs(PRESETS) do if file_exists(p) then preset = p; break end end
+        local text = utils.format_json({ v = 1, defaults = DEFAULTS, edges = o.edges, edges_blur = o.edges_blur,
+                                         temporal_denoise = o.temporal_denoise, preset = preset })
+        if text and text ~= PRESETS.defaults_written then
+            local path = utils.join_path(DATA, "render-defaults.json")
+            if not utils.file_info(DATA) then
+                mp.command_native({ name = "subprocess", playback_only = false,
+                                    args = platform.windows and { "cmd", "/d", "/c", "mkdir", DATA } or { "mkdir", "-p", DATA } })
+            end
+            local f = io.open(path .. ".tmp", "w")
+            if f then
+                f:write(text); f:close()
+                os.remove(path)
+                if os.rename(path .. ".tmp", path) then PRESETS.defaults_written = text end
+            end
+        end
+    end
 end
 
 -- The filter set up again for current_source (the horizon lock, the lens, or the rate changing with the edge fill);

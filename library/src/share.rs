@@ -36,9 +36,23 @@ pub struct Item {
     /// Files that go along as they are (a Live Photo's video)
     #[serde(skip)]
     pub along: Vec<PathBuf>,
+    /// To be rendered: the render's recipe, the file the player was asked to make (`out` of its request), the
+    /// original and a moment's part (for one with nothing to change: the original as it is, or its part cut)
+    #[serde(skip)]
+    pub render: Option<Asked>,
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Clone, Debug)]
+pub struct Asked {
+    pub recipe: Value,
+    pub out: String,
+    pub original: PathBuf,
+    pub part: Option<(f64, f64)>,
+    /// Where a moment's lossless cut goes (the cache, beside its render: <hash>.<profile>.mp4)
+    pub cut: PathBuf,
+}
+
+#[derive(Serialize, Clone, Debug, Default)]
 pub struct Share {
     pub dest: String,
     pub folder: String,
@@ -46,11 +60,14 @@ pub struct Share {
     /// The player's run ended: what it made is to be handed over (main.rs's worker)
     #[serde(skip)]
     pub ended: bool,
+    /// What the player would have rendered each with by itself (its status' `used`: { out, player })
+    #[serde(skip)]
+    pub used: Vec<Value>,
 }
 
 fn failed(name: &str, kind: &str, why: String) -> Item {
     Item { name: name.to_string(), kind: kind.to_string(), state: "failed".into(), message: Some(why), saved: None, file: None, save_as: String::new(),
-           expect: Vec::new(), along: Vec::new() }
+           expect: Vec::new(), along: Vec::new(), render: None }
 }
 
 /// What sharing `items` takes: each one's file when the cache (or the item itself) has it, else what the player is to
@@ -74,7 +91,7 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
             if !file.is_file() { out.push(failed(&shown, kind, "the file isn't there".into())); continue; }
             let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             let along = if name.to_lowercase().ends_with(".heic") { vec![file.with_extension("mov")].into_iter().filter(|m| m.is_file()).collect() } else { Vec::new() };
-            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: None, saved: None, file: Some(file), save_as: name, expect: Vec::new(), along });
+            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: None, saved: None, file: Some(file), save_as: name, expect: Vec::new(), along, render: None });
             continue;
         }
         let item = match renders::item(root, kind, path) { Ok(i) => i, Err(e) => { out.push(failed(&shown, kind, e)); continue } };
@@ -83,7 +100,7 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
         let ext_of = |f: &Path| f.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| profile.exts[0].to_string());
         if let Some(file) = found.file.clone() {
             let save_as = renders::readable(&item, profile, &ext_of(&file));
-            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: None, saved: None, file: Some(file), save_as, expect: Vec::new(), along: Vec::new() });
+            out.push(Item { name: shown, kind: kind.into(), state: "copying".into(), message: None, saved: None, file: Some(file), save_as, expect: Vec::new(), along: Vec::new(), render: None });
             continue;
         }
         // To be rendered: from its original, which has to be here
@@ -93,13 +110,18 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
         let made = if profile.photo { expect[0].0.with_extension("") } else { expect[0].0.clone() };
         let made = made.display().to_string();
         // Two items of one recipe (a moment and its copy in another album) are one render
+        // The player renders with the recipe's settings (`view`), so the render is what its hash says
         if !asked.iter().any(|a| a["out"] == json!(made)) {
             asked.push(renders::trimmed_request(&json!({
                 "of": item.kind.name(), "name": shown, "file": item.file.as_ref().map(|f| f.display().to_string()), "clip": original.display().to_string(),
                 "t": item.link["t"], "crop": item.link["crop"], "camera": item.link["camera"], "sdr": profile.name == "SDR", "out": made,
+                "view": renders::render_view(&found.recipe), "alone": found.recipe["alone"],
                 "link": renders::link(ctx, &item, profile, &found) })));
         }
-        out.push(Item { name: shown, kind: kind.into(), state: "waiting".into(), message: None, saved: None, file: None, save_as: String::new(), expect, along: Vec::new() });
+        let part = (item.kind == Kind::Moment).then(|| (item.link["in"].as_f64(), item.link["out"].as_f64())).and_then(|(a, b)| Some((a?, b?)));
+        let render = Asked { recipe: found.recipe.clone(), out: made, original, part, cut: renders::cache_path(root, &found.hash, profile, "mp4") };
+        out.push(Item { name: shown, kind: kind.into(), state: "waiting".into(), message: None, saved: None, file: None, save_as: String::new(), expect, along: Vec::new(),
+                        render: Some(render) });
     }
     (out, asked)
 }
@@ -151,25 +173,98 @@ pub fn deliver(dest: &str, folder: &Path, item: &mut Item) -> Vec<PathBuf> {
     written
 }
 
-/// After the player's run: each item still waiting gets its render from the cache, or says why not (`failures`: what
-/// the player said, by the item's name; `stopped`: the run was stopped)
-pub fn collect(share: &mut Share, failures: &[(String, String)], stopped: bool) -> Vec<PathBuf> {
+/// The player's run ended: what it made handed over; what it said has nothing to change handed over as the original
+/// (a clip) or its part cut losslessly by `cut` (afp-cut: a moment); the rest failed with the player's reason. A
+/// render whose settings aren't what this player would have taken by itself (its defaults changed since the Library
+/// read them) is handed over and kept (it's what its recipe says), and the item says so
+pub fn collect(share: &mut Share, failures: &[(String, String)], stopped: bool, cut: Option<&Path>, ffmpeg: Option<&Path>) -> Vec<PathBuf> {
     let folder = PathBuf::from(&share.folder);
     let mut written = Vec::new();
+    let used = share.used.clone();
     for item in share.items.iter_mut().filter(|i| i.state == "waiting" || i.state == "rendering") {
+        let why = failures.iter().find(|(n, _)| *n == item.name).map(|(_, why)| why.clone());
         match item.expect.iter().find(|(f, _)| f.is_file()).cloned() {
             Some((file, name)) => {
                 item.file = Some(file);
                 item.save_as = name;
+                if let Some(r) = &item.render {
+                    let differ = used.iter().find(|u| u["out"].as_str() == Some(r.out.as_str()))
+                        .map(|u| renders::differs(&r.recipe, &u["player"])).unwrap_or_default();
+                    if !differ.is_empty() {
+                        item.message = Some(format!("made with the settings the Library had; the player's own differ ({}): shared again, it's made with those", differ.join(", ")));
+                    }
+                }
                 written.extend(deliver(&share.dest, &folder, item));
+            }
+            None if why.as_deref().is_some_and(|w| w.contains("nothing to change")) && item.render.is_some() => {
+                written.extend(as_recorded(&share.dest, &folder, item, cut, ffmpeg));
             }
             None => {
                 item.state = "failed".into();
-                item.message = Some(failures.iter().find(|(n, _)| *n == item.name).map(|(_, why)| why.clone())
-                    .unwrap_or_else(|| if stopped { "stopped before it was rendered".into() } else { "it wasn't rendered".into() }));
+                item.message = Some(why.unwrap_or_else(|| if stopped { "stopped before it was rendered".into() } else { "it wasn't rendered".into() }));
             }
         }
     }
+    written
+}
+
+/// An item the player has nothing to change in (not log, nothing to stabilize it with): a clip handed over as it is,
+/// a moment as its part of the original cut without re-encoding (from the keyframe at or before its start: afp-cut,
+/// checked to read as the original does; a file it can't cut, by the player's ffmpeg copying the streams), kept in
+/// the cache beside its render's name, so sharing it again copies it at once
+fn as_recorded(dest: &str, folder: &Path, item: &mut Item, cut: Option<&Path>, ffmpeg: Option<&Path>) -> Vec<PathBuf> {
+    let r = item.render.clone().unwrap();
+    let ext = r.original.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mp4".into());
+    let safe: String = item.name.chars().map(|c| if "/\\:*?\"<>|".contains(c) || c.is_control() { '_' } else { c }).collect();
+    match r.part {
+        None => {
+            item.file = Some(r.original.clone());
+            item.save_as = format!("{}.{ext}", safe.trim());
+        }
+        Some((from, to)) => {
+            let Some(tool) = cut else {
+                item.state = "failed".into();
+                item.message = Some("nothing to change, and the player's afp-cut isn't there to cut its part".into());
+                return Vec::new();
+            };
+            if !r.cut.is_file() {
+                let _ = std::fs::create_dir_all(r.cut.parent().unwrap_or(folder));
+                let out = std::process::Command::new(tool).arg(&r.original).args(["--from", &format!("{from:.3}"), "--to", &format!("{to:.3}"), "--out"]).arg(&r.cut)
+                    .stdin(std::process::Stdio::null()).output();
+                // A file afp-cut can't cut (2: one it doesn't read, as a camera's ctts): the streams copied by ffmpeg
+                let out = match (out, ffmpeg) {
+                    (Ok(o), Some(ff)) if o.status.code() == Some(2) => {
+                        let _ = std::fs::remove_file(&r.cut);
+                        std::process::Command::new(ff).args(["-v", "error", "-y", "-ss", &format!("{from:.3}"), "-i"]).arg(&r.original)
+                            .args(["-t", &format!("{:.3}", to - from), "-map", "0:v:0", "-map", "0:a?", "-c", "copy", "-avoid_negative_ts", "make_zero", "-f", "mp4"])
+                            .arg(&r.cut).stdin(std::process::Stdio::null()).output()
+                    }
+                    (o, _) => o,
+                };
+                match out {
+                    Ok(o) if o.status.success() && r.cut.is_file() => {}
+                    Ok(o) => {
+                        let _ = std::fs::remove_file(&r.cut);
+                        let said = String::from_utf8_lossy(&o.stderr).lines().last().unwrap_or("").to_string();
+                        item.state = "failed".into();
+                        item.message = Some(format!("nothing to change, and its part couldn't be cut: {said}"));
+                        return Vec::new();
+                    }
+                    Err(e) => {
+                        item.state = "failed".into();
+                        item.message = Some(format!("nothing to change, and afp-cut didn't start: {e}"));
+                        return Vec::new();
+                    }
+                }
+            }
+            item.file = Some(r.cut.clone());
+            item.save_as = format!("{}.mp4", safe.trim());
+        }
+    }
+    item.message = Some(if r.part.is_some() { "nothing to change: its part of the original, cut without re-encoding".into() } else { "nothing to change: the original as it is".into() });
+    let mut written = vec![];
+    written.extend(deliver(dest, folder, item));
+    if r.part.is_some() { written.push(r.cut); }
     written
 }
 
@@ -237,7 +332,7 @@ mod tests {
 
         // What's there is saved now, under readable names; what's in the folder already is left as it is
         std::fs::write(dest.join("Turtle.mov"), b"mine").unwrap();
-        let mut share = Share { dest: "folder".into(), folder: dest.display().to_string(), items: Vec::new(), ended: false };
+        let mut share = Share { dest: "folder".into(), folder: dest.display().to_string(), items: Vec::new(), ..Default::default() };
         for it in items.iter_mut().filter(|i| i.state == "copying") { deliver("folder", &dest, it); }
         assert_eq!(std::fs::read(dest.join("Turtle.mov")).unwrap(), b"mine");
         assert_eq!(std::fs::read(dest.join("Turtle 2.mov")).unwrap(), b"turtle in hdr");
@@ -249,7 +344,7 @@ mod tests {
         std::fs::write(format!("{}.jpg", asked[1]["out"].as_str().unwrap()), b"photo").unwrap();
         std::fs::write(asked[2]["out"].as_str().unwrap(), b"whole clip").unwrap();
         share.items = items;
-        collect(&mut share, &[("Shark".into(), "gyroflow-export failed".into())], false);
+        collect(&mut share, &[("Shark".into(), "gyroflow-export failed".into())], false, None, None);
         let states: Vec<&str> = share.items.iter().map(|i| i.state.as_str()).collect();
         assert_eq!(states, ["copied", "failed", "failed", "copied", "copied", "copied", "copied", "failed"]);
         assert_eq!(share.items[1].message.as_deref(), Some("gyroflow-export failed"));

@@ -670,6 +670,8 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
     if let Some(f) = st.get("made_paths").and_then(Value::as_array) {
         job.made_paths = f.iter().filter_map(Value::as_str).map(str::to_string).collect();
     }
+    // A share's: what the player would have rendered each with by itself
+    if let (Some(s), Some(u)) = (job.share.as_mut(), st.get("used").and_then(Value::as_array)) { s.used = u.clone(); }
     if let Some(f) = st.get("left_out").and_then(Value::as_array) {
         job.left_out = f.iter().filter_map(|p| {
             let p = p.as_array()?;
@@ -1207,7 +1209,8 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
                    "never_rename": locations::never_rename(&root),
                    "tag_stores": locations::tag_stores(&root), "finder_here": cfg!(target_os = "macos"),
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
-                   "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
+                   "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()),
+                   "renders": renders::cache_size(&root) }))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1277,6 +1280,17 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     if !stores.is_empty() { doc["tag_stores"] = json!(stores); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }).await.map_err(|e| e.to_string())?
+}
+
+// The project's render cache (_Renders) emptied: what Share made there, never anything else. Only on the user's Clear
+// (Project settings, General); nothing cleans it by itself. { files, bytes } freed, { kept }
+#[tauri::command]
+async fn clear_renders(shared: State<'_, Shared>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (freed, problems) = renders::clear(&root);
+        if problems.is_empty() { Ok(freed) } else { Err(format!("Couldn't remove {} of them: {}", problems.len(), problems[0])) }
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -2353,8 +2367,12 @@ fn share_collect(shared: &Shared) {
             (j.id, s.clone(), j.failures.clone(), j.state == JobState::Stopped)
         }).collect()
     };
+    // afp-cut, beside the player's gyroflow-probe: a moment with nothing to change is its part cut as it is
+    if ended.is_empty() { return; }
+    let cut = index::probe_tool(player().ok().as_deref())
+        .map(|p| p.with_file_name(if cfg!(windows) { "afp-cut.exe" } else { "afp-cut" })).filter(|p| p.is_file());
     for (id, mut s, failures, stopped) in ended {
-        let written = share::collect(&mut s, &failures, stopped);
+        let written = share::collect(&mut s, &failures, stopped, cut.as_deref(), player_ffmpeg().as_deref());
         seen::note_now(&written);
         let mut inner = shared.lock().unwrap();
         if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) { share_sum(j, s); }
@@ -2408,11 +2426,11 @@ async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folde
             inner.jobs.push(Job { id, kind: "share".into(), title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                                   project: root.display().to_string(), state: JobState::Looking, done: 0, total: n as u64, failed: 0, made: None, fraction: None,
                                   current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request: Value::Null,
-                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ended: false }) });
+                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ..Default::default() }) });
             id
         };
         let (planned, asked) = share::plan(&root, &items, &look);
-        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ended: false };
+        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ..Default::default() };
         let show = |s: &share::Share, request: Option<Value>| {
             let mut inner = shared.lock().unwrap();
             if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) {
@@ -2630,7 +2648,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
                                                  albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
@@ -3185,9 +3203,14 @@ mod share_e2e {
     fn a_share_with_the_player() {
         let (Some(_), Some(trip)) = (std::env::var_os("AFL_PLAYER"), std::env::var_os("AFL_SHARE_TRIP")) else { return };
         let root = PathBuf::from(&trip);
-        let clip = "Day 1/A.MP4";
+        // AFL_SHARE_CLIP: the clip's path in the trip (a real camera clip, with its .afp.json and .gyroflow if it has them)
+        let clip_owned = std::env::var("AFL_SHARE_CLIP").unwrap_or_else(|_| "Day 1/A.MP4".into());
+        let clip = clip_owned.as_str();
         let size = std::fs::metadata(root.join(clip)).unwrap().len();
         let jpeg = std::fs::read(root.join("thumb.jpg")).unwrap();
+        if !root.join(PROJECT_FILE).is_file() {
+            std::fs::write(root.join(PROJECT_FILE), r#"{"format":"actionfootage-project","version":3,"id":"share-e2e"}"#).unwrap();
+        }
         for d in ["_Moments/Reef", "_Stills/Reef"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
         let roots = json!([root.display().to_string()]);
         std::fs::write(root.join("_Moments/Reef/Turtle.afplink.mp4"),
@@ -3199,9 +3222,11 @@ mod share_e2e {
         std::fs::create_dir_all(&folder).unwrap();
         let items = [json!({ "kind": "moment", "path": "_Moments/Reef/Turtle.afplink.mp4", "name": "Turtle" }),
                      json!({ "kind": "photo", "path": "_Stills/Reef/A_1.00s.afplink.jpg", "name": "A_1.00s" }),
-                     json!({ "kind": "clip", "path": clip, "name": "A" })];
+                     json!({ "kind": "clip", "path": clip, "name": clip.rsplit('/').next().unwrap_or(clip).split('.').next().unwrap_or("A") })];
         let look = std::env::var("AFL_SHARE_LOOK").unwrap_or_else(|_| "HDR".into());
-        let (planned, asked) = share::plan(&root, &items, &look);
+        let (mut planned, asked) = share::plan(&root, &items, &look);
+        // What the cache has is handed over at once, as the command does
+        for i in planned.iter_mut().filter(|i| i.state == "copying") { share::deliver("folder", &folder, i); }
         println!("planned: {}", serde_json::to_string(&planned.iter().map(|i| (&i.name, &i.state, &i.message)).collect::<Vec<_>>()).unwrap());
         println!("asked of the player: {}", serde_json::to_string_pretty(&asked).unwrap());
         let shared: Shared = Arc::new(Mutex::new(Inner::default()));
@@ -3214,7 +3239,7 @@ mod share_e2e {
                 state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
                 failures: vec![], left_out: vec![], made_paths: vec![],
                 request: json!({ "kind": "share", "project": root.display().to_string(), "items": asked }),
-                share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ended: false }),
+                share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ..Default::default() }),
             });
         }
         let t0 = Instant::now();
@@ -3239,6 +3264,9 @@ mod share_e2e {
         println!("_Renders: {:?}", list(&root.join("_Renders")));
         println!("shared: {:?}", list(&folder));
         assert!(j.share.as_ref().unwrap().items.iter().all(|i| i.state == "copied"), "not everything was saved");
+        // The player rendered with the recipe's settings, and they're what it would have taken by itself
+        assert!(!j.share.as_ref().unwrap().items.iter().any(|i| i.message.as_deref().is_some_and(|m| m.contains("differ"))),
+                "the Library's recipe and the player's own settings differ");
         assert_eq!(j.state, JobState::Done, "{:?}", j.message);
     }
 }

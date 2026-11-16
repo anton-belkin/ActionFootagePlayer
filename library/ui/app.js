@@ -1417,6 +1417,8 @@ function renderSheet() {
       '<p class="sub wrap">One line per NAS: the name its locations use, then the other names it answers to. Any of them matches a share mounted under that name.</p>' +
       '<div class="lab">What’s made</div>' +
       '<label class="switch"><input type="checkbox" id="genruns"' + (st.generated_runs ? " checked" : "") + '><span class="wrap">A folder per run in Generated: each run’s clip previews, moments, photos and exports in a folder of their own, named by its date and time (what’s saved by hand: one a day). Off: all in Generated itself (_Clips/Generated, _Moments/Generated, _Stills/Generated, _Exports/Generated).</span></label>' +
+      // The render cache (_Renders, in the project: Share's renders, made again when they're needed). Cleared only here
+      (st.renders ? '<div class="lab">Renders</div><div class="kv"><span style="min-width:0"><span class="nm">_Renders</span><span class="sub">What Share rendered, kept to be copied at once next time. Cleared, they’re made again when they’re shared' + (st.renders.others ? " · " + st.renders.others + " other files there are kept" : "") + '</span></span><span class="num">' + st.renders.files + " files · " + sizeText(st.renders.bytes) + '</span><button type="button" class="btn sm" data-a="clearrenders"' + (st.renders.files ? "" : " disabled") + '>Clear the render cache</button></div>' : "") +
       '<div class="btns"><button type="button" class="btn sm" data-a="moveproject">Move the project to…</button></div>' +
       '<p class="sub wrap">Moves Project.afproject and the project’s _ folders to another folder (the SSD, say). The clips and their own files stay where they are; this folder becomes a location.</p></div>' +
       '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
@@ -2675,6 +2677,7 @@ document.addEventListener("click", async (e) => {
     case "localrm": S.localEdit.splice(+v, 1); renderSheet(); return;
     case "savelocal": try { const nr = $("neverrename"); await invoke("save_local", { list: S.localEdit.map((l) => ({ name: l.name, at: l.at, path: l.path })), neverRename: nr ? nr.checked : S.neverRename }); S.sheet = null; renderSheet(); toast("Saved on this computer"); await refresh(); } catch (er) { showError(String(er)); } return;
     case "clearcache": try { await invoke("clear_cache", { key: v }); toast("Cleared"); await openSettings(); } catch (er) { showError(String(er)); } return;
+    case "clearrenders": try { const r = await invoke("clear_renders"); toast("Render cache cleared: " + sizeText(r.bytes) + " freed (" + r.files + (r.files === 1 ? " file" : " files") + ")"); await openSettings(); } catch (er) { showError(String(er)); } return;
     case "exportjson": {
       S.menu = false; renderTop();
       try { const f = await invoke("export_library"); if (f) { toast("Exported: " + f); call("reveal_path", { path: f }).catch(() => {}); } else $("toast").hidden = true; } catch (er) { showError(String(er)); }

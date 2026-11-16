@@ -25,7 +25,10 @@
 --   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
 --                        and stabilized as the clip plays: { id, clip, from, to, at, link, dates, output, force,
 --                        reply }; the answer is `script-message-to <reply> preview-done <id> <json>`, { ok, error }
---   photo                the frame on screen as a photo (Alt+s; Enter in crop mode): gyroflow-export --photo, as it
+--   photo                the frame on screen as a photo link (Alt+s; Enter in crop mode): in a project, a small
+--                        picture of the frame as it shows with its link (clip, time, crop, camera), in _Stills/Generated/,
+--                        rendered by the Library's Share when it's shared; outside a project, as photo-full
+--   photo-full           the frame on screen as a full photo, rendered now (Alt+Shift+s): gyroflow-export --photo, as it
 --                        plays (the same stabilization, the frame cleaned up from its neighbours as Ctrl+p does, crop
 --                        mode's camera and frame), as an SDR screen shows the look (as_it_plays) with a gain map to the
 --                        HLG: a HEIC on macOS, an Ultra HDR JPEG elsewhere, in the project's _Stills/ (stabilized/
@@ -274,7 +277,7 @@ local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true
 -- water's color fringes (Ctrl+a) taken out or left as recorded (whatever chromatic_skip leaves out on this screen).
 -- Every export carries them: the video, a moment, a batch's, a Live Photo's motion (gyroflow-export runs the player's
 -- own shaders for them). A clip whose saved view doesn't say: as the session has it, else the app's defaults
-local function cleanup_args(args, denoise, strong, chromatic)
+local function cleanup_args(args, denoise, strong, chromatic, amount)
     local session = mp.get_property_native("user-data/gyroflow/session") or {}
     local defaults = mp.get_property_native("user-data/gyroflow/defaults") or {}
     local function pick(v, k)
@@ -282,7 +285,8 @@ local function cleanup_args(args, denoise, strong, chromatic)
         if type(session[k]) == "boolean" then return session[k] end
         return defaults[k] == true
     end
-    local amount = mp.get_property_native("user-data/gyroflow/temporal_denoise") or "full"
+    -- `amount`: the Library's recipe's (a share), else this computer's
+    amount = amount or mp.get_property_native("user-data/gyroflow/temporal_denoise") or "full"
     if pick(denoise, "denoise") and (amount == "full" or amount == "light") then
         table.insert(args, "--denoise"); table.insert(args, amount)
         if pick(strong, "denoise_strong") then table.insert(args, "--denoise-strong") end
@@ -361,10 +365,11 @@ local function view_args(args, v)
         if lens == "as-recorded" then add("--lens-recorded") end
     end
     if v.level then add("--level", v.level) end
-    local edges = mp.get_property_native("user-data/gyroflow/edges")
+    -- The edge fill: the Library's recipe's (a share), else as it's set here
+    local edges = v.edges or mp.get_property_native("user-data/gyroflow/edges")
     if edges then
         add("--edges", edges)
-        local blur = mp.get_property_native("user-data/gyroflow/edges_blur")
+        local blur = v.edges_blur or mp.get_property_native("user-data/gyroflow/edges_blur")
         if blur then add("--edges-blur", string.format("%g", blur)) end
     end
     if v.horizon_lock == "yes" or v.horizon_lock == "no" then add("--horizon-lock", v.horizon_lock == "yes" and "100" or "0") end
@@ -375,7 +380,7 @@ local function view_args(args, v)
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
-    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic)
+    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, v.temporal_denoise)
 end
 
 -- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
@@ -765,7 +770,27 @@ local function photo_dir()
     return dir
 end
 
-local function photo()
+-- Save frame's (crop mode's) camera and frame, as a photo takes them: the camera (360: yaw, pitch, roll, zoom) and
+-- the frame in shares of the camera's view; flat, the frame in shares of the video as it's recorded. nil, nil: the
+-- whole frame
+local function save_frame()
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    local f = crop.active and crop.frame
+    if f and crop.camera then
+        return crop.camera, { x = f.x, y = f.y, w = f.w, h = f.h }
+    elseif f and crop.flat then
+        -- On screen a point u (in shares of the video as it'd be unzoomed) shows the video's (u - 1/2) / s - pan + 1/2
+        local s = 2 ^ crop.flat.zoom
+        local function clamp(v) return math.max(0, math.min(1, v)) end
+        local x0, y0 = clamp((f.x - 0.5) / s - crop.flat.x + 0.5), clamp((f.y - 0.5) / s - crop.flat.y + 0.5)
+        local x1, y1 = clamp((f.x + f.w - 0.5) / s - crop.flat.x + 0.5), clamp((f.y + f.h - 0.5) / s - crop.flat.y + 0.5)
+        if x1 > x0 and y1 > y0 then return nil, { x = x0, y = y0, w = x1 - x0, h = y1 - y0 } end
+    end
+    return nil, nil
+end
+
+-- The full photo, rendered now (Alt+Shift+s; Alt+s where there's no project to keep a photo link in)
+local function photo_full()
     local path = local_path()
     if not path or not installed("Photo") then return end
     local t = shown_time()
@@ -790,22 +815,9 @@ local function photo()
     end
     local still = mp.get_property_native("user-data/gyroflow/still")
     if still == false then table.insert(args, "--radius"); table.insert(args, "0") end
-    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
-    local f = crop.active and crop.frame
-    if f and crop.camera then
-        local c = crop.camera
-        table.insert(args, "--camera"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.5f", c.yaw, c.pitch, c.roll, c.zoom))
-        table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h))
-    elseif f and crop.flat then
-        -- On screen a point u (in shares of the video as it'd be unzoomed) shows the video's (u - 1/2) / s - pan + 1/2
-        local s = 2 ^ crop.flat.zoom
-        local function clamp(v) return math.max(0, math.min(1, v)) end
-        local x0, y0 = clamp((f.x - 0.5) / s - crop.flat.x + 0.5), clamp((f.y - 0.5) / s - crop.flat.y + 0.5)
-        local x1, y1 = clamp((f.x + f.w - 0.5) / s - crop.flat.x + 0.5), clamp((f.y + f.h - 0.5) / s - crop.flat.y + 0.5)
-        if x1 > x0 and y1 > y0 then
-            table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", x0, y0, x1 - x0, y1 - y0))
-        end
-    end
+    local c, f = save_frame()
+    if c then table.insert(args, "--camera"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.5f", c.yaw, c.pitch, c.roll, c.zoom)) end
+    if f then table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h)) end
     local dir = photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
     -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
@@ -838,8 +850,40 @@ local function photo()
     end)
 end
 
+-- A photo link (Alt+s; Enter in crop mode; docs/albums-photos-share-concept.md, "Photos as objects"): the frame as it
+-- shows now, Save frame's crop and camera, made into a small picture with its link (clip, time, crop, camera) by the
+-- workspace plugin, in the project's _Stills/Generated/. Nothing is rendered: Action Footage Library's Share renders
+-- it when it's shared, in the form the destination wants. Playback doesn't stop. Outside a project (nothing would
+-- keep or share the link): the full photo, as Alt+Shift+s
+local function photo()
+    local wsd = mp.get_property_native("user-data/workspace")
+    local project = type(wsd) == "table" and wsd.project
+    local path = local_path()
+    if type(project) ~= "string" or project == "" or not path then return photo_full() end
+    local t = shown_time()
+    if not t then return end
+    if wsd.path == mp.get_property("path") and type(wsd.offset) == "number" then t = t + wsd.offset end
+    local camera, frame = save_frame()
+    -- The picture: the frame as mpv renders it (the look, the stabilization on the GPU path), a JPEG at the video's
+    -- size; the workspace plugin crops and shrinks it
+    photos = photos + 1
+    local picture = utils.join_path(platform.temp_dir(), string.format("afp-photo-link-%d-%d.jpg", utils.getpid(), photos))
+    local saved = {}
+    for k, v in pairs({ ["screenshot-format"] = "jpg", ["screenshot-jpeg-quality"] = "92", ["screenshot-tag-colorspace"] = "no", ["screenshot-high-bit-depth"] = "no" }) do
+        saved[k] = mp.get_property(k)
+        mp.set_property(k, v)
+    end
+    mp.command_native({ "screenshot-to-file", picture, "video" })
+    for k, v in pairs(saved) do mp.set_property(k, v) end
+    if not utils.file_info(picture) then picture = nil end
+    mp.commandv("script-message-to", "workspace", "photo-link", utils.format_json({
+        t = math.floor(t * 1000 + 0.5) / 1000, crop = frame, camera = camera, picture = picture }))
+end
+
 mp.add_key_binding("Alt+s", "photo", photo)
 mp.register_script_message("photo", photo)
+mp.add_key_binding("Alt+S", "photo-full", photo_full)
+mp.register_script_message("photo-full", photo_full)
 
 -- A photo of any clip at a time, with its saved view, for the workspace plugin (the Project tab's photos of marks):
 -- { id, clip, t, view, reply, crop, camera, link, still }. As Save frame's choice has it (a still, Live or Motion Photo) and the clean still
