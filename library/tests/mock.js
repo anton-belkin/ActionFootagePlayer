@@ -29,6 +29,20 @@
         ["_Clips/Best of the year/DJI_20260214102233_0007_D.afplink.mp4", "Alps 2026/DJI_20260214102233_0007_D.MP4"],
         ["Generated/2026-11-10 14-32 Clip previews/DJI_20260214113020_0008_D.afplink.mp4", "Alps 2026/DJI_20260214113020_0008_D.MP4"],
       ],
+      // Moments, photos (links and rendered ones) and exports: [its path in the project's folder, its link, more]
+      moments: [
+        ["_Moments/Best of the year/Turtle.afplink.mp4", { clip: "Egypt 2026/Day 2/GX010123.MP4", in: 12, out: 19.5, created: "2025-10-22T17:58:42.000000Z", snap: 1 }, { renders: { HDR: "current" } }],
+        ["_Moments/Generated/2026-11-10 14-32/GX010124 0.03.afplink.mp4", { clip: "Egypt 2026/Day 2/GX010124.MP4", in: 3, out: 9, created: "2025-10-22T19:28:42.000000Z" }, {}],
+        ["_Moments/Generated/2026-11-10 14-32/GX010124 0.12.afplink.mp4", { clip: "Egypt 2026/Day 2/GX010124.MP4", in: 12, out: 20, created: "2025-10-22T19:28:42.000000Z" }, { renders: { HDR: "stale" } }],
+      ],
+      stills: [
+        ["_Clips/Best of the year/GX010123_14.00s.afplink.jpg", { clip: "Egypt 2026/Day 2/GX010123.MP4", t: 14, created: "2025-10-22T17:58:42.000000Z" }, { form: "Photo link", linked: true }],
+        ["_Stills/Generated/GX010124_3.00s.heic", { clip: "Egypt 2026/Day 2/GX010124.MP4", t: 3 }, { form: "Live Photo", linked: false }],
+        ["_Stills/Generated/GX010125_7.50s.MP.jpg", { clip: "Egypt 2026/Day 2/GX010125.MP4", t: 7.5 }, { form: "Motion Photo", linked: false }],
+      ],
+      exports: [
+        ["_Exports/Generated/Turtle.mp4", { clip: "Egypt 2026/Day 2/GX010123.MP4", in: 12, out: 19.5, look: "dv" }, {}],
+      ],
       dirs: ["_Clips", "_Clips/Egypt", "_Clips/Egypt/Dives", "_Clips/Best of the year", "Generated", "Generated/2026-11-10 14-32 Clip previews"],
     };
     const probe = (c, i) => {
@@ -52,6 +66,17 @@
         probes: probes(),
       };
     };
+    // The moments', photos' and exports' scans: an item a file, as index.rs gives them
+    const own = (view) => {
+      const list = state[view], kind = { moments: "moment", stills: "still", exports: "export" }[view];
+      const dirs = new Set();
+      for (const [rel] of list) { let d = parent(rel); while (d) { dirs.add(d); d = parent(d); } }
+      return { root: ROOT, view, dirs: Array.from(dirs).sort(), probes: probes(), items: list.map(([rel, link, more]) => Object.assign({
+        id: rel, dir: parent(rel), name: kind === "moment" ? rel.split("/").pop().replace(/\.afplink\.mp4$/, "") : rel.split("/").pop(), path: ROOT + "/" + rel, size: kind === "export" ? 8.4e7 : 2.4e5, mtime: 1762784000,
+        kind, tags: [], link: Object.assign({ v: 1, kind: kind === "still" ? "photo" : kind, size: 3.9e9, roots: [ROOT] }, link) },
+        kind === "moment" ? { gyroflow: false, renders: {}, original: "/Volumes/video/" + link.clip } : {}, more)) };
+    };
+    const everything = () => state.moments.concat(state.stills, state.exports);
     // A picture for each file: a gradient from its name, flat and grey for an original that's log (as Finder draws it)
     const picture = (path) => {
       let h = 0;
@@ -70,7 +95,7 @@
         case "recent": return [];
         case "engine": return "ok";
         case "cached_view": return null;
-        case "scan": return args.view === "footage" ? footage() : { root: ROOT, view: args.view, dirs: [], items: [], probes: probes() };
+        case "scan": return args.view === "footage" ? footage() : own(args.view);
         case "probes_since": return { version: 1, items: {}, pending: 0 };
         case "thumb": return picture(args.path);
         case "album_add": {
@@ -89,14 +114,43 @@
           for (const f of args.files) {
             const l = state.links.find(([rel]) => ROOT + "/" + rel === f);
             if (l) { l[0] = args.album + "/" + l[0].split("/").pop(); moved++; }
+            const o = everything().find(([rel]) => ROOT + "/" + rel === f);
+            if (o) { o[0] = args.album + "/" + o[0].split("/").pop(); moved++; }
           }
           if (!state.dirs.includes(args.album)) state.dirs.push(args.album);
           return { moved, album: args.album, problems: [] };
         }
+        case "album_copy": {
+          let copied = 0;
+          for (const f of args.files) for (const view of ["moments", "stills"]) {
+            const o = state[view].find(([rel]) => ROOT + "/" + rel === f);
+            if (o) { state[view].push([args.album + "/" + o[0].split("/").pop(), o[1], o[2]]); copied++; }
+          }
+          return { copied, album: args.album, problems: [] };
+        }
+        case "photo_add": {
+          const made = [];
+          for (const ph of args.photos) {
+            const rel = args.album + "/" + ph.tree.split("/").pop().replace(/\.[^.]+$/, "") + "_" + ph.t.toFixed(2) + "s.afplink.jpg";
+            state.stills.push([rel, { clip: ph.tree, t: ph.t }, { form: "Photo link", linked: true }]);
+            made.push(ROOT + "/" + rel);
+          }
+          return { made, already: 0, album: args.album, failed: [], ms: 180 * made.length };
+        }
+        case "rename_item": {
+          const o = everything().find(([rel]) => ROOT + "/" + rel === args.path);
+          if (o) o[0] = parent(o[0]) + "/" + args.name + o[0].slice(o[0].lastIndexOf("/") + 1).replace(/^.*?(\.afplink\.(mp4|jpg)|\.MP\.jpg|\.[^.]+)$/, "$1");
+          return ROOT + "/" + (o ? o[0] : "");
+        }
+        case "add_job": state.jobs.push({ id: state.jobs.length + 1, kind: args.kind, label: args.label, state: "queued" }); return null;
         case "delete_items": {
-          const before = state.links.length;
-          state.links = state.links.filter(([rel]) => !args.items.some((x) => x.path === ROOT + "/" + rel));
-          return { done: before - state.links.length, to: ["the Trash"], problems: [] };
+          const gone = (rel) => args.items.some((x) => x.path === ROOT + "/" + rel || (x.kind === "folder" && (ROOT + "/" + rel).startsWith(x.path + "/")));
+          const n = () => state.links.length + everything().length;
+          const before = n();
+          state.links = state.links.filter(([rel]) => !gone(rel));
+          for (const view of ["moments", "stills", "exports"]) state[view] = state[view].filter(([rel]) => !gone(rel));
+          state.dirs = state.dirs.filter((d) => !args.items.some((x) => x.kind === "folder" && (ROOT + "/" + d === x.path || (ROOT + "/" + d).startsWith(x.path + "/"))));
+          return { done: before - n() || args.items.length, to: ["the Trash"], problems: [] };
         }
         case "new_folder": { const d = (args.parent ? args.parent + "/" : "") + "untitled folder"; state.dirs.push(d); return d; }
         default: return null;
