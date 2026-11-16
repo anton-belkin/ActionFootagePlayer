@@ -27,7 +27,7 @@ const ok = (cond, what) => { if (!cond) { console.log("FAIL: " + what); process.
 const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
 (async () => {
   await tick(500);
-  ok(scripts[0] === "albums.js" && scripts[scripts.length - 1] === "app.js", "the page loads albums.js before app.js");
+  ok(scripts.includes("albums.js") && scripts.indexOf("writes.js") < scripts.indexOf("albums.js") && scripts[scripts.length - 1] === "app.js", "the page loads albums.js before app.js");
   const tabs = Array.from(w.document.querySelectorAll('[data-a="view"]')).map((e) => e.textContent);
   ok(tabs[0] === "Originals" && tabs[1] === "Albums" && !tabs.includes("Footage"), "the tabs: " + tabs.join(", "));
   ok(tab("sources").classList.contains("on"), "it opens on Originals");

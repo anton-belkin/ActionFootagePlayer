@@ -173,17 +173,30 @@ async function albumOut() {
   const problems = [];
   let n = 0;
   try {
-    if (links.length) { const r = await invoke("delete_items", { items: links }); n += r.done; problems.push(...r.problems); }
+    // The links: gone from the album at once, moved to the Trash after (writes.js)
+    S.sel = {}; S.anchor = null;
+    if (links.length) {
+      const done = await Writes.run("delete", [], { items: links, names: a.out.filter((x) => x.link_file).map((x) => "the link of " + x.name) });
+      if (done.answer) n += done.answer.done || 0;
+    }
+    const read = [];
     for (const [kind, album] of [["moment", "_Moments/" + GENERATED], ["still", "_Stills/" + GENERATED]]) {
       const files = a.out.filter((x) => x.kind === kind).map((x) => x.path);
       if (!files.length) continue;
       const r = await invoke("album_move", { album, files });
       n += r.moved; problems.push(...r.problems);
+      read.push(kind === "moment" ? "moments" : "stills");
     }
     toast(n + (n === 1 ? " item" : " items") + " taken out of the album" + (a.out.some((x) => x.kind !== "clip") ? ": moments and photos are in Generated" : ": the originals are untouched") + (problems.length ? ". But: " + problems.join(" · ") : ""));
-    S.sel = {}; S.anchor = null;
-    await refresh();
+    await albumRead(read);
   } catch (e) { showError(String(e)); }
+}
+// After an album's change that the page can't show by itself (new links, files moved): only the views it touched
+// are read again, never the whole project (docs/library-responsiveness.md)
+async function albumRead(views) {
+  if (!views.length) return;
+  await Promise.all(views.map((v) => loadView(v).catch(() => {})));
+  renderAll();
 }
 
 // ---------- photos as links: of the marks ----------
@@ -233,7 +246,7 @@ async function photoLinks() {
     toast((made === 1 ? "1 photo" : made + " photos") + " made" + (made ? " in " + (ms < 950 ? Math.max(1, Math.round(ms / 10) * 10) + " ms" : (ms / 1000).toFixed(1) + " s") : "") +
       ": links to their frames, in " + (albums.length === 1 ? albumShown(albums[0]) : "their albums") + (already ? " · " + already + (already === 1 ? " was" : " were") + " there already" : "") +
       (failed.length ? ". But " + failed.length + " couldn’t be made: " + failed[0][1] : ""));
-    await refresh();
+    await albumRead(["stills"]);
   } catch (e) { showError(String(e)); }
 }
 function renderAlbumSheet() {
@@ -291,6 +304,6 @@ async function albumGo() {
     remember("afl.album", shown);
     S.sheet = null; S.album = null; renderSheet();
     S.sel = {}; S.anchor = null;
-    await refresh();
+    await albumRead(a.mode === "move" ? ["footage", "moments", "stills"] : (a.clips.length ? ["footage"] : []).concat(a.copies.length ? ["moments", "stills"] : []));
   } catch (e) { a.busy = false; renderSheet(); showError(String(e)); }
 }

@@ -14,6 +14,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod albums;
+mod changed;
 mod checks;
 mod geo;
 mod index;
@@ -106,6 +107,9 @@ struct Inner {
     next_id: u64,
     // The window's close asked while batches are queued: the page asks whether to stop them
     close_asked: bool,
+    // …or while the page's changes are still being written (WRITES_PENDING): the window stays until they are, the
+    // page saying so
+    close_waits: bool,
     // Projects opened before the page was ready (Finder's double click as the app starts)
     pending_open: VecDeque<PathBuf>,
     // The project's folder and its locations watched: what the player (or Finder, or anyone) changes there is seen
@@ -391,6 +395,7 @@ fn project_of(path: &Path) -> Option<PathBuf> {
 }
 
 fn read_doc(root: &Path) -> Value {
+    afp_catalog::store::nas::read();
     std::fs::read_to_string(root.join(PROJECT_FILE)).ok()
         .and_then(|t| serde_json::from_str::<Value>(&t).ok())
         .filter(|v| v.is_object() && v.get("format").is_none_or(|f| f == FORMAT))
@@ -420,6 +425,7 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
 }
 
 fn count_files(dir: &Path, suffixes: &[&str], depth: u32) -> u64 {
+    afp_catalog::store::nas::read();
     let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
     let mut n = 0;
     for e in entries.flatten() {
@@ -725,6 +731,7 @@ struct Snapshot {
     project: Option<String>,
     jobs: Vec<Job>,
     close_asked: bool,
+    close_waits: bool,
     macos: bool,
     // Changes seen in the project's folder and locations, and how long since the last one (ms)
     changes: u64,
@@ -776,6 +783,7 @@ async fn snapshot(shared: State<'_, Shared>) -> Result<Snapshot, String> {
         project: inner.project.as_ref().map(|p| p.display().to_string()),
         jobs: inner.jobs.clone(),
         close_asked: inner.close_asked,
+        close_waits: inner.close_waits,
         macos: cfg!(target_os = "macos"),
         changes,
         quiet_ms,
@@ -963,6 +971,32 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         }
         v["probes"] = known;
         v
+    }).await.map_err(|e| e.to_string())
+}
+
+/// What changed since the page's count `since` (seen.rs counts, and tells the page: `catalog-changed`), as the items
+/// it changed (changed.rs): { upto: the count now, changed: the items, or null when that can't be said and the views
+/// are to be read again }
+#[tauri::command]
+async fn changes_since(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, since: u64) -> Result<Value, String> {
+    let (root, now) = { let g = shared.lock().unwrap(); (g.project.clone().ok_or("Open a project first")?, g.watch.as_ref().map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0)) };
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let changed = seen::since(since, now).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
+        json!({ "upto": now, "changed": changed })
+    }).await.map_err(|e| e.to_string())
+}
+
+/// These items of a view as they are now (changed.rs): what the page asks for when it knows which items to look at
+/// again (a clip whose preview went)
+#[tauri::command]
+async fn view_items(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, ids: Vec<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut c = changed::Changed::default();
+        c.add(&root, changed::flat_previews(&root), &view, &ids);
+        c.with_probes(&probes)
     }).await.map_err(|e| e.to_string())
 }
 
@@ -1417,26 +1451,32 @@ async fn mend(shared: State<'_, Shared>) -> Result<Value, String> {
 // ---------- renders ----------
 
 #[tauri::command]
-async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<Value, String> {
+async fn delete_renders(shared: State<'_, Shared>, moments: Vec<String>, stale_only: bool) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let (n, problems) = index::delete_renders(&root, &moments, stale_only);
-    Ok(json!({ "deleted": n, "problems": problems }))
+    // The moments as they are now (changed.rs): the page corrects those, and reads no view again
+    let mut c = changed::Changed { answer: json!({ "deleted": n, "problems": problems }), problems, ..Default::default() };
+    c.add(&root, changed::flat_previews(&root), "moments", &moments);
+    Ok(c)
 }).await.map_err(|e| e.to_string())?
 }
 
 // ---------- tags ----------
 
 #[tauri::command]
-async fn set_tags(shared: State<'_, Shared>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<Vec<String>, String> {
+async fn set_tags(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, add: Vec<String>, remove: Vec<String>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let tool = link_tool();
     let meta = meta_tool();
-    tauri::async_runtime::spawn_blocking(move || tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l),
-                                                           &|f, t| write_photo_tags(meta.as_ref(), f, t)))
-        .await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t));
+        // The items as they are now (changed.rs): the page corrects those, and reads no view again
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Stabilize optically: the lens ----------
@@ -1499,11 +1539,16 @@ async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::Share
 /// The Source settings of clips (the Source Settings tab, Batch set Source settings): [{ "clip": its path in the
 /// tree, "source": { key: value, or null to take it out } }], each clip's own; only the keys given are written
 #[tauri::command]
-async fn set_source(shared: State<'_, Shared>, entries: Vec<Value>) -> Result<Vec<String>, String> {
+async fn set_source(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, entries: Vec<Value>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let list: Vec<(String, serde_json::Map<String, Value>)> = entries.iter().filter_map(|e| Some((e["clip"].as_str()?.to_string(), e["source"].as_object()?.clone())))
         .filter(|(_, s)| !s.is_empty()).collect();
-    tauri::async_runtime::spawn_blocking(move || tags::set_source(&root, &list)).await.map_err(|e| e.to_string())
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_source(&root, &list);
+        // The clips as they are now (changed.rs)
+        changed::of_clips(&root, &list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- Take in another project ----------
@@ -1585,12 +1630,15 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-async fn rename_item(shared: State<'_, Shared>, view: String, kind: String, path: String, name: String) -> Result<String, String> {
+async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        rename_in(&root, &view, &kind, &path, &name)
+        let to = rename_in(&root, &view, &kind, &path, &name)?;
+        // What it is now, and that the old name is gone (changed.rs); its new path is the answer
+        Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1611,7 +1659,9 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
     // comes late or never)
     let touched: std::cell::RefCell<Vec<PathBuf>> = std::cell::RefCell::new(Vec::new());
     let mv = |a: &Path, b: &Path| -> Result<(), String> {
+        afp_catalog::store::nas::stat();
         if b.exists() { return Err(format!("{} exists already", b.display())); }
+        afp_catalog::store::nas::write();
         std::fs::rename(a, b).map_err(|e| format!("{}: {e}", a.display()))?;
         touched.borrow_mut().extend([a.to_path_buf(), b.to_path_buf()]);
         Ok(())
@@ -1673,6 +1723,7 @@ static TRASH_REMOVES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicB
 // Where `file` goes when deleted: the system's Trash on a local disk, the share's own #recycle on a network one (a
 // UGREEN or Synology share keeps what's deleted there; Finder can't put a network file in the Trash). Ok: where it went
 fn to_trash(file: &Path) -> Result<String, String> {
+    afp_catalog::store::nas::write();
     // Tests on a local disk: removed (Finder's Trash isn't theirs to fill)
     #[cfg(test)]
     if TRASH_REMOVES.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1716,12 +1767,15 @@ fn to_trash(file: &Path) -> Result<String, String> {
 // Gyroflow project and renders, a photo with its Live Photo video, a clip's preview (the clip itself stays: its
 // footage is deleted in Finder), an export. What went where, and what couldn't
 #[tauri::command]
-async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<serde_json::Value, String> {
+async fn delete_items(shared: State<'_, Shared>, items: Vec<serde_json::Value>) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || -> Result<serde_json::Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        Ok(delete_in(&root, &items))
+        // What's gone, and the clips whose previews went, as they are now (changed.rs); what went where is the answer
+        let clips = changed::before_delete(&items);
+        let answer = delete_in(&root, &items);
+        Ok(changed::of_delete(&root, &items, &clips, answer))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -2150,11 +2204,27 @@ async fn reveal(shared: State<'_, Shared>, what: Option<String>) -> Result<(), S
 }).await.map_err(|e| e.to_string())
 }
 
+/// How many of the page's changes are still being written (ui/writes.js: a change shows at once and is written after):
+/// the window isn't closed under them
+static WRITES_PENDING: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[tauri::command]
+fn writes_pending(n: u64) { WRITES_PENDING.store(n, std::sync::atomic::Ordering::Relaxed); }
+
+/// What a close of the window does: asked about (batches queued), waited with until the page's changes are written,
+/// or done. Asked a second time while waiting, it closes (a page that never answers mustn't keep the window)
+#[derive(Debug, PartialEq)]
+enum Close { Ask, Wait, Now }
+fn close_decision(batches: bool, writes: u64, waiting: bool) -> Close {
+    if batches { Close::Ask } else if writes > 0 && !waiting { Close::Wait } else { Close::Now }
+}
+
 // The window's close, answered: stop the batches and quit, or keep them going (the window stays)
 #[tauri::command]
 fn answer_close(app: tauri::AppHandle, shared: State<Shared>, quit: bool) {
     let mut inner = shared.lock().unwrap();
     inner.close_asked = false;
+    inner.close_waits = false;
     if quit {
         stop_all(&mut inner);
         drop(inner);
@@ -2253,7 +2323,7 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
@@ -2264,10 +2334,20 @@ fn main() {
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
-                if busy(&for_window) {
-                    api.prevent_close();
-                    for_window.lock().unwrap().close_asked = true;
-                    let _ = window.set_focus();
+                let waiting = for_window.lock().unwrap().close_waits;
+                match close_decision(busy(&for_window), WRITES_PENDING.load(std::sync::atomic::Ordering::Relaxed), waiting) {
+                    Close::Ask => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_asked = true;
+                        let _ = window.set_focus();
+                    }
+                    // The page's changes still being written: it closes the window once they are (answer_close)
+                    Close::Wait => {
+                        api.prevent_close();
+                        for_window.lock().unwrap().close_waits = true;
+                        let _ = window.emit("close-waits", ());
+                    }
+                    Close::Now => {}
                 }
             }
         })
@@ -2288,9 +2368,23 @@ fn main() {
     });
 }
 
+// Where the time goes on each changing command, measured on a project of thousands of clips (perf.rs)
+#[cfg(test)]
+mod perf;
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_window_waits_for_changes_being_written() {
+        assert_eq!(close_decision(false, 0, false), Close::Now);
+        assert_eq!(close_decision(false, 2, false), Close::Wait);
+        // Asked again while it waits (the page not answering): closed
+        assert_eq!(close_decision(false, 2, true), Close::Now);
+        // Batches queued: asked about first (the page then waits for the changes before it quits)
+        assert_eq!(close_decision(true, 2, false), Close::Ask);
+    }
 
     #[test]
     fn changes_seen() {

@@ -109,6 +109,7 @@ const LENS_TYPES = {};    // a camera ("DJI OsmoAction6") -> [[type, label]] fro
 const LENS_OF = {};       // a clip's path -> its --lens-types answer ({camera, types, type, recorded, mode}); null while asked
 let RAW_FOOTAGE = null; // the footage view as scanned: one item per clip, at its path in the tree
 const DATA = {};          // view -> { dirs: [path], items: [item] }
+const CONFIRMED = {};     // view -> the app's last answer for it: what the disk has (what's shown: with the changes being written over it)
 const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
 let probesVersion = 0, probesPending = 0;
 let MOMENTS_OF = {};      // a clip's path in the project -> how many moments it has
@@ -241,11 +242,12 @@ function derive(view) {
   if (view === "footage" || view === "sources") { arrange(); return; }
   deriveItems(view);
 }
-function deriveItems(view) {
+// (`only`: these items alone, of that view's kind: changes.js's pinpoint update)
+function deriveItems(view, only) {
   const d = DATA[view === "sources" ? "footage" : view];
   if (!d) return;
   const root = S.root;
-  for (const it of d.items) {
+  for (const it of only || d.items) {
     if (it.kind === "clip") {
       const probe = PROBES[it.path];
       deriveSource(it, probe);
@@ -758,6 +760,7 @@ function backgroundTasks() {
   if (S.checking) t.push(["Checking", "what you selected"]);
   if (S.finding) t.push(["Finding moved files", "by their names, sizes, fingerprints"]);
   if (S.mending) t.push(["Mending links", "finding the moved originals, writing the links"]);
+  if (writesSlow) t.push(["Saving changes", Writes.pending() + " to go"]);
   return t;
 }
 function queueHtml() {
@@ -1021,14 +1024,13 @@ async function applySource() {
     }
     return { clip: it.id, source: s };
   }).filter((e) => Object.keys(e.source).length);
-  try {
-    const problems = entries.length ? await invoke("set_source", { entries }) : [];
-    lens.forEach((p) => { delete LENS_OF[p]; delete LENS_INFO[p]; });
-    S.srcDraft = {};
-    if (problems.length) showError(problems.join(" · "));
-    toast("Source settings set for " + entries.length + (entries.length === 1 ? " clip" : " clips") + (toNo ? "; lens under water No for " + toNo + (toNo === 1 ? " (its camera doesn’t" : " (their cameras don’t") + " record it)" : ""));
-    await refresh();
-  } catch (e) { showError(String(e)); }
+  S.srcDraft = {};
+  if (!entries.length) { renderSide(); return; }
+  if (toNo) toast("Lens under water No for " + toNo + (toNo === 1 ? " clip (its camera doesn’t" : " clips (their cameras don’t") + " record it)");
+  // Shown at once, written after (writes.js)
+  const done = await Writes.run("source", clips.filter((it) => entries.some((e) => e.clip === it.id)), { entries });
+  // What was asked about their lenses was answered with the type they had
+  if (done.ok && lens.length) { lens.forEach((p) => { delete LENS_OF[p]; delete LENS_INFO[p]; }); renderSide(); }
 }
 
 // Stabilize optically (vs-gyroflow's optical.rs, run by gyroflow-optical): Gyroflow measures the camera's motion from
@@ -1177,11 +1179,9 @@ function tagsBody(c) {
 async function setTags(add, remove) {
   const c = ctx();
   if (!c.any) return;
-  try {
-    const problems = await invoke("set_tags", { items: c.selItems.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), add, remove });
-    if (problems.length) showError(problems.join(" · "));
-    await refresh();
-  } catch (e) { showError(String(e)); }
+  // Shown at once, written after (writes.js)
+  const items = c.selItems.filter((it) => Writes.VIEW_OF[it.kind]);
+  Writes.run("tags", items, { items: items.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), add, remove });
 }
 
 async function runCheck() {
@@ -1235,6 +1235,7 @@ async function connectRecent(path, host) {
   try {
     const here = await invoke("connect_project", { path, host: host || null });
     S.menu = false;
+    await Writes.drained();
     await call("open_project", { path: here }).catch(() => {});
   } catch (e) { showError(String(e)); }
   delete S.connecting[key];
@@ -1574,13 +1575,13 @@ async function deleteSelection() {
     if (c.any) toast(S.view === "sources" ? "Footage is deleted in Finder: Check then shows what pointed at it" : S.view === "footage" ? "Nothing here to remove: the clips themselves are deleted in Finder" : "Nothing here to delete");
     return;
   }
-  try {
-    const r = await invoke("delete_items", { items: list });
-    const where = r.to.length ? " to " + r.to.join(" and ") : "";
-    toast((r.done === 1 ? "1 moved" : r.done + " moved") + where + (list.every((x) => x.kind === "preview") ? ": the originals are untouched" : "") + (r.problems.length ? ". But: " + r.problems.join(" · ") : ""));
-    S.sel = {}; S.anchor = null;
-    await refresh();
-  } catch (e) { showError(String(e)); }
+  // Gone from the window at once, moved to the Trash after (writes.js); what couldn't be comes back, said so
+  const names = c.selFolders.map((f) => f.split("/").pop()).concat(c.direct.filter((it) => it.kind !== "mark" && (it.kind !== "clip" || it.preview)).map((it) => (it.kind === "clip" ? "the link of " : "") + it.name));
+  for (const x of list) if (x.kind === "folder") x.rel = x.path.slice(S.root.length + 1);
+  S.sel = {}; S.anchor = null;
+  const done = await Writes.run("delete", [], { items: list, names });
+  const r = done.answer;
+  if (r && r.done) toast((r.done === 1 ? "1 moved" : r.done + " moved") + (r.to.length ? " to " + r.to.join(" and ") : "") + (list.every((x) => x.kind === "preview") ? ": the originals are untouched" : ""));
 }
 function canRename(c) {
   if (c.selFolders.length + c.direct.length !== 1 || S.view === "sources") return false;
@@ -2027,12 +2028,12 @@ function geoBody(plan) {
   if (notes.length) h += '<p class="sub wrap">' + esc(notes.join(". ") + ".") + '</p>';
   return h;
 }
-async function geoWrite(entries) {
-  try {
-    const problems = await invoke("set_locations", { entries });
-    if (problems.length) { showError(problems.join(" · ")); return false; }
-    return true;
-  } catch (e) { showError(String(e)); return false; }
+// Locations set (or taken off) for clips: shown at once, written after (writes.js). `more`: a point typed whose
+// place's name is still to be looked up
+function geoWrite(entries, more) {
+  const ids = new Set(entries.flatMap((e) => e.ids));
+  const clips = ((DATA.footage && DATA.footage.items) || []).filter((it) => ids.has(it.id));
+  return Writes.run("location", clips, Object.assign({ entries, set: new Date().toISOString().replace(/\.\d+Z$/, "Z") }, more || {}));
 }
 async function geoApply() {
   const plan = geoPlan();
@@ -2045,12 +2046,9 @@ async function geoApply() {
   const pt = chosen && plan.places[chosen.key];
   if (pt && plan.far.length) entries.push({ ids: plan.far.map((f) => f.id), lat: pt.lat, lon: pt.lon, source: "manual", place: pt.place || null });
   if (!entries.length) return;
-  S.geoBusy = true; renderSheet();
-  const ok = await geoWrite(entries);
-  S.geoBusy = false;
-  if (ok) { S.sheet = null; toast(entries.reduce((n, x) => n + x.ids.length, 0) + " clips placed"); }
-  renderSheet();
-  await refresh();
+  S.sheet = null; renderSheet();
+  const done = await geoWrite(entries);
+  if (done.ok) toast(entries.reduce((n, x) => n + x.ids.length, 0) + " clips placed");
 }
 async function geoAct(a, v, el) {
   switch (a) {
@@ -2066,17 +2064,20 @@ async function geoAct(a, v, el) {
     case "geohand": {
       const ids = ctx().selItems.filter((it) => it.kind === "clip").map((it) => it.id);
       if (!ids.length) return;
-      try {
-        const p = await invoke("parse_location", { text: S.geoHand });
-        if (await geoWrite([{ ids, lat: p.lat, lon: p.lon, source: "manual", place: p.place, site: S.geoSite }]))
-          toast((p.place_text || coordText(p.lat, p.lon)) + ": set for " + ids.length + " clip" + (ids.length === 1 ? "" : "s"));
-        await refresh();
-      } catch (e) { showError(String(e)); }
+      // "27.7333, 34.25" is set at once, its place's name looked up as it's written; anything else (degrees and
+      // minutes) is read by the app first
+      const text = S.geoHand, site = S.geoSite;
+      const m = /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/.exec(text);
+      let p = m && Math.abs(+m[1]) <= 90 && Math.abs(+m[2]) <= 180 ? { lat: +m[1], lon: +m[2] } : null;
+      const typed = !!p;
+      if (!p) { try { p = await invoke("parse_location", { text }); } catch (e) { showError(String(e)); return; } }
+      const done = await geoWrite([{ ids, lat: p.lat, lon: p.lon, source: "manual", place: p.place, site }], typed ? { lookup: text } : null);
+      if (done.ok) toast((done.args.placeText || p.place_text || coordText(p.lat, p.lon)) + ": set for " + ids.length + " clip" + (ids.length === 1 ? "" : "s"));
       return;
     }
     case "georemove": {
       const ids = ctx().selItems.filter((it) => it.kind === "clip" && it.geo && it.geo.source !== "camera").map((it) => it.id);
-      if (ids.length) { await geoWrite([{ ids, remove: true }]); await refresh(); }
+      if (ids.length) geoWrite([{ ids, remove: true }]);
       return;
     }
   }
@@ -2172,13 +2173,24 @@ async function commitRename(name) {
   const it = currentItems().find((x) => keyOf(x) === key);
   S.renaming = null;
   if (!it || !name.trim() || name.trim() === renameStem(it)) { renderMain(); return; }
+  name = name.trim();
   // An album: each of its folders on disk (in _Clips, _Moments, _Stills) gets the name
   const paths = it.kind === "folder" ? foldersOnDisk(it.path) : [it.path];
-  try {
-    for (const path of paths) await invoke("rename_item", { view: it.kind === "still" ? "stills" : it.kind === "export" ? "exports" : it.kind === "moment" ? "moments" : S.view, kind: it.kind, path, name: name.trim() });
-    S.sel = {}; S.anchor = null;
-    await refresh();
-  } catch (e) { showError(String(e)); renderMain(); }
+  const view = it.kind === "still" ? "stills" : it.kind === "export" ? "exports" : it.kind === "moment" ? "moments" : S.view;
+  // What the app would refuse, said before anything shows: a name no file can have, one that's taken
+  let why = badName(name);
+  const to = it.kind === "folder" ? null : renamed(it, name);
+  if (!why && it.kind === "folder" && childDirs(dirKey()).some((d) => d.split("/").pop() === name)) why = name + " exists already";
+  if (!why && to && DATA[view] && DATA[view].items.some((x) => x.id === to.id)) why = to.name + " exists already";
+  if (why) { showError(why); renderMain(); return; }
+  S.sel = {}; S.anchor = null;
+  // Shown at once, renamed after (writes.js)
+  if (it.kind === "folder") {
+    for (const path of paths) {
+      const from = path.slice(S.root.length + 1);
+      Writes.run("renamefolder", [], { view, path, name, was: it.name, from, to: from.slice(0, from.length - it.name.length) + name });
+    }
+  } else Writes.run("rename", [it], { view, in: Writes.VIEW_OF[it.kind], kind: it.kind, path: paths[0], name, was: it.name, id: it.id, to });
 }
 // The rows shown: folders and items, as VISIBLE has them
 function currentItems() {
@@ -2269,13 +2281,31 @@ function listKeys(e) {
 // ---------- loading ----------
 
 function applyView(view, r) {
+  // As the disk has it; what's shown is that with the changes still being written over it (writes.js)
+  CONFIRMED[view] = r;
+  mergeProbes(r.probes);
+  showView(view);
+}
+function showView(view) {
+  const r = Writes.over(view, CONFIRMED[view]);
   if (view === "footage") { RAW_FOOTAGE = { items: r.items || [], clips_dirs: r.clips_dirs || [], dirs: r.dirs || [], links: r.links || [] }; S.locations = r.locations || []; }
   else DATA[view] = rooted(view, { dirs: r.dirs || [], items: r.items || [] });
-  mergeProbes(r.probes);
+  const had = MOMENTS_OF;
   if (view === "moments") countMoments();
   derive(view);
-  // Albums show the moments, photos and exports too: made again from what was read
-  if (view !== "footage") derive("footage");
+  // Albums show the moments, photos and exports too. The clips' counts of moments: only the clips whose count
+  // changed are made again (changes.js), when they're few; the albums' items are made again from what was read
+  if (view === "moments") {
+    const ids = Array.from(new Set(Object.keys(had).concat(Object.keys(MOMENTS_OF)))).filter((id) => had[id] !== MOMENTS_OF[id]);
+    if (ids.length <= 50 && CONFIRMED.footage && showItems("footage", ids.filter((id) => placeOf("footage", id) >= 0))) albumsAgain();
+    else derive("footage");
+  } else if (view !== "footage") albumsAgain();
+}
+// The Albums view alone made again from the scans as shown (its own items derived; Originals untouched)
+function albumsAgain() {
+  if (!RAW_FOOTAGE) return;
+  DATA.footage = albumItems();
+  derive1("footage");
 }
 // A view: what was there last time (the app's cache) at once, then the disk looked at again
 async function loadView(view) {
@@ -2287,12 +2317,14 @@ async function loadView(view) {
   }
   S.scanning[view] = true;
   renderMain();
+  // What's written while it's read (and may not be in its answer) is put into it: writes.js
+  const reading = Writes.reading(view);
   try {
     const r = await call("scan", { view });
     if (r.root !== S.root) return;
-    applyView(view, r);
+    applyView(view, Writes.read(reading, r));
     S.cachedViews[view] = false;
-  } finally { S.scanning[view] = false; }
+  } finally { S.scanning[view] = false; Writes.read(reading, null); }
 }
 function mergeProbes(p) {
   if (!p) return false;
@@ -2306,6 +2338,8 @@ async function loadProject() {
   S.info = await invoke("project").catch(() => null);
   S.name = S.info ? S.info.name : "";
   for (const k of Object.keys(DATA)) delete DATA[k];
+  for (const k of Object.keys(CONFIRMED)) delete CONFIRMED[k];
+  Writes.reset();
   RAW_FOOTAGE = null; S.cachedViews = {}; S.scanning = {};
   S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
   renderAll();
@@ -2370,7 +2404,7 @@ async function poll() {
   // (what the project's catalog was told comes at once, as an event: refreshSoon below)
   const batchRuns = s.jobs.some((j) => j.state === "running");
   const due = batchRuns ? Date.now() - (S.lastRefresh || 0) > 4000 : s.quiet_ms > 800;
-  if (S.root && s.changes !== S.changes && due) refreshSoon(s.changes);
+  if (S.root && s.changes !== S.changes && due) catalogChanged(s.changes);
   S.jobs = s.jobs;
   const finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
   if (finished !== S.finished) {
@@ -2380,6 +2414,7 @@ async function poll() {
   }
   renderQueueOnly();
   $("ask").hidden = !s.close_asked;
+  closing(!!s.close_waits);
   renderMoving(s.moving);
 }
 
@@ -2396,7 +2431,8 @@ function refreshSoon(n) {
     if (S.refreshAgain) { S.refreshAgain = false; refreshSoon(); }
   });
 }
-if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => refreshSoon(e.payload));
+// (the items that changed, not the views read again: changes.js)
+if (window.__TAURI__.event) window.__TAURI__.event.listen("catalog-changed", (e) => catalogChanged(e.payload));
 
 // Move the project…: how far the copy is (a move on one disk is a rename, done at once)
 function renderMoving(m) {
@@ -2472,11 +2508,12 @@ document.addEventListener("click", async (e) => {
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;
-    case "choose": S.menu = false; await call("choose_project").catch(() => {}); return poll();
+    // (another project: what's still being written of this one is written first, here and below)
+    case "choose": S.menu = false; await Writes.drained(); await call("choose_project").catch(() => {}); return poll();
     case "openrecent": {
       const r = S.recent.find((x) => x.path === v);
       if (r && !r.here) { if (r.connect) return connectRecent(v); showError(r.name + " isn’t reachable: connect " + (r.share || "its disk") + " first"); return; }
-      S.menu = false; await call("open_project", { path: v }).catch(() => {}); return poll();
+      S.menu = false; await Writes.drained(); await call("open_project", { path: v }).catch(() => {}); return poll();
     }
     case "connectrecent": S.via = null; return connectRecent(v, el.dataset.h);
     case "connectvia": S.via = S.via === v ? null : v; renderAll(); return;
@@ -2528,7 +2565,10 @@ document.addEventListener("click", async (e) => {
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();
     case "clearjobs": await call("clear_finished").catch(() => {}); return poll();
     case "keep": await call("answer_close", { quit: false }).catch(() => {}); return poll();
-    case "quit": return call("answer_close", { quit: true }).catch(() => {});
+    // (what's still being written is written first)
+    case "quit": return Writes.drained().then(() => call("answer_close", { quit: true }).catch(() => {}));
+    case "closenow": closingNow = false; return call("answer_close", { quit: true }).catch(() => {});
+    case "unsavedok": UNSAVED.length = 0; renderUnsaved(); return;
     case "toastok": $("toast").hidden = true; return;
     case "sheet": return openSettings();
     case "takein": S.sheet = null; renderSheet(); return chooseTakeIn();
@@ -2584,7 +2624,10 @@ document.addEventListener("click", async (e) => {
     case "removesource": return removeSources(ctx().selFolders);
     case "delrenders": {
       const c = ctx(); if (!c.any) return;
-      try { const r = await invoke("delete_renders", { moments: c.moments.map((it) => it.id), staleOnly: v === "stale" }); toast(r.deleted + " render" + (r.deleted === 1 ? "" : "s") + " deleted" + (r.problems.length ? ". But: " + r.problems.join(" · ") : "")); await refresh(); } catch (er) { showError(String(er)); }
+      // Shown at once, deleted after (writes.js)
+      const ms = c.moments;
+      const done = await Writes.run("renders", ms, { moments: ms.map((it) => it.id), staleOnly: v === "stale" });
+      if (done.answer) toast(done.answer.deleted + " render" + (done.answer.deleted === 1 ? "" : "s") + " deleted");
       return;
     }
     case "tag": { const t = S.tagDraft.trim(); if (!t) return; S.tagDraft = ""; return setTags([t], []); }
@@ -2699,6 +2742,7 @@ document.addEventListener("keydown", (e) => {
 try {
   window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(async (ev) => {
     if (ev.payload.type === "drop" && ev.payload.paths.length) {
+      await Writes.drained();
       await call("open_project", { path: ev.payload.paths[0] }).catch(() => {});
       poll();
     }

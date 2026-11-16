@@ -83,6 +83,8 @@ pub struct Catalog {
     /// Records read from the journals that change what there is (a file, its insides, a folder there or gone), not
     /// only what's known of a folder's listing: for the Library to read its views again only then
     pub seen_changes: u64,
+    /// …and which they were (root, path in it), until asked for (take_seen); None once there were too many to keep
+    pub seen_keys: Option<Vec<(String, String)>>,
     /// How long a file must have been not needed before a clean-up removes it (10 minutes)
     pub grace: std::time::Duration,
     /// Journal files that couldn't be read at the last reading (their computer's later lines wait)
@@ -110,7 +112,7 @@ impl Catalog {
     pub fn new(shared: Arc<dyn Store>, local: Arc<dyn Store>, project: &Path, cache: &Path, me: &str) -> Catalog {
         Catalog { shared, local, dir: project.join(".afp").join("catalog"), cache: cache.to_path_buf(), me: me.to_string(), state: State::default(),
                   manifest: None, applied: BTreeMap::new(), lamports: BTreeMap::new(), lamport: 0, tail_lines: 0, tail_bytes: 0, partial: false,
-                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0, unreadable: Vec::new(),
+                  offsets: HashMap::new(), grace: std::time::Duration::from_secs(600), clock_ahead: 0, seen_changes: 0, seen_keys: Some(Vec::new()), unreadable: Vec::new(),
                   recheck_after: std::time::Duration::from_secs(60) }
     }
 
@@ -216,9 +218,16 @@ impl Catalog {
         let now = visible(&f);
         if self.state.apply(k, Rec { v: Version { l, by: by.clone() }, f }) {
             let was = before.map(|b| b.map(|(d, s, m, x)| if d { (true, 0, 0, None) } else { (d, s, m, x) })).flatten();
-            if was != now { self.seen_changes += 1; }
+            if was != now {
+                self.seen_changes += 1;
+                match &mut self.seen_keys { Some(v) if v.len() < 2000 => v.push((root.to_string(), rel.to_string())), k => *k = None }
+            }
         }
     }
+
+    /// The records counted in seen_changes since this was last asked: (root, path in it); None: too many were read to
+    /// say which (a first look at a location)
+    pub fn take_seen(&mut self) -> Option<Vec<(String, String)>> { self.seen_keys.replace(Vec::new()) }
 
     fn read_tails(&mut self) -> Result<usize, Error> {
         self.unreadable.clear();

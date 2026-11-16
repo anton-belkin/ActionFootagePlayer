@@ -19,6 +19,7 @@ fn changed(old: &Value, add: &[String], remove: &[String]) -> Vec<String> {
 
 pub(crate) fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
     let tmp = PathBuf::from(format!("{}.tmp", file.display()));
+    afp_catalog::store::nas::write();
     std::fs::write(&tmp, serde_json::to_vec(doc).unwrap()).and_then(|_| std::fs::rename(&tmp, file)).map_err(|e| format!("{}: {e}", file.display()))
 }
 
@@ -36,9 +37,11 @@ pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
 
 /// The same with the project's locations worked out already (many clips at once: the locations once, not per clip)
 pub fn clip_own_in(locs: &[locations::Location], tree: &str) -> Result<(PathBuf, PathBuf), String> {
-    let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| f.is_file()).map(|f| (f, l.copies || l.local))).collect();
+    // (nas::stat: a share's slowness stood in for when measuring, nothing otherwise)
+    let is_file = |f: &Path| { afp_catalog::store::nas::stat(); f.is_file() };
+    let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| is_file(f)).map(|f| (f, l.copies || l.local))).collect();
     copies.sort_by_key(|(_, late)| *late);
-    let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| f.with_extension("afp.json").is_file()).collect();
+    let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| is_file(&f.with_extension("afp.json"))).collect();
     let clip = found.first().map(|f| (*f).clone()).or_else(|| copies.iter().find(|(_, c)| !c).map(|(f, _)| f.clone()))
         .or_else(|| copies.first().map(|(f, _)| f.clone())).ok_or(format!("{tree} isn't in the project's locations"))?;
     Ok((clip.with_extension("afp.json"), clip))

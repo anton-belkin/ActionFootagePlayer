@@ -370,6 +370,7 @@ pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
 }
 
 fn read_json(path: &Path) -> Option<Value> {
+    afp_catalog::store::nas::read();
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
@@ -385,7 +386,9 @@ fn has_gyroflow(file: &Path) -> bool {
 /// The footage view: every location of the project, each at its place in the tree, a path the first one has winning
 /// (a working copy before the archive's). Each clip with where it plays from (`loc`), every location that has it
 /// (`copies`), its own file wherever it is (two: `own_conflict`)
-fn footage(root: &Path, flat_previews: bool) -> Value {
+/// `only`: these clips alone (their paths in the tree), each looked up where a location would have it, nothing walked:
+/// the items as the whole view would have them (changed.rs)
+fn footage(root: &Path, flat_previews: bool, only: Option<&[String]>) -> Value {
     let mounts = crate::locations::mounts();
     let locs = crate::locations::locations(root, &mounts);
     // The NAS's other names (Project settings): an offline location's Connect offers each
@@ -417,7 +420,16 @@ fn footage(root: &Path, flat_previews: bool) -> Value {
         // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
         // aren't footage
         let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
-        let (dir, found) = if off {
+        let (dir, found) = if let Some(only) = only {
+            let dir = if off { offline_dir(l) } else { match &l.dir { Some(d) => d.clone(), None => continue } };
+            let found = only.iter().filter_map(|tree| {
+                let rel = if l.at.is_empty() { Some(tree.as_str()) } else { tree.strip_prefix(&format!("{}/", l.at)) }?;
+                let (size, mtime) = if off { crate::seen::file_in(&id, rel).filter(|f| !f.dir).map(|f| (f.size, crate::seen::seconds(f.mtime))) }
+                    else { stamp(&rel.split('/').fold(dir.clone(), |d, p| d.join(p)).to_string_lossy()) }?;
+                Some((rel.to_string(), false, size, mtime))
+            }).collect();
+            (dir, found)
+        } else if off {
             let Some(found) = crate::seen::walk_root(&id, &skip, MAX_DEPTH) else { continue };
             (offline_dir(l), found)
         } else {
@@ -515,8 +527,13 @@ fn offline_dir(l: &crate::locations::Location) -> PathBuf {
     }
 }
 
-pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
-    if view == "footage" { return footage(root, flat_previews); }
+pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value { scan_only(root, view, flat_previews, None) }
+
+/// A view, or with `only` these items of it alone (a clip's path in the tree, a moment's, photo's or export's in the
+/// project's folder), exactly as the whole view would have them: what a command says it changed (changed.rs). The
+/// ones asked for that aren't in the view aren't in the answer; its folders aren't said
+pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[String]>) -> Value {
+    if view == "footage" { return footage(root, flat_previews, only); }
     if !matches!(view, "moments" | "stills" | "exports") { return json!({ "dirs": [], "items": [] }) }
     // A moment's original, through the project's locations (the first that has it)
     let locs = if view == "moments" { crate::locations::locations(root, &crate::locations::mounts()) } else { Vec::new() };
@@ -542,7 +559,7 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
     // The files of this view's kind, wherever they are (docs/library-management.md §8): moments and exports by the link
     // inside (an export of before 0.11 in _Exports without one too), photos with a link or in _Stills
     let mut links: HashMap<String, Value> = HashMap::new();
-    let (entries, dirs) = own_files(root, &mut |rel, path, _| {
+    let mut keep = |rel: &str, path: &Path, _: bool| {
         let lower = rel.to_lowercase();
         let video = lower.ends_with(".mp4") || lower.ends_with(".mov");
         let photo = [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e));
@@ -555,7 +572,20 @@ pub fn scan(root: &Path, view: &str, flat_previews: bool) -> Value {
         };
         if keep { if let Some(k) = l { links.insert(rel.to_string(), k); } }
         keep
-    });
+    };
+    let (entries, dirs) = match only {
+        // Only these: each as the walk would have found it (there, the project's own or a link among its footage)
+        Some(only) => {
+            let footage = footage_dirs(root);
+            (only.iter().filter_map(|rel| {
+                let path = rel.split('/').fold(root.to_path_buf(), |d, p| d.join(p));
+                let (size, mtime) = stamp(&path.to_string_lossy())?;
+                if !own_area(root, &path, &footage) && !rel.to_lowercase().ends_with(LINK_EXT) { return None; }
+                keep(rel, &path, true).then(|| (rel.clone(), size, mtime))
+            }).collect(), Vec::new())
+        }
+        None => own_files(root, &mut keep),
+    };
     let mut items = Vec::new();
     let files: HashSet<String> = walk_names(root, &entries);
     for (rel, size, mtime) in &entries {
@@ -663,6 +693,7 @@ pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) ->
     let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
     let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
+    afp_catalog::store::nas::stat();
     let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
     trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
                      "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)

@@ -140,6 +140,7 @@ pub fn is_sidecar(lower: &str) -> bool { lower.ends_with(".afp.json") || lower.e
 
 /// What's inside a file that counts, by its kind (None: nothing of ours in it)
 pub fn read(path: &Path) -> io::Result<Option<Value>> {
+    crate::store::nas::read();
     let lower = path.to_string_lossy().to_lowercase();
     if is_sidecar(&lower) {
         let text = std::fs::read(path)?;
