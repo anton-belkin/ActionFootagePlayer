@@ -310,3 +310,38 @@ body.waiting,body.waiting *{cursor:progress}
 .albumrow:hover{background:var(--line2)}
 .albumrow.on{background:var(--accent-soft);box-shadow:inset 0 0 0 1px var(--accent-line)}
 .albumsheet input[type=text]{box-sizing:border-box;border:1px solid var(--line);border-radius:7px;padding:5px 8px;min-height:30px;background:var(--surface);color:var(--fg);min-width:0;width:100%}
+/* Views inside Albums that aren't folders (albumviews.js): their tiles at the top of Albums */
+.avtiles{display:flex;flex-wrap:wrap;gap:10px;padding:4px 14px 10px}
+.avtile{display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--surface);border-radius:10px;padding:10px 14px;min-width:240px;color:var(--fg)}
+.avtile:hover{background:var(--hover)}
+.avtile svg{color:var(--accent);flex:none}
+/* Timeline (timeline.js): Days is blocks at known places, the tiles of a fixed size (TL in timeline.js has the same numbers) */
+.tlbody{position:relative}
+.tlb{position:absolute;left:0;right:0;padding:0 14px;overflow:hidden}
+.tlmonth{display:flex;align-items:flex-end;gap:10px;padding-bottom:6px}
+.tlmonth h3,.tlyear h3{margin:0;font-size:18px;font-weight:650}
+.tlyear{display:flex;align-items:baseline;gap:10px;padding:14px 14px 4px}
+.tltrip{display:flex;align-items:center;gap:8px}
+.tltrip b{background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);border-radius:6px;padding:2px 8px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tlday header{height:38px;display:flex;align-items:center;gap:10px;white-space:nowrap}
+.tlday header b{overflow:hidden;text-overflow:ellipsis}
+.tlday.intrip{box-shadow:inset 3px 0 0 var(--accent-line)}
+.tlgrid{display:grid;grid-template-columns:repeat(auto-fill,168px);gap:8px}
+.card.tl{width:168px;height:146px;overflow:hidden}
+.card.tl .th{flex:none}
+.tlcovers{grid-template-columns:repeat(auto-fill,minmax(220px,1fr))}
+.card.tlcover .nm{font-size:15px;font-weight:650}
+/* Map (map.js) */
+.mapbox{flex:1 1 auto;min-height:420px;margin:0 14px 14px;border:1px solid var(--line);border-radius:10px;overflow:hidden;position:relative;background:var(--line2)}
+.mapbox .leaflet-container{position:absolute;inset:0;font:inherit;background:var(--line2)}
+.mappin{position:relative;width:64px;height:64px;border-radius:10px;border:2px solid #FFFFFF;box-shadow:0 2px 8px rgba(0,0,0,.45);background:#3A3A40;overflow:visible;cursor:pointer;padding:0;display:block}
+.mappin .th{width:100%;height:100%;border-radius:8px}
+.mappin .n{position:absolute;right:-8px;top:-8px;min-width:22px;height:22px;border-radius:11px;padding:0 6px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:650;line-height:22px;text-align:center;border:2px solid #FFFFFF;font-variant-numeric:tabular-nums}
+.mapnote{padding:6px 14px 10px;color:var(--muted);font-size:12px}
+.placelist{padding:0 14px 24px;display:flex;flex-direction:column;gap:2px}
+.placerow{display:flex;align-items:center;gap:12px;text-align:left;border:0;background:transparent;border-radius:8px;padding:6px 8px;color:var(--fg)}
+.placerow:hover{background:var(--hover)}
+.placerow .th{flex:none}
+.placerow .cnt{margin-left:auto;color:var(--fg2);font-variant-numeric:tabular-nums}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}}
+:root[data-theme="dark"] .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}
