@@ -337,7 +337,7 @@ if [ $apps = 1 ] && [ $macos = 1 ]; then
     mkdir -p "$APPS_DIR"
     player="$APPS_DIR/$PLAYER_NAME.app"
     # A release has its version in VERSION
-    version=$(cat VERSION 2>/dev/null || git describe --tags --always 2>/dev/null || echo local)
+    version=$(cat VERSION 2>/dev/null || git describe --tags --match 'v*' --always 2>/dev/null || echo local)
     tools/make_app.sh "$player" "$BIN" "$BUILD/dlogm_hlg.glsl" "$version"
     # Action Footage Library beside it: a release has its binary in bin/, a checkout builds it
     if [ -x "$BIN/ActionFootageLibrary" ]; then

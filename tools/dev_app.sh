@@ -50,7 +50,8 @@ fi
 command -v cargo >/dev/null || [ ! -x "$prefix/opt/rustup/bin/cargo" ] || PATH="$prefix/opt/rustup/bin:$PATH"
 command -v cargo >/dev/null || { echo "Missing cargo (https://rustup.rs, or brew install rustup)" >&2; exit 1; }
 
-tag=$(git describe --tags --abbrev=0 2>/dev/null || echo v0)
+# The app's versions only (v*): the repository's other tags (windows-deps, upscaler-models) hold files, not versions
+tag=$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || echo v0)
 if [ "$(git rev-parse HEAD)" = "$(git rev-parse "$tag^{commit}" 2>/dev/null)" ]; then
     version=${tag#v}
 else
