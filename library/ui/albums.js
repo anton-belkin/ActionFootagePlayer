@@ -60,7 +60,8 @@ function albumClips() {
     const clip = byId[l.clip];
     if (!clip) continue;
     const i = l.rel.lastIndexOf("/");
-    out.push(Object.assign({}, clip, { key: "a:" + l.rel, tdir: clip.dir, rdir: i < 0 ? "" : l.rel.slice(0, i), preview: l.path, link_file: l.path, draft: l.draft || undefined }));
+    out.push(Object.assign({}, clip, { key: "a:" + l.rel, tdir: clip.dir, rdir: i < 0 ? "" : l.rel.slice(0, i), preview: l.path, link_file: l.path, draft: l.draft || undefined,
+      pending: l.pending ? true : undefined, ph: l.pending ? (l.ph || clip.preview || clip.thumb || clip.path) : undefined }));
   }
   return out;
 }
@@ -155,6 +156,7 @@ async function askAlbum(mode) {
   const c = ctx();
   const a = albumSel(c);
   if (mode === "move" ? !a.files.length : !a.n) return;
+  if (mode === "move" && stillWriting(c.direct)) return;
   if (!DATA.footage) await needViews(["footage"]);
   const list = albumList();
   // The album open now, when one is (Albums): the likely one isn't it, so none chosen; else the last one used
@@ -168,37 +170,19 @@ async function askAlbum(mode) {
 }
 // Out of the album: a clip's link removed (the clip is in Originals), moments and photos moved back to Generated
 // (theirs: _Moments/Generated, _Stills/Generated), where what's in no album is
-async function albumOut() {
+// (all of it at once: the links gone, the moments and photos in Generated; written after, writes.js)
+function albumOut() {
   const a = albumSel(ctx());
-  if (!a.out.length) return;
+  if (!a.out.length || stillWriting(a.out)) return;
   const links = a.out.filter((x) => x.link_file).map((x) => ({ kind: "preview", path: x.link_file }));
-  const problems = [];
-  let n = 0;
-  try {
-    // The links: gone from the album at once, moved to the Trash after (writes.js)
-    S.sel = {}; S.anchor = null;
-    if (links.length) {
-      const done = await Writes.run("delete", [], { items: links, names: a.out.filter((x) => x.link_file).map((x) => "the link of " + x.name) });
-      if (done.answer) n += done.answer.done || 0;
-    }
-    const read = [];
-    for (const [kind, album] of [["moment", "_Moments/" + GENERATED], ["still", "_Stills/" + GENERATED]]) {
-      const files = a.out.filter((x) => x.kind === kind).map((x) => x.path);
-      if (!files.length) continue;
-      const r = await invoke("album_move", { album, files });
-      n += r.moved; problems.push(...r.problems);
-      read.push(kind === "moment" ? "moments" : "stills");
-    }
-    toast(n + (n === 1 ? " item" : " items") + " taken out of the album" + (a.out.some((x) => x.kind !== "clip") ? ": moments and photos are in Generated" : ": the originals are untouched") + (problems.length ? ". But: " + problems.join(" · ") : ""));
-    await albumRead(read);
-  } catch (e) { showError(String(e)); }
-}
-// After an album's change that the page can't show by itself (new links, files moved): only the views it touched
-// are read again, never the whole project (docs/library-responsiveness.md)
-async function albumRead(views) {
-  if (!views.length) return;
-  await Promise.all(views.map((v) => loadView(v).catch(() => {})));
-  renderAll();
+  S.sel = {}; S.anchor = null;
+  if (links.length) Writes.run("delete", [], { items: links, names: a.out.filter((x) => x.link_file).map((x) => "the link of " + x.name) });
+  for (const [kind, album] of [["moment", "_Moments/" + GENERATED], ["still", "_Stills/" + GENERATED]]) {
+    const files = a.out.filter((x) => x.kind === kind).map((x) => x.path);
+    if (files.length) albumMove(album, files, "taking " + namesText(a.out.filter((x) => x.kind === kind).map((x) => x.name)) + " out of the album");
+  }
+  const n = a.out.length;
+  toast(n + (n === 1 ? " item" : " items") + " taken out of the album" + (a.out.some((x) => x.kind !== "clip") ? ": moments and photos are in Generated" : ": the originals are untouched"));
 }
 
 // ---------- photos as links: of the marks ----------
@@ -238,18 +222,10 @@ async function photoLinks() {
   }
   const albums = Object.keys(by);
   if (!albums.length) { toast(S.view === "clip" ? "Select marks: a photo is made of each" : "No mark without a photo in what’s selected"); return; }
-  let made = 0, already = 0, ms = 0;
-  const failed = [];
-  try {
-    for (const album of albums) {
-      const r = await invoke("photo_add", { album, photos: by[album] });
-      made += r.made.length; already += r.already; ms += r.ms; failed.push(...r.failed);
-    }
-    toast((made === 1 ? "1 photo" : made + " photos") + " made" + (made ? " in " + (ms < 950 ? Math.max(1, Math.round(ms / 10) * 10) + " ms" : (ms / 1000).toFixed(1) + " s") : "") +
-      ": links to their frames, in " + (albums.length === 1 ? albumShown(albums[0]) : "their albums") + (already ? " · " + already + (already === 1 ? " was" : " were") + " there already" : "") +
-      (failed.length ? ". But " + failed.length + " couldn’t be made: " + failed[0][1] : ""));
-    await albumRead(["stills"]);
-  } catch (e) { showError(String(e)); }
+  // Shown at once, each with its clip's picture until its frame is read (writes.js, the "photoadd" change below)
+  let made = 0;
+  for (const album of albums) made += photoAdd(album, by[album]);
+  toast((made === 1 ? "1 photo" : made + " photos") + ": links to their frames, in " + (albums.length === 1 ? albumShown(albums[0]) : "their albums"));
 }
 function renderAlbumSheet() {
   const a = S.album;
@@ -289,23 +265,234 @@ async function albumGo() {
   if (!shown) return;
   if (shown === OTHER || shown.startsWith(OTHER + "/")) { showError("That name is taken by the view: choose another"); return; }
   const album = diskRel(shown, "footage");
-  a.busy = true; renderSheet();
-  try {
-    if (a.mode === "move") {
-      const r = await invoke("album_move", { album, files: a.files });
-      toast((r.moved === 1 ? "1 moved" : r.moved + " moved") + " to " + shown + (r.problems.length ? ". But: " + r.problems.join(" · ") : ""));
-    } else {
-      const r = a.clips.length ? await invoke("album_add", { album, clips: a.clips.map(clipForLink) }) : { made: [], already: 0, failed: [], ms: 0 };
-      // Moments and photos: a copy of each link there
-      const cp = a.copies.length ? await invoke("album_copy", { album, files: a.copies }) : { copied: 0, problems: [] };
-      const made = r.made.length + cp.copied;
-      for (const pr of cp.problems) r.failed.push(["", pr]);
-      toast((a.copies.length ? (made === 1 ? "1 item" : made + " items") : (made === 1 ? "1 clip" : made + " clips")) + " added to " + shown + (made ? " in " + (r.ms < 950 ? Math.max(1, Math.round(r.ms / 10) * 10) + " ms" : (r.ms / 1000).toFixed(1) + " s") : "") +
-        (r.already ? " · " + r.already + (r.already === 1 ? " was" : " were") + " there already" : "") + (r.failed.length ? ". But " + r.failed.length + " couldn’t be made: " + r.failed[0][1] : ""));
-    }
-    remember("afl.album", shown);
-    S.sheet = null; S.album = null; renderSheet();
-    S.sel = {}; S.anchor = null;
-    await albumRead(a.mode === "move" ? ["footage", "moments", "stills"] : (a.clips.length ? ["footage"] : []).concat(a.copies.length ? ["moments", "stills"] : []));
-  } catch (e) { a.busy = false; renderSheet(); showError(String(e)); }
+  // Shown at once in the album (and in Originals' "In an album"), written after (writes.js); the sheet closes now
+  S.sheet = null; S.album = null; renderSheet();
+  S.sel = {}; S.anchor = null;
+  remember("afl.album", shown);
+  if (a.mode === "move") {
+    const n = albumMove(album, a.files, "moving " + namesText(a.files.map((f) => f.split("/").pop())) + " to " + shown);
+    toast((n === 1 ? "1 moved" : n + " moved") + " to " + shown);
+  } else {
+    const r = albumAdd(album, a.clips);
+    const cp = albumCopy(album, a.copies);
+    const made = r.made + cp;
+    toast((a.copies.length ? (made === 1 ? "1 item" : made + " items") : (made === 1 ? "1 clip" : made + " clips")) + " added to " + shown +
+      (r.already ? " · " + r.already + (r.already === 1 ? " was" : " were") + " there already" : ""));
+  }
 }
+
+// ---------- shown at once, written after (docs/library-responsiveness.md) ----------
+//
+// Each album command is a change of writes.js: what it will make is worked out here by the command's own rules
+// (src/albums.rs: a name taken gets " 2", " 3"…; a clip already in the album, a photo of a time already there, is
+// left as it is), shown at once (a clip's link with the picture the page has of the clip, a copy with its file's, a
+// photo link with its clip's until its frame is read), and the command's answer (src/changed.rs's of_album: the links
+// and items as made) replaces it with no view read. A change that fails is taken back and said in the strip.
+//
+// An item still being written can be selected, tagged, culled and added to another album: those are changes too,
+// queued behind its write (and taken back with it when it fails). Moving it, taking it out, renaming, deleting or
+// sharing it waits until it's written: refused with a word, since they need its file.
+
+// The files a folder of the project's folder has, as far as the page knows (every view's, the ones being written
+// among them): lower-cased names
+function namesIn(rdir) {
+  const out = new Set();
+  const take = (rel) => { if (parentDir(rel) === rdir) out.add(rel.slice(rel.lastIndexOf("/") + 1).toLowerCase()); };
+  for (const l of (RAW_FOOTAGE && RAW_FOOTAGE.links) || []) take(l.rel);
+  for (const v of ["moments", "stills", "exports"]) for (const it of (DATA[v] && DATA[v].items) || []) take(it.id);
+  return out;
+}
+// A name free in a folder (albums.rs: `stem`, else `stem 2`, `stem 3`…), taken from then on
+function freeName(names, stem, ext) {
+  let name = stem + ext, n = 2;
+  while (names.has(name.toLowerCase())) name = stem + " " + n++ + ext;
+  names.add(name.toLowerCase());
+  return name;
+}
+// A file's name split as albums.rs's item_of splits it: what's renamed, and its ending
+function nameParts(file) {
+  const lower = file.toLowerCase();
+  const n = lower.endsWith(".afplink.mp4") || lower.endsWith(".afplink.jpg") ? 12 : lower.endsWith(".mp.jpg") ? 7 : file.lastIndexOf(".") >= 0 ? file.length - file.lastIndexOf(".") : 0;
+  return [file.slice(0, file.length - n), file.slice(file.length - n)];
+}
+const rootOf = () => S.root.replace(/\/$/, "");
+// Some of these still being written: said, and true (what needs their files waits for them)
+function stillWriting(list) {
+  const p = list.filter((x) => x.pending);
+  if (!p.length) return false;
+  toast((p.length === 1 ? p[0].name + " is" : namesText(p.map((x) => x.name)) + " are") + " still being written: in a moment");
+  return true;
+}
+const nowS = () => Math.floor(Date.now() / 1000);
+
+// Links to clips (album_add): `clips` as albumSel gives them. What's made and what was there already
+function albumAdd(album, clips) {
+  if (!clips.length) return { made: 0, already: 0 };
+  const names = namesIn(album), there = new Set(((RAW_FOOTAGE && RAW_FOOTAGE.links) || []).filter((l) => parentDir(l.rel) === album).map((l) => l.clip));
+  const links = [], send = [];
+  let already = 0;
+  for (const c of clips) {
+    if (there.has(c.id)) { already++; continue; }
+    there.add(c.id);
+    const stem = c.id.split("/").pop().replace(/\.[^.]+$/, "");
+    const rel = album + "/" + freeName(names, stem, ".afplink.mp4");
+    // (the picture the page shows for the clip where it was selected)
+    links.push({ clip: c.id, rel, path: rootOf() + "/" + rel, ph: c.thumbPath || c.preview || c.thumb || c.path, name: c.name });
+    send.push(clipForLink(c));
+  }
+  if (links.length) Writes.run("albumadd", [], { album, links, clips: send, shown: albumShown(album) });
+  return { made: links.length, already };
+}
+Writes.define("albumadd", {
+  views: ["footage"],
+  what: (a) => "adding " + namesText(a.links.map((l) => l.name)) + " to the album " + a.shown,
+  patch(d, a) {
+    if (d.view !== "footage") return;
+    const links = d.data.links || [];
+    const add = a.links.filter((p) => !links.some((l) => l.path === p.path || (l.clip === p.clip && parentDir(l.rel) === a.album)));
+    if (!add.length) return;
+    const t = nowS();
+    d.data.links = links.concat(add.map((p) => ({ path: p.path, rel: p.rel, clip: p.clip, draft: false, size: 0, mtime: t, pending: true, ph: p.ph })));
+    d.list("clips_dirs", (l) => { for (let x = a.album; x && !l.includes(x); x = parentDir(x)) l.push(x); return l.sort(); });
+    d.hit = true;
+  },
+  send: (a) => ["album_add", { album: a.album, clips: a.clips }],
+  problems: (r) => (r && r.failed ? r.failed.map((f) => f[0] + ": " + f[1]) : []),
+});
+
+// Moments and photos that are links, copied into an album (album_copy): each an item of its own there
+function albumCopy(album, files) {
+  if (!files.length) return 0;
+  const names = namesIn(album), made = [];
+  for (const f of files) {
+    const view = /\.afplink\.mp4$/i.test(f) ? "moments" : "stills";
+    const src = ((DATA[view] && DATA[view].items) || []).find((x) => x.path === f);
+    if (!src || src.rdir === album) continue;
+    const [stem, ext] = nameParts(f.split("/").pop());
+    const id = album + "/" + freeName(names, stem, ext);
+    made.push({ view, from: src.id, id, path: rootOf() + "/" + id, name: src.name, ph: src.thumbPath || src.ph || src.path });
+  }
+  if (made.length) Writes.run("albumcopy", [], { album, files, made, shown: albumShown(album) }, { made: made.map((m) => m.view + ":" + m.id) });
+  return made.length;
+}
+// An item of a view as it will be at another place (a copy, or moved): its id, path, folder and name, its picture
+// meanwhile, put where a reading would have it
+function itemAt(d, it, m, album) {
+  const file = m.id.split("/").pop();
+  Object.assign(it, { id: m.id, path: m.path, dir: album, name: it.kind === "moment" ? nameParts(file)[0] : file, pending: true, ph: m.ph });
+  d.moved(it);
+  d.list("dirs", (l) => { for (let x = album; x && !l.includes(x); x = parentDir(x)) l.push(x); return l.sort(); });
+  d.hit = true;
+}
+Writes.define("albumcopy", {
+  views: ["moments", "stills"],
+  what: (a) => "copying " + namesText(a.made.map((m) => m.name)) + " into the album " + a.shown,
+  patch(d, a) {
+    for (const m of a.made) {
+      if (m.view !== d.view || d.data.items.some((x) => x.id === m.id)) continue;
+      const src = d.data.items.find((x) => x.id === m.from);
+      if (!src) continue;
+      const it = JSON.parse(JSON.stringify(src));
+      d.data.items.push(it);
+      itemAt(d, it, m, a.album);
+    }
+  },
+  send: (a) => ["album_copy", { album: a.album, files: a.files }],
+  problems: (r) => (r && r.problems) || [],
+});
+
+// An album's own files (a clip's link, a moment, a photo) moved into another album (album_move): `what` for the strip
+function albumMove(album, files, what) {
+  const names = namesIn(album), moves = [];
+  for (const f of files) {
+    const link = ((RAW_FOOTAGE && RAW_FOOTAGE.links) || []).find((l) => l.path === f);
+    const view = link ? "footage" : /\.afplink\.mp4$/i.test(f) ? "moments" : "stills";
+    const src = link ? null : ((DATA[view] && DATA[view].items) || []).find((x) => x.path === f);
+    const from = link ? link.rel : src ? src.id : null;
+    if (!from || parentDir(from) === album) continue;
+    const [stem, ext] = nameParts(f.split("/").pop());
+    const id = album + "/" + freeName(names, stem, ext);
+    moves.push({ view, from, fromPath: f, id, path: rootOf() + "/" + id, ph: link ? (link.ph || f) : (src.ph || src.thumbPath || f), name: f.split("/").pop() });
+  }
+  if (moves.length) Writes.run("albummove", [], { album, files, moves, what }, { made: moves.filter((m) => m.view !== "footage").map((m) => m.view + ":" + m.id) });
+  return moves.length;
+}
+Writes.define("albummove", {
+  views: ["footage", "moments", "stills"],
+  what: (a) => a.what,
+  patch(d, a) {
+    for (const m of a.moves) {
+      if (m.view !== d.view) continue;
+      if (d.view === "footage") {
+        const links = d.data.links || [];
+        const i = links.findIndex((l) => l.path === m.fromPath);
+        if (i < 0 || links.some((l) => l.path === m.path)) continue;
+        d.data.links = links.slice();
+        d.data.links[i] = Object.assign({}, links[i], { rel: m.id, path: m.path, pending: true, ph: m.ph });
+        d.list("clips_dirs", (l) => { for (let x = a.album; x && !l.includes(x); x = parentDir(x)) l.push(x); return l.sort(); });
+        d.hit = true;
+      } else {
+        if (d.data.items.some((x) => x.id === m.id)) continue;
+        const it = d.item(m.from);
+        if (it) itemAt(d, it, m, a.album);
+      }
+    }
+  },
+  send: (a) => ["album_move", { album: a.album, files: a.files }],
+  problems: (r) => (r && r.problems) || [],
+});
+
+// Photo links of marks (photo_add), in an album: what's made (one at a time of that clip already there: left)
+function photoAdd(album, photos) {
+  const names = namesIn(album), made = [], send = [];
+  const there = ((DATA.stills && DATA.stills.items) || []).filter((p) => p.rdir === album && p.link && p.link.clip).map((p) => [p.link.clip, +p.link.t || 0]);
+  for (const ph of photos) {
+    if (there.some(([c, t]) => c === ph.tree && Math.abs(t - ph.t) < 0.05)) continue;
+    there.push([ph.tree, ph.t]);
+    const stem = ph.tree.split("/").pop().replace(/\.[^.]+$/, "") + "_" + ph.t.toFixed(2) + "s";
+    const id = album + "/" + freeName(names, stem, ".afplink.jpg");
+    const orig = (DATA.sources && DATA.sources.items.find((x) => x.id === ph.tree)) || {};
+    made.push({ id, path: rootOf() + "/" + id, clip: ph.tree, t: Math.round(ph.t * 1000) / 1000, created: ph.created, ph: orig.thumbPath || orig.thumb || orig.path || null });
+    send.push(ph);
+  }
+  if (made.length) Writes.run("photoadd", [], { album, photos: send, made, shown: albumShown(album) }, { made: made.map((m) => "stills:" + m.id) });
+  return made.length;
+}
+Writes.define("photoadd", {
+  views: ["stills"],
+  what: (a) => "making " + (a.made.length === 1 ? "a photo" : a.made.length + " photos") + " of marks in " + a.shown,
+  patch(d, a) {
+    if (d.view !== "stills") return;
+    const t = nowS();
+    for (const m of a.made) {
+      if (d.data.items.some((x) => x.id === m.id || (x.dir === a.album && x.link && x.link.clip === m.clip && Math.abs((+x.link.t || 0) - m.t) < 0.05))) continue;
+      const link = { v: 1, kind: "photo", clip: m.clip, t: m.t };
+      if (m.created) link.created = new Date(m.created * 1000).toISOString();
+      const it = { kind: "still", id: m.id, dir: a.album, name: m.id.split("/").pop(), path: m.path, size: 0, mtime: t, tags: [], linked: true, form: "Photo link", link, pending: true, ph: m.ph };
+      d.data.items.push(it);
+      d.moved(it);
+      d.list("dirs", (l) => { for (let x = a.album; x && !l.includes(x); x = parentDir(x)) l.push(x); return l.sort(); });
+      d.hit = true;
+    }
+  },
+  send: (a) => ["photo_add", { album: a.album, photos: a.photos }],
+  problems: (r) => (r && r.failed ? r.failed.map((f) => f[0] + ": " + f[1]) : []),
+});
+
+// A new album (or folder): shown at once with the name the app will give it (src/main.rs's new_folder: "untitled
+// folder", " 2"… when taken), ready to be renamed; the app is asked for that name
+Writes.define("newfolder", {
+  views: ["footage", "moments", "stills", "exports"],
+  what: (a) => "making the folder " + a.name,
+  patch(d, a) {
+    if (d.view !== a.in) return;
+    d.list(d.view === "footage" ? "clips_dirs" : "dirs", (l) => { for (let x = a.rel; x && !l.includes(x); x = parentDir(x)) l.push(x); return l.sort(); });
+  },
+  async run(op, ask) {
+    const a = op.args;
+    const made = await ask("new_folder", { view: a.view, parent: a.parent, name: a.name });
+    // (another name after all: the folders read again)
+    if (made !== a.rel) setTimeout(() => Writes.host.reload([a.in]), 0);
+    return made;
+  },
+});

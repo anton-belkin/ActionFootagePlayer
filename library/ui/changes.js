@@ -75,6 +75,7 @@ const parentDir = (p) => (p.lastIndexOf("/") < 0 ? "" : p.slice(0, p.lastIndexOf
 // that add, remove or move items): each replaces the one of its id; a new one goes where a reading would have it
 // among its folder's (by name), its folder listed; the gone ones go
 function mergedInto(view, data, ch) {
+  if (view === "footage") data = linksInto(data, ch);
   const items = (ch.items || {})[view] || [], gone = new Set((ch.gone || {})[view] || []);
   if (!items.length && !gone.size) return data;
   const by = new Map(items.map((it) => [it.id, it]));
@@ -103,12 +104,29 @@ function mergedInto(view, data, ch) {
   if (view === "footage") for (const it of items) if (it.pdir) folders("clips_dirs", it.pdir);
   return out;
 }
+// The clips' links an album command made or moved (src/changed.rs's of_album: `links`, `links_gone`) put into the
+// Footage scan's list of them, their folders listed: as a reading of Footage would have them, none read
+function linksInto(data, ch) {
+  const add = ch.links || [], gone = new Set(ch.links_gone || []);
+  if (!data || (!add.length && !gone.size)) return data;
+  const paths = new Set(add.map((l) => l.path));
+  const links = (data.links || []).filter((l) => !gone.has(l.path) && !paths.has(l.path)).concat(add);
+  const dirs = (data.clips_dirs || []).slice();
+  for (const l of add) for (let d = parentDir(l.rel); d && !dirs.includes(d); d = parentDir(d)) dirs.push(d);
+  return Object.assign({}, data, { links, clips_dirs: dirs.length !== (data.clips_dirs || []).length ? dirs.sort() : data.clips_dirs });
+}
 // A Changed put into what the disk has, and what's shown made again for it: its items alone when they're where
 // they were, the view whole (from memory) when items came, went or moved. What's said back: whether anything shown
 // changed, and the views that must be read again after all
 function mergeChanged(ch) {
   if (ch.probes) mergeProbes(ch.probes);
   const out = { changed: false, reload: new Set(), whole: new Set() };
+  // Links made or moved (albums): Albums and Originals' "In an album" are made again from the list, from memory
+  if (CONFIRMED.footage && ((ch.links || []).length || (ch.links_gone || []).length)) {
+    CONFIRMED.footage = linksInto(CONFIRMED.footage, ch);
+    showView("footage");
+    out.whole.add("footage"); out.changed = true;
+  }
   for (const view of VIEW_NAMES) {
     const data = CONFIRMED[view];
     if (!data) continue;
@@ -380,7 +398,21 @@ function inFolder(p, f) { return p != null && (p === f || p.startsWith(f + "/"))
 Writes.define("renamefolder", {
   views: ["footage", "moments", "stills", "exports"],
   what: (a) => "renaming the folder " + a.was + " to " + a.name,
-  patch(d, a) {
+  patch: (d, a) => folderRenamed(d, a),
+  send: (a) => ["rename_item", { view: a.view, kind: "folder", path: a.path, name: a.name }],
+});
+// An album renamed: its folders (in _Clips, _Moments, _Stills: up to three) as one change, shown whole or taken back
+// whole (src/main.rs's rename_album names back the ones done when one can't be)
+Writes.define("renamealbum", {
+  views: ["footage", "moments", "stills", "exports"],
+  what: (a) => "renaming the album " + a.was + " to " + a.name,
+  patch(d, a) { for (const f of a.folders) folderRenamed(d, { from: f.from, to: f.to, name: a.name }); },
+  send: (a) => ["rename_album", { paths: a.folders.map((f) => f.path), name: a.name }],
+});
+// A folder of the project's renamed (`from`, `to`: its paths in the project's folder; `name`: its new name), in a view's
+// draft: what's in it follows
+function folderRenamed(d, a) {
+  {
     const move = (p) => (p === a.from ? a.to : p.startsWith(a.from + "/") ? a.to + p.slice(a.from.length) : p);
     const was = a.from.split("/").pop();
     // A file's path on the disk, the folder's name in it changed (`rest`: what follows the folder in its path)
@@ -405,9 +437,8 @@ Writes.define("renamefolder", {
         it.id = it.dir + "/" + it.id.split("/").pop();
       }
     }
-  },
-  send: (a) => ["rename_item", { view: a.view, kind: "folder", path: a.path, name: a.name }],
-});
+  }
+}
 // Deleted: a folder with what's in it, a moment, photo or export, a clip's preview (the clip then has none)
 Writes.define("delete", {
   views: ["footage", "moments", "stills", "exports"],

@@ -11,7 +11,8 @@ const fs = require("fs");
 const path = require("path");
 const vm = require("vm");
 
-const UI = path.join(__dirname, "..", "ui");
+// (AFL_UI: another copy of the page, an older one to measure against)
+const UI = process.env.AFL_UI || path.join(__dirname, "..", "ui");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A small project, for the tests that need no more: two folders of clips, each clip with a link in the album of its

@@ -429,6 +429,7 @@ pub fn add(root: &Path, album: &str, clips: &[Add], cache: &Path, luts: Option<&
     let mut names: HashSet<String> = HashSet::new();
     let mut there: HashSet<String> = HashSet::new();
     for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        afp_catalog::store::nas::stat();
         let name = e.file_name().to_string_lossy().into_owned();
         if name.to_lowercase().ends_with(crate::index::LINK_EXT) {
             if let Some(c) = crate::index::link(&e.path()).filter(|l| l["kind"] == "clip").and_then(|l| l["clip"].as_str().map(str::to_string)) { there.insert(c); }
@@ -457,6 +458,7 @@ pub fn add(root: &Path, album: &str, clips: &[Add], cache: &Path, luts: Option<&
                 let mut link = json!({ "v": 1, "kind": "clip", "clip": a.tree, "size": a.size, "roots": [root_text] });
                 if let Some(t) = a.created { link["created"] = json!(iso(t)); }
                 let r = link_file(&thumbnail(a, cache, luts), &link.to_string()).and_then(|bytes| {
+                    afp_catalog::store::nas::write();
                     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| e.to_string())?;
                     f.write_all(&bytes).map_err(|e| { let _ = std::fs::remove_file(out); e.to_string() })
                 });
@@ -490,6 +492,7 @@ pub fn add_photos(root: &Path, album: &str, photos: &[Photo], cache: &Path, luts
     let mut names: HashSet<String> = HashSet::new();
     let mut there: Vec<(String, f64)> = Vec::new();
     for e in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        afp_catalog::store::nas::stat();
         let name = e.file_name().to_string_lossy().into_owned();
         if name.to_lowercase().ends_with(PHOTO_EXT) {
             if let Some(l) = crate::index::link(&e.path()).filter(|l| l["kind"] == "photo") {
@@ -534,6 +537,7 @@ pub fn add_photos(root: &Path, album: &str, photos: &[Photo], cache: &Path, luts
                     None => thumbnail(a, cache, luts),
                 };
                 let r = photo_file(&picture, &link.to_string()).and_then(|bytes| {
+                    afp_catalog::store::nas::write();
                     let mut f = std::fs::OpenOptions::new().write(true).create_new(true).open(out).map_err(|e| e.to_string())?;
                     f.write_all(&bytes).map_err(|e| { let _ = std::fs::remove_file(out); e.to_string() })
                 });
@@ -590,13 +594,14 @@ pub fn move_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
         if from.parent() == Some(dir.as_path()) { continue; }
         let mut new_stem = stem.clone();
         let mut n = 2;
-        while dir.join(format!("{new_stem}{ext}")).exists() { new_stem = format!("{stem} {n}"); n += 1; }
+        while { afp_catalog::store::nas::stat(); dir.join(format!("{new_stem}{ext}")).exists() } { new_stem = format!("{stem} {n}"); n += 1; }
         let to = dir.join(format!("{new_stem}{ext}"));
         // A moment's renders, at the paths its place gives them, before it goes
         let rel = |p: &Path| p.strip_prefix(root).map(|r| r.to_string_lossy().replace('\\', "/")).unwrap_or_default();
         let renders: Vec<(PathBuf, PathBuf)> = if kind == "moment" {
             crate::index::RENDER_PROFILES.iter().map(|p| (crate::index::render_path(root, &rel(from), p), crate::index::render_path(root, &rel(&to), p))).collect()
         } else { Vec::new() };
+        afp_catalog::store::nas::write();
         match std::fs::rename(from, &to) {
             Ok(()) => {
                 moved += 1;
@@ -636,8 +641,10 @@ pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
         if from.parent() == Some(dir.as_path()) { continue; }
         let mut new_stem = stem.clone();
         let mut n = 2;
-        while dir.join(format!("{new_stem}{ext}")).exists() { new_stem = format!("{stem} {n}"); n += 1; }
+        while { afp_catalog::store::nas::stat(); dir.join(format!("{new_stem}{ext}")).exists() } { new_stem = format!("{stem} {n}"); n += 1; }
         let to = dir.join(format!("{new_stem}{ext}"));
+        afp_catalog::store::nas::read();
+        afp_catalog::store::nas::write();
         match std::fs::copy(from, &to) {
             Ok(_) => {
                 copied += 1;

@@ -208,6 +208,22 @@ pub fn commands(r: &Rig, rows: &mut Vec<Row>) {
     timed(rows, "saying what changed: 20 moments", || crate::changed::of_items(&r.p, &items, Vec::new()).with_probes(&r.probes));
     let own = vec![r.f.join(&r.clips[pick(0)]).with_extension("afp.json")];
     timed(rows, "what the catalog says changed, as items: 1 clip's own file", || crate::changed::of_files(&r.p, &own).map(|c| c.with_probes(&r.probes)));
+    // Albums (albums.rs): links made in a new album, moved, photo links of marks; each then saying what it made
+    // (changed.rs's of_album). The clips' pictures are in the window's cache already (it showed them): warmed first
+    let cache = r.base.join("thumbcache");
+    let add = |i: usize| crate::albums::Add { tree: r.clips[pick(i)].clone(), path: r.f.join(&r.clips[pick(i)]), thumb: None, size: 8, created: Some(1_700_000_000), curve: None };
+    for i in 0..300 { let _ = index::thumb_bytes(&add(i).path, &cache); }
+    for (n, album) in [(1, "_Clips/Perf one"), (300, "_Clips/Perf")] {
+        let list: Vec<crate::albums::Add> = (0..n).map(add).collect();
+        let v = timed(rows, &format!("album_add: {n} clip(s)"), || crate::albums::add(&r.p, album, &list, &cache, None).unwrap());
+        timed(rows, &format!("saying what changed: album_add {n}"), || crate::albums::album_changed(&r.p, v).with_probes(&r.probes));
+    }
+    let links: Vec<PathBuf> = std::fs::read_dir(r.p.join("_Clips/Perf")).unwrap().flatten().map(|e| e.path()).filter(|p| p.to_string_lossy().ends_with(index::LINK_EXT)).take(50).collect();
+    let v = timed(rows, "album_move: 50 links", || crate::albums::move_to(&r.p, "_Clips/Perf moved", &links).unwrap());
+    timed(rows, "saying what changed: album_move 50", || crate::albums::album_changed(&r.p, v).with_probes(&r.probes));
+    let photos: Vec<crate::albums::Photo> = (0..20).map(|i| crate::albums::Photo { clip: add(i % 5), t: 1.0 + i as f64, crop: None, camera: None }).collect();
+    let v = timed(rows, "photo_add: 20 marks", || crate::albums::add_photos(&r.p, "_Stills/Generated", &photos, &cache, None).unwrap());
+    timed(rows, "saying what changed: photo_add 20", || crate::albums::album_changed(&r.p, v).with_probes(&r.probes));
     TRASH_REMOVES.store(true, std::sync::atomic::Ordering::Relaxed);
     for (n, skip) in [(1, r.moments.len() / 2), (20, r.moments.len() * 6 / 10)] {
         let items: Vec<Value> = r.moments.iter().skip(skip).take(n).map(|m| r.own("moment", m)).collect();

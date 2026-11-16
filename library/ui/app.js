@@ -297,6 +297,9 @@ function deriveItems(view, only) {
       it.thumbPath = it.path;
       it.sub = (l.clip ? l.clip.split("/").pop() + " · " : "") + it.look;
     }
+    // An item still being written (albums.js): the picture the page has for it meanwhile (its clip's, the file it's
+    // a copy of), replaced by its own once the command says what it made
+    if (it.ph) it.thumbPath = it.ph;
     it.date = it.when ? dateText(it.when) : "";
     it.dur = it.kind === "still" ? (it.form === "Live Photo" ? "Live" : it.linked ? "Link" : "") : clock(it.durS);
   }
@@ -1575,14 +1578,19 @@ async function newFolder() {
   // A new album is made in My albums: from the top of Albums, it's opened first
   if (S.view === "footage" && (!S.path.length || albumMineOpen())) S.path = [AV_MARK + "My albums"];
   const parent = dirKey();
-  try {
-    // An album's new album is in _Clips (the user's own); under Other folders, where that folder is
-    const made = await invoke("new_folder", { view: S.view, parent: S.view === "footage" && parent === NOPREV ? VIEW_ROOT.footage : diskRel(parent) });
-    await refresh();
-    const k = "f:" + shownDir(S.view, made);
-    S.sel = {}; S.sel[k] = true; S.anchor = k; S.renaming = k;
-    renderAll();
-  } catch (e) { showError(String(e)); }
+  // An album's new album is in _Clips (the user's own); under Other folders, where that folder is. Shown at once with
+  // the name the app gives it, ready to be renamed (writes.js: the rename waits for it to be made)
+  const real = S.view === "footage" && parent === NOPREV ? VIEW_ROOT.footage : diskRel(parent);
+  const names = namesIn(real);
+  const dirs = [(RAW_FOOTAGE && RAW_FOOTAGE.clips_dirs) || []].concat(["moments", "stills", "exports"].map((v) => (CONFIRMED[v] && CONFIRMED[v].dirs) || []));
+  for (const l of dirs) for (const d of l) if (parentDir(d) === real) names.add(d.split("/").pop().toLowerCase());
+  let name = "untitled folder", n = 1;
+  while (names.has(name)) name = "untitled folder " + ++n;
+  const rel = real ? real + "/" + name : name;
+  Writes.run("newfolder", [], { view: S.view, in: S.view === "sources" ? "footage" : S.view, parent: real, name, rel });
+  const k = "f:" + shownDir(S.view, rel);
+  S.sel = {}; S.sel[k] = true; S.anchor = k; S.renaming = k;
+  renderAll();
 }
 
 // ---------- a clip's moments and photos, and back to the footage ----------
@@ -1689,6 +1697,7 @@ function deleteLabel(c, list) {
 }
 async function deleteSelection() {
   const c = ctx();
+  if (stillWriting(c.direct)) return;
   const list = deletable(c);
   if (!list.length) {
     if (c.any) toast(S.view === "sources" ? "Footage is deleted in Finder: Check then shows what pointed at it" : S.view === "footage" ? "Nothing here to remove: the clips themselves are deleted in Finder" : "Nothing here to delete");
@@ -2280,7 +2289,7 @@ function startRename() {
   const keys = Object.keys(S.sel);
   if (keys.length !== 1) return;
   const it = currentItems().find((x) => keyOf(x) === keys[0]);
-  if (!it) return;
+  if (!it || stillWriting([it])) return;
   if (S.view === "sources" || (S.view === "footage" && (it.kind === "clip" || it.path === NOPREV))) {
     toast(it.kind === "folder" ? "Sources’ folders are renamed in Finder (Find moved files then follows)" : "A clip is renamed in Finder: Find moved files then follows. Here: albums, moments, photos, exports");
     return;
@@ -2305,7 +2314,11 @@ async function commitRename(name) {
   if (why) { showError(why); renderMain(); return; }
   S.sel = {}; S.anchor = null;
   // Shown at once, renamed after (writes.js)
-  if (it.kind === "folder") {
+  if (it.kind === "folder" && S.view === "footage") {
+    // An album: its folders as one change (shown whole, or taken back whole)
+    const folders = paths.map((path) => { const from = path.slice(S.root.length + 1); return { path, from, to: from.slice(0, from.length - it.name.length) + name }; });
+    Writes.run("renamealbum", [], { view, name, was: it.name, folders });
+  } else if (it.kind === "folder") {
     for (const path of paths) {
       const from = path.slice(S.root.length + 1);
       Writes.run("renamefolder", [], { view, path, name, was: it.name, from, to: from.slice(0, from.length - it.name.length) + name });
