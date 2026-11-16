@@ -499,6 +499,8 @@ fn footage(root: &Path, flat_previews: bool, only: Option<&[String]>) -> Value {
                                     "source": own.get("source").cloned().unwrap_or(Value::Null),
                                     "location": own.get("location").cloned().unwrap_or(Value::Null) });
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                if let Some(r) = crate::tags::rating_of(&own["rating"]) { it["rating"] = json!(r); }
+                if let Some(p) = crate::tags::pick_of(&own["pick"]) { it["pick"] = json!(p); }
             }
         }
     }
@@ -601,6 +603,8 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 let stem = if lower.ends_with(LINK_EXT) { &name[..name.len() - LINK_EXT.len()] } else { name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name) };
                 it["name"] = json!(stem);
                 it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
+                if let Some(p) = crate::tags::pick_of(&l["pick"]) { it["pick"] = json!(p); }
                 it["gyroflow"] = json!(has_gyroflow(&path));
                 it["renders"] = renders_of(root, rel, &path, &l);
                 let (original, moved_to) = original_of(&l);
@@ -621,6 +625,8 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                     if !tags.iter().any(|x| x.eq_ignore_ascii_case(t)) { tags.push(t.to_string()); }
                 }
                 it["tags"] = json!(tags);
+                if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
+                if let Some(p) = crate::tags::pick_of(&l["pick"]) { it["pick"] = json!(p); }
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
                 // A photo that's a link (albums.rs: a small picture, rendered when shared), or the rendered file
                 it["linked"] = json!(lower.ends_with(crate::albums::PHOTO_EXT));
@@ -632,7 +638,8 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
             }
             _ => {
                 it["kind"] = json!("export");
-                it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
+                // Not tagged: a derivative (docs/tags-and-culling.md); tags an older version put in its link are left there
+                it["tags"] = json!([]);
                 it["link"] = l;
             }
         }

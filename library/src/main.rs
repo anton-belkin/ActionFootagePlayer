@@ -257,9 +257,31 @@ fn watch(root: &Path, moved: bool) -> Watch {
     let (c, l) = (changes.clone(), last.clone());
     let runner = seen::start(root, changes.clone(), last.clone(), moved);
     let (events, me) = (runner.events.clone(), root.to_path_buf());
+    // A file's attributes changed (a Finder tag set by hand, FSEvents' ItemXattrMod; this Mac's disks, and this Mac's
+    // own changes on a share): that original or moment synced with the library's tag stores, a second after it settles
+    // (docs/tags-and-culling.md, Sync). Our own writes, noticed again, find nothing to do
+    let (attrs, attrs_rx) = std::sync::mpsc::channel::<PathBuf>();
+    let sync_root = root.to_path_buf();
+    std::thread::spawn(move || {
+        while let Ok(first) = attrs_rx.recv() {
+            let mut paths = vec![first];
+            while let Ok(p) = attrs_rx.recv_timeout(Duration::from_millis(1000)) { paths.push(p); }
+            let stores = tags::Stores::of(&sync_root);
+            if stores.list.is_empty() { continue; }
+            let mut items: Vec<Value> = Vec::new();
+            for p in paths { if let Some(it) = tags::item_of_file(&sync_root, &p) { if !items.contains(&it) { items.push(it); } } }
+            if items.is_empty() { continue; }
+            let tool = link_tool();
+            let (came, problems) = tags::sync(&sync_root, &items, &|f, l| write_link(tool.as_ref(), f, l), &stores);
+            if came > 0 || !problems.is_empty() { eprintln!("tags: {came} item(s) changed in Finder taken in; {problems:?}"); }
+        }
+    });
     let watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
         let Ok(e) = res else { return };
         if matches!(e.kind, notify::EventKind::Access(_)) { return; }
+        if matches!(e.kind, notify::EventKind::Modify(notify::event::ModifyKind::Metadata(_)) | notify::EventKind::Modify(notify::event::ModifyKind::Any)) {
+            for p in &e.paths { let _ = attrs.send(p.clone()); }
+        }
         // Temporary and hidden files (a write through a temporary file shows as its final name too), the NAS's recycle bin
         let ours = e.paths.iter().any(|p| !p.components().any(|c| { let n = c.as_os_str().to_string_lossy(); n.starts_with('.') || n.starts_with('#') })
                                           && !p.to_string_lossy().ends_with(".tmp"));
@@ -303,6 +325,36 @@ struct RecentEntry {
     /// while it's offline)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     hosts: Vec<String>,
+    /// "Open at start": the one project of the list the app opens when it's started with no file (start_entry). This
+    /// computer's choice, kept here in the app's own data, never in the project
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    at_start: bool,
+}
+
+/// The project opened at start: the one of the list marked so (the first, should a list edited by hand mark several)
+fn start_entry(list: &[RecentEntry]) -> Option<&RecentEntry> { list.iter().find(|e| e.at_start) }
+
+/// "Open at start" put on the project at `path` (None: on none), taken off every other. false: it isn't in the list
+fn set_start(list: &mut [RecentEntry], path: Option<&str>) -> bool {
+    for e in list.iter_mut() { e.at_start = false; }
+    match path {
+        None => true,
+        Some(p) => list.iter_mut().find(|e| e.path == p).map(|e| e.at_start = true).is_some(),
+    }
+}
+
+/// The list with a project just opened put first: its own entry replaced (its "Open at start" kept), the list kept to
+/// ten, the project opened at start never dropped off its end
+fn remembered(mut list: Vec<RecentEntry>, mut new: RecentEntry) -> Vec<RecentEntry> {
+    new.at_start = list.iter().any(|x| x.path == new.path && x.at_start);
+    list.retain(|x| x.path != new.path);
+    list.insert(0, new);
+    if list.len() > 10 {
+        let start = list.iter().skip(10).find(|e| e.at_start).cloned();
+        list.truncate(10);
+        if let Some(s) = start { list[9] = s; }
+    }
+    list
 }
 
 /// The list as kept: entries, or (before 0.13) the paths alone
@@ -362,12 +414,9 @@ fn recent_names(e: &RecentEntry) -> Vec<String> {
 
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
-    let mut list = recent_list(app);
-    list.retain(|x| x.path != p);
     let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
     let hosts = other_names(root, share.as_deref());
-    list.insert(0, RecentEntry { path: p, share, rel, hosts });
-    list.truncate(10);
+    let list = remembered(recent_list(app), RecentEntry { path: p, share, rel, hosts, at_start: false });
     write_recent(app, &list);
 }
 
@@ -455,6 +504,8 @@ struct ProjectInfo {
     moments: u64,
     stills: u64,
     exports: u64,
+    // The library's tag stores (docs/tags-and-culling.md): "finder"
+    tag_stores: Vec<String>,
 }
 
 fn project_info(root: &Path) -> ProjectInfo {
@@ -473,6 +524,7 @@ fn project_info(root: &Path) -> ProjectInfo {
         moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
         stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
         exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
+        tag_stores: locations::tag_stores(root),
     }
 }
 
@@ -843,6 +895,8 @@ struct Recent {
     connect: bool,
     /// The names it can be connected by (the NAS's), for Connect's list
     names: Vec<String>,
+    /// The one the app opens when it's started with no file ("Open at start")
+    at_start: bool,
 }
 
 // The projects this computer has opened, the last first: every one, those not reachable now too (offline)
@@ -866,11 +920,48 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
         let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
                  here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
-                 names: if here.is_none() { recent_names(e) } else { Vec::new() } }
+                 names: if here.is_none() { recent_names(e) } else { Vec::new() }, at_start: e.at_start }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
 }).await.map_err(|e| e.to_string())
+}
+
+/// "Open at start" put on a project of the list (None: taken off): the one the app opens when it's started with no
+/// file. Kept with the list, in the app's own data on this computer
+#[tauri::command]
+async fn set_start_project(app: tauri::AppHandle, path: Option<String>) -> Result<(), String> {
+    let mut list = recent_list(&app);
+    if !set_start(&mut list, path.as_deref()) { return Err("That project isn't in the list of those opened here".into()); }
+    write_recent(&app, &list);
+    Ok(())
+}
+
+/// The app started with no file (the page asks once, when it's up and no project is open: a Project.afproject double
+/// clicked has opened by then): the project marked "Open at start" opened, when it's reachable. Its path; None: none
+/// marked, one opened already, or it's offline (the start screen then shows it so, with Connect)
+#[tauri::command]
+async fn open_at_start(app: tauri::AppHandle, shared: State<'_, Shared>) -> Result<Option<String>, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Option<String> {
+        if shared.lock().unwrap().project.is_some() { return None; }
+        let list = recent_list(&app);
+        let root = recent_here(start_entry(&list)?, &locations::mounts())?;
+        usable(&root).map_err(|e| eprintln!("{e}")).ok()?;
+        let mut inner = shared.lock().unwrap();
+        // One opened meanwhile (a double click) stays
+        if inner.project.is_some() { return None; }
+        inner.project = Some(root.clone());
+        Some(root.display().to_string())
+    }).await.map_err(|e| e.to_string())
+}
+
+/// The project closed: the start screen, with the projects opened before (tasks queued go on)
+#[tauri::command]
+fn close_project(shared: State<Shared>) {
+    let mut inner = shared.lock().unwrap();
+    inner.project = None;
+    inner.pending_open.clear();
 }
 
 /// A project taken off the list of those opened before (a test one, one moved away)
@@ -1100,6 +1191,7 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
         Ok(json!({ "path": root.display().to_string(), "name": root.file_name().map(|n| n.to_string_lossy().into_owned()),
                    "id": doc.get("id"), "hosts": doc.get("hosts").cloned().unwrap_or(json!({})), "locations": own, "local": local, "caches": caches,
                    "never_rename": locations::never_rename(&root),
+                   "tag_stores": locations::tag_stores(&root), "finder_here": cfg!(target_os = "macos"),
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
                    "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
     }).await.map_err(|e| e.to_string())?
@@ -1163,9 +1255,12 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
     // "I never rename my footage": kept, unless this save says otherwise
     let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
-    if clean.is_empty() && !never_rename { let _ = std::fs::remove_file(&file); return Ok(()); }
+    // The tag stores chosen on this computer (save_tag_stores) stay
+    let stores = locations::read_json(&file).map(|d| locations::tag_stores_in(&d)).unwrap_or_default();
+    if clean.is_empty() && !never_rename && stores.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
     let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
     if never_rename { doc["never_rename"] = json!(true); }
+    if !stores.is_empty() { doc["tag_stores"] = json!(stores); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }).await.map_err(|e| e.to_string())?
 }
@@ -1473,11 +1568,103 @@ async fn set_tags(shared: State<'_, Shared>, probes: State<'_, index::SharedProb
     let meta = meta_tool();
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        tags::remember(&add);
         let problems = tags::set(&root, &items, &add, &remove, &|f, l| write_link(tool.as_ref(), f, l), &|f, t| write_photo_tags(meta.as_ref(), f, t));
         // The items as they are now (changed.rs): the page corrects those, and reads no view again
         changed::of_items(&root, &items, problems).with_probes(&probes)
     }).await.map_err(|e| e.to_string())
 }
+
+// 1–5 stars on the selection (None: none), kept where its tags are (stills: designed). Answers with the items as they
+// are now, as set_tags does
+#[tauri::command]
+async fn set_rating(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, rating: Option<u8>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::apply(&root, &items, &tags::Op::Rating(rating), &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
+// Accept or Reject on the selection (None: neither; docs/tags-and-culling.md)
+#[tauri::command]
+async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, pick: Option<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let meta = meta_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::apply(&root, &items, &tags::Op::Pick(pick.as_deref()), &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
+// The selection (none: every original and moment) synced with the library's tag stores: what changed in Finder comes in
+#[tauri::command]
+async fn sync_tags(shared: State<'_, Shared>, items: Option<Vec<Value>>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = items.filter(|i| !i.is_empty()).unwrap_or_else(|| tags::every_item(&root));
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        json!({ "looked": items.len(), "came": came, "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tag stores this computer syncs (Project settings → Tags): written into this computer's own file for the project
+// (never Project.afproject: it keeps only the locations), its other choices kept; then everything synced once
+#[tauri::command]
+async fn save_tag_stores(shared: State<'_, Shared>, stores: Vec<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let id = project_id(&root)?;
+        let file = locations::local_file(&id).ok_or("No place for this computer's files")?;
+        write_tag_stores(&file, &root, &stores)?;
+        let items = tags::every_item(&root);
+        let (came, problems) = tags::sync(&root, &items, &|f, l| write_link(tool.as_ref(), f, l), &tags::Stores::of(&root));
+        Ok(json!({ "looked": items.len(), "came": came, "problems": problems }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// `stores` (the ones known) into this computer's file for the project, what else it keeps left as it is; a file left
+/// with nothing of this computer's is removed
+fn write_tag_stores(file: &Path, root: &Path, stores: &[String]) -> Result<(), String> {
+    let list: Vec<&String> = stores.iter().filter(|s| *s == "finder").collect();
+    let mut doc = locations::read_json(file).filter(Value::is_object).unwrap_or_else(|| json!({ "project": root.display().to_string(), "locations": [] }));
+    let o = doc.as_object_mut().unwrap();
+    if list.is_empty() { o.remove("tag_stores"); } else { o.insert("tag_stores".into(), json!(list)); }
+    let nothing = o.get("locations").and_then(Value::as_array).is_none_or(|l| l.is_empty()) && o.get("never_rename").and_then(Value::as_bool) != Some(true) && list.is_empty();
+    if nothing { let _ = std::fs::remove_file(file); return Ok(()); }
+    if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
+    std::fs::write(file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
+}
+
+// A tag renamed everywhere in the project (every view's items that have it); to a name in use: merged into it
+#[tauri::command]
+async fn rename_tag(shared: State<'_, Shared>, from: String, to: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let (from, to) = (from.trim().to_string(), to.split_whitespace().collect::<Vec<_>>().join(" "));
+    if from.is_empty() || to.is_empty() { return Err("A tag and its new name".into()); }
+    let tool = link_tool();
+    let meta = meta_tool();
+    tauri::async_runtime::spawn_blocking(move || {
+        let items = tags::with_tag(&root, &from);
+        let problems = tags::apply(&root, &items, &tags::Op::Rename { from: &from, to: &to }, &|f, l| write_link(tool.as_ref(), f, l),
+                                   &|f, t| write_photo_tags(meta.as_ref(), f, t), &tags::Stores::of(&root));
+        tags::remember(std::slice::from_ref(&to));
+        json!({ "count": items.len(), "problems": problems })
+    }).await.map_err(|e| e.to_string())
+}
+
+// The tags used last on this computer (the player's K writes them too)
+#[tauri::command]
+fn recent_tags() -> Vec<String> { tags::recent() }
 
 // ---------- Stabilize optically: the lens ----------
 
@@ -2323,11 +2510,11 @@ fn main() {
             let _ = seen::ON_CHANGE.set(Box::new(move |n| { let _ = h.emit("catalog-changed", n); }));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
+        .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, set_start_project, open_at_start, close_project, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
                                                  export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
                                                  albums::album_add, albums::album_move, albums::album_copy, albums::photo_add])
@@ -2375,6 +2562,90 @@ mod perf;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "Open at start": one project of the list, kept with it; opening projects keeps it, and never drops it off the list
+    #[test]
+    fn one_project_opens_at_start() {
+        let e = |p: &str| RecentEntry { path: p.into(), ..Default::default() };
+        let mut list = vec![e("/a"), e("/b"), e("/c")];
+        assert!(start_entry(&list).is_none());
+        assert!(set_start(&mut list, Some("/b")));
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Another one: only one at a time
+        assert!(set_start(&mut list, Some("/c")));
+        assert_eq!(list.iter().filter(|x| x.at_start).count(), 1);
+        assert_eq!(start_entry(&list).unwrap().path, "/c");
+        // One that isn't in the list: said, none marked
+        assert!(!set_start(&mut list, Some("/nowhere")));
+        assert!(start_entry(&list).is_none());
+        // As kept in the file: the mark only on the one, older lists (no mark, paths alone) read as before
+        assert!(set_start(&mut list, Some("/b")));
+        let text = serde_json::to_string(&list).unwrap();
+        assert_eq!(text.matches("at_start").count(), 1);
+        assert_eq!(parse_recent(&text), list);
+        assert!(start_entry(&parse_recent(r#"["/a",{"path":"/b","share":"//u@nas/Trips","rel":"b"}]"#)).is_none());
+        // Opened again: first in the list, still the one at start, its share kept as now
+        let list = remembered(list, RecentEntry { path: "/b".into(), share: Some("//u@nas/Trips".into()), rel: "b".into(), ..Default::default() });
+        assert_eq!(list.iter().map(|x| x.path.as_str()).collect::<Vec<_>>(), ["/b", "/a", "/c"]);
+        assert!(list[0].at_start && list[0].share.is_some());
+        // Ten others opened after it: it stays in the list (the last place), still marked
+        let mut list = list;
+        for i in 0..12 { list = remembered(list, e(&format!("/p{i}"))); }
+        assert_eq!(list.len(), 10);
+        assert_eq!(list[0].path, "/p11");
+        assert_eq!(start_entry(&list).unwrap().path, "/b");
+        // Taken off
+        assert!(set_start(&mut list, None));
+        assert!(start_entry(&list).is_none());
+    }
+
+    /// The project at start, where it is now: reachable at its path; else by its share, mounted now; else offline
+    #[test]
+    fn the_start_project_reachable_or_offline() {
+        let top = std::env::temp_dir().join(format!("afl-atstart-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let p = top.join("vol/Trips/Egypt");
+        std::fs::create_dir_all(&p).unwrap();
+        std::fs::write(p.join(PROJECT_FILE), "{}").unwrap();
+        let here = RecentEntry { path: p.display().to_string(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&here, &[]), Some(p.clone()));
+        // Kept at a path that isn't there now, its share mounted elsewhere: found under the mount
+        let moved = RecentEntry { path: "/Volumes/Trips/Egypt".into(), share: Some("//me@nas.local/Trips".into()), rel: "Egypt".into(), at_start: true, ..Default::default() };
+        assert_eq!(recent_here(&moved, &[("//me@nas.local/Trips".into(), top.join("vol/Trips"))]), Some(p.clone()));
+        // Its share not mounted: offline (the start screen shows it, with Connect)
+        assert_eq!(recent_here(&moved, &[]), None);
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    /// The tag stores chosen on a computer are in its own file for the project, beside its other choices, which stay
+    #[test]
+    fn tag_stores_in_this_computers_file() {
+        let top = std::env::temp_dir().join(format!("afl-tagstores-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        std::fs::create_dir_all(&top).unwrap();
+        let (file, root) = (top.join("abc.json"), top.join("P"));
+        // None yet, none chosen: no file made
+        write_tag_stores(&file, &root, &[]).unwrap();
+        assert!(!file.exists());
+        write_tag_stores(&file, &root, &["finder".into(), "nonsense".into()]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert_eq!(doc["tag_stores"], json!(["finder"]));
+        assert_eq!(locations::tag_stores_in(&doc), vec!["finder".to_string()]);
+        // Its other choices stay
+        std::fs::write(&file, r#"{"project":"/p","locations":[{"name":"SSD","at":"","path":"/ssd"}],"never_rename":true}"#).unwrap();
+        write_tag_stores(&file, &root, &["finder".into()]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert_eq!(doc["locations"][0]["path"], json!("/ssd"));
+        assert_eq!(doc["never_rename"], json!(true));
+        write_tag_stores(&file, &root, &[]).unwrap();
+        let doc = locations::read_json(&file).unwrap();
+        assert!(doc.get("tag_stores").is_none() && doc["never_rename"] == json!(true));
+        // Nothing of this computer's left: the file goes
+        std::fs::write(&file, r#"{"project":"/p","locations":[],"tag_stores":["finder"]}"#).unwrap();
+        write_tag_stores(&file, &root, &[]).unwrap();
+        assert!(!file.exists());
+        let _ = std::fs::remove_dir_all(&top);
+    }
 
     #[test]
     fn the_window_waits_for_changes_being_written() {
@@ -2545,7 +2816,7 @@ mod tests {
         // The same share mounted elsewhere now (another name for the NAS too): the project found there
         std::fs::create_dir_all(b.join("Trips/P")).unwrap();
         std::fs::write(b.join("Trips/P").join(PROJECT_FILE), "{}").unwrap();
-        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new() };
+        let e = RecentEntry { path: a.join("Trips/P").display().to_string(), share: Some("//u@NAS._smb._tcp.local/ssd".into()), rel: "Trips/P".into(), hosts: Vec::new(), at_start: false };
         assert_eq!(recent_here(&e, &[("//other@nas/SSD".to_string(), b.clone())]), Some(b.join("Trips/P")));
         // Not mounted: offline
         assert_eq!(recent_here(&e, &[]), None);
@@ -2969,7 +3240,7 @@ mod audit {
     }
 
     fn check(rows: &[(String, String, String)]) {
-        let want = ["[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
+        let want = ["[\"reef\"]", "[\"reef\"]", "[]", "[\"reef\"]", "\"normal\"", "27.9", "true", "\"Day 2/A.MP4\"", "{}", "true",
                     "[\"_Moments/Reef/Shark.afplink.mp4\"]", "[\"_Moments/Sea/Shark.afplink.mp4\"]", "true", "true"];
         for ((w, _, a), x) in rows.iter().zip(want) { assert!(a.contains(x), "{w}: {a}, wanted {x}"); }
         let (_, _, del) = rows.last().unwrap();

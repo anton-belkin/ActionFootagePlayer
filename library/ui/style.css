@@ -80,6 +80,40 @@ a{color:var(--accent)}
 .chip.sys{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
 .chip.tag{background:var(--tag-bg)}
 button.chip{cursor:pointer}
+/* Culling and tags (culling.js): Accept / Reject / Undecided, the stars, the tags in use, the new tag's suggestions.
+   A button is on (all of the selection), some (part of it: dashed) or off */
+.stars{display:flex;align-items:center;gap:2px}
+.star{font-size:18px;line-height:24px;min-width:26px;min-height:26px;border:0;background:none;color:var(--muted);cursor:pointer;border-radius:5px;padding:0}
+.star.on{color:var(--accent)}
+.star.some{color:var(--accent-line)}
+.star:hover:not([disabled]),.nostar:hover:not([disabled]){background:var(--tag-bg)}
+.nostar{margin-left:6px;min-height:26px;padding:2px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg2);font-size:12px;cursor:pointer}
+.nostar.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.stars .sub{margin-left:6px}
+.picks{display:flex;align-items:center;gap:6px}
+.pickb{flex:1;min-height:30px;border:1px solid var(--line);border-radius:7px;background:var(--surface);color:var(--fg2);cursor:pointer;font-weight:600;white-space:nowrap;padding:2px 6px}
+.pickb .n{font-weight:400;opacity:.8}
+.pickb.acc.on{background:var(--ok-bg);border-color:var(--ok-line);color:var(--ok)}
+.pickb.rej.on{background:var(--wa-bg);border-color:var(--wa-line);color:var(--wa)}
+.pickb.und.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep)}
+.pickb.some,.tagb.some{border-style:dashed}
+.pickb.acc.some{border-color:var(--ok-line);color:var(--ok)}
+.pickb.rej.some{border-color:var(--wa-line);color:var(--wa)}
+.pickb.und.some{border-color:var(--accent-line);color:var(--accent-deep)}
+.pickb:hover:not([disabled]){border-color:var(--accent-line)}
+.pickb[disabled],.star[disabled],.nostar[disabled],.tagb[disabled]{opacity:.5;cursor:default}
+.tagb{cursor:pointer;font-size:12px;line-height:18px;padding:2px 8px;min-height:24px}
+.tagb.on{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent-deep);font-weight:600}
+.tagb.some{border-color:var(--accent-line);color:var(--accent-deep)}
+.tagb.sys.on{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
+.tagb:hover:not([disabled]){border-color:var(--accent)}
+.culltags{max-height:156px;overflow:auto}
+.tagwrap{position:relative}
+.tagsugg{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column}
+.tagsugg button{border:0;background:transparent;text-align:left;padding:5px 8px;border-radius:5px;min-height:26px;color:var(--fg);cursor:pointer}
+.tagsugg button:hover{background:var(--hover)}
+.tagsugg button.on{background:var(--accent-soft);color:var(--accent-deep)}
+.cullsw{white-space:nowrap}
 .loc{font-size:12px;color:var(--fg2);display:flex;align-items:center;gap:5px}
 .dot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:0 0 auto}
 .grid{padding:4px 14px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}
@@ -347,3 +381,10 @@ body.waiting,body.waiting *{cursor:progress}
 .placerow .cnt{margin-left:auto;color:var(--fg2);font-variant-numeric:tabular-nums}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}}
 :root[data-theme="dark"] .mapbox .leaflet-tile-pane{filter:invert(1) hue-rotate(180deg) brightness(.92) contrast(.9)}
+/* Open at start (atstart.js): the tick on a row of the projects opened before, the word on the one marked in the menu */
+.rstart{display:inline-flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--fg2);font-size:12px;white-space:nowrap;padding:4px 8px;border-radius:6px;min-height:28px;cursor:pointer;flex:0 0 auto}
+button.rstart:hover{background:var(--hover)}
+.rstart .box{width:15px;height:15px;border:1px solid var(--muted);border-radius:4px;display:inline-flex;align-items:center;justify-content:center;background:var(--surface)}
+.rstart.on{color:var(--fg)}
+.rstart.on .box{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
