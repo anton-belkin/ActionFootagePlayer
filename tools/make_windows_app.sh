@@ -53,11 +53,13 @@ if [ $arch = x86_64 ]; then
     MSVC_RUNTIME_URL="https://files.pythonhosted.org/packages/c2/6e/7ba5696e9d8c1bcb01352f06e441497c308e84f75aba598400646ab31ca7/msvc_runtime-14.51.36231-cp313-cp313-win_amd64.whl"
     MSVC_RUNTIME_SHA256="f3c3ac4f733a774f6ae209567e533bfde6f72dc1c10977733bfe09ce01e5b624"
     VULKAN_RID=win-x64
-    # ffmpeg for gyroflow-export: Gyan's essentials build (x265, NVENC, Quick Sync, AMF)
-    FFMPEG_URL="https://github.com/GyanD/codexffmpeg/releases/download/9.0.2/ffmpeg-9.0.2-essentials_build.7z"
-    FFMPEG_SHA256="4705843ccaaf54257c16ad90f3e952ece33c17df964ecf7bfdbb0f49c7171077"
-    # The HEVC encoders gyroflow-export tries, which the ffmpeg has to have
-    FFMPEG_ENCODERS="hevc_nvenc hevc_qsv hevc_amf libx265 prores_ks"
+    # ffmpeg for gyroflow-export: BtbN's build of the same release (x265, NVENC, Quick Sync, AMF, and libplacebo with
+    # Vulkan for the GPU path, docs/export-gpu-path.md: Gyan's essentials build has neither), from a month's last
+    # build, which BtbN keeps (checksums.sha256 in that release)
+    FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip"
+    FFMPEG_SHA256="693f3e224bc184b40524a62ca47526cfebaf2504414021b92fe75f677ad868b9"
+    # The HEVC encoders gyroflow-export tries, which the ffmpeg has to have (hevc_vulkan: the GPU path's, no copies)
+    FFMPEG_ENCODERS="hevc_nvenc hevc_qsv hevc_amf libx265 prores_ks hevc_vulkan"
 else
     # mpv: shinchiro's build of the same mpv, from its GitHub release (kept there for a few weeks only), as this
     # project's windows-deps release keeps it
@@ -78,7 +80,7 @@ else
     # don't have), from a month's last build, which BtbN keeps
     FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-winarm64-gpl-9.0.zip"
     FFMPEG_SHA256="8b3c394762f26716ccef03ac1b7ac76430759080e1255aa9bc01d74db590bcb5"
-    FFMPEG_ENCODERS="libx265 prores_ks"
+    FFMPEG_ENCODERS="libx265 prores_ks hevc_vulkan"
 fi
 
 if ! git diff --quiet HEAD -- vs-gyroflow mpv windows; then
@@ -241,6 +243,8 @@ if [ "$(uname -s)" != Linux ]; then
     for e in $FFMPEG_ENCODERS; do
         grep -q " $e " <<< "$encoders" || { echo "This ffmpeg has no $e" >&2; exit 1; }
     done
+    # The GPU path's filter (gyroflow-export --gpu)
+    "$gyroflow/ffmpeg.exe" -hide_banner -h filter=libplacebo | grep -q custom_shader_path || { echo "This ffmpeg has no libplacebo filter" >&2; exit 1; }
 fi
 
 echo "== The launcher and the setup"

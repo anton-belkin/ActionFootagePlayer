@@ -15,8 +15,9 @@ use std::collections::{ HashMap, HashSet };
 use std::path::{ Path, PathBuf };
 
 pub const DIR: &str = "_Renders";
-/// Raised when the renderer's pixels change for the same recipe: every render is then another one
-pub const VERSION: u64 = 3;
+/// Raised when the renderer's pixels change for the same recipe: every render is then another one. 4: gyroflow-export
+/// renders on the GPU path where it can, the player's own shaders (docs/export-gpu-path.md), not Gyroflow's engine
+pub const VERSION: u64 = 4;
 
 pub struct Profile {
     pub name: &'static str,

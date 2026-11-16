@@ -1,0 +1,453 @@
+diff --git a/libavfilter/Makefile b/libavfilter/Makefile
+index ce40cf3..db38639 100644
+--- a/libavfilter/Makefile
++++ b/libavfilter/Makefile
+@@ -374,6 +374,9 @@ OBJS-$(CONFIG_LATENCY_FILTER)                += f_latency.o
+ OBJS-$(CONFIG_LENSCORRECTION_FILTER)         += vf_lenscorrection.o
+ OBJS-$(CONFIG_LENSFUN_FILTER)                += vf_lensfun.o
+ OBJS-$(CONFIG_LIBPLACEBO_FILTER)             += vf_libplacebo.o vulkan.o vulkan_filter.o
++ifdef CONFIG_VIDEOTOOLBOX
++OBJS-$(CONFIG_LIBPLACEBO_FILTER)             += vf_libplacebo_vt.o
++endif
+ OBJS-$(CONFIG_LIBVMAF_FILTER)                += vf_libvmaf.o framesync.o
+ OBJS-$(CONFIG_LIBVMAF_CUDA_FILTER)           += vf_libvmaf.o framesync.o
+ OBJS-$(CONFIG_LIMITDIFF_FILTER)              += vf_limitdiff.o framesync.o
+diff --git a/libavfilter/vf_libplacebo.c b/libavfilter/vf_libplacebo.c
+index 4ee8c36..16f043a 100644
+--- a/libavfilter/vf_libplacebo.c
++++ b/libavfilter/vf_libplacebo.c
+@@ -39,6 +39,12 @@
+ #include <libplacebo/utils/frame_queue.h>
+ #include <libplacebo/vulkan.h>
+ 
++#if CONFIG_VIDEOTOOLBOX
++#include "libavutil/hwcontext.h"
++#include "libavutil/hwcontext_videotoolbox.h"
++#include "vf_libplacebo_vt.h"
++#endif
++
+ enum {
+     TONE_MAP_AUTO,
+     TONE_MAP_CLIP,
+@@ -148,6 +154,10 @@ typedef struct LibplaceboContext {
+     /* libplacebo */
+     pl_log log;
+     pl_vulkan vulkan;
++#if CONFIG_VIDEOTOOLBOX
++    FFPlVT *vt; /* VideoToolbox frames in and out without copies */
++    AVBufferRef *vt_device;
++#endif
+     pl_gpu gpu;
+     pl_tex tex[4];
+     struct pl_custom_lut *lut;
+@@ -704,8 +714,15 @@ static int init_vulkan(AVFilterContext *avctx, const AVVulkanDeviceContext *hwct
+         s->vulkan = pl_vulkan_import(s->log, &import_params);
+         s->have_hwdevice = 1;
+     } else {
++#if CONFIG_VIDEOTOOLBOX
++        static const char *const vt_exts[] = { "VK_EXT_metal_objects" };
++#endif
+         s->vulkan = pl_vulkan_create(s->log, pl_vulkan_params(
+             .queue_count = 0, /* enable all queues for parallelization */
++#if CONFIG_VIDEOTOOLBOX
++            .opt_extensions = vt_exts,
++            .num_opt_extensions = 1,
++#endif
+         ));
+     }
+ 
+@@ -718,6 +735,11 @@ static int init_vulkan(AVFilterContext *avctx, const AVVulkanDeviceContext *hwct
+ 
+     s->gpu = s->vulkan->gpu;
+     pl_gpu_set_cache(s->gpu, s->cache);
++#if CONFIG_VIDEOTOOLBOX
++    s->vt = ff_pl_vt_create(s->vulkan);
++    if (s->vt)
++        av_log(avctx, AV_LOG_VERBOSE, "VideoToolbox frames in and out without copies\n");
++#endif
+ 
+     /* Parse the user shaders, if requested */
+     if (s->shader_bin_len)
+@@ -766,6 +788,10 @@ static void libplacebo_uninit(AVFilterContext *avctx)
+     pl_renderer_destroy(&s->linear_rr);
+     pl_tex_destroy(s->gpu, &s->linear_tex);
+     pl_options_free(&s->opts);
++#if CONFIG_VIDEOTOOLBOX
++    ff_pl_vt_destroy(&s->vt);
++    av_buffer_unref(&s->vt_device);
++#endif
+     pl_vulkan_destroy(&s->vulkan);
+     pl_log_destroy(&s->log);
+     ff_vk_uninit(&s->vkctx);
+@@ -1006,6 +1032,11 @@ props_done:
+         out->duration = 1;
+ 
+     /* Map, render and unmap output frame */
++#if CONFIG_VIDEOTOOLBOX
++    if (out->format == AV_PIX_FMT_VIDEOTOOLBOX) {
++        ok = ff_pl_vt_map(s->vt, &target, out, 1);
++    } else
++#endif
+     if (outdesc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+         ok = pl_map_avframe_ex(s->gpu, &target, pl_avframe_params(
+             .frame    = out,
+@@ -1074,6 +1105,13 @@ props_done:
+         pl_render_image(s->linear_rr, NULL, &target, &opts->params);
+     }
+ 
++#if CONFIG_VIDEOTOOLBOX
++    if (out->format == AV_PIX_FMT_VIDEOTOOLBOX) {
++        ff_pl_vt_unmap(s->vt, &target);
++        /* The encoder takes the pixel buffer as it is: its colors as the frame's */
++        av_vt_pixbuf_set_attachments(ctx, (CVPixelBufferRef) out->data[3], out);
++    } else
++#endif
+     if (outdesc->flags & AV_PIX_FMT_FLAG_HWACCEL) {
+         pl_unmap_avframe(s->gpu, &target);
+     } else if (!pl_download_avframe(s->gpu, &target, out)) {
+@@ -1093,7 +1131,28 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex,
+ {
+     AVFrame *avframe = src->frame_data;
+     LibplaceboContext *s = avframe->opaque;
+-    bool ok = pl_map_avframe_ex(gpu, out, pl_avframe_params(
++    bool ok;
++#if CONFIG_VIDEOTOOLBOX
++    if (avframe->format == AV_PIX_FMT_VIDEOTOOLBOX) {
++        /* The frame stays until unmap_frame: its pixel buffer is the texture */
++        /* As pl_map_avframe keeps it, for pl_get_mapped_avframe */
++        struct pl_avframe_priv *priv = av_mallocz(sizeof(*priv));
++        ok = priv && ff_pl_vt_map(s->vt, out, avframe, 0);
++        if (priv)
++            priv->avframe = avframe;
++        out->user_data = priv;
++        out->lut = s->lut;
++        out->lut_type = s->lut_type;
++        out->rotation += s->rotation;
++        if (!ok) {
++            av_frame_free(&avframe);
++            av_freep(&priv);
++            out->user_data = NULL;
++        }
++        return ok;
++    }
++#endif
++    ok = pl_map_avframe_ex(gpu, out, pl_avframe_params(
+         .frame      = avframe,
+         .tex        = tex,
+         .map_dovi   = s->apply_dovi,
+@@ -1112,6 +1171,16 @@ static bool map_frame(pl_gpu gpu, pl_tex *tex,
+ static void unmap_frame(pl_gpu gpu, struct pl_frame *frame,
+                         const struct pl_source_frame *src)
+ {
++#if CONFIG_VIDEOTOOLBOX
++    struct pl_avframe_priv *priv = frame->user_data;
++    if (priv && priv->avframe && priv->avframe->format == AV_PIX_FMT_VIDEOTOOLBOX) {
++        LibplaceboContext *s = priv->avframe->opaque;
++        ff_pl_vt_unmap(s->vt, frame);
++        av_frame_free(&priv->avframe);
++        av_freep(&frame->user_data);
++        return;
++    }
++#endif
+     pl_unmap_avframe(gpu, frame);
+ }
+ 
+@@ -1287,6 +1356,18 @@ static int libplacebo_query_format(const AVFilterContext *ctx,
+     const AVPixFmtDescriptor *desc = NULL;
+     AVFilterFormats *infmts = NULL, *outfmts = NULL;
+ 
++#if CONFIG_VIDEOTOOLBOX
++    /* VideoToolbox frames, mapped without copies: first, to be preferred. Out
++     * in the biplanar format asked for (format=p010le, nv12, p210le...) */
++    if (s->vt) {
++        const AVPixFmtDescriptor *od = av_pix_fmt_desc_get(s->out_format);
++        RET(ff_add_format(&infmts, AV_PIX_FMT_VIDEOTOOLBOX));
++        if (od && av_pix_fmt_count_planes(s->out_format) == 2 && od->nb_components == 3 &&
++            !(od->flags & (AV_PIX_FMT_FLAG_HWACCEL | AV_PIX_FMT_FLAG_BE)))
++            RET(ff_add_format(&outfmts, AV_PIX_FMT_VIDEOTOOLBOX));
++    }
++#endif
++
+     /* List AV_PIX_FMT_VULKAN first to prefer it when possible */
+     if (s->have_hwdevice) {
+         RET(ff_add_format(&infmts, AV_PIX_FMT_VULKAN));
+@@ -1497,6 +1578,29 @@ static int libplacebo_config_output(AVFilterLink *outlink)
+     s->var_values[VAR_OHSUB]    = 1 << out_desc->log2_chroma_w;
+     s->var_values[VAR_OVSUB]    = 1 << out_desc->log2_chroma_h;
+ 
++#if CONFIG_VIDEOTOOLBOX
++    if (outlink->format == AV_PIX_FMT_VIDEOTOOLBOX) {
++        AVBufferRef *frames;
++        AVHWFramesContext *vtfc;
++        if (!s->vt_device)
++            RET(av_hwdevice_ctx_create(&s->vt_device, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, NULL, NULL, 0));
++        frames = av_hwframe_ctx_alloc(s->vt_device);
++        if (!frames)
++            return AVERROR(ENOMEM);
++        vtfc = (AVHWFramesContext *) frames->data;
++        vtfc->format    = AV_PIX_FMT_VIDEOTOOLBOX;
++        vtfc->sw_format = s->out_format;
++        vtfc->width     = outlink->w;
++        vtfc->height    = outlink->h;
++        if ((err = av_hwframe_ctx_init(frames)) < 0) {
++            av_buffer_unref(&frames);
++            return err;
++        }
++        av_buffer_unref(&l->hw_frames_ctx);
++        l->hw_frames_ctx = frames;
++        return 0;
++    }
++#endif
+     if (outlink->format != AV_PIX_FMT_VULKAN)
+         return 0;
+ 
+diff --git a/libavfilter/vf_libplacebo_vt.h b/libavfilter/vf_libplacebo_vt.h
+new file mode 100644
+index 0000000..37b5a97
+--- /dev/null
++++ b/libavfilter/vf_libplacebo_vt.h
+@@ -0,0 +1,40 @@
++/*
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#ifndef AVFILTER_VF_LIBPLACEBO_VT_H
++#define AVFILTER_VF_LIBPLACEBO_VT_H
++
++#include <libplacebo/vulkan.h>
++#include <libplacebo/renderer.h>
++#include <libplacebo/utils/libav.h>
++
++/* VideoToolbox frames as libplacebo textures, through MoltenVK's VK_EXT_metal_objects */
++typedef struct FFPlVT FFPlVT;
++
++/* NULL where the Vulkan device can't import Metal textures */
++FFPlVT *ff_pl_vt_create(pl_vulkan vk);
++void ff_pl_vt_destroy(FFPlVT **vt);
++
++/* A biplanar IOSurface-backed frame (NV12, P010, P210...) as a pl_frame: its planes, its colors from the frame.
++ * `target`: rendered into. Returns 0 on failure */
++int ff_pl_vt_map(FFPlVT *vt, struct pl_frame *out, const AVFrame *frame, int target);
++
++/* Waits until the GPU is done with the frame's textures */
++void ff_pl_vt_unmap(FFPlVT *vt, struct pl_frame *frame);
++
++#endif /* AVFILTER_VF_LIBPLACEBO_VT_H */
+diff --git a/libavfilter/vf_libplacebo_vt.m b/libavfilter/vf_libplacebo_vt.m
+new file mode 100644
+index 0000000..187a0c1
+--- /dev/null
++++ b/libavfilter/vf_libplacebo_vt.m
+@@ -0,0 +1,198 @@
++/*
++ * VideoToolbox frames in and out of the libplacebo filter without copies:
++ * each plane of a frame's IOSurface-backed CVPixelBuffer is an MTLTexture on
++ * that IOSurface, imported into Vulkan (MoltenVK, VK_EXT_metal_objects) and
++ * wrapped for libplacebo. Imports are kept per IOSurface: decoder and encoder
++ * pools recycle their buffers.
++ *
++ * This file is part of FFmpeg.
++ *
++ * FFmpeg is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * FFmpeg is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with FFmpeg; if not, write to the Free Software
++ * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
++ */
++
++#import <Metal/Metal.h>
++#import <CoreVideo/CoreVideo.h>
++#import <IOSurface/IOSurface.h>
++
++#define VK_USE_PLATFORM_METAL_EXT
++#include <vulkan/vulkan.h>
++
++#include "libavutil/frame.h"
++#include "libavutil/hwcontext.h"
++#include "vf_libplacebo_vt.h"
++
++#define MAX_IMPORTS 96
++
++typedef struct VTImport {
++    IOSurfaceID id;
++    int target;
++    int num_planes;
++    VkImage image[2];
++    pl_tex tex[2];
++    id<MTLTexture> mtl[2];
++    uint64_t used;
++} VTImport;
++
++struct FFPlVT {
++    pl_vulkan vk;
++    id<MTLDevice> device;
++    VTImport imports[MAX_IMPORTS];
++    int num_imports;
++    uint64_t clock;
++    PFN_vkCreateImage create_image;
++    PFN_vkDestroyImage destroy_image;
++};
++
++static void import_free(FFPlVT *vt, VTImport *im)
++{
++    for (int p = 0; p < im->num_planes; p++) {
++        pl_tex_destroy(vt->vk->gpu, &im->tex[p]);
++        if (im->image[p])
++            vt->destroy_image(vt->vk->device, im->image[p], NULL);
++        [im->mtl[p] release];
++    }
++    memset(im, 0, sizeof(*im));
++}
++
++FFPlVT *ff_pl_vt_create(pl_vulkan vk)
++{
++    int have = 0;
++    for (int i = 0; i < vk->num_extensions; i++)
++        have |= !strcmp(vk->extensions[i], VK_EXT_METAL_OBJECTS_EXTENSION_NAME);
++    if (!have)
++        return NULL;
++    PFN_vkExportMetalObjectsEXT export = (PFN_vkExportMetalObjectsEXT)
++        vk->get_proc_addr(vk->instance, "vkExportMetalObjectsEXT");
++    if (!export)
++        return NULL;
++    // The MTLDevice MoltenVK renders with: the textures are made on it
++    VkExportMetalDeviceInfoEXT dev = { .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_DEVICE_INFO_EXT };
++    VkExportMetalObjectsInfoEXT objs = { .sType = VK_STRUCTURE_TYPE_EXPORT_METAL_OBJECTS_INFO_EXT, .pNext = &dev };
++    export(vk->device, &objs);
++    if (!dev.mtlDevice)
++        return NULL;
++    FFPlVT *vt = calloc(1, sizeof(*vt));
++    if (!vt)
++        return NULL;
++    vt->vk = vk;
++    vt->device = [dev.mtlDevice retain];
++    vt->create_image = (PFN_vkCreateImage) vk->get_proc_addr(vk->instance, "vkCreateImage");
++    vt->destroy_image = (PFN_vkDestroyImage) vk->get_proc_addr(vk->instance, "vkDestroyImage");
++    return vt;
++}
++
++void ff_pl_vt_destroy(FFPlVT **pvt)
++{
++    FFPlVT *vt = *pvt;
++    if (!vt)
++        return;
++    pl_gpu_finish(vt->vk->gpu);
++    for (int i = 0; i < vt->num_imports; i++)
++        import_free(vt, &vt->imports[i]);
++    [vt->device release];
++    free(vt);
++    *pvt = NULL;
++}
++
++static VTImport *import(FFPlVT *vt, CVPixelBufferRef pb, int target)
++{
++    IOSurfaceRef surf = CVPixelBufferGetIOSurface(pb);
++    if (!surf || !CVPixelBufferIsPlanar(pb) || CVPixelBufferGetPlaneCount(pb) != 2)
++        return NULL;
++    IOSurfaceID sid = IOSurfaceGetID(surf);
++    for (int i = 0; i < vt->num_imports; i++) {
++        if (vt->imports[i].id == sid && vt->imports[i].target == target) {
++            vt->imports[i].used = ++vt->clock;
++            return &vt->imports[i];
++        }
++    }
++    VTImport *im;
++    if (vt->num_imports < MAX_IMPORTS) {
++        im = &vt->imports[vt->num_imports++];
++    } else {
++        // The least recently used: every frame is done on the GPU before its buffer goes back (ff_pl_vt_unmap)
++        im = &vt->imports[0];
++        for (int i = 1; i < MAX_IMPORTS; i++)
++            if (vt->imports[i].used < im->used)
++                im = &vt->imports[i];
++        import_free(vt, im);
++    }
++    im->id = sid;
++    im->target = target;
++    im->used = ++vt->clock;
++    im->num_planes = 2;
++
++    // 8 or 16 bits a sample (NV12, NV16, P010, P210, P016...): the luma plane's bytes per pixel tell
++    int wide = CVPixelBufferGetBytesPerRowOfPlane(pb, 0) >= 2 * CVPixelBufferGetWidthOfPlane(pb, 0);
++    for (int p = 0; p < 2; p++) {
++        int w = (int) CVPixelBufferGetWidthOfPlane(pb, p), h = (int) CVPixelBufferGetHeightOfPlane(pb, p);
++        MTLPixelFormat mf = p ? (wide ? MTLPixelFormatRG16Unorm : MTLPixelFormatRG8Unorm)
++                              : (wide ? MTLPixelFormatR16Unorm : MTLPixelFormatR8Unorm);
++        VkFormat vf = p ? (wide ? VK_FORMAT_R16G16_UNORM : VK_FORMAT_R8G8_UNORM)
++                        : (wide ? VK_FORMAT_R16_UNORM : VK_FORMAT_R8_UNORM);
++        MTLTextureDescriptor *d = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:mf width:w height:h mipmapped:NO];
++        d.usage = MTLTextureUsageShaderRead | (target ? (MTLTextureUsageShaderWrite | MTLTextureUsageRenderTarget) : 0);
++        d.storageMode = MTLStorageModeShared;
++        im->mtl[p] = [vt->device newTextureWithDescriptor:d iosurface:surf plane:p];
++        if (!im->mtl[p])
++            goto fail;
++        VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
++        if (target)
++            usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
++        VkImportMetalTextureInfoEXT imp = { .sType = VK_STRUCTURE_TYPE_IMPORT_METAL_TEXTURE_INFO_EXT,
++                                            .plane = VK_IMAGE_ASPECT_PLANE_0_BIT, .mtlTexture = im->mtl[p] };
++        VkImageCreateInfo ci = { .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .pNext = &imp, .imageType = VK_IMAGE_TYPE_2D,
++                                 .format = vf, .extent = { w, h, 1 }, .mipLevels = 1, .arrayLayers = 1,
++                                 .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
++                                 .sharingMode = VK_SHARING_MODE_EXCLUSIVE, .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED };
++        if (vt->create_image(vt->vk->device, &ci, NULL, &im->image[p]) != VK_SUCCESS)
++            goto fail;
++        im->tex[p] = pl_vulkan_wrap(vt->vk->gpu, pl_vulkan_wrap_params(.image = im->image[p], .width = w, .height = h,
++                                                                       .format = vf, .usage = usage));
++        if (!im->tex[p])
++            goto fail;
++        // libplacebo's from now on; MoltenVK moves no pixels on a layout change
++        pl_vulkan_release_ex(vt->vk->gpu, pl_vulkan_release_params(.tex = im->tex[p], .layout = VK_IMAGE_LAYOUT_GENERAL,
++                                                                   .qf = VK_QUEUE_FAMILY_IGNORED));
++    }
++    return im;
++
++fail:
++    import_free(vt, im);
++    return NULL;
++}
++
++int ff_pl_vt_map(FFPlVT *vt, struct pl_frame *out, const AVFrame *frame, int target)
++{
++    CVPixelBufferRef pb = (CVPixelBufferRef) frame->data[3];
++    VTImport *im = pb ? import(vt, pb, target) : NULL;
++    if (!im)
++        return 0;
++    pl_frame_from_avframe(out, frame);
++    if (out->num_planes != 2)
++        return 0;
++    for (int p = 0; p < 2; p++)
++        out->planes[p].texture = im->tex[p];
++    return 1;
++}
++
++void ff_pl_vt_unmap(FFPlVT *vt, struct pl_frame *frame)
++{
++    // Done on the GPU before the buffer goes back to its pool, or on to the encoder
++    pl_gpu_flush(vt->vk->gpu);
++    for (int p = 0; p < frame->num_planes; p++)
++        while (frame->planes[p].texture && pl_tex_poll(vt->vk->gpu, frame->planes[p].texture, UINT64_MAX))
++            ;
++}

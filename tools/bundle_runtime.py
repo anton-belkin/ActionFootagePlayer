@@ -28,6 +28,10 @@ import sys
 
 app, prefix = sys.argv[1], os.path.realpath(sys.argv[2])
 mpv_bin = os.environ.get("MPV_BIN") and os.path.realpath(os.environ["MPV_BIN"])
+# FFMPEG_BIN: tools/export-gpu/build_ffmpeg_libplacebo.sh's ffmpeg (libplacebo, Vulkan, VideoToolbox frames in and out
+# of the libplacebo filter: gyroflow-export's GPU path, docs/export-gpu-path.md) in place of Homebrew's; its ffprobe
+# beside it
+ffmpeg_bin = os.environ.get("FFMPEG_BIN") and os.path.realpath(os.environ["FFMPEG_BIN"])
 contents = os.path.join(app, "Contents")
 helpers = os.path.join(contents, "Helpers")
 frameworks = os.path.join(contents, "Frameworks")
@@ -173,6 +177,8 @@ origin = {}
 for exe in EXECUTABLES:
     dst = os.path.join(helpers, exe)
     src = mpv_bin if exe == "mpv" and mpv_bin else os.path.realpath(os.path.join(prefix, "bin", exe))
+    if ffmpeg_bin and exe in ("ffmpeg", "ffprobe"):
+        src = os.path.join(os.path.dirname(ffmpeg_bin), exe)
     shutil.copy2(src, dst)
     origin[dst] = src
 molten = os.path.join(prefix, "opt/molten-vk/lib/libMoltenVK.dylib")
@@ -253,7 +259,7 @@ for path in origin:
 # Their licenses and where their sources are (the GPL's and LGPL's terms for passing their binaries on): for each
 # Homebrew formula something here came from, its license files, and its formula, which has the source's URL, its
 # checksum, the patches and the build's options
-ffmpeg_conf = run(os.path.join(prefix, "bin", "ffmpeg"), "-hide_banner", "-buildconf")
+ffmpeg_conf = run(ffmpeg_bin or os.path.join(prefix, "bin", "ffmpeg"), "-hide_banner", "-buildconf")
 if "--enable-nonfree" in ffmpeg_conf:
     raise SystemExit("Homebrew's ffmpeg is built with --enable-nonfree: it can't be passed on")
 kegs = {}
@@ -304,9 +310,15 @@ if mpv_bin:
                    "in the ActionFootagePlayer project)\n")
     own.append("mpv's build: tools/build_mpv.sh and tools/mpv.lock in the ActionFootagePlayer project, at this "
                "app's version\n")
+if ffmpeg_bin:
+    own.append("ffmpeg n9.0.2 (GPL-3.0-or-later as configured), with libplacebo v7.387.0 (LGPL-2.1-or-later) linked "
+               "statically\n  source:  https://git.ffmpeg.org/ffmpeg.git tag n9.0.2, "
+               "https://code.videolan.org/videolan/libplacebo.git tag v7.387.0\n  patches: tools/export-gpu/ffmpeg-patches/ "
+               "in the ActionFootagePlayer project\n  build:   tools/export-gpu/build_ffmpeg_libplacebo.sh, at this app's "
+               "version\n")
 with open(os.path.join(third, "SOURCES.txt"), "w") as f:
     if own:
-        f.write("ActionFootagePlayer carries mpv, built by the ActionFootagePlayer project from the sources below,\n"
+        f.write("ActionFootagePlayer carries mpv (and ffmpeg, when listed), built by the ActionFootagePlayer project from the sources below,\n"
                 "with libplacebo linked into it, each under its own license (its folder here has the license files). On\n"
                 "request, these sources are also available from the ActionFootagePlayer project.\n\n"
                 + "\n".join(own) + "\n")
