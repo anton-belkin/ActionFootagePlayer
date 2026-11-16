@@ -69,9 +69,8 @@ Gyroflow's per-pixel engine: what the player shows, not what the pipes rendered.
 
 - the preview, photos and their Live Photo / Motion Photo motion;
 - `--youtube`, `--crop`, `--dv-live-l1` (each frame's L1 is measured by the pipes' LUT);
-- clips the GPU warp can't render: lens correction below 100 % (both GoPro test projects), Sony / mesh lenses,
-  IBIS/OIS, equirect;
-- a turned clip without stabilization;
+- clips the GPU warp can't render: Sony / mesh lenses, IBIS/OIS, equirect, a horizontal rolling shutter (what each
+  would take: "What the GPU warp still can't render" below);
 - 360 and reframe exports;
 - an ffmpeg without the libplacebo filter, or a Mac ffmpeg without the patch (Homebrew's).
 
@@ -86,6 +85,181 @@ the same frame count, each frame closest to its own index, PSNR above 33 dB. It 
   `bundle_runtime.py` with `FFMPEG_BIN`.
 - **Windows:** the BtbN build above.
 - **Share's recipe:** version 4 (`renders::VERSION`), since the GPU path's pixels differ from the pipes'.
+
+## The rest, 2026-11-17: lens correction below 100 %, HDR in → HDR out, a photo's date
+
+### A. Lens correction below 100 % on the GPU path
+
+**Why it was refused.** `gpu_table::unsupported` said "lens correction N %" for any clip below 100 %, and the player
+then played it through VapourSynth and the export went through the pipes. The warp (`shaders/gyroflow/warp.glsl`) only
+knew the fully corrected case: an output pixel's ray was the output projection's alone (`unproject`). Gyroflow's
+`lens_correction_amount` `a` is not a blend of two pictures. Each ray of angle θ lands where `(1-a)·R(θ) + a·P(θ)`
+says: `R` is where the source lens images it (with the water's refraction), `P` is where the output projection wants
+it. Finding the ray for an output pixel means inverting that per pixel (the fork's `Stabilization::output_ray`,
+`gpu/wgpu_undistort.wgsl`):
+
+- a regula falsi (Illinois, 6 steps) bracketed by the two maps' own answers;
+- the lens's field limit and Snell's window as the bracket's end;
+- at `a = 0`, the source lens's own ray, tangential terms and all;
+- with a digital lens, its warp in the un-zoomed frame;
+- the tangential offset fading out with `1-a`.
+
+The FOV / zoom is not the issue: it comes from gyroflow-core's zooming per frame and was already in the table (texel 7).
+
+**What was done.** `warp.glsl`'s `blend_ray` ports it. It runs only where `LENS_BLEND` is set (`gpu_table::lens_blend`:
+the correction below 100 % or keyframed), so other clips' shaders are unchanged. The check is gone from `unsupported`.
+Everything the GPU path does applies to these clips too:
+
+- the fringes: red's and blue's index (`stretch.zw`) is now in the table at any correction. The blend is solved with
+  green's index, each color refracted with its own after. The pipes' chromatic.glsl couldn't do this below 100 %;
+- the look, the edge fill, the temporal denoise and the translation run after or around the warp unchanged.
+
+**Measured.** `gpu_table::tests::the_shader_maps_pixels_as_gyroflow_does`, the shader's source coordinate against
+gyroflow-core's `undistort_coord` at every pixel of a 1920×1080 output (worst pixel):
+
+| Clip (project) | lens, correction | exact | grid 8 bilinear (the player's) | grid 8 + a camera |
+|---|---|---|---|---|
+| Egypt HERO12 `GX010845` | gopro, 0 % | 0.029 px | 0.028 px | 0.043 px |
+| 2019 dive HERO7 `GX010304` (optical flow) | opencv_fisheye, 0 % | 0.012 px | 0.004 px | 0.080 px |
+| D-Log M `DJI_…0069_D` (its own motion data) | opencv_fisheye, 100 % | 0.007 px | 0.015 px | 0.043 px |
+
+The 32-px grid (not the player's) reaches 0.15 px on the Egypt clip: the uncorrected fisheye bends more between grid
+points. Its bound is 0.25 px there. Zoomed out by the test camera (1.25), less than half of that output is picture.
+
+`tests/export_gpu.rs`, 2 s (0.5-2.5 s) through the GPU path and through the pipes (Gyroflow's engine), Y at quarter
+size:
+
+| Clip | GPU path | pipes | Y, GPU vs pipes (frames 0 / middle / last) |
+|---|---|---|---|
+| Egypt HERO12, 0 % | 3.6 s | 2.5 s | 48.2 / 45.8 / 45.7 dB |
+| 2019 dive, 0 % | 3.0 s | 2.4 s | 49.9 / 46.8 / 49.6 dB |
+| D-Log M 4K60, 100 % | 3.8 s | 4.9 s | 44.2 / 43.8 / 43.5 dB |
+
+Times are whole runs, engine load included: for 2 s of 4K30 the load dominates. The pipes write one frame more than
+`--from/--to` ask for (61 against 60, 121 against 120). That is the pipes' own off-by-one, left as it is. The test
+compares the frames both have.
+
+**Clips with nothing to warp.** A clip with no motion data and no project but a look (log → HLG, HLG → SDR) already
+went through the GPU path. A turn or a cut (`--rotation`, `--aspect`, the file's display matrix) now does too, instead
+of the pipes:
+
+- on a Mac, VideoToolbox's `transpose_vt` before the filter, on the decoder's frames;
+- elsewhere, `transpose_vulkan`; untested;
+- the cut as the libplacebo filter's `crop_*`;
+- with no look, the filter runs with no shader (`gpu_turn`).
+
+The temporal denoise needs the motion table: it predicts each pixel's motion between frames from the camera's
+rotation. With no motion data the player has no denoise either: Ctrl+p denoises only on the GPU warp path. So the
+export has none, as before; nothing to fix there.
+
+**What the GPU warp still can't render, and what it would take** (not built):
+
+- **Sony and the generic polynomial (mesh lenses):** the per-frame lens mesh (`mesh_data`) would go into the table,
+  as a block per frame whose size varies with the mesh, with the fork's `sony.glsl` mesh sampling ported. That is the
+  largest of these: the table's layout and the frame block both change.
+- **IBIS / OIS / lens breathing:** the frame transform's per-row shift (`m[9..14]`) and breathing scale (`m[14]`)
+  would become texels beside the row quaternions, applied in `rotate_and_distort` as gyroflow-core's
+  `shift_per_point` does. Medium: one more texel per knot and a few lines of shader, but no clip here to check it on.
+- **Equirect output** from a flat lens: the shader already has the equirect branch (the 360 sphere uses it), and the
+  fork forces the correction to 100 % there. Probably only the check and a test: small.
+- **Horizontal rolling shutter:** the row from `uv.x` instead of `uv.y` in `source_coord`. Small.
+
+### B. HDR in → HDR out; SDR exactly SDR
+
+**A bug found and fixed: a full-range clip lost its range on the GPU path.** Anton's HERO12 clips (Egypt) and his
+older GoPros (the 2019 dive) are **full range** (`pc`; 10-bit and 8-bit `yuvj420p`). The GPU path wrote them tagged
+limited, with the full-range pixels inside: decoded, the picture's contrast changed. On the dive clip that was 28 dB
+against the pipes; after the fix it is 50 dB. Two causes in our ffmpeg, both fixed by
+`tools/export-gpu/ffmpeg-patches/0002-VideoToolbox-full-range-output.patch`:
+
+- the libplacebo filter's VideoToolbox frame pool never got the output's range, so its buffers were always the
+  video-range format (`x420`). It now gets the output's range, so a full-range output is `xf20`;
+- `hevc_videotoolbox` given VideoToolbox frames told the session nothing about them, and VT then writes "video range"
+  in the stream's VUI whatever the buffers are. It now describes them (their sw format and range) when they're full
+  range.
+
+The patched ffmpeg must be rebuilt with 0002: `build_ffmpeg_libplacebo.sh` applies every patch in the folder.
+
+**SDR in → SDR out, exactly.** `tests/export_gpu.rs` `an_sdr_clip_keeps_its_colors` (`AFP_GPU_SDR_CLIPS`) exports 1 s
+turned 180° with no warp through the GPU path. It compares each plane at 10 bits with the source turned by ffmpeg, and
+with the same encoder at the same bit rate on the source alone:
+
+| Clip | tags in → out | mean moved (of 1023) | Y PSNR, export / encoder alone |
+|---|---|---|---|
+| Lumix `P1060688` 640×480, 8-bit, limited, BT.601 matrix | `tv, bt470bg, bt709, smpte170m`, unchanged | ≤ 0.67 (Cr) | 38.3-43.6 / 38.8-44.4 dB |
+| Egypt HERO12 4K, 10-bit, **full** | `pc, bt709, bt709, bt709`, unchanged | 0.00 | 47.3-52.2 / the same |
+
+There is no LUT, no tone curve and no range squeeze. On the Egypt clip the only difference is the encoder. The Lumix
+loses at most 1.5 dB more than the encoder alone: an 8-bit source written at 10 bits.
+
+**HDR in → HDR out.** Not log, HLG or PQ: the export is "colors as recorded". It keeps the source's transfer,
+primaries, matrix and range, at 10 bits, with no LUT (`gyroflow-export`'s color pick). **Not verified on a real HLG or
+PQ clip.** None was found among 400 videos (DJI_Inbox, the Egypt folder, USA GoPro, the Photos library backup on the
+NAS) or in ~/Movies. Anton's GoPros record NATURAL / GOPRO color; no HERO13 HLG clip is there. The mastering display /
+MaxCLL side data is also unchecked: whether libplacebo and `hevc_videotoolbox` carry them through. Both wait for an HLG
+clip (a GoPro HERO13 in HLG, or an iPhone video).
+
+**An SDR clip's "HDR" is its SDR render.** For a clip that isn't log and isn't HLG or PQ, both profiles render the
+same pixels: "colors as recorded" (`--nbcu` changes nothing for it). Now:
+
+- **one hash, one file:** `renders::resolve` maps the HDR profile to SDR for such a clip. `find` hands the SDR render
+  over for an HDR request, and the page shows both profiles current;
+- **the sheet says so:** "this clip is SDR: its SDR render";
+- **how the Library tells:** `afp_catalog::range::of` reads it from the MP4, the way gyroflow-export decides (the
+  Library doesn't link vs-gyroflow): DJI's ColorMode in the metadata track, GoPro's Protune color and firmware, the
+  `colr` box's transfer. The clip's own `source.curve` overrides it. A clip that can't be read keeps its HDR;
+- **checked:** on the four real clips it reads as the exporter does (D-Log M → log; HERO12, HERO7 and Lumix → SDR).
+  Tests: `range::tests`, `renders::tests::an_sdr_clip_s_hdr_is_its_sdr_render`;
+- **the recipe stays the same:** the SDR render's recipe is the one the player renders.
+
+**HDR in, SDR asked for:** NBCU's HLG → SDR or PQ → SDR LUT (`luts/`, `NBCU_HLG` / `NBCU_PQ`), as before.
+
+### C. A photo's date is the moment in the clip
+
+What each way of making a photo wrote, and what it writes now (`tests/photo_dates.rs`, `AFP_PHOTO_CLIPS`, read back
+with exiftool):
+
+| Path | Before | Now |
+|---|---|---|
+| `--photo` HEIC (afp-photo) | Exif DateTimeOriginal = clip start + t, whole seconds, no zone, the start in **this Mac's** zone (an older GoPro's local mvhd time shifted once more); no OffsetTime, no SubSec | + `SubSecTimeOriginal`, `OffsetTimeOriginal`/`Digitized`/`OffsetTime` where the zone is known |
+| `--photo` JPEG / Motion Photo | same, from `photo::exif` | the same tags, plus IFD0 DateTime |
+| Live Photo's MOV | no creation date (AVAssetWriter's own time) | `com.apple.quicktime.creationdate` = the moment with its zone |
+| Motion Photo's MP4 (in the JPEG) | `creation_time` = the clip's start (copied) | + `com.apple.quicktime.creationdate` = the moment (not read back by the test: it's inside the JPEG) |
+| Files' own dates | when the photo was made | modified and created = the moment |
+
+What the moment is: `moment_dates`, the clip's start as the Library dates it (`geotag::read`), plus the frame's time.
+
+- **The clock:**
+  - the camera's GPS time;
+  - else its clock, read per camera: DJI and HERO12+ write UTC.
+- **The zone:**
+  - GoPro's TZON;
+  - else a DJI name's (its local time against the UTC it writes);
+  - else an older GoPro's own local mvhd time against its GPS UTC;
+  - else this Mac's, assumed and not written as OffsetTime;
+  - an older GoPro with no GPS keeps its local time as it is.
+- `--dates` still wins where given.
+
+**Checked, t = 2.5 s:**
+
+| Clip | Photo's time | Basis |
+|---|---|---|
+| D-Log M | 15:29:40.503 +02:00 | UTC + the name's zone |
+| Egypt HERO12 | 11:13:22.5 +02:00 | TZON |
+| 2019 dive HERO7 | 18:25:50.372 +09:00 | GPS + its local clock: Raja Ampat |
+
+Each in all three forms: HEIC, Live Photo HEIC + MOV, Motion Photo JPEG.
+
+**Already right, unchanged:**
+
+- the player's photo link (`afp-meta --link`) and the Library's `photo_add` keep `created` = the clip's start and `t`
+  beside it. That `created` names the clip (`checks.rs` matches links to their original by it), so it's the clip's,
+  not the photo's;
+- Share's photo render is `gyroflow-export --photo` (the row above);
+- the Live Photo's still frame is at the photo's frame (`--still-time`).
+
+**Not done:** Share's copy out of `_Renders` (`std::fs::copy`) keeps the file's modified date on macOS, which is the
+moment now. The created date isn't checked.
 
 ## Verdict
 

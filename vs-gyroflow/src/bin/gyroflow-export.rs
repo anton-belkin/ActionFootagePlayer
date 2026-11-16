@@ -1260,6 +1260,8 @@ struct Part {
     sdr: Option<&'static str>,
     // Where its photo was taken (ISO 6709), as its QuickTime location
     location: Option<String>,
+    // When its photo was taken, as its QuickTime creation date
+    created: Option<String>,
 }
 
 // How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
@@ -2005,6 +2007,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let mut keys = Vec::new();
             if let Some(l) = link { keys.push((vs_gyroflow::mp4meta::LINK_KEY, l.as_str())); }
             if let Some(l) = part.and_then(|p| p.location.as_deref()) { keys.push((vs_gyroflow::mp4meta::LOCATION_KEY, l)); }
+            if let Some(c) = part.and_then(|p| p.created.as_deref()) { keys.push((vs_gyroflow::mp4meta::CREATION_DATE_KEY, c)); }
             if keys.is_empty() { Ok(read) } else { vs_gyroflow::mp4meta::write_keys(&tmp_path, &keys).map(|_| read) }
         }
     });
@@ -2519,6 +2522,37 @@ impl Post {
 // the camera), cleaned up from its neighbours as the player's clean still frame is (still.rs), in the SDR look with
 // the HDR one as a gain map (photo.rs): HEIC through afp-photo on macOS (macos/photo.swift), else an Ultra HDR JPEG
 
+/// When the frame at `t` s into the clip was taken, and whether its zone is known: the clip's start as the Library
+/// dates it (geotag::read: the camera's GPS time, else its clock read per camera, GoPro's TZON zone), plus `t`. The zone:
+/// the camera's own (TZON), else a DJI name's (its local time against the UTC it writes), else this computer's,
+/// assumed. An older GoPro writes its local time with no zone: that local time is kept as it is. None where the
+/// camera's clock was never set and its name says nothing either
+fn moment_dates(path: &Path, camera: &str, created: Option<&str>, t: f64) -> Option<(Dates, bool)> {
+    let mvhd = created.and_then(parse_dates).map(|d| d.unix);
+    let (clock, _) = vs_gyroflow::geotag::read(path, camera, mvhd.map(|c| c.round() as i64));
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let named = clip_start_local(path).filter(|_| stem.starts_with("DJI_"));
+    match (clock.basis, clock.utc) {
+        ("local", Some(local)) => {
+            let off = (local_offset(local as i64) / 60) as i32;
+            Some((Dates { unix: local - off as f64 * 60.0 + t, offset_min: off }, false))
+        }
+        (_, Some(utc)) => {
+            // An older GoPro (no TZON) writes its local time as mvhd's: against the GPS's UTC, that is its zone
+            let gopro_local = (clock.basis == "gps" && camera.to_lowercase().starts_with("gopro")).then_some(()).and(mvhd).map(|m| ((m - utc) / 900.0).round() as i32 * 15)
+                .filter(|z| z.abs() <= 14 * 60);
+            let zone = clock.zone_min.or_else(|| mvhd.and_then(|m| zone_of_name(&stem, m))).or(gopro_local);
+            let (off, known) = match zone { Some(z) => (z, true), None => ((local_offset(utc as i64) / 60) as i32, false) };
+            Some((Dates { unix: utc + t, offset_min: off }, known))
+        }
+        // A clock never set: a DJI name's local time, if any
+        _ => named.map(|local| {
+            let off = (local_offset(local) / 60) as i32;
+            (Dates { unix: (local - off as i64 * 60) as f64 + t, offset_min: off }, false)
+        }),
+    }
+}
+
 /// When the clip started, local time, as seconds since 1970 counted in local time: from a DJI file's name
 /// (DJI_YYYYMMDDHHMMSS_…, the camera's own clock), else the container's creation time (UTC) in this computer's zone
 fn clip_start_local(path: &Path) -> Option<i64> {
@@ -2544,10 +2578,14 @@ fn local_offset(utc: i64) -> i64 {
 #[cfg(not(unix))]
 fn local_offset(_utc: i64) -> i64 { 0 }
 
-fn exif_time(local: i64) -> String {
-    let (y, m, d) = civil_from_days(local.div_euclid(86400));
-    let s = local.rem_euclid(86400);
-    format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+
+/// A file's modified and (on a Mac) created dates
+fn set_file_dates(path: &Path, at: std::time::SystemTime) {
+    let Ok(f) = std::fs::File::options().write(true).open(path) else { return };
+    let times = std::fs::FileTimes::new().set_modified(at).set_accessed(at);
+    #[cfg(target_os = "macos")]
+    let times = { use std::os::macos::fs::FileTimesExt; times.set_created(at) };
+    let _ = f.set_times(times);
 }
 
 // Photos: the project's _Stills (beside its _Exports, docs/moments-and-workspaces.md), else stabilized/ next to the clip
@@ -2958,6 +2996,12 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
     let place = vs_gyroflow::geotag::photo_place(&path, make.as_deref().unwrap_or(""), n as f64 / fps);
     lap("place");
+    // When the frame was taken: the clip's start plus the frame's time (--dates: the clip's start as given)
+    let camera = format!("{} {}", make.as_deref().unwrap_or(""), model.as_deref().unwrap_or("")).trim().to_string();
+    let dates = match opts.dates {
+        Some(d) => Some((Dates { unix: d.unix + n as f64 / fps, offset_min: d.offset_min }, true)),
+        None => moment_dates(&path, &camera, info.created.as_deref(), n as f64 / fps),
+    };
     let place = place.as_ref();
 
     std::thread::scope(|scope| {
@@ -2972,7 +3016,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let to = (t + half).min(info.duration.max(from + 1.0 / fps));
             let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
             let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr,
-                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)) };
+                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)), created: dates.map(|(d, _)| d.quicktime()) };
             // The photo's frame in it: the part starts at `first`
             let at = (n - first) as f64 / fps;
             scope.spawn(move || {
@@ -2994,10 +3038,10 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             Some(Err(_)) => { eprintln!("  no motion, the photo alone: its export failed"); None }
         };
 
-        let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
+        let taken = dates.map(|(d, known)| ph::Taken::at(d.unix, d.offset_min, known));
         let link = photo_link(&path, opts, n as f64 / fps);
         if jpeg {
-            let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref(), place.map(|p| &p.0));
+            let exif = ph::exif(taken.as_ref(), make.as_deref(), model.as_deref(), place.map(|p| &p.0));
             let video = match &live { Some((f, _)) => Some(std::fs::read(&f.0).map_err(|e| format!("{}: {e}", f.0.display()))?), None => None };
             let motion = video.as_deref().zip(live.as_ref()).map(|(v, (_, at))| ph::Motion { video: v, presentation_us: (at * 1e6).round() as i64 });
             let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref(), Some(&link))?;
@@ -3011,7 +3055,12 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             cmd.args(["--width", &sdr.width.to_string(), "--height", &sdr.height.to_string(), "--quality", &format!("{:.2}", opts.quality as f64 / 100.0)])
                 .arg("--sdr").arg(&sdr_file.0).arg("--out").arg(&out_path);
             if let Some(f) = &hdr_file { cmd.arg("--hdr").arg(&f.0); }
-            if let Some(t) = &taken { cmd.args(["--taken", t]); }
+            if let Some(t) = &taken {
+                cmd.args(["--taken", &t.local, "--subsec", &t.subsec]);
+                if let Some(o) = &t.offset { cmd.args(["--offset", o]); }
+            }
+            // The Live Photo's video: QuickTime's creation date (local time and zone, as an iPhone writes it)
+            if let Some((d, _)) = &dates { cmd.args(["--created", &d.quicktime()]); }
             if let Some(m) = &make { cmd.args(["--make", m]); }
             if let Some(m) = &model { cmd.args(["--model", m]); }
             if let Some((p, _)) = place { cmd.args(["--gps", &gps_arg(p)]); }
@@ -3023,6 +3072,11 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             }
             let out = cmd.output().map_err(|e| format!("afp-photo: {e}"))?;
             if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        }
+        // The files' own dates: the moment's too
+        if let Some((d, _)) = &dates {
+            let mov = out_path.with_extension("mov");
+            for f in std::iter::once(&out_path).chain(live.as_ref().filter(|_| !jpeg).map(|_| &mov)) { set_file_dates(f, d.system_time()); }
         }
         lap("written");
         eprintln!("  {label} · {}x{}{} · {}", sdr.width, sdr.height,
