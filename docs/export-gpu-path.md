@@ -540,3 +540,50 @@ different pixels (Y 39 dB). `tests/render_settings.json` gets the key.
   - `--encoder ffv1` writes lossless MOVs;
   - `AFP_TIMES` prints the engine's and the LUT's time a frame.
 - `tools/export-gpu/build_ffmpeg_libplacebo.sh` and `tools/export-gpu/cmp_frames.py`.
+
+## For whoever continues (state on 2026-11-16)
+
+**Where things are:**
+
+- **The path:** `export()` in `vs-gyroflow/src/bin/gyroflow-export.rs` branches to `export_gpu()` just after the encoder
+  is picked. The conditions and the fallback reasons are in the `why` closure there.
+- **The shader:** `warp_shader()` builds it from `gpu_table` (`Options::player`, `shader_with`, `look_shader`,
+  `set_param_default`, `for_libplacebo`, `passes_per_frame`).
+- **How it decodes and encodes:** `gpu_setup()` probes the ffmpeg once.
+  - Mac: a 3-frame test through `hwupload` → `libplacebo` → `hevc_videotoolbox`.
+  - Elsewhere: a Vulkan device, then `hevc_vulkan`, then Vulkan decode of the clip.
+- **ffmpeg:**
+  - The patch is `tools/export-gpu/ffmpeg-patches/0001` (vf_libplacebo VT in/out; the import code is in
+    `libavfilter/vf_libplacebo_vt.m`). `build_ffmpeg_libplacebo.sh` applies it.
+  - **Gotchas:** the work folder can't contain spaces; libplacebo is static, so `-lc++` is needed; the Metal,
+    IOSurface and CoreVideo frameworks are needed.
+  - **Two traps when editing the patch:** `pl_frame.user_data` must be a `struct pl_avframe_priv`, which
+    `pl_get_mapped_avframe` reads. Output pixel buffers need `av_vt_pixbuf_set_attachments`, or `hevc_videotoolbox`
+    fails with -12902.
+- **App:**
+  - `tools/dev_app.sh` builds that ffmpeg once into `~/Library/Caches/afp-ffmpeg-build` (`NO_GPU_FFMPEG=1` skips it).
+  - `bundle_runtime.py` (`FFMPEG_BIN`) puts it and its libraries in the bundle.
+  - Inside the app, `gyroflow-export` finds `Contents/Helpers/ffmpeg` and `Resources/vulkan/icd.d/MoltenVK_icd.json`
+    by its own location (`app_contents()`), with no environment.
+  - `AFP_GPU_FFMPEG` points elsewhere (tests, dev).
+- **The release workflow** still bundles Homebrew's ffmpeg on macOS. Its export falls back to the pipes and says
+  `this ffmpeg has no libplacebo filter`. To ship the GPU path, add a step running `build_ffmpeg_libplacebo.sh`
+  before `make_release.sh` and pass `FFMPEG_BIN`. It's about 10 minutes; cache the folder by the patch's hash.
+- **Windows:** CI builds pass on x64 and arm64 with BtbN's ffmpeg (`hevc_vulkan` and the libplacebo filter present).
+  It has never been run on Windows hardware: check `--gpu on` on an NVIDIA/AMD/Intel machine.
+
+**Tests:**
+
+- `vs-gyroflow/tests/export_gpu.rs` (`AFP_GPU_CLIP`, `AFP_GPU_FFMPEG`).
+- `library`'s `share_e2e` with `AFL_PLAYER`, `AFL_SHARE_TRIP` and `AFL_SHARE_CLIP`. Run it with `HOME` set to a
+  scratch folder: the player writes `<data>/gyroflow/render-defaults.json` on every start.
+
+**Not done, and known:**
+
+- **Not done:** the mpv-screenshot comparison (needs a window), Linux, 360/reframe on the GPU path, photos and
+  previews on it, `--dv-live-l1` (an L1 measuring pass), YouTube.
+- **Taken over by another session:** lens correction below 100 % on the GPU (both GoPro test projects), HDR-in/SDR
+  exactness and photo dates (`export-gpu-rest`).
+- **Known:**
+  - With the denoise, the clip's last `radius` frames differ from the player's: the last frame is repeated.
+  - With the fringes on, the old pipes and the player differ by a 0.33 % zoom; the GPU path is the player's.
