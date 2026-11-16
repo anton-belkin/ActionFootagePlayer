@@ -638,7 +638,8 @@ every platform and needs no mpv patch.
   Lanczos; on the HLG frame 12.6 against 15.1 (8.7 full size). So it acts as a slightly weaker sharpening, mostly in
   the darks, which `fsr_sharpness` sets anyway; it costs two `pow` per channel per tap; and the frames Anton looked at
   were FSR on HLG's coded values. None of it then.
-- **Settings.** `gyroflow.conf`: `upscaler=fsr` (or `mpv`), `fsr_sharpness=0.2` (RCAS in stops below its strongest,
+- **Settings.** `gyroflow.conf`: `upscaler=fsr` (or `mpv`, or `off`: no FSR and the render at its size from before
+  FSR, the panel's Quality › Sharpen (FSR) switch, to compare), `fsr_sharpness=0.2` (RCAS in stops below its strongest,
   0 to 2; 0.2 as in the probe). They set the shader's parameters `afp_fsr` and `afp_fsr_sharpness`; nothing is
   written again. No panel control yet.
 - **For a still.** The same file through libplacebo with the target at the size wanted (the photo export's

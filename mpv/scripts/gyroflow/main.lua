@@ -143,7 +143,9 @@
 --                denoise and the looks render at that size and mpv scales it to the screen (gyroflow_render_scale)
 --   upscaler=fsr  on the GPU path, what takes the picture from the size it renders at to the size it shows at, when
 --                that's bigger: fsr, AMD's FSR 1 (fsr.glsl: an edge-adaptive upscale, then a sharpening, after the look),
---                or mpv, mpv's own scaler (scale=, Lanczos by default). fsr_sharpness=0.2: FSR's sharpening, in stops
+--                or mpv, mpv's own scaler (scale=, Lanczos by default); off, no FSR at all and the render at the size
+--                it had before FSR (auto: the display's, at most 1080p with the denoise; the panel's Quality ›
+--                Sharpen (FSR) switch, to compare). fsr_sharpness=0.2: FSR's sharpening, in stops
 --                below its strongest (0 the strongest, 2 the weakest). docs/gpu-render.md, "The upscale to the screen"
 --   zoom_margin=1.25  how much more input it keeps than the output shows, for the stabilization's zoom: the part of
 --                the frame that shows reaches the output about 1:1 up to a zoom of this much
@@ -222,7 +224,7 @@ end
 local DENOISE_FRAMES = { full = 5, light = 3 }
 if o.temporal_denoise ~= "light" and o.temporal_denoise ~= "off" then o.temporal_denoise = "full" end
 if not ({ auto = true, display = true, video = true })[o.resolution] and not tonumber(o.resolution) then o.resolution = "auto" end
-if o.upscaler ~= "mpv" then o.upscaler = "fsr" end
+if o.upscaler ~= "mpv" and o.upscaler ~= "off" then o.upscaler = "fsr" end
 o.fsr_sharpness = math.max(0, math.min(2, tonumber(o.fsr_sharpness) or 0.2))
 o.still_radius = DENOISE_FRAMES[o.temporal_denoise] or 5
 o.still_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25))
@@ -1258,7 +1260,7 @@ local function gpu_render_scale()
         s = math.min(s, 3840 / dw, 2160 / dh)
     elseif short then
         s = math.min(1, short / math.min(dw, dh))
-    elseif o.resolution == "auto" and fsr.available then
+    elseif o.resolution == "auto" and fsr.available and o.upscaler ~= "off" then
         -- With upscaler=mpv too: quality.lua's step to mpv's scaler is then lighter, not the full size again
         s = AUTO_SHARE
     end
@@ -2312,7 +2314,8 @@ end)
 local QUALITY = {
     fps_limit = { ["0"] = "every frame", ["30"] = "up to 30 fps", ["15"] = "up to 15 fps" },
     resolution = { auto = "auto: 0.8 of the display's size with FSR, at most 1080p while the temporal denoise is on", display = "fits the display", ["1080"] = "up to 1080p", ["720"] = "up to 720p", video = "the video's own size" },
-    upscaler = { fsr = "upscale to the screen: FSR 1, sharp", mpv = "upscale to the screen: mpv's scaler, lighter" },
+    upscaler = { fsr = "upscale to the screen: FSR 1, sharp", mpv = "upscale to the screen: mpv's scaler, lighter",
+                 off = "no FSR: rendered at the size it had before FSR, mpv's scaler" },
     edge_fill_rate = { auto = "edge fill rate: auto, as the GPU has room", ["50"] = "edge fill rate: 50 % of the frames", ["25"] = "edge fill rate: 25 % of the frames" },
     chromatic_skip = { yes = "color aberration correction skipped on this screen, for smooth playback", no = "color aberration correction as the clip's transform says" },
     ask_when_slow = { yes = "pauses and asks when it can't keep up", no = "plays on when it can't keep up" },

@@ -1160,6 +1160,11 @@ local function quality_part(u, x, w, y)
     y = u:select_row(x, w, y + 4 * s, "size", "Size", choices({ { "auto", "Auto" }, { "display", "Screen" }, { "1080", "1080p" }, { "720", "720p" },
                                                                 { "video", "Video" } }, q("resolution")), tostring(g.resolution))
     y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
+    -- FSR on or off at once, to compare (gyroflow.conf's upscaler: fsr, or off; mpv, Quality's lighter step, counts as on)
+    local sharpen = g.upscaler ~= "off"
+    y = u:switch(x, w, y + 4 * s, "fsr", "Sharpen (FSR)", sharpen, q("upscaler") .. " " .. (sharpen and "off" or "fsr"))
+    y = u:caption(x, w, y, sharpen and "On: Auto renders at 0.8 of the screen and FSR takes it up, sharper edges"
+                              or "Off: no FSR, rendered at the full size as before FSR, mpv's own scaler")
     y = u:select_row(x, w, y + 4 * s, "paused", "Paused frame", choices({ { "off", "As played" }, { "auto", "Full size" } }, q("paused_full_size")),
                      tostring(g.paused_full_size or "off"), { key = keys["script-binding gyroflow/full"] })
     y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
