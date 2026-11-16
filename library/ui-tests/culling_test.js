@@ -247,7 +247,7 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   const sort = () => q('#top [data-c="starsort"]');
   click(sort());
   expect("Most stars first: by stars, the rest as they were", visibleOf("still").map((k) => k.replace("i:p:_Stills/", "")), ["Turtle 1.heic", "Reef 2.heic", "Blurry 3.heic"]);
-  expect("…folders stay on top", ev("VISIBLE.slice(0, 2)"), ["f:Day 1", "f:Day 2"]);
+  expect("…folders stay on top (Other folders, then the albums)", ev("VISIBLE.slice(0, 3)"), ["f:Other folders", "f:Day 1", "f:Day 2"]);
   click(sort());
 
   // A clip selected in its album (its link): the clip itself is what's culled; it shows at once on the link and on

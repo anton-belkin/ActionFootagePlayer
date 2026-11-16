@@ -45,7 +45,7 @@ function albumRealDirs(shown) {
 }
 // Whether a folder shown is an album of the user's (not Generated, not Other folders)
 function userAlbum(d) { return !!d && d !== OTHER && !d.startsWith(OTHER + "/") && d !== GENERATED && !d.startsWith(GENERATED + "/"); }
-// Views inside Albums that aren't folders: [id, label, a function drawing it]. None yet
+// Views inside Albums that aren't folders: [id, label, draw, items, meta] (albumviews.js): Timeline, Map, the media types
 const ALBUM_VIEWS = [];
 // The log curves a thumbnail is turned to normal colour from (the player's luts/<curve>_hlg.cube)
 const ALBUM_CURVES = ["dlogm", "dlog", "dlog2", "gplog", "gplog2", "ilog"];

@@ -2,7 +2,8 @@
 // share. Loaded after albums.js and before app.js, whose state and helpers it uses when called; app.js calls in at
 // the lines marked "albumviews.js" (items(), buildFacets(), renderMain(), goUp()).
 //
-// A view is [id, label, draw(main), items()]. While one is open the page's view is still Albums (S.view "footage")
+// A view is [id, label, draw(main), items(), meta]. With no draw (null) it is drawn by app.js's renderMain as an album
+// of its items: the media types (Videos, Moments, Photos…), meta { media: true }, pushed below. While one is open the page's view is still Albums (S.view "footage")
 // and S.path[0] is the view's label behind AV_MARK, a character no folder's name starts with: so the breadcrumbs,
 // Back and Forward and the keys work as for a folder, and an album of the user's called "Timeline" stays an album.
 // The view's items are what items() gives then, so the selection, ctx(), the menu, the side panel and opening in the
@@ -22,21 +23,78 @@ function albumViewItems() { const v = albumViewOpen(); return v ? v[3]() : null;
 // Drawn in place of the folder's list; false: no view is open
 function albumViewDraw(main) {
   const v = albumViewOpen();
-  if (!v) return false;
+  if (!v || !v[2]) return false;
   v[2](main);
   return true;
 }
-// The views, as tiles above the albums at the top of Albums
-function albumViewTiles() {
-  if (!ALBUM_VIEWS.length) return "";
-  return '<div class="avtiles" role="group" aria-label="Views of the whole library">' + ALBUM_VIEWS.map((v) =>
-    '<button type="button" class="avtile" data-a="aview" data-v="' + esc(v[0]) + '">' + (AV_ICON[v[0]] || "") + '<span><b>' + esc(v[1]) + '</b><span class="sub">' + esc(AV_SUB[v[0]] || "") + '</span></span></button>').join("") + '</div>';
+// Albums' top is one list (renderMain): the views of the whole library (Timeline, Map), the media types, then the
+// folders (Generated, Other folders), then the user's albums; rows of the one look, each opened by a click.
+const AV_GROUPS = { views: "The whole library", media: "Media types", folders: "Folders", albums: "Your albums" };
+function avGroupHead(g) { return '<div class="lgroup" role="presentation">' + esc(AV_GROUPS[g]) + '</div>'; }
+// The views' rows, with their group's heading before each group; null: none (no project yet)
+function albumTopRows(layout, filt) {
+  if (!ALBUM_VIEWS.length) return null;
+  const shown = ALBUM_VIEWS.filter((v) => !(v[4] && v[4].optional) || v[3]().length);
+  const views = shown.filter((v) => !(v[4] && v[4].media)), media = shown.filter((v) => v[4] && v[4].media);
+  const row = (v) => {
+    const m = v[4] && v[4].media;
+    const all = m ? v[3]() : null, its = m && filt ? avShown(all) : all;
+    const sub = m ? (filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many)) : (AV_SUB[v[0]] || "");
+    const th = m ? avMosaic(its) : '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>';
+    const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Open ' + esc(v[1]) + '"';
+    if (layout === "list") return '<button ' + a + ' class="row avrow">' + th + '<span style="min-width:0"><span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span></span>' +
+      '<span class="cell hide-s"></span><span class="cell hide-s"></span><span class="cell hide-s"></span><span class="chips hide-s"></span><span class="cell"></span></button>';
+    return '<button ' + a + ' class="card avrow">' + th + '<span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span><span class="chips"></span></button>';
+  };
+  return (views.length ? avGroupHead("views") + views.map(row).join("") : "") + (media.length ? avGroupHead("media") + media.map(row).join("") : "");
 }
+// Four pictures of a media type's items, as a folder's row has its own
+function avMosaic(list) {
+  const its = [];
+  for (const it of list) { if (it.thumbPath) its.push(it); if (its.length === 4) break; }
+  let h = '<span class="mosaic">';
+  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
+  return h + '</span>';
+}
+function avTopGroup(it) {
+  if (it.kind !== "folder") return "albums";
+  return it.path === GENERATED || it.path === OTHER ? "folders" : "albums";
+}
+// The heading before the i-th row of the folders' part, when its group starts there
+function albumTopHead(list, i) {
+  const g = avTopGroup(list[i]);
+  return i && avTopGroup(list[i - 1]) === g ? "" : avGroupHead(g);
+}
+// The folders at the top: Generated and Other folders first, then the user's albums (each part as it was sorted)
+function albumTopOrder(rows) {
+  const rank = (it) => it.path === GENERATED ? 0 : it.path === OTHER ? 1 : 2;
+  const keyed = rows.map((r, i) => [rank(r), i, r]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  keyed.forEach((k, i) => { rows[i] = k[2]; });
+}
+// What a media-type album says of itself on its breadcrumbs' line
+function albumViewWhere(v) { return (v[4] && v[4].where) || AV_SUB[v[0]] || ""; }
 const AV_ICON = {
   timeline: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
   map: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-6.5-6.2-6.5-11a6.5 6.5 0 0 1 13 0c0 4.8-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></svg>',
 };
 const AV_SUB = { timeline: "Everything by day, month and year", map: "Everything by where it was recorded" };
+
+// The media types, as Apple Photos has them: every item of a kind in the library, from what the page holds
+// (avEverything: no scan of its own). Live Photos and 360° only when the library has some.
+const AV_MEDIA = [
+  ["videos", "Videos", (it) => it.kind === "clip", { one: "clip", many: "clips", where: "Every original clip in the library, wherever it is" }],
+  ["moments", "Moments", (it) => it.kind === "moment", { one: "moment", many: "moments", where: "Every moment in the library: in albums, in Generated, anywhere" }],
+  ["photos", "Photos", (it) => it.kind === "still", { one: "photo", many: "photos", where: "Every photo in the library: links to a clip’s frame and rendered ones" }],
+  ["livephotos", "Live Photos", (it) => it.kind === "still" && it.form === "Live Photo", { one: "Live Photo", many: "Live Photos", optional: true, where: "Every Live Photo in the library" }],
+  ["videos360", "360° videos", (it) => it.kind === "clip" && !!it.is360, { one: "clip", many: "clips", optional: true, where: "Every 360° original in the library" }],
+];
+// A media type's items, made again only when the library's items are
+function avMedia(id, fn) {
+  const all = avEverything();
+  if (!AV.media || AV.media.all !== all) AV.media = { all, lists: {} };
+  return AV.media.lists[id] || (AV.media.lists[id] = all.filter(fn));
+}
+for (const m of AV_MEDIA) ALBUM_VIEWS.push([m[0], m[1], null, () => avMedia(m[0], m[2]), Object.assign({ media: true }, m[3])]);
 function albumViewGo(id) {
   const v = ALBUM_VIEWS.find((x) => x[0] === id);
   if (!v) return;
@@ -51,10 +109,10 @@ function albumViewGo(id) {
 
 // The Info part with nothing selected: what the view is of (it has no folder of its own)
 function albumViewInfo() {
-  const v = albumViewOpen(), all = avEverything();
+  const v = albumViewOpen(), all = v[3]();
   return '<div class="ihead"><b>' + esc(v[1]) + '</b><span class="sub">' + esc(avKinds(all) || "Nothing yet") + '</span></div>' +
     infoSec("Files", kv([["Project", pathsHtml([S.root]), false, true]])) +
-    '<p class="sub wrap" style="padding:0 16px">' + esc(AV_SUB[v[0]] || "") + ': the whole library, not a folder. Select a clip, moment or photo to see what it is.</p>';
+    '<p class="sub wrap" style="padding:0 16px">' + esc(albumViewWhere(v)) + ': the whole library, not a folder. Select a clip, moment or photo to see what it is.</p>';
 }
 
 // Everything in the library, for these views: every original once (as Originals has them), and the moments and photos

@@ -152,6 +152,7 @@ function drawTimeline(main) {
     '<button type="button" role="tab" aria-selected="' + (TL.level === x[0]) + '" class="' + (TL.level === x[0] ? "on" : "") + '" data-a="tlevel" data-v="' + x[0] + '">' + x[1] + '</button>').join("") + '</div>' +
     '<span class="sub" style="display:inline">' + avCount(m.n, "item", "items") + (list.length !== all.length ? " of " + all.length.toLocaleString("en-US") + " match" : "") + (m.trips.length ? " · " + avCount(m.trips.length, "trip", "trips") : "") + '</span>' +
     (TL.level === "days" && m.n ? avSelBar(m.n, c) : "") + '</div>';
+  h = '<div class="mbar">' + h + '</div>'; // pinned while the timeline scrolls (app.js pinBar)
   if (probesPending) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. A clip gets its day once it’s read.</div>';
   const st = main.scrollTop;
   if (!ready) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; return; }

@@ -35,7 +35,7 @@ const last = (cmd) => calls.filter((c) => c[0] === cmd).pop();
   // Albums: the user's albums at the top, the rest of the project's folder under Other folders
   click(tab("footage")); await tick(120);
   ok(tabs.length === 2, "two tabs: Moments, Photos and Exports are gone");
-  ok(names().join("|") === "Best of the year|Egypt|Generated|Other folders", "Albums' top: your albums, Generated, Other folders: " + names().join("|"));
+  ok(names().join("|") === "Timeline|Map|Videos|Moments|Photos|Live Photos|Generated|Other folders|Best of the year|Egypt", "Albums' top is one list: Timeline, Map, the media types, Generated, Other folders, your albums: " + names().join("|"));
   ok(!$("main").textContent.includes("Without a clip preview"), "no folder of clips without a preview");
   dbl(by("pick", "f:Egypt")); await tick();
   ok(names().join("|") === "Dives|DJI_20261020083012_0001_D.MP4|GX010123.MP4", "an album: its albums, then its links as their clips: " + names().join("|"));
