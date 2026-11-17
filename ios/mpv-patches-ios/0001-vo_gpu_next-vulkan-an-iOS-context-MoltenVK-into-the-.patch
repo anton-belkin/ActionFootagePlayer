@@ -1,0 +1,198 @@
+From 30b59bfa15e4c2a812edb2fb91c3aa8bfe8ab6be Mon Sep 17 00:00:00 2001
+From: ActionFootagePlayer <build@localhost>
+Date: Mon, 9 Nov 2026 16:27:37 +0100
+Subject: [PATCH] vo_gpu_next: vulkan: an iOS context, MoltenVK into the app's
+ CAMetalLayer (--wid)
+
+---
+ meson.build                    |   7 ++
+ video/out/gpu/context.c        |   4 +
+ video/out/vulkan/context_ios.m | 136 +++++++++++++++++++++++++++++++++
+ 3 files changed, 147 insertions(+)
+ create mode 100644 video/out/vulkan/context_ios.m
+
+diff --git a/meson.build b/meson.build
+index 103a50808..9395ab011 100644
+--- a/meson.build
++++ b/meson.build
+@@ -1359,6 +1359,13 @@ if features['vulkan']
+                      'video/filter/vf_gpu_vulkan.c')
+ endif
+ 
++# iOS: Vulkan through MoltenVK into the embedding app's CAMetalLayer (--wid)
++features += {'ios-vulkan': features['vulkan'] and darwin and not features['cocoa']}
++if features['ios-vulkan']
++    sources += files('video/out/vulkan/context_ios.m')
++    dependencies += dependency('appleframeworks', modules: ['QuartzCore', 'Metal'])
++endif
++
+ if features['vulkan'] and features['android']
+     sources += files('video/out/vulkan/context_android.c')
+ endif
+diff --git a/video/out/gpu/context.c b/video/out/gpu/context.c
+index 60c0641a7..307c75229 100644
+--- a/video/out/gpu/context.c
++++ b/video/out/gpu/context.c
+@@ -50,6 +50,7 @@ extern const struct ra_ctx_fns ra_ctx_vulkan_xlib;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_android;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_display;
+ extern const struct ra_ctx_fns ra_ctx_vulkan_mac;
++extern const struct ra_ctx_fns ra_ctx_vulkan_ios;
+ 
+ /* Direct3D 11 */
+ extern const struct ra_ctx_fns ra_ctx_d3d11;
+@@ -96,6 +97,9 @@ static const struct ra_ctx_fns *const contexts[] = {
+ #if HAVE_COCOA && HAVE_SWIFT
+     &ra_ctx_vulkan_mac,
+ #endif
++#if HAVE_IOS_VULKAN
++    &ra_ctx_vulkan_ios,
++#endif
+ #endif
+ 
+ // OpenGL contexts:
+diff --git a/video/out/vulkan/context_ios.m b/video/out/vulkan/context_ios.m
+new file mode 100644
+index 000000000..ee60111b8
+--- /dev/null
++++ b/video/out/vulkan/context_ios.m
+@@ -0,0 +1,136 @@
++/*
++ * This file is part of mpv.
++ *
++ * mpv is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU Lesser General Public
++ * License as published by the Free Software Foundation; either
++ * version 2.1 of the License, or (at your option) any later version.
++ *
++ * mpv is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU Lesser General Public License for more details.
++ *
++ * You should have received a copy of the GNU Lesser General Public
++ * License along with mpv.  If not, see <http://www.gnu.org/licenses/>.
++ */
++
++// Vulkan (MoltenVK) on iOS: libmpv renders into the CAMetalLayer the embedding app hands over with --wid (a
++// CAMetalLayer pointer). The app sizes the layer (its drawableSize); a change is taken up at the next event check.
++
++#import <QuartzCore/CAMetalLayer.h>
++#include <vulkan/vulkan.h>
++#include <vulkan/vulkan_metal.h>
++
++#include "video/out/gpu/context.h"
++#include "video/out/vo.h"
++#include "common.h"
++#include "context.h"
++#include "utils.h"
++
++struct priv {
++    struct mpvk_ctx vk;
++    CAMetalLayer *layer;
++    int w, h;
++};
++
++static bool layer_size(struct ra_ctx *ctx, int *w, int *h)
++{
++    struct priv *p = ctx->priv;
++    CGSize s = p->layer.drawableSize;
++    if (s.width < 1 || s.height < 1) {
++        CGFloat scale = p->layer.contentsScale > 0 ? p->layer.contentsScale : 1;
++        s = CGSizeMake(p->layer.bounds.size.width * scale, p->layer.bounds.size.height * scale);
++    }
++    *w = (int)s.width;
++    *h = (int)s.height;
++    return *w > 0 && *h > 0;
++}
++
++static void ios_uninit(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv;
++    ra_vk_ctx_uninit(ctx);
++    mpvk_uninit(&p->vk);
++    p->layer = nil;
++}
++
++static bool ios_init(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv = talloc_zero(ctx, struct priv);
++    struct mpvk_ctx *vk = &p->vk;
++    int msgl = ctx->opts.probing ? MSGL_V : MSGL_ERR;
++
++    int64_t wid = ctx->vo->opts->WinID;
++    if (wid == 0 || wid == -1) {
++        MP_MSG(ctx, msgl, "iOS: --wid must be a CAMetalLayer\n");
++        goto fail;
++    }
++    p->layer = (__bridge CAMetalLayer *)(void *)(intptr_t)wid;
++
++    if (!mpvk_init(vk, ctx, VK_EXT_METAL_SURFACE_EXTENSION_NAME))
++        goto fail;
++
++    VkMetalSurfaceCreateInfoEXT info = {
++        .sType = VK_STRUCTURE_TYPE_METAL_SURFACE_CREATE_INFO_EXT,
++        .pLayer = (__bridge const CAMetalLayer *)p->layer,
++    };
++
++    struct ra_ctx_params params = {0};
++
++    VkInstance inst = vk->vkinst->instance;
++    VkResult res = vkCreateMetalSurfaceEXT(inst, &info, NULL, &vk->surface);
++    if (res != VK_SUCCESS) {
++        MP_MSG(ctx, msgl, "Failed creating the Metal surface\n");
++        goto fail;
++    }
++
++    if (!ra_vk_ctx_init(ctx, vk, params, VK_PRESENT_MODE_FIFO_KHR))
++        goto fail;
++
++    return true;
++fail:
++    ios_uninit(ctx);
++    return false;
++}
++
++static bool ios_reconfig(struct ra_ctx *ctx)
++{
++    struct priv *p = ctx->priv;
++    int w, h;
++    if (!layer_size(ctx, &w, &h))
++        return false;
++    p->w = w;
++    p->h = h;
++    ctx->vo->dwidth = w;
++    ctx->vo->dheight = h;
++    return ra_vk_ctx_resize(ctx, w, h);
++}
++
++static int ios_control(struct ra_ctx *ctx, int *events, int request, void *arg)
++{
++    struct priv *p = ctx->priv;
++    if (request == VOCTRL_CHECK_EVENTS) {
++        int w, h;
++        if (layer_size(ctx, &w, &h) && (w != p->w || h != p->h)) {
++            p->w = w;
++            p->h = h;
++            ctx->vo->dwidth = w;
++            ctx->vo->dheight = h;
++            ra_vk_ctx_resize(ctx, w, h);
++            *events |= VO_EVENT_RESIZE;
++        }
++        return VO_TRUE;
++    }
++    return VO_NOTIMPL;
++}
++
++const struct ra_ctx_fns ra_ctx_vulkan_ios = {
++    .type           = "vulkan",
++    .name           = "iosvk",
++    .description    = "iOS/Vulkan (MoltenVK, --wid a CAMetalLayer)",
++    .reconfig       = ios_reconfig,
++    .control        = ios_control,
++    .init           = ios_init,
++    .uninit         = ios_uninit,
++};
+-- 
+2.42.0
+
