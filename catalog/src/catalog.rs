@@ -99,11 +99,6 @@ pub struct Catalog {
 
 fn not_found(e: &io::Error) -> bool { e.kind() == io::ErrorKind::NotFound }
 
-/// The same time of a file, as two computers see it: over a share a time comes in 100 ns steps (…540500), on the disk
-/// itself to the nanosecond (…540523). Compared to the nanosecond, every file one computer noted over the share was
-/// read and noted again by the one that has the disk (the NAS Helper)
-pub fn same_time(a: i64, b: i64) -> bool { (a - b).abs() < 1000 }
-
 impl Catalog {
     /// Err when the project is of a newer version (project::VERSION): an older program would write records its way,
     /// without what it doesn't know, over the newer ones'
@@ -629,7 +624,7 @@ impl Catalog {
                 let rec = self.state.get(&rid, &d).cloned();
                 let dg = digest(known.iter().map(|(n, f)| (n.as_str(), f)));
                 let differs = force || opts.deep || whole || match &rec {
-                    Some(f) if f.dir => !same_time(f.mtime, st.mtime) || f.digest.as_deref() != Some(dg.as_str()),
+                    Some(f) if f.dir => f.mtime != st.mtime || f.digest.as_deref() != Some(dg.as_str()),
                     _ => true,
                 };
                 let is_due = due.contains(&d);
@@ -662,7 +657,7 @@ impl Catalog {
                 // What's inside the new and changed files, read several at once (each a few round trips on a share)
                 let to_read: Vec<&Item> = items.iter().filter(|it| !it.stat.dir && insp.wants(&rid, &join(&d, &it.name))
                     && !insp.leave(&rid, &join(&d, &it.name), false)
-                    && !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && same_time(k.mtime, it.stat.mtime))).collect();
+                    && !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime)).collect();
 
                 let read: HashMap<&str, io::Result<Option<Value>>> = {
                     let threads = to_read.len().clamp(1, 8);
@@ -698,7 +693,7 @@ impl Catalog {
                         continue;
                     }
                     if old.is_some_and(|k| k.dir) { gone_dirs.push(rel.clone()); }
-                    let f = match old.filter(|k| !k.dir && k.size == it.stat.size && same_time(k.mtime, it.stat.mtime)) {
+                    let f = match old.filter(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime) {
                         Some(k) => k.clone(),
                         None => {
                             let meta = match read.remove(it.name.as_str()) {
@@ -842,13 +837,4 @@ pub fn machine_id() -> String {
         return t.trim().to_string();
     }
     String::new()
-}
-
-#[cfg(test)]
-mod time_tests {
-    #[test]
-    fn a_time_over_a_share_is_the_disks() {
-        assert!(super::same_time(1794902700976540500, 1794902700976540523));
-        assert!(!super::same_time(1794902700976540500, 1794902700976541500));
-    }
 }
