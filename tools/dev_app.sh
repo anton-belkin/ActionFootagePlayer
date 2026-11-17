@@ -41,6 +41,16 @@ prefix=$(brew --prefix)
 FFPL_DIR="${FFPL_DIR:-$HOME/Library/Caches/afp-ffmpeg-build}"
 if [ -z "${FFMPEG_BIN:-}" ] && [ -x "$FFPL_DIR/prefix/bin/ffmpeg" ]; then
     FFMPEG_BIN="$FFPL_DIR/prefix/bin/ffmpeg"
+    # Built for this tree's patches (tools/export-gpu/ffmpeg-patches), not an older set: else refuse, never bundle it
+    want=$(tools/export-gpu/build_ffmpeg_libplacebo.sh --stamp)
+    have=$(cat "$FFPL_DIR/prefix/afp-ffmpeg.stamp" 2>/dev/null || echo none)
+    if [ "$have" != "$want" ]; then
+        echo "The GPU path's ffmpeg in $FFPL_DIR was built for other patches (stamp $have, this tree's $want):" >&2
+        echo "run tools/export-gpu/build_ffmpeg_libplacebo.sh first (it rebuilds what changed)" >&2
+        exit 1
+    fi
+    # And it keeps a full-range clip full range on the GPU path (ffmpeg-patches/0002): about a second
+    tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >/dev/null || { tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >&2; echo "Not bundling it" >&2; exit 1; }
 fi
 [ -z "${FFMPEG_BIN:-}" ] || export FFMPEG_BIN
 # The release's mpv (tools/build_mpv.sh) when it's built, else Homebrew's

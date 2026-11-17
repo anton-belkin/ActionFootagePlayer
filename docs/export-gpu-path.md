@@ -199,7 +199,7 @@ against the pipes; after the fix it is 50 dB. Two causes in our ffmpeg, both fix
   in the stream's VUI whatever the buffers are. It now describes them (their sw format and range) when they're full
   range.
 
-The patched ffmpeg must be rebuilt with 0002: `build_ffmpeg_libplacebo.sh` applies every patch in the folder.
+The patched ffmpeg must be rebuilt with 0002. `build_ffmpeg_libplacebo.sh` used to apply the patches once and never again, so a cache built with 0001 alone kept being bundled without 0002 (it happened on Anton's Mac). Now the build is keyed on a stamp (a hash of the ffmpeg tag and every patch): when it changes, the checkout is reset, all the patches are applied again, ffmpeg is rebuilt (about 5 s for a changed patch) and `tools/export-gpu/check_ffmpeg_range.sh` must pass before the new stamp is written. That check takes about a second: it encodes a tiny full-range clip and sends it through the GPU path (it gives `tv` without 0002). `tools/dev_app.sh` refuses to bundle a build whose stamp isn't this tree's, or that fails the check.
 
 **SDR in → SDR out, exactly.** `tests/export_gpu.rs` `an_sdr_clip_keeps_its_colors` (`AFP_GPU_SDR_CLIPS`) exports 1 s
 turned 180° with no warp through the GPU path. It compares each plane at 10 bits with the source turned by ffmpeg, and
