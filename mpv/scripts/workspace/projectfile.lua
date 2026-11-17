@@ -32,7 +32,7 @@ M.FILE = "Project.afproject"
 M.FORMAT = "actionfootage-project"
 -- The project's version (afp-catalog's project::VERSION, which says what each means): a newer one isn't written by
 -- this player, whose writes would lose what it doesn't know; an older one is raised to it
-M.VERSION = 3
+M.VERSION = 4
 M.LEGACY_DIR = "_ActionFootagePlayer"
 -- The old folder's files: its settings, and its lists (dropped when it's moved into the file)
 local LEGACY_SETTINGS = "settings.json"
