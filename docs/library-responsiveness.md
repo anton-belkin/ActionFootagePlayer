@@ -209,3 +209,75 @@ That it ends where a reading ends is tested both ways:
 A command joins in Rust with its last line: `changed::of_items(&root, &items, problems).with_probes(&probes)` (or
 `of_clips`). One that doesn't yet (it answers with its list of problems) still works through `writes.js`: the page
 then reads the views again only when it lists problems.
+
+## Albums (2026-11-17)
+
+Every album action now goes the same way: shown at once, written after, the command saying what it made.
+
+| Action | Change (`writes.js` kind, in `albums.js`) | Command | Answers with |
+|---|---|---|---|
+| Add to an album (Originals, an album, Timeline, a Map place, a media type) | `albumadd` | `album_add` | the new links (`links`), the clips they're of |
+| …a moment or a photo link (a copy of its link) | `albumcopy` | `album_copy` | the new moments / photos |
+| Move to an album; Take out of the album (moments, photos to Generated) | `albummove` | `album_move` | the links moved (`links_gone` + `links`), the moments / photos gone and made |
+| Photos of the marks, Make a photo of the mark | `photoadd` | `photo_add` | the new photo links |
+| New album | `newfolder` | `new_folder` (now takes the name the window shows) | its path |
+| An album renamed (one to three folders: `_Clips/X`, `_Moments/X`, `_Stills/X`) | `renamealbum` | `rename_album` (new) | the folders' new paths; the views read again, as for a folder |
+| Taking a clip's link out, deleting an album | `delete` | `delete_items` | as before |
+
+- **What shows before the answer** is worked out by the command's own rules (`src/albums.rs`): a name taken in the
+  album gets " 2", " 3"…; a clip already in the album, a photo of a time already there, is left (the command's
+  "already": two adds of the same clip are one link); the album appears among My albums. A clip's link shows with the
+  picture the page has of the clip where it was selected, a copy with its file's picture, a photo link with its clip's
+  picture: each until the command answers, then its own (the link's thumbnail, the frame). Such an item is drawn faded
+  with a small pulsing dot, its tooltip "Being written…".
+- **The answer** (`changed.rs` `of_album`): the links as the Footage scan lists them (`links`, `links_gone`), the
+  moments and photos as their views' items, the clips whose links changed (Originals' picture is a clip's first link).
+  The page puts them into what the disk has (`changes.js` `linksInto`, `mergedInto`) and draws from memory: no `scan`,
+  no `project`, no `refresh()`.
+- **The catalog's notice of the command's own files** (it's told at once, so the views read the new links) no longer
+  makes the page read Footage again: `seen::ours` keeps the files the window's own album commands wrote (a minute at
+  most, each once), and `changes_since` leaves them out (`seen::not_ours`). Before, the album's folder was among them,
+  which made `changes_since` give up and the page read every view. The folder is told only when the command made it.
+- **An album of three folders renamed** is one change: `rename_album` renames each, and when one can't be, names back
+  the ones done and fails; the window then shows the album as it was, whole (before: three writes, a failure in the
+  second left two albums on screen until the views were read).
+- **An item still being written** can be selected, tagged, culled, and added to another album: those are changes too,
+  queued behind its write and taken back with it when it fails ("it follows a change that wasn't saved"). Moving it,
+  taking it out, renaming, deleting it waits: refused with "… is still being written: in a moment" (they need its
+  file, and its name is only the page's guess until the answer). Share isn't guarded (`share.js` is another PR's).
+- **Closing the window** waits for album writes as for the others (they're `Writes` changes: `writes_pending`).
+- **Where it shows**: an album, My albums, the media-type albums, Timeline, a Map place's list and Originals'
+  "In an album" are all made from the same lists (`RAW_FOOTAGE.links`, `DATA.moments`, `DATA.stills`), so a change
+  put over them shows in all.
+
+Measured (`page_perf.js`, adapted to Originals / Albums: the four album scenarios; 10,000 clips; the commands timed by
+`perf.rs`, which now times `album_add` 1 / 300, `album_move` 50, `photo_add` 20 and their saying what they made; before
+= this branch's base page, `AFL_UI=<its library/ui>`). From the click on Add / Move to the item shown (Originals' "In an
+album", the link in the album, the photos), and to the page done (nothing more asked):
+
+| Action, 10,000 clips | Shown: before | Shown: now | Done: before | Done: now | Asked of the app, before → now |
+|---|---:|---:|---:|---:|---|
+| Add 1 clip to a new album, as a NAS | 4.7 s | 0.12 s | 64.6 s | 0.70 s | album_add, changes_since, `project`, `scan` ×3 → album_add, changes_since |
+| Add 300 clips, as a NAS | 7.9 s | 0.15 s | 67.8 s | 4.1 s | the same |
+| Move 50 links, as a NAS | 6.8 s | 0.14 s | 74.4 s | 3.1 s | album_move, changes_since, `project`, `scan` ×7 → album_move, changes_since |
+| Photo links of 20 marks, as a NAS | 4.1 s | 0.08 s | 64.7 s | 0.89 s | photo_add, changes_since, `project`, `scan` ×3 → photo_add, changes_since |
+| Add 1 clip, this disk | 1.2 s | 0.12 s | 4.7 s | 0.58 s | |
+| Add 1 clip, the page's own work | 0.56 s | 0.13 s | 0.57 s | 0.47 s | |
+
+"Done" now is the write itself in the background (300 links on a NAS: 3.4 s of writes, as `perf.rs` models a share) and
+one `changes_since` that asks for nothing. Before, the catalog's notice of the album folder made the page read every
+view (the 60 s: `scan moments` is 57 s as a NAS on this project). The model's NAS numbers are `perf.rs`'s (5 / 5 / 15 ms
+a stat / read / write); `photo_add` on the perf project reads no real frames (its clips aren't video), so a real one is
+slower to be *done* (each frame decoded), not to show.
+
+Not changed: renaming an album still reads its views once after it's written (in the background, as a folder
+renamed does: what's in it shows at once all the same). If another computer takes a name between the page's guess and
+the write, the item lands under the command's name: the pending one is replaced by it (a selection on it is lost).
+
+Pictures: `docs/img/albums-screen-first/` (headless Chrome against the mock, album commands slowed to 4 s; before: the
+sheet waits with its button greyed; after: the album open 1 s after the click, the two items faded and dotted).
+
+Tests: `library/ui-tests/albums_writes_test.js` (11: add, add failing, add twice and a name taken, copy with a tag
+queued, a copy failing with its tag, move, take out, photo links, three-folder rename failing then whole, new album,
+closing waits); `changed.rs` `album_commands_say_what_a_reading_shows` (each command's answer is what a reading of the
+views shows after it, links included; the window's own files; the rename named back).

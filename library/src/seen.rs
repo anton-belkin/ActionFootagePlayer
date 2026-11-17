@@ -345,6 +345,25 @@ static LOG: Mutex<std::collections::VecDeque<(u64, Option<Vec<PathBuf>>)>> = Mut
 
 /// The files that changed after the page's count `since`, up to `now`; None: can't be said (a count with nothing
 /// logged for it: the file system's own notice with no catalog, too long ago, too many): read the views again
+/// Files the window's own commands just wrote and already answered for (albums.rs: the links and photos made, the
+/// files moved), each with when: the catalog's notice of them asks the window for nothing (`not_ours`). Kept a
+/// minute at most, so a change from elsewhere to the same file later is seen
+static OURS: Mutex<Vec<(PathBuf, Instant)>> = Mutex::new(Vec::new());
+pub fn ours(paths: &[PathBuf]) {
+    let mut o = OURS.lock().unwrap();
+    let now = Instant::now();
+    o.retain(|(_, t)| now.duration_since(*t) < Duration::from_secs(60));
+    o.extend(paths.iter().map(|p| (p.clone(), now)));
+}
+/// The files changed without the window's own (each let go once seen: the next change to it is someone else's)
+pub fn not_ours(files: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut o = OURS.lock().unwrap();
+    if o.is_empty() { return files; }
+    let now = Instant::now();
+    o.retain(|(_, t)| now.duration_since(*t) < Duration::from_secs(60));
+    files.into_iter().filter(|f| match o.iter().position(|(p, _)| p == f) { Some(i) => { o.remove(i); false } None => true }).collect()
+}
+
 pub fn since(since: u64, now: u64) -> Option<Vec<PathBuf>> {
     let log = LOG.lock().unwrap();
     let mut out: Vec<PathBuf> = Vec::new();

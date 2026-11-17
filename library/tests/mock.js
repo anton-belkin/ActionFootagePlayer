@@ -77,6 +77,7 @@
         kind === "moment" ? { gyroflow: false, renders: {}, original: "/Volumes/video/" + link.clip } : {}, more)) };
     };
     const everything = () => state.moments.concat(state.stills, state.exports);
+    const said = (answer, reload) => ({ items: {}, gone: {}, gone_files: [], reload, probes: { version: 1, items: {}, pending: 0 }, problems: answer.problems || [], answer, links: [], links_gone: [] });
     // A picture for each file: a gradient from its name, flat and grey for an original that's log (as Finder draws it)
     const picture = (path) => {
       let h = 0;
@@ -102,6 +103,8 @@
         case "scan": return args.view === "footage" ? footage() : own(args.view);
         case "probes_since": return { version: 1, items: {}, pending: 0 };
         case "thumb": return picture(args.path);
+        // The album commands answer what they made (src/changed.rs's of_album); this mock says only which views to
+        // read again, which the page then does in the background
         case "album_add": {
           const made = [];
           let already = 0;
@@ -111,7 +114,7 @@
             state.links.push([rel, c.tree]);
             made.push(ROOT + "/" + rel);
           }
-          return { made, already, album: args.album, failed: [], ms: 12 * made.length };
+          return said({ made, already, album: args.album, failed: [], ms: 12 * made.length }, ["footage"]);
         }
         case "album_move": {
           let moved = 0;
@@ -122,7 +125,7 @@
             if (o) { o[0] = args.album + "/" + o[0].split("/").pop(); moved++; }
           }
           if (!state.dirs.includes(args.album)) state.dirs.push(args.album);
-          return { moved, album: args.album, problems: [] };
+          return said({ moved, album: args.album, problems: [] }, ["footage", "moments", "stills"]);
         }
         case "album_copy": {
           let copied = 0;
@@ -130,7 +133,7 @@
             const o = state[view].find(([rel]) => ROOT + "/" + rel === f);
             if (o) { state[view].push([args.album + "/" + o[0].split("/").pop(), o[1], o[2]]); copied++; }
           }
-          return { copied, album: args.album, problems: [] };
+          return said({ copied, album: args.album, problems: [] }, ["moments", "stills"]);
         }
         case "photo_add": {
           const made = [];
@@ -139,7 +142,7 @@
             state.stills.push([rel, { clip: ph.tree, t: ph.t }, { form: "Photo link", linked: true }]);
             made.push(ROOT + "/" + rel);
           }
-          return { made, already: 0, album: args.album, failed: [], ms: 180 * made.length };
+          return said({ made, already: 0, album: args.album, failed: [], ms: 180 * made.length }, ["stills"]);
         }
         case "rename_item": {
           const o = everything().find(([rel]) => ROOT + "/" + rel === args.path);
@@ -172,7 +175,19 @@
           state.dirs = state.dirs.filter((d) => !args.items.some((x) => x.kind === "folder" && (ROOT + "/" + d === x.path || (ROOT + "/" + d).startsWith(x.path + "/"))));
           return { done: before - n() || args.items.length, to: ["the Trash"], problems: [] };
         }
-        case "new_folder": { const d = (args.parent ? args.parent + "/" : "") + "untitled folder"; state.dirs.push(d); return d; }
+        case "new_folder": { const d = (args.parent ? args.parent + "/" : "") + (args.name || "untitled folder"); state.dirs.push(d); return d; }
+        // An album's folders renamed as one (src/main.rs's rename_album)
+        case "rename_album": {
+          const to = (p) => p.split("/").slice(0, -1).join("/") + "/" + args.name;
+          for (const p of args.paths) {
+            const from = p.slice(ROOT.length + 1), now = to(p).slice(ROOT.length + 1);
+            const move = (rel) => (rel === from || rel.startsWith(from + "/") ? now + rel.slice(from.length) : rel);
+            state.dirs = state.dirs.map(move);
+            for (const l of state.links) l[0] = move(l[0]);
+            for (const o of everything()) o[0] = move(o[0]);
+          }
+          return said(args.paths.map(to), ["footage", "moments", "stills", "exports"]);
+        }
         default: return null;
       }
     };
