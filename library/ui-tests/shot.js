@@ -5,7 +5,8 @@
 //   node shot.js <state> <out.png> [--ui <another ui folder, e.g. main's>]
 //
 // States: unsaved (a tag that couldn't be written), saving (changes still being written, in Tasks), closing (the
-// window closed with changes waiting), tagged (a tag just added, the app not answered yet).
+// window closed with changes waiting), tagged (a tag just added, the app not answered yet), catalog (Checks' catalog part
+// after a check against the files).
 
 const fs = require("fs");
 const os = require("os");
@@ -22,6 +23,9 @@ const STATES = {
   leaves: { set_tags: { apply: true }, first: "VIEWS.footage.items[1].tags = ['reef']; VIEWS.footage.items[2].tags = ['reef'];",
     does: "S.path = ['Day 1']; showTab('tags'); renderAll(); buildFacets(); S.filters = { 'tag:reef': true }; S.filtersOpen = true; renderAll(); sel(['Day 1/A.MP4']); setTimeout(() => document.querySelector('[data-a=\"untag\"][data-v=\"reef\"]').click(), 200);" },
   tagged: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/A.MP4', 'Day 1/B.MP4']); tag('turtle');" },
+  // Checks' catalog part after "Read every file again" corrected two records, with one clip's own file not JSON
+  catalog: { set_tags: { never: true }, care: { kind: "check", busy: false, changes: 2, corrected: ["/P/Day 1/A.afp.json", "/P/Generated/2026-11-01 Moments/Day 1/A m.mp4"],
+    unreadable_now: ["/P/Day 1/C.afp.json"] }, does: "S.path = ['Day 1']; showTab('checks'); renderAll(); sel(['Day 1/A.MP4']);" },
 };
 
 function html(ui, state) {
@@ -35,7 +39,7 @@ function html(ui, state) {
     const answers = {
       snapshot: () => ({ project: ROOT, jobs: [], close_asked: false, close_waits: !!window.closeWaits, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),
       project: () => ({ path: ROOT, name: "Red Sea 2025", legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
-      engine: () => "", recent: () => [], cached_view: () => null, probes_since: () => ({ version: 1, items: {}, pending: 0 }), thumb: () => null, missing_links: () => [],
+      engine: () => "", recent: () => [], catalog_care: () => ST.care || {}, catalog_look: () => null, cached_view: () => null, probes_since: () => ({ version: 1, items: {}, pending: 0 }), thumb: () => null, missing_links: () => [],
       scan: (a) => JSON.parse(JSON.stringify(VIEWS[a.view] || { root: ROOT, view: a.view, dirs: [], items: [] })),
       set_tags: (a) => {
         if (ST.set_tags.never) return new Promise(() => {});

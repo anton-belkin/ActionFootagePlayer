@@ -981,7 +981,7 @@ function sideBody(c) {
     // Of anything selected: clips, moments, photos, mixed (share.js)
     case "share": return partHead(title, c, true) + shareBody(c);
     case "checks":
-      return partHead(title, c, true) + (clipsView ? part(checksBody(c)) : note("Checks look at clips and moments: in Albums or Originals."));
+      return partHead(title, c, true) + (clipsView ? part(checksBody(c)) : note("Checks look at clips and moments: in Albums or Originals.")) + '<div class="secb whole">' + catalogBody() + '</div>';
   }
   return "";
 }
@@ -1001,7 +1001,8 @@ function renderSide() {
   pane.scrollTop = keep;
   if (S.tab === "info") { fillThumbs(); fillMaps(); return; }
   // Commands act only on what's selected: greyed out with nothing (their settings can still be set)
-  if (!c.any && S.tab !== "queue") pane.querySelectorAll('.secb .btn').forEach((x) => { x.disabled = true; });
+  // (a part of the whole project's, Checks' catalog: never waits for a selection)
+  if (!c.any && S.tab !== "queue") pane.querySelectorAll('.secb:not(.whole) .btn').forEach((x) => { x.disabled = true; });
 }
 function momentsBody(c) {
   return '<p>For ' + esc(c.any ? c.label : "what you select") + '.</p>' +
@@ -1295,6 +1296,42 @@ function checksBody(c) {
       (ok.length ? '<div class="btns"><button type="button" class="btn sm pri" data-a="applymoved">Update ' + ok.length + '</button></div>' : "") + '</div>';
   }
   return body;
+}
+// The catalog against the files (library/src/seen.rs, docs/catalog-safeguards.md): what the Library shows is kept as
+// the files were last seen, and seen again as they change. On demand: every folder looked at again (after a script or
+// Finder changed files while nothing was watching), or every file of ours read again (after a restore that kept times)
+function catalogBody() {
+  if (S.care === undefined) { S.care = null; refreshCare(); }
+  const k = S.care || {};
+  const busy = !!k.busy;
+  const btn = (v, text) => '<button type="button" class="btn sm" data-a="carelook" data-v="' + v + '"' + (busy ? " disabled" : "") + '>' +
+    (busy && k.kind === v ? '<span class="spin" aria-hidden="true"></span> ' : "") + text + '</button>';
+  let body = '<p><b>The whole project’s catalog</b></p><span class="sub wrap">What the Library shows, as the files were last seen. Files changed by a script or in Finder while nothing was watching are seen within a day, or now:</span>' +
+    '<div class="btns">' + btn("deep", "Look at every folder again") + btn("check", "Read every file again") + '</div>';
+  if (k.error) body += '<div class="result"><b>Not done</b><span class="wrap">' + esc(k.error) + '</span></div>';
+  else if (!busy && k.kind) {
+    const fixed = (k.corrected || []).length;
+    body += '<div class="result"><b>' + (k.kind === "check" ? (fixed ? "Corrected " + fixed + (fixed === 1 ? " file" : " files") : "The catalog was right") :
+      (k.changes ? k.changes + " changes seen" : "Nothing new")) + '</b>' +
+      (k.corrected || []).slice(0, 20).map((f) => '<div class="it"><span class="mono wrap">' + esc(f) + '</span></div>').join("") + '</div>';
+  }
+  const bad = k.unreadable_now || [];
+  if (bad.length) {
+    body += '<div class="result"><b>' + bad.length + (bad.length === 1 ? " clip’s own file isn’t what it should be" : " clips’ own files aren’t what they should be") + '</b>' +
+      '<span class="sub wrap">Not JSON: written wrong, or still being written. Shown as they were until they read right.</span>' +
+      bad.slice(0, 20).map((f) => '<div class="it"><span class="chip warn">unreadable</span><span class="mono wrap">' + esc(f) + '</span></div>').join("") + '</div>';
+  }
+  return body;
+}
+async function refreshCare() {
+  try { S.care = await invoke("catalog_care"); } catch (e) { S.care = {}; }
+  renderSide();
+  if (S.care && S.care.busy) setTimeout(refreshCare, 1000);
+}
+async function careLook(v) {
+  try { await invoke("catalog_look", { check: v === "check" }); } catch (e) { showError(String(e)); return; }
+  S.care = { kind: v, busy: true }; renderSide();
+  setTimeout(refreshCare, 1000);
 }
 // Culling and tags on the selection: culling.js's panel (Accept / Reject, stars, the tags in use, a new one)
 function tagsBody(c) { return cullBody(c); }
@@ -2758,6 +2795,7 @@ document.addEventListener("click", async (e) => {
     case "takeplan": return planTakeIn(S.take.other);
     case "takerun": return runTakeIn();
     case "runcheck": return runCheck();
+    case "carelook": return careLook(v);
     case "revealpath": { if (v) call("reveal_path", { path: v }).catch(() => {}); return; }
     case "showbroken": {
       // Where they are: the view that has them, filtered to them (across its folders); clip previews (not items of a

@@ -6,7 +6,11 @@
 //
 // - every 3 s: the journals' new lines (what the player, or another computer, wrote)
 // - what this computer's system says changed (FSEvents): those folders looked at a second after it settles
-// - every 5 minutes: a look at every folder's time; once a day the deep look, slowly
+// - every 5 minutes: a look at the project's own folders' times
+// - at the start and every hour: the roots nobody has looked after within a day (no deep look by any computer, no
+//   NAS watcher vouching for them: afp_catalog::care) looked at deep, slowly — what a script or an editor changed in
+//   place, which leaves its folder's time alone
+// - what the Library couldn't note at once (a share away): its folders looked at again soon, then less often
 // - the journals folded into a new snapshot when they've grown, and what's no longer needed cleared
 //
 // It has two copies: one the views read (taken only briefly to read the journals' lines into it), one that looks and
@@ -208,7 +212,7 @@ pub fn note_now(paths: &[PathBuf]) {
             }
             Ok(Some(_)) => {}
             Ok(None) => gone.push((root, rel)),
-            Err(_) => {}
+            Err(_) => RETRY.lock().unwrap().push(p.clone()),
         }
     }
     // What's inside the files that counts (a link, a clip's own file), 8 at a time
@@ -217,7 +221,11 @@ pub fn note_now(paths: &[PathBuf]) {
     std::thread::scope(|sc| for _ in 0..8.min(files.len()) { sc.spawn(|| loop {
         let i = next.fetch_add(1, Ordering::Relaxed);
         let Some((root, rel, path, st)) = files.get(i) else { break };
-        let meta = if ours.wants(root, rel) { match ours.inspect(path, root, rel) { Ok(m) => m, Err(_) => continue } } else { None };
+        let meta = if ours.wants(root, rel) { match ours.inspect(path, root, rel) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => { UNREADABLE.lock().unwrap().insert(path.clone()); continue }
+            Err(_) => { RETRY.lock().unwrap().push(path.clone()); continue }
+        } } else { None };
         read.lock().unwrap().push((root.clone(), rel.clone(), Some(File { dir: false, size: st.size, mtime: st.mtime, meta, digest: None })));
     }); });
     entries.extend(read.into_inner().unwrap());
@@ -247,7 +255,9 @@ pub fn note_now(paths: &[PathBuf]) {
     }
     entries.extend(up);
     if entries.is_empty() { return; }
-    let _ = s.cat.note(entries);
+    // Not written (a share away): looked at again by the thread, from the files as they are then. A newer program's
+    // project isn't written to at all, again or not
+    if let Err(Error::Io(_)) = s.cat.note(entries) { RETRY.lock().unwrap().extend(paths.iter().cloned()); }
     // (what the journals said meanwhile is read by note: it's in this change too)
     let more = paths_of(&s.roots, s.cat.take_seen());
     if let Some((changes, last)) = &s.bump { changed_what(changes, last, more.map(|mut m| { m.extend(paths.iter().cloned()); m })); }
@@ -304,6 +314,12 @@ pub struct Runner {
     pub missing: Arc<AtomicU64>,
     /// …and which they are (file, the path it names)
     pub missing_list: Arc<Mutex<Vec<serde_json::Value>>>,
+    /// Asked for in Checks: every folder listed now (after a script changed files), or every file of ours read again
+    /// (after a restore that kept times)
+    pub deep_now: Arc<AtomicBool>,
+    pub check_now: Arc<AtomicBool>,
+    /// The last of those, as said in Checks: { kind, busy, changes, corrected, unreadable }
+    pub care: Arc<Mutex<serde_json::Value>>,
 }
 
 impl Drop for Runner {
@@ -325,15 +341,30 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
     let everything = Arc::new(AtomicBool::new(false));
     let missing = Arc::new(AtomicU64::new(u64::MAX));
     let missing_list = Arc::new(Mutex::new(Vec::new()));
-    let r = Runner { stop: stop.clone(), everything: everything.clone(), missing: missing.clone(), missing_list: missing_list.clone(), events: tx, status: status.clone() };
+    let deep_now = Arc::new(AtomicBool::new(false));
+    let check_now = Arc::new(AtomicBool::new(false));
+    let care = Arc::new(Mutex::new(serde_json::Value::Null));
+    let r = Runner { stop: stop.clone(), everything: everything.clone(), missing: missing.clone(), missing_list: missing_list.clone(), events: tx, status: status.clone(),
+                     deep_now: deep_now.clone(), check_now: check_now.clone(), care: care.clone() };
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
     // (another project's counts, or this one's from before it was watched again: nothing can be said of them)
     LOG.lock().unwrap().clear();
-    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, moved, stop, everything, missing, missing_list, rx, status, changes, last)).ok();
+    RETRY.lock().unwrap().clear();
+    UNREADABLE.lock().unwrap().clear();
+    let asked = Asked { deep: deep_now, check: check_now, care };
+    std::thread::Builder::new().name("catalog".into()).spawn(move || run(id, root, moved, stop, everything, missing, missing_list, rx, status, changes, last, asked)).ok();
     r
 }
+
+/// What note_now couldn't write or read (a share away): looked at again by the project's thread, soon and then less
+/// often. The files themselves are read again then, never what was seen of them before (docs/catalog-safeguards.md)
+static RETRY: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+/// Clips' own files that aren't what they should be (not JSON: written wrong by a script): their records kept as they
+/// were; read again every few minutes, and noted once they read right. For Checks
+static UNREADABLE: Mutex<BTreeSet<PathBuf>> = Mutex::new(BTreeSet::new());
 
 /// Told each time what the catalog knows changed, with the count (main.rs: the page hears it at once, an event)
 pub static ON_CHANGE: std::sync::OnceLock<Box<dyn Fn(u64) + Send + Sync>> = std::sync::OnceLock::new();
@@ -411,8 +442,29 @@ pub fn read_now() {
 
 fn set(status: &Mutex<String>, s: &str) { *status.lock().unwrap() = s.to_string(); }
 
+/// What Checks asks of the thread, and where it says how it went
+struct Asked { deep: Arc<AtomicBool>, check: Arc<AtomicBool>, care: Arc<Mutex<serde_json::Value>> }
+
+/// A look's files that weren't what they should be: kept for Checks (full paths)
+fn unreadable_from(roots: &[Root], rep: &afp_catalog::Report) {
+    if rep.unreadable.is_empty() { return; }
+    if let Some(p) = paths_of(roots, Some(rep.unreadable.clone())) { UNREADABLE.lock().unwrap().extend(p); }
+}
+
+/// The files that weren't what they should be, read again: the ones that read right now noted (and off the list)
+fn unreadable_again() {
+    let list: Vec<PathBuf> = UNREADABLE.lock().unwrap().iter().cloned().collect();
+    let right: Vec<PathBuf> = list.into_iter().filter(|p| !matches!(afp_catalog::inspect::read(p), Err(e) if e.kind() == std::io::ErrorKind::InvalidData)).collect();
+    if right.is_empty() { return; }
+    { let mut u = UNREADABLE.lock().unwrap(); for p in &right { u.remove(p); } }
+    note_now(&right);
+}
+
+/// Clips' own files that aren't what they should be, as last seen
+pub fn unreadable() -> Vec<String> { UNREADABLE.lock().unwrap().iter().map(|p| p.display().to_string()).collect() }
+
 #[allow(clippy::too_many_arguments)]
-fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, missing_list: Arc<Mutex<Vec<serde_json::Value>>>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>) {
+fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: Arc<AtomicBool>, missing: Arc<AtomicU64>, missing_list: Arc<Mutex<Vec<serde_json::Value>>>, rx: Receiver<Vec<PathBuf>>, status: Arc<Mutex<String>>, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, asked: Asked) {
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
     // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
@@ -486,7 +538,12 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
     count_missing(&missing);
     let mut counted_at = changes.load(Ordering::Relaxed);
     let mut counted_when = Instant::now();
-    let deep_file = worker.cache.join("deep.json");
+    // Looked after: at the start, then every hour (afp_catalog::care decides whether anything needs looking at)
+    let mut last_care = Instant::now() - Duration::from_secs(10_000);
+    // What couldn't be noted: when it's looked at again, and how long it waits after a failure
+    let mut retry: Vec<(String, String)> = Vec::new();
+    let mut retry_at = Instant::now();
+    let mut retry_wait = Duration::from_secs(5);
     let mut last_read = Instant::now();
     let mut last_look = Instant::now() - Duration::from_secs(10_000);
     let mut pending: BTreeSet<(String, String)> = BTreeSet::new();
@@ -521,10 +578,29 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
             counted_when = Instant::now();
             count_missing(&missing);
         }
+        // What the Library couldn't note: its folders (and the files) looked at again, from the files as they are now
+        for p in std::mem::take(&mut *RETRY.lock().unwrap()) {
+            if let Some((r, rel)) = project::locate(&roots, &p) {
+                let pair = (r.clone(), afp_catalog::state::parent(&rel).to_string());
+                if !retry.contains(&pair) { retry.push(pair); }
+                if !retry.contains(&(r.clone(), rel.clone())) { retry.push((r, rel)); }
+            }
+        }
+        if !retry.is_empty() && Instant::now() >= retry_at {
+            let only = std::mem::take(&mut retry);
+            match worker.sweep(&roots, &ours, &Sweep { only: only.clone(), ..Default::default() }) {
+                Ok(rep) => { unreadable_from(&roots, &rep); refresh(&changes, &last); retry_wait = Duration::from_secs(5); }
+                // The share still away: again later, waiting longer each time (up to 5 minutes); the regular looks
+                // see it anyway once it's back (the folders' times were changed when it was written)
+                Err(Error::Io(_)) => { retry = only; retry_at = Instant::now() + retry_wait; retry_wait = (retry_wait * 2).min(Duration::from_secs(300)); }
+                // A newer program's project: nothing more written
+                Err(_) => {}
+            }
+        }
         // What this computer changed: its folders looked at once it settles
         if !pending.is_empty() && last_event.elapsed() >= Duration::from_secs(1) {
             let only: Vec<(String, String)> = std::mem::take(&mut pending).into_iter().collect();
-            if worker.sweep(&roots, &ours, &Sweep { only, ..Default::default() }).is_ok() { refresh(&changes, &last); }
+            if let Ok(rep) = worker.sweep(&roots, &ours, &Sweep { only, ..Default::default() }) { unreadable_from(&roots, &rep); refresh(&changes, &last); }
         }
         // Folders that changed, listed once more a minute later (the Mac's listing then is sure)
         let due = worker.due_rechecks();
@@ -537,22 +613,47 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
             set(&status, "");
         }
         if last_look.elapsed() >= Duration::from_secs(300) {
-            if worker.sweep(&own_roots, &own, &Sweep::default()).is_ok() { refresh(&changes, &last); }
+            if let Ok(rep) = worker.sweep(&own_roots, &own, &Sweep::default()) { unreadable_from(&roots, &rep); refresh(&changes, &last); }
+            unreadable_again();
             last_look = Instant::now();
+        }
+        // Asked for in Checks: every folder listed now, or every file of ours read again (both said for the other
+        // computers: none of them needs to look today)
+        let deep = asked.deep.swap(false, Ordering::Relaxed);
+        let check = asked.check.swap(false, Ordering::Relaxed);
+        if deep || check {
+            let kind = if check { "check" } else { "deep" };
+            *asked.care.lock().unwrap() = serde_json::json!({ "kind": kind, "busy": true });
+            set(&status, if check { "Reading every file of ours again, against the catalog…" } else { "Looking at every folder again…" });
+            let r = worker.sweep(&roots, &ours, &Sweep { deep, reread: check, ..Default::default() });
+            set(&status, "");
+            *asked.care.lock().unwrap() = match r {
+                Ok(rep) => {
+                    afp_catalog::care::mark_deep(&worker, &roots.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect::<Vec<_>>());
+                    unreadable_from(&roots, &rep);
+                    refresh(&changes, &last);
+                    let p = |k: &[(String, String)]| paths_of(&roots, Some(k.to_vec())).unwrap_or_default().iter().map(|p| p.display().to_string()).collect::<Vec<_>>();
+                    serde_json::json!({ "kind": kind, "busy": false, "changes": rep.changes, "read": rep.inspected, "folders": rep.dirs,
+                                        "corrected": p(&rep.corrected), "unreadable": p(&rep.unreadable), "not_there": rep.skipped_roots })
+                }
+                Err(e) => serde_json::json!({ "kind": kind, "busy": false, "error": e.to_string() }),
+            };
+            last_care = Instant::now();
         }
         if worker.should_compact() {
             set(&status, "Folding the project's catalog…");
             if worker.compact().is_ok() { let _ = worker.clean(); }
             set(&status, "");
         }
-        // The deep look, once a day (this computer's clock: only how long since it last did)
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-        let before = std::fs::read_to_string(&deep_file).ok().and_then(|t| t.trim().parse::<u64>().ok()).unwrap_or(0);
-        if now.saturating_sub(before) > 86_400 && last_look.elapsed() < Duration::from_secs(290) {
-            if worker.sweep(&own_roots, &own, &Sweep { deep: true, pause: Some(Duration::from_millis(20)), ..Default::default() }).is_ok() {
-                let _ = std::fs::write(&deep_file, now.to_string());
-                refresh(&changes, &last);
-            }
+        // Looked after: the roots nobody has looked at deep within a day, nor watches now (the NAS's watcher), looked
+        // at deep, slowly; nothing when somebody has (afp_catalog::care)
+        if last_care.elapsed() >= Duration::from_secs(3600) {
+            last_care = Instant::now();
+            let st = status.clone();
+            let r = afp_catalog::care::look_after(&mut worker, &roots, &ours, Some(Duration::from_millis(20)),
+                &|n| set(&st, &format!("Looking at every folder of {n} {} nobody has looked after today…", if n == 1 { "source" } else { "sources" })));
+            set(&status, "");
+            if let Ok(Some(rep)) = r { unreadable_from(&roots, &rep); refresh(&changes, &last); }
         }
     }
     let mut g = SEEN.write().unwrap();
@@ -561,6 +662,22 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
 
 /// A look at everything, the footage too, asked of the project's thread
 pub fn look_at_everything(r: Option<&Runner>) { if let Some(r) = r { r.everything.store(true, Ordering::Relaxed); } }
+
+/// Every folder listed now (Checks: "Look at every folder again"), or every file of ours read again ("Check every file
+/// against the catalog")
+pub fn look_deep(r: Option<&Runner>, check: bool) {
+    let Some(r) = r else { return };
+    *r.care.lock().unwrap() = serde_json::json!({ "kind": if check { "check" } else { "deep" }, "busy": true });
+    if check { r.check_now.store(true, Ordering::Relaxed); } else { r.deep_now.store(true, Ordering::Relaxed); }
+}
+
+/// How the last of those went, and the files that aren't what they should be
+pub fn care(r: Option<&Runner>) -> serde_json::Value {
+    let mut v = r.map(|r| r.care.lock().unwrap().clone()).unwrap_or(serde_json::Value::Null);
+    if v.is_null() { v = serde_json::json!({}); }
+    v["unreadable_now"] = serde_json::json!(unreadable());
+    v
+}
 
 /// What the page shows of it
 pub fn status(r: Option<&Runner>) -> String { r.map(|r| r.status.lock().unwrap().clone()).unwrap_or_default() }
@@ -575,6 +692,96 @@ pub fn missing_list(r: Option<&Runner>) -> Vec<serde_json::Value> { r.map(|r| r.
 pub fn recount(r: Option<&Runner>) { if let Some(r) = r { r.missing.store(u64::MAX, Ordering::Relaxed); } }
 
 pub fn is_on(root: &Path) -> bool { SEEN.read().ok().is_some_and(|g| g.as_ref().is_some_and(|s| s.root == root)) }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn project(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("afl-seen-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Day 1")).unwrap();
+        std::fs::write(root.join("Day 1/A.MP4"), b"x").unwrap();
+        std::fs::write(root.join("Project.afproject"), r#"{"id":"seen-test","locations":[{"name":"Here","at":"","path":"."}]}"#).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), br#"{"format":"actionfootageplayer-clip","version":1,"tags":["kept"]}"#).unwrap();
+        let root = root.canonicalize().unwrap();
+        let (roots, ours) = project::roots(&root);
+        let store: Arc<dyn Store> = Arc::new(DiskStore);
+        let mut cat = Catalog::new(store.clone(), store, &root, &root.join(".cache"), "test");
+        cat.load(&Want::All).unwrap();
+        cat.sweep(&roots, &ours, &Default::default()).unwrap();
+        *SEEN.write().unwrap() = Some(Seen::of(&root, cat));
+        root
+    }
+
+    fn tags(path: &Path) -> serde_json::Value { meta(path).flatten().map(|m| m["own"]["tags"].clone()).unwrap_or_default() }
+
+    /// A clip's own file written wrong by a script, noted by the Library: its tags aren't wiped, it's listed for
+    /// Checks; written right (in place), it's noted at the thread's next turn and off the list
+    #[test]
+    fn a_broken_own_file_is_kept_said_and_taken_once_right() {
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        UNREADABLE.lock().unwrap().clear();
+        let root = project("broken");
+        let own = root.join("Day 1/A.afp.json");
+        assert_eq!(tags(&own), serde_json::json!(["kept"]));
+        std::fs::write(&own, br#"{"tags":["half"#).unwrap();
+        note_now(std::slice::from_ref(&own));
+        assert_eq!(tags(&own), serde_json::json!(["kept"]), "its record as it was");
+        assert_eq!(unreadable(), vec![own.display().to_string()]);
+        unreadable_again();
+        assert_eq!(unreadable().len(), 1, "still broken: still said");
+        std::fs::write(&own, br#"{"format":"actionfootageplayer-clip","version":1,"tags":["kept","fixed"]}"#).unwrap();
+        unreadable_again();
+        assert!(unreadable().is_empty());
+        assert_eq!(tags(&own), serde_json::json!(["kept", "fixed"]));
+        *SEEN.write().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// What note_now couldn't write (the catalog's journal not writable: a share away) is kept to be looked at again,
+    /// by the files' paths — never by what was seen of them then
+    #[test]
+    fn a_note_that_couldnt_be_written_is_kept_to_look_at_again() {
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        RETRY.lock().unwrap().clear();
+        let root = project("retry");
+        let own = root.join("Day 1/A.afp.json");
+        std::fs::write(&own, br#"{"tags":["new"]}"#).unwrap();
+        // The journal's folder made unwritable, as a share gone away is
+        let journal = root.join(".afp/catalog/journal");
+        let mut p = std::fs::metadata(&journal).unwrap().permissions();
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; p.set_mode(0o500); }
+        std::fs::set_permissions(&journal, p.clone()).unwrap();
+        for e in std::fs::read_dir(&journal).unwrap().flatten() {
+            let mut q = std::fs::metadata(e.path()).unwrap().permissions();
+            #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; q.set_mode(0o500); }
+            std::fs::set_permissions(e.path(), q).unwrap();
+            for f in std::fs::read_dir(e.path()).unwrap().flatten() {
+                let mut r = std::fs::metadata(f.path()).unwrap().permissions();
+                r.set_readonly(true);
+                std::fs::set_permissions(f.path(), r).unwrap();
+            }
+        }
+        // (the writer's own record of where it is, on this computer, forgotten: it must find the segment again)
+        let _ = std::fs::remove_file(root.join(".cache/writer.json"));
+        note_now(std::slice::from_ref(&own));
+        let kept = RETRY.lock().unwrap().clone();
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt;
+            for e in walkdir(&journal) { let mut q = std::fs::metadata(&e).unwrap().permissions(); q.set_mode(0o755); std::fs::set_permissions(&e, q).unwrap(); } }
+        assert!(kept.contains(&own), "kept to look at again: {kept:?}");
+        *SEEN.write().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn walkdir(d: &Path) -> Vec<PathBuf> {
+        let mut out = vec![d.to_path_buf()];
+        for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            if e.path().is_dir() { out.extend(walkdir(&e.path())); } else { out.push(e.path()); }
+        }
+        out
+    }
+}
 
 // The footage view of a real project, from its catalog and from the disks, compared (by hand:
 // AFL_SEEN=<project> cargo test --release -- --ignored footage_from_catalog --nocapture)

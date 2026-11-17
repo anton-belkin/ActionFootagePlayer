@@ -86,6 +86,13 @@ pub fn temp_name(p: &Path) -> PathBuf {
     p.with_file_name(format!(".tmp-{}-{:x}-{}-{name}", std::process::id(), t, n))
 }
 
+/// A file's time as every computer keeps it: whole 100 ns. That's what SMB carries and what a Mac sees of a share's
+/// file; the NAS sees the same file in nanoseconds (…540523 where the Mac has …540500). Times in records, and the
+/// times compared with them, are all cut to this, so that every computer finds a file as the others noted it (two
+/// precisions made each re-read and re-note the other's files at every look: docs/catalog-safeguards.md, 1). Times
+/// before 1970 and the records' "not known" (-1) are left as they are
+pub fn canon(ns: i64) -> i64 { if ns > 0 { ns - ns % 100 } else { ns } }
+
 pub fn nanos(t: io::Result<std::time::SystemTime>) -> i64 {
     match t {
         Ok(t) => match t.duration_since(std::time::UNIX_EPOCH) {
@@ -156,7 +163,7 @@ mod bulk {
                 o += 8;
                 let kind = u32_at(e, o);
                 o += 4;
-                let mtime = i64_at(e, o).saturating_mul(1_000_000_000).saturating_add(i64_at(e, o + 8));
+                let mtime = super::canon(i64_at(e, o).saturating_mul(1_000_000_000).saturating_add(i64_at(e, o + 8)));
                 o += 16;
                 // A folder's entry has no file attributes
                 let size = if o + 8 <= e.len() { i64_at(e, o).max(0) as u64 } else { 0 };
@@ -183,7 +190,7 @@ mod bulk {
 pub struct DiskStore;
 
 fn stat_of(m: &std::fs::Metadata) -> Stat {
-    Stat { dir: m.is_dir(), size: if m.is_dir() { 0 } else { m.len() }, mtime: nanos(m.modified()) }
+    Stat { dir: m.is_dir(), size: if m.is_dir() { 0 } else { m.len() }, mtime: canon(nanos(m.modified())) }
 }
 
 impl Store for DiskStore {
@@ -304,6 +311,20 @@ mod tests {
             assert_eq!(i.stat, s, "{}", i.name);
         }
         assert_eq!(l.len(), if cfg!(unix) { 4 } else { 3 });
+        std::fs::remove_dir_all(&d).unwrap();
+    }
+
+    /// Every time the disk gives is in whole 100 ns, listed or looked at, whatever the file system keeps
+    #[test]
+    fn times_are_given_in_whole_100_ns() {
+        assert_eq!((canon(1_794_912_649_703_114_533), canon(1_794_912_649_703_114_500), canon(-1), canon(0)), (1_794_912_649_703_114_500, 1_794_912_649_703_114_500, -1, 0));
+        let d = std::env::temp_dir().join(format!("afp-cat-canon-{}", std::process::id()));
+        std::fs::create_dir_all(&d).unwrap();
+        for i in 0..20 { std::fs::write(d.join(format!("{i}.json")), b"{}").unwrap(); }
+        for i in DiskStore.list(&d).unwrap() {
+            assert_eq!(i.stat.mtime % 100, 0, "{}", i.name);
+            assert_eq!(DiskStore.stat(&d.join(&i.name)).unwrap().unwrap().mtime % 100, 0);
+        }
         std::fs::remove_dir_all(&d).unwrap();
     }
 }
