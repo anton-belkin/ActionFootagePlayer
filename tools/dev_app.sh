@@ -40,13 +40,22 @@ prefix=$(brew --prefix)
 # else Homebrew's (the export then takes the pipes, saying why)
 FFPL_DIR="${FFPL_DIR:-$HOME/Library/Caches/afp-ffmpeg-build}"
 if [ -z "${FFMPEG_BIN:-}" ]; then
-    # Built once (about 10 minutes), then kept there; NO_GPU_FFMPEG=1 takes Homebrew's instead
-    if [ ! -x "$FFPL_DIR/prefix/bin/ffmpeg" ] && [ -z "${NO_GPU_FFMPEG:-}" ]; then
-        echo "== ffmpeg with libplacebo for the GPU export (tools/export-gpu/build_ffmpeg_libplacebo.sh, into $FFPL_DIR)"
-        FFPL_DIR="$FFPL_DIR" tools/export-gpu/build_ffmpeg_libplacebo.sh > "$FFPL_DIR.log" 2>&1 \
-            || { echo "Building it failed: $FFPL_DIR.log (NO_GPU_FFMPEG=1 builds the app with Homebrew's)" >&2; exit 1; }
+    # Built once (about 10 minutes), then kept there, and again when this tree's patches (tools/export-gpu/ffmpeg-patches)
+    # aren't the ones it was built for; NO_GPU_FFMPEG=1 takes Homebrew's instead
+    if [ -z "${NO_GPU_FFMPEG:-}" ]; then
+        want=$(tools/export-gpu/build_ffmpeg_libplacebo.sh --stamp)
+        have=$(cat "$FFPL_DIR/prefix/afp-ffmpeg.stamp" 2>/dev/null || echo none)
+        if [ ! -x "$FFPL_DIR/prefix/bin/ffmpeg" ] || [ "$have" != "$want" ]; then
+            echo "== ffmpeg with libplacebo for the GPU export (tools/export-gpu/build_ffmpeg_libplacebo.sh, into $FFPL_DIR; stamp $have, this tree's $want)"
+            FFPL_DIR="$FFPL_DIR" tools/export-gpu/build_ffmpeg_libplacebo.sh > "$FFPL_DIR.log" 2>&1 \
+                || { echo "Building it failed: $FFPL_DIR.log (NO_GPU_FFMPEG=1 builds the app with Homebrew's)" >&2; exit 1; }
+        fi
+        if [ -x "$FFPL_DIR/prefix/bin/ffmpeg" ]; then
+            FFMPEG_BIN="$FFPL_DIR/prefix/bin/ffmpeg"
+            # And it keeps a full-range clip full range on the GPU path (ffmpeg-patches/0002): about a second
+            tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >/dev/null || { tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >&2; echo "Not bundling it" >&2; exit 1; }
+        fi
     fi
-    [ -x "$FFPL_DIR/prefix/bin/ffmpeg" ] && FFMPEG_BIN="$FFPL_DIR/prefix/bin/ffmpeg"
 fi
 [ -z "${FFMPEG_BIN:-}" ] || export FFMPEG_BIN
 # The release's mpv (tools/build_mpv.sh) when it's built, else Homebrew's
