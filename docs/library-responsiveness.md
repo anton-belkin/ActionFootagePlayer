@@ -250,6 +250,26 @@ Every album action now goes the same way: shown at once, written after, the comm
   "In an album" are all made from the same lists (`RAW_FOOTAGE.links`, `DATA.moments`, `DATA.stills`), so a change
   put over them shows in all.
 
+Measured (`page_perf.js`, adapted to Originals / Albums: the four album scenarios; 10,000 clips; the commands timed by
+`perf.rs`, which now times `album_add` 1 / 300, `album_move` 50, `photo_add` 20 and their saying what they made; before
+= this branch's base page, `AFL_UI=<its library/ui>`). From the click on Add / Move to the item shown (Originals' "In an
+album", the link in the album, the photos), and to the page done (nothing more asked):
+
+| Action, 10,000 clips | Shown: before | Shown: now | Done: before | Done: now | Asked of the app, before → now |
+|---|---:|---:|---:|---:|---|
+| Add 1 clip to a new album, as a NAS | 4.7 s | 0.12 s | 64.6 s | 0.70 s | album_add, changes_since, `project`, `scan` ×3 → album_add, changes_since |
+| Add 300 clips, as a NAS | 7.9 s | 0.15 s | 67.8 s | 4.1 s | the same |
+| Move 50 links, as a NAS | 6.8 s | 0.14 s | 74.4 s | 3.1 s | album_move, changes_since, `project`, `scan` ×7 → album_move, changes_since |
+| Photo links of 20 marks, as a NAS | 4.1 s | 0.08 s | 64.7 s | 0.89 s | photo_add, changes_since, `project`, `scan` ×3 → photo_add, changes_since |
+| Add 1 clip, this disk | 1.2 s | 0.12 s | 4.7 s | 0.58 s | |
+| Add 1 clip, the page's own work | 0.56 s | 0.13 s | 0.57 s | 0.47 s | |
+
+"Done" now is the write itself in the background (300 links on a NAS: 3.4 s of writes, as `perf.rs` models a share) and
+one `changes_since` that asks for nothing. Before, the catalog's notice of the album folder made the page read every
+view (the 60 s: `scan moments` is 57 s as a NAS on this project). The model's NAS numbers are `perf.rs`'s (5 / 5 / 15 ms
+a stat / read / write); `photo_add` on the perf project reads no real frames (its clips aren't video), so a real one is
+slower to be *done* (each frame decoded), not to show.
+
 Not changed: renaming an album still reads its views once after it's written (in the background, as a folder
 renamed does: what's in it shows at once all the same). If another computer takes a name between the page's guess and
 the write, the item lands under the command's name: the pending one is replaced by it (a selection on it is lost).

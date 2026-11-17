@@ -26,7 +26,7 @@ const readViews = () => { const v = {}; for (const n of ["footage", "moments", "
 const UIDIR = process.env.AFL_UI || path.join(__dirname, "..", "ui");
 const pinpoint = fs.readFileSync(path.join(UIDIR, "changes.js"), "utf8").includes("changes_since");
 // …and the album commands' account of what they made (albums shown at once)
-const albumsSay = fs.readFileSync(path.join(UIDIR, "albums.js"), "utf8").includes("albumadd");
+const albumsSay = fs.readFileSync(path.join(UIDIR, "albums.js"), "utf8").includes("Writes.define(\"albumadd\"");
 
 // How long a command takes in a mode ("own": at once), by how many items it's for
 function delayFor(mode) {
@@ -80,13 +80,13 @@ const SCENARIOS = [
   } },
   { name: "Add 300 clips to a new album", async run(page, views) {
     const ids = unlinked(views, 300);
-    page.get("S.view = 'sources'; S.path = []; S.flat = true; renderAll()");
+    page.get("S.view = 'sources'; S.path = " + JSON.stringify(FOLDER) + "; renderAll()");
     page.select(ids, "i:s");
     return { act: await sheet(page, "add", "Perf"), shown: () => inAlbum(page, ids[0]) && inAlbum(page, ids[299]) };
   } },
   { name: "Move 50 links to a new album", async run(page, views) {
     const links = views.footage.links.filter((l) => l.rel.startsWith("_Clips/Trip 01/")).slice(0, 50);
-    page.get("S.view = 'footage'; S.path = ['Trip 01']; S.flat = true; renderAll()");
+    page.get("S.view = 'footage'; S.path = ['Trip 01', 'Day 01']; renderAll()");
     page.select(links.map((l) => l.rel), "i:a");
     const last = "_Clips/Moved/" + links[49].rel.split("/").pop();
     return { act: await sheet(page, "move", "Moved"), shown: () => page.get("RAW_FOOTAGE.links.some((l) => l.rel === " + JSON.stringify(last) + ")") };
@@ -94,7 +94,7 @@ const SCENARIOS = [
   { name: "Photo links of 20 marks", async run(page, views) {
     // 5 clips with 4 marks each (their probes say so), selected in Originals
     const ids = unlinked(views, 5);
-    page.get("for (const id of " + JSON.stringify(ids) + ") { const c = RAW_FOOTAGE.items.find((x) => x.id === id); PROBES[c.path] = Object.assign({}, PROBES[c.path] || {}, { marks: { times: [2, 4, 6, 8] } }); } S.view = 'sources'; S.path = []; S.flat = true; renderAll()");
+    page.get("for (const id of " + JSON.stringify(ids) + ") { const c = RAW_FOOTAGE.items.find((x) => x.id === id); PROBES[c.path] = Object.assign({}, PROBES[c.path] || {}, { marks: { times: [2, 4, 6, 8] } }); } S.view = 'sources'; S.path = " + JSON.stringify(FOLDER) + "; renderAll()");
     page.select(ids, "i:s");
     const last = ids[4];
     return { act: () => page.get("photoLinks()"), shown: () => page.get("(DATA.stills.items || []).filter((p) => p.link && p.link.clip === " + JSON.stringify(last) + ").length === 4") };
@@ -169,7 +169,8 @@ const SCENARIOS = [
       const mark = page.mark();
       const t = Date.now();
       act();
-      await page.until(shown, 600000, sc.name + " to show");
+      try { await page.until(shown, +(process.env.AFL_PERF_WAIT || 600000), sc.name + " to show"); }
+      catch (e) { console.error("not shown: errors " + JSON.stringify(page.errors.map(String)) + ", error box " + JSON.stringify(page.get("$('error').textContent")) + ", sheet " + page.get("S.sheet") + ", asked " + page.since(mark).map((c) => c.cmd).join(",")); throw e; }
       const tShown = Date.now() - t;
       await page.quiet(150, 600000);
       const tQuiet = Date.now() - t - 150;
