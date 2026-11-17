@@ -157,13 +157,16 @@ pub fn own_kept(own: &Value) -> Value {
     Value::Object(out)
 }
 
-/// What's inside a file that counts, by its kind (None: nothing of ours in it)
+/// What's inside a file that counts, by its kind (None: nothing of ours in it; InvalidData: a clip's own file that
+/// isn't JSON)
 pub fn read(path: &Path) -> io::Result<Option<Value>> {
     crate::store::nas::read();
     let lower = path.to_string_lossy().to_lowercase();
     if is_sidecar(&lower) {
         let text = std::fs::read(path)?;
-        let Ok(own) = serde_json::from_slice::<Value>(&text) else { return Ok(None) };
+        // Not JSON (being written by something that doesn't write it whole, or written wrong): an error, not a clip
+        // without tags, so that its record stays as it was until the file reads right (docs/catalog-safeguards.md)
+        let own = serde_json::from_slice::<Value>(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
         return Ok(Some(json!({ "own": own_kept(&own) })));
     }
     if is_video(&lower) {

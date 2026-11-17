@@ -356,6 +356,8 @@ impl Catalog {
         let mut seen = HashSet::new();
         let mut entries: Vec<_> = entries.into_iter().rev().filter(|(r, p, _)| seen.insert(key(r, p))).collect();
         entries.reverse();
+        // Times as every computer keeps them (store::canon), whoever made the record
+        for (_, _, f) in entries.iter_mut() { if let Some(f) = f { f.mtime = crate::store::canon(f.mtime); } }
         // What's on record read first: this line's version above every one written before it that can be read now
         // (a computer that hasn't read for a while would otherwise write below newer records, and lose to them)
         match self.read_tails() { Ok(_) | Err(Error::Gap(_)) => {} Err(e) => return Err(e) }
@@ -616,14 +618,14 @@ impl Catalog {
                 if let Some(p) = opts.pause { std::thread::sleep(p); }
                 let full = if d.is_empty() { root.dir.clone() } else { root.dir.join(&d) };
                 let st = match self.shared.stat(&full) {
-                    Ok(Some(s)) if s.dir => s,
+                    Ok(Some(s)) if s.dir => crate::store::Stat { mtime: crate::store::canon(s.mtime), ..s },
                     Ok(_) => continue,
                     Err(_) => { rep.errors += 1; continue }
                 };
                 let known: Vec<(String, File)> = idx.get(&d).cloned().unwrap_or_default();
                 let rec = self.state.get(&rid, &d).cloned();
                 let dg = digest(known.iter().map(|(n, f)| (n.as_str(), f)));
-                let differs = force || opts.deep || whole || match &rec {
+                let differs = force || opts.deep || opts.reread || whole || match &rec {
                     Some(f) if f.dir => f.mtime != st.mtime || f.digest.as_deref() != Some(dg.as_str()),
                     _ => true,
                 };
@@ -634,7 +636,7 @@ impl Catalog {
                     continue;
                 }
                 let mut items = match self.shared.list(&full) {
-                    Ok(i) => i,
+                    Ok(i) => i.into_iter().map(|i| Item { stat: crate::store::Stat { mtime: crate::store::canon(i.stat.mtime), ..i.stat }, ..i }).collect::<Vec<_>>(),
                     Err(e) if not_found(&e) => continue,
                     Err(_) => { rep.errors += 1; continue }
                 };
@@ -644,7 +646,8 @@ impl Catalog {
                 items.retain(|i| keep(i));
                 // A folder that had things in it, listed empty: listed again, and its root's marker looked for again
                 if items.is_empty() && known.len() > 8 {
-                    let again = self.shared.list(&full).map(|mut l| { l.retain(|i| keep(i)); l });
+                    let again = self.shared.list(&full).map(|l| l.into_iter().map(|i| Item { stat: crate::store::Stat { mtime: crate::store::canon(i.stat.mtime), ..i.stat }, ..i })
+                        .filter(|i| keep(i)).collect::<Vec<_>>());
                     let marker = root.marker.as_ref().is_none_or(|m| matches!(self.shared.stat(&root.dir.join(m)), Ok(Some(_))));
                     match again { Ok(l) if marker => items = l, _ => { rep.errors += 1; continue } }
                 }
@@ -657,7 +660,7 @@ impl Catalog {
                 // What's inside the new and changed files, read several at once (each a few round trips on a share)
                 let to_read: Vec<&Item> = items.iter().filter(|it| !it.stat.dir && insp.wants(&rid, &join(&d, &it.name))
                     && !insp.leave(&rid, &join(&d, &it.name), false)
-                    && !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime)).collect();
+                    && (opts.reread || !known_map.get(it.name.as_str()).is_some_and(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime))).collect();
 
                 let read: HashMap<&str, io::Result<Option<Value>>> = {
                     let threads = to_read.len().clamp(1, 8);
@@ -693,13 +696,39 @@ impl Catalog {
                         continue;
                     }
                     if old.is_some_and(|k| k.dir) { gone_dirs.push(rel.clone()); }
-                    let f = match old.filter(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime) {
-                        Some(k) => k.clone(),
+                    let same = old.filter(|k| !k.dir && k.size == it.stat.size && k.mtime == it.stat.mtime);
+                    // Read again whatever its size and time (the check against the files): its record kept when what's
+                    // inside is as on record, else corrected, and said
+                    let same = match (same, opts.reread) {
+                        (Some(k), true) => match read.get(it.name.as_str()) {
+                            Some(Ok(m)) if *m == k.meta => Some(k),
+                            Some(Ok(_)) => { rep.corrected.push((rid.clone(), rel.clone())); None }
+                            _ => Some(k),
+                        },
+                        (s, _) => s,
+                    };
+                    let f = match same {
+                        Some(k) => {
+                            // A file it couldn't read keeps its record, and is said as for any look
+                            if let Some(Err(e)) = read.remove(it.name.as_str()) {
+                                failed = true; rep.errors += 1;
+                                if e.kind() == io::ErrorKind::InvalidData { rep.unreadable.push((rid.clone(), rel.clone())); }
+                            }
+                            k.clone()
+                        }
                         None => {
                             let meta = match read.remove(it.name.as_str()) {
                                 None => None,
                                 Some(Ok(m)) => m,
-                                Some(Err(_)) => { failed = true; rep.errors += 1; continue }
+                                // Couldn't be read, or not what it should be (a clip's own file that isn't JSON: being
+                                // written, or written wrong): its record stays as it was, its folder listed again at
+                                // the next look (and the file read again then)
+                                Some(Err(e)) => {
+                                    failed = true; rep.errors += 1;
+                                    if e.kind() == io::ErrorKind::InvalidData { rep.unreadable.push((rid.clone(), rel.clone())); }
+                                    if let Some(k) = old { now.push((it.name.clone(), k.clone())); }
+                                    continue
+                                }
                             };
                             let f = File { dir: false, size: it.stat.size, mtime: it.stat.mtime, meta, digest: None };
                             out.push((rid.clone(), rel.clone(), Some(f.clone())));
@@ -723,7 +752,7 @@ impl Catalog {
                 }
                 // Changed: to be listed once more by this computer, a while later (not when it's that second listing,
                 // nor a folder never listed before, as on a first look: nothing of it was seen to change)
-                if differs && !is_due && rec.is_some() && !opts.deep { recheck_new.push((rid.clone(), d.clone(), t + self.recheck_after.as_secs())); }
+                if differs && !is_due && rec.is_some() && !opts.deep && !opts.reread { recheck_new.push((rid.clone(), d.clone(), t + self.recheck_after.as_secs())); }
                 if is_due { recheck_done.push((rid.clone(), d.clone())); }
                 let dir_rec = File { dir: true, size: 0, mtime: if failed { -1 } else { st.mtime },
                                      meta: (d.is_empty() && !root.exclude.is_empty()).then(|| json!({ "exclude": root.exclude })),
@@ -774,6 +803,9 @@ pub trait Inspect: Sync {
 pub struct Sweep {
     /// Every folder listed, whatever its time (once a day: changes inside a file that left its folder's time alone)
     pub deep: bool,
+    /// Every folder listed and every file whose insides count read again, whatever its size and time: the check
+    /// against the files (on demand: a restore that kept times). A record is written only where what's inside differs
+    pub reread: bool,
     /// Only these folders (root, path), listed whatever their time (what this computer's system said changed)
     pub only: Vec<(String, String)>,
     pub batch: usize,
@@ -790,6 +822,12 @@ pub struct Report {
     pub inspected: usize,
     pub changes: usize,
     pub errors: usize,
+    /// Files whose insides weren't what they should be (a clip's own file that isn't JSON): their records kept as they
+    /// were, read again at the next look (root, path in it)
+    pub unreadable: Vec<(String, String)>,
+    /// Read again (reread) and found other than on record although their size and time were the same: the catalog
+    /// was wrong there, and is corrected (root, path in it)
+    pub corrected: Vec<(String, String)>,
 }
 
 /// This computer's name in the journals: made once, kept on its own disk with the machine's id it was made on (a

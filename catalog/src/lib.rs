@@ -9,6 +9,7 @@
 // and a reader reads the newest snapshot (only the parts it needs) and the journals' lines after it. Nothing is ever
 // written over, no lock is taken on the share, no clock is compared. Lost, it's built again from the files.
 
+pub mod care;
 pub mod catalog;
 pub mod cli;
 pub mod finder;

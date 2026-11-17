@@ -1,9 +1,10 @@
-// How the catalog stays true to the files, and where it doesn't (docs/catalog-safeguards.md). Most of these tests
-// document how the catalog behaves TODAY: each asserts a hole that is there, so that the report's evidence is
-// re-runnable, and each says which assertion to turn round once the safeguard it argues for is built. The last one
-// checks the project's version gate on a real folder.
+// The catalog against the files, scenario by scenario (docs/catalog-safeguards.md): what's changed in the project's
+// files, by our programs or by anything else (Finder, a script), is in the catalog within the time the report
+// promises — at once where something watches, within a day where nothing does, now on demand — and the catalog
+// writes nothing where nothing changed. Two computers on one simulated share: a Mac with the Library, and the NAS.
 
 mod common;
+use afp_catalog::care;
 use afp_catalog::sim::{ Fs, Net, SimStore };
 use afp_catalog::state::File;
 use afp_catalog::store::{ Item, Stat };
@@ -13,6 +14,8 @@ use serde_json::{ json, Value };
 use std::io;
 use std::path::{ Path, PathBuf };
 use std::sync::{ Arc, Mutex };
+
+const MINUTE: i64 = 60 * 1_000_000_000;
 
 /// One computer's view of the shared files with its own precision of times: `extra` nanoseconds added to every time
 /// it sees. The simulated disk's times are whole microseconds; a Mac over SMB sees a file's time in 100 ns steps
@@ -39,8 +42,8 @@ impl Store for Prec {
 }
 
 /// What's read from a file: a moment's link in the project's folder (as common's), and a clip's own file (.afp.json)
-/// anywhere, kept whole. `old`: a program from before "pick" (Accept / Reject) was kept, which drops it (the NAS
-/// Helper of 2026-11-17)
+/// anywhere, kept whole; one that isn't JSON is an error, as afp_catalog::inspect::read has it. `old`: a program from
+/// before "pick" (Accept / Reject) was kept, which drops it (the NAS Helper of 2026-11-17)
 struct Reader { store: Arc<dyn Store>, old: bool }
 
 impl Inspect for Reader {
@@ -49,7 +52,7 @@ impl Inspect for Reader {
     fn inspect(&self, path: &Path, _r: &str, rel: &str) -> io::Result<Option<Value>> {
         let b = self.store.read(path)?;
         if rel.ends_with(".mp4") { return Ok(read_meta(&b)); }
-        let Ok(mut own) = serde_json::from_slice::<Value>(&b) else { return Ok(None) };
+        let mut own = serde_json::from_slice::<Value>(&b).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         if self.old { if let Some(o) = own.as_object_mut() { o.remove("pick"); } }
         Ok(Some(json!({ "own": own })))
     }
@@ -70,13 +73,30 @@ impl Pc {
     fn reader(&self) -> Reader { Reader { store: self.store.clone(), old: self.old } }
     /// A look at every root's folders' times (the NAS's watcher every 30 min, a Library's "everything")
     fn look(&mut self) -> afp_catalog::Report { let r = self.reader(); self.cat.sweep(&roots(), &r, &Sweep::default()).unwrap() }
-    /// The Library's regular look and its daily deep look: the project's own folder only (seen.rs, project::own_roots)
-    fn look_own(&mut self, deep: bool) -> afp_catalog::Report {
+    /// The Library's regular look: the project's own folder only, by folders' times (seen.rs, project::own_roots)
+    fn look_own(&mut self) -> afp_catalog::Report {
         let r = self.reader();
         let own: Vec<Root> = roots().into_iter().filter(|r| r.id == "p").collect();
-        self.cat.sweep(&own, &r, &Sweep { deep, ..Default::default() }).unwrap()
+        self.cat.sweep(&own, &r, &Sweep::default()).unwrap()
     }
-    fn deep(&mut self) -> afp_catalog::Report { let r = self.reader(); self.cat.sweep(&roots(), &r, &Sweep { deep: true, ..Default::default() }).unwrap() }
+    /// The Library at its start and every hour: the roots nobody has looked after today, looked at deep
+    fn look_after(&mut self) -> Option<afp_catalog::Report> { let r = self.reader(); care::look_after(&mut self.cat, &roots(), &r, None, &|_| {}).unwrap() }
+    /// Checks' "Look at every folder again", afp-catalog look --deep
+    fn deep(&mut self) -> afp_catalog::Report {
+        let r = self.reader();
+        let rep = self.cat.sweep(&roots(), &r, &Sweep { deep: true, ..Default::default() }).unwrap();
+        care::mark_deep(&self.cat, &roots());
+        rep
+    }
+    /// Checks' "Read every file again", afp-catalog check
+    fn check(&mut self) -> afp_catalog::Report { let r = self.reader(); self.cat.sweep(&roots(), &r, &Sweep { reread: true, ..Default::default() }).unwrap() }
+    /// The NAS's watcher starting: every folder listed, then its roots vouched for while it watches
+    fn helper_start(&mut self) -> afp_catalog::Report {
+        let rep = self.deep();
+        care::watching(&self.cat, &roots(), true);
+        rep
+    }
+    fn beat(&self) { care::watching(&self.cat, &roots(), false); }
     /// The NAS's watcher told by inotify that something in this folder changed
     fn told(&mut self, root: &str, dir: &str) -> afp_catalog::Report {
         let r = self.reader();
@@ -92,99 +112,263 @@ impl Pc {
         self.cat.note(vec![(root.into(), rel.into(), Some(File { dir: false, size: st.size, mtime: st.mtime, meta, digest: None }))]).unwrap();
     }
     fn meta(&self, root: &str, rel: &str) -> Option<Value> { self.cat.state.get(root, rel).and_then(|f| f.meta.clone()) }
+    fn has(&self, root: &str, rel: &str) -> bool { self.cat.state.get(root, rel).is_some() }
 }
 
 fn moments(fs: &Arc<Mutex<Fs>>) -> usize {
     fs.lock().unwrap().files_under(Path::new(PROJECT)).iter().filter(|p| p.to_string_lossy().ends_with(".mp4")).count()
 }
 
-/// Two computers that see the same files' times at different precisions re-read and re-note every file of ours at
-/// every look, for ever: each look finds the other's records "changed". With one precision the second look reads
-/// nothing. (Safeguard: one canonical precision for times in records; then turn `assert!(… > 0)` into `== 0`.)
+fn footage(rel: &str) -> PathBuf { Path::new(FOOTAGE).join(rel) }
+
+/// Time passing on the share (its clock: the files' times)
+fn later(fs: &Arc<Mutex<Fs>>, ns: i64) { fs.lock().unwrap().tick += ns; }
+
+// --- One precision of times (safeguard A) ---
+
+/// Two computers that see the same files' times at different precisions (the NAS in ns, a Mac in 100 ns) settle like
+/// two that see them alike: after the first looks, a look reads nothing and writes nothing. (Before the cut each look
+/// found the other's records "changed", and both re-read and re-noted every file for ever.)
 #[test]
-fn today_two_precisions_reread_everything_for_ever() {
-    for (nas_extra, settles) in [(0, true), (23, false)] {
+fn two_precisions_settle_as_one() {
+    for nas_extra in [0, 23] {
         let fs = Fs::new();
         project(&fs, 6, 10, 2);
-        let n = moments(&fs);
+        assert!(moments(&fs) > 0);
         let mut mac = Pc::new(&fs, "mac", 0, false);
         let mut nas = Pc::new(&fs, "nas", nas_extra, false);
         mac.look();
         nas.look();
         for round in 0..4 {
             let (m, s) = (mac.look(), nas.look());
-            if settles {
-                assert_eq!((m.inspected, s.inspected, m.changes, s.changes), (0, 0, 0, 0), "round {round}");
-            } else {
-                // Every moment read again by both, and every folder's and file's record written again
-                assert_eq!((m.inspected, s.inspected), (n, n), "round {round}");
-                assert!(m.changes > n && s.changes > n, "round {round}: {} / {}", m.changes, s.changes);
-            }
+            assert_eq!((m.inspected, s.inspected, m.changes, s.changes), (0, 0, 0, 0), "NAS +{nas_extra} ns, round {round}");
         }
     }
 }
 
-/// The 2026-11-17 channel: the Library writes a clip's own file and notes it; the NAS's watcher, told of the write,
-/// lists the folder and — only because it sees the time with more digits — reads the file again and notes it again
-/// (with whatever its program keeps). With one precision it notes nothing of the file.
+/// The Library writes a clip's own file and notes it; the NAS's watcher, told of the write, lists the folder and
+/// leaves the file alone: it's on record as it is (the door of 2026-11-17 was this re-read, by a program that kept less).
 #[test]
-fn today_the_nas_renotes_each_file_a_mac_just_noted() {
-    for (nas_extra, renoted) in [(0, false), (23, true)] {
-        let fs = Fs::new();
-        project(&fs, 2, 4, 0);
-        let rel = "Day000/C0000.afp.json";
-        fs.lock().unwrap().write(&Path::new(FOOTAGE).join(rel), br#"{"tags":["sun"]}"#);
-        let mut mac = Pc::new(&fs, "mac", 0, false);
-        let mut nas = Pc::new(&fs, "nas", nas_extra, false);
-        mac.look();
-        nas.look();
-        fs.lock().unwrap().write(&Path::new(FOOTAGE).join(rel), br#"{"tags":["sun"],"pick":"reject"}"#);
-        mac.note_now("f", rel);
-        let r = nas.told("f", "Day000");
-        assert_eq!(r.inspected, renoted as usize, "the NAS read the file again: {renoted}");
-    }
-}
-
-/// …and a program that keeps less than the file holds then wipes the field from every view, for good where no
-/// computer looks again: the Library's regular and daily deep looks are of the project's own folder, not of the
-/// footage's locations where clips' own files are. With one precision the older program never touches the record.
-/// (Today project::VERSION refuses such a program and own_kept carries unknown fields; the hole shown here is the
-/// mechanism, which any future inspection difference would use again.)
-#[test]
-fn today_an_older_program_wipes_a_field_and_nothing_heals_it() {
+fn the_nas_leaves_alone_a_file_the_mac_just_noted() {
     for nas_extra in [0, 23] {
         let fs = Fs::new();
         project(&fs, 2, 4, 0);
         let rel = "Day000/C0000.afp.json";
-        let file = Path::new(FOOTAGE).join(rel);
-        fs.lock().unwrap().write(&file, br#"{"tags":["sun"]}"#);
+        fs.lock().unwrap().write(&footage(rel), br#"{"tags":["sun"]}"#);
+        let mut mac = Pc::new(&fs, "mac", 0, false);
+        let mut nas = Pc::new(&fs, "nas", nas_extra, false);
+        mac.look();
+        nas.look();
+        fs.lock().unwrap().write(&footage(rel), br#"{"tags":["sun"],"pick":"reject"}"#);
+        mac.note_now("f", rel);
+        let r = nas.told("f", "Day000");
+        assert_eq!(r.inspected, 0, "NAS +{nas_extra} ns read it again");
+    }
+}
+
+/// …so an older program on the NAS (one that drops a field) never gets to rewrite the record, and Accept / Reject
+/// stays in every view, through every look of both computers.
+#[test]
+fn an_older_reader_never_rewrites_what_the_mac_noted() {
+    for nas_extra in [0, 23] {
+        let fs = Fs::new();
+        project(&fs, 2, 4, 0);
+        let rel = "Day000/C0000.afp.json";
+        fs.lock().unwrap().write(&footage(rel), br#"{"tags":["sun"]}"#);
         let mut mac = Pc::new(&fs, "mac", 0, false);
         let mut nas = Pc::new(&fs, "nas", nas_extra, true);
         mac.look();
         nas.look();
-        fs.lock().unwrap().write(&file, br#"{"tags":["sun"],"pick":"reject"}"#);
+        fs.lock().unwrap().write(&footage(rel), br#"{"tags":["sun"],"pick":"reject"}"#);
         mac.note_now("f", rel);
         nas.told("f", "Day000");
-        // The Library's looks, regular and deep, many times; the NAS's every-30-minutes look too
-        for _ in 0..3 { mac.look_own(false); mac.look_own(true); nas.look(); }
+        for _ in 0..3 { mac.look_own(); nas.look(); }
         mac.cat.refresh().unwrap();
-        let pick = mac.meta("f", rel).and_then(|m| m["own"].get("pick").cloned());
-        if nas_extra == 0 {
-            assert_eq!(pick, Some(json!("reject")), "one precision: the older program never re-read it");
-        } else {
-            assert_eq!(pick, None, "today: wiped, and no look brings it back (the file still has it)");
-            // What would: reading the file's insides again although its size and time are as on record
-            assert!(String::from_utf8(fs.lock().unwrap().nodes[&file].data.clone()).unwrap().contains("reject"));
-        }
+        assert_eq!(mac.meta("f", rel).and_then(|m| m["own"].get("pick").cloned()), Some(json!("reject")), "NAS +{nas_extra} ns");
     }
 }
 
-/// A file whose insides change while its size and time stay (a copy or a restore that keeps times, `touch -r`, a
-/// rewrite within a coarse disk's tick) is never read again: not by a look, not by the deep look (it lists every
-/// folder but reads only files whose size or time differ). (Safeguard: a periodic re-reading of contents; then turn
-/// the last assertion round.)
+// --- Changes made in Finder or by a script (files only, nothing noted) ---
+
+/// Finder, with the NAS's watcher running: a clip moved to another folder with its own file, one renamed, one deleted,
+/// a whole folder moved. Each is seen as soon as the watcher is told, and the moved clip's own file keeps its tags at
+/// its new place.
 #[test]
-fn today_a_change_keeping_size_and_time_is_never_seen() {
+fn finder_moves_renames_and_deletes_are_seen_where_the_nas_watches() {
+    let fs = Fs::new();
+    project(&fs, 3, 4, 0);
+    fs.lock().unwrap().write(&footage("Day000/C0000.afp.json"), br#"{"tags":["reef"]}"#);
+    let mut nas = Pc::new(&fs, "nas", 0, false);
+    nas.helper_start();
+    {
+        let mut f = fs.lock().unwrap();
+        f.rename(&footage("Day000/C0000.mp4"), &footage("Sorted/C0000.mp4"));
+        f.rename(&footage("Day000/C0000.afp.json"), &footage("Sorted/C0000.afp.json"));
+        f.rename(&footage("Day000/C0001.mp4"), &footage("Day000/Dive one.mp4"));
+        f.remove(&footage("Day000/C0002.mp4"));
+        f.rename(&footage("Day002"), &footage("2026 Egypt/Day002"));
+    }
+    for d in ["Day000", "Sorted", "", "2026 Egypt"] { nas.told("f", d); }
+    assert_eq!(nas.meta("f", "Sorted/C0000.afp.json"), Some(json!({ "own": { "tags": ["reef"] } })));
+    assert!(!nas.has("f", "Day000/C0000.afp.json") && !nas.has("f", "Day000/C0000.mp4") && nas.has("f", "Sorted/C0000.mp4"));
+    assert!(nas.has("f", "Day000/Dive one.mp4") && !nas.has("f", "Day000/C0001.mp4"));
+    assert!(!nas.has("f", "Day000/C0002.mp4"));
+    assert!(nas.has("f", "2026 Egypt/Day002/C0003.mp4") && !nas.has("f", "Day002/C0003.mp4"));
+}
+
+/// The same in Finder with no watcher anywhere (a USB disk, the Helper not installed): the Library's look at
+/// everything by folders' times sees all of it (moves, renames and deletions change folders' times).
+#[test]
+fn finder_changes_are_seen_by_the_librarys_look_without_a_watcher() {
+    let fs = Fs::new();
+    project(&fs, 3, 4, 0);
+    fs.lock().unwrap().write(&footage("Day000/C0000.afp.json"), br#"{"tags":["reef"]}"#);
+    let mut mac = Pc::new(&fs, "mac", 0, false);
+    assert!(mac.look_after().is_some(), "nobody has looked after them yet: looked at");
+    {
+        let mut f = fs.lock().unwrap();
+        f.rename(&footage("Day000/C0000.mp4"), &footage("Sorted/C0000.mp4"));
+        f.rename(&footage("Day000/C0000.afp.json"), &footage("Sorted/C0000.afp.json"));
+        f.remove(&footage("Day000/C0002.mp4"));
+        f.rename(&footage("Day002"), &footage("2026 Egypt/Day002"));
+    }
+    mac.look();
+    assert_eq!(mac.meta("f", "Sorted/C0000.afp.json"), Some(json!({ "own": { "tags": ["reef"] } })));
+    assert!(!mac.has("f", "Day000/C0000.mp4") && mac.has("f", "Sorted/C0000.mp4"));
+    assert!(!mac.has("f", "Day000/C0002.mp4") && mac.has("f", "2026 Egypt/Day002/C0003.mp4") && !mac.has("f", "Day002/C0003.mp4"));
+}
+
+/// A script that rewrites clips' own files in place (Python's open('w'): the folder's time stays) with nothing
+/// watching: not seen by the looks that go by folders' times, seen by the next deep look — on demand at once, else
+/// within a day, by whoever is about first.
+#[test]
+fn a_script_editing_in_place_is_seen_within_a_day_or_at_once_on_demand() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 0);
+    let rel = "Day001/C0002.afp.json";
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":[]}"#);
+    let mut mac = Pc::new(&fs, "mac", 0, false);
+    mac.look_after();
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["edited by a script"]}"#);
+    mac.look();
+    mac.look_own();
+    assert!(mac.look_after().is_none(), "looked after today already: nothing listed");
+    assert_eq!(mac.meta("f", rel), Some(json!({ "own": { "tags": [] } })), "not seen yet: its folder's time is as it was");
+    // A day later, the Library's hourly look after
+    later(&fs, 24 * 60 * MINUTE);
+    let r = mac.look_after().expect("a day without anyone looking: looked at deep");
+    assert!(r.listed >= 3 && r.inspected == 1, "every folder listed, only the changed file read: {r:?}");
+    assert_eq!(mac.meta("f", rel), Some(json!({ "own": { "tags": ["edited by a script"] } })));
+    // …or at once: Checks' "Look at every folder again" (afp-catalog look --deep)
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["again"]}"#);
+    assert_eq!(mac.deep().inspected, 1);
+    assert_eq!(mac.meta("f", rel), Some(json!({ "own": { "tags": ["again"] } })));
+}
+
+/// A deep look by one computer spares the others that day: a second Mac's Library opening looks at nothing.
+#[test]
+fn one_computers_deep_look_spares_the_others() {
+    let fs = Fs::new();
+    project(&fs, 3, 4, 2);
+    let mut a = Pc::new(&fs, "mac-a", 0, false);
+    let mut b = Pc::new(&fs, "mac-b", 0, false);
+    a.look_after().expect("looked at");
+    later(&fs, 23 * 60 * MINUTE);
+    assert!(b.look_after().is_none(), "looked after by the other Mac within the day");
+    later(&fs, 2 * 60 * MINUTE);
+    assert!(b.look_after().is_some(), "over a day: this one looks");
+    assert!(a.look_after().is_none(), "…and spares the first");
+}
+
+/// The NAS's watcher vouches for its roots while it runs, however long, with no deep look of its own: the Library
+/// never looks deep then. Stopped, it stops vouching within 15 minutes, and the Library looks.
+#[test]
+fn a_watching_helper_spares_the_library_and_a_stopped_one_doesnt() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 2);
+    let mut nas = Pc::new(&fs, "nas", 23, false);
+    let mut mac = Pc::new(&fs, "mac", 0, false);
+    nas.helper_start();
+    // Two days of it watching, a line every 5 minutes; the Library opened now and then
+    for i in 0..(2 * 24 * 12) {
+        later(&fs, 5 * MINUTE);
+        nas.beat();
+        if i % 50 == 0 { assert!(mac.look_after().is_none(), "watched: nothing for the Library to look at ({i})"); }
+    }
+    // The Helper stops (the NAS off, its container stopped)
+    later(&fs, 20 * MINUTE);
+    assert!(mac.look_after().is_some(), "no longer watched: the Library looks");
+}
+
+/// The Helper starting again lists every folder: what was changed in place while it was down is seen.
+#[test]
+fn the_helper_at_its_start_sees_what_changed_while_it_was_down() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 0);
+    let rel = "Day000/C0001.afp.json";
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":[]}"#);
+    let mut nas = Pc::new(&fs, "nas", 23, false);
+    nas.helper_start();
+    // Down; meanwhile a script edits in place
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["while it was down"]}"#);
+    nas.look();
+    assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": [] } })), "a look by folders' times doesn't see it");
+    nas.helper_start();
+    assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": ["while it was down"] } })));
+}
+
+/// A clip's own file written wrong (not JSON: a script's bug, or caught half-written) keeps its record as it was —
+/// the tags aren't wiped — and is said; once it reads right it's noted, even written in place, by the next look of
+/// its folder (which is listed again until then).
+#[test]
+fn a_broken_own_file_keeps_its_record_until_it_reads_right() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 0);
+    let rel = "Day000/C0003.afp.json";
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["kept"]}"#);
+    let mut nas = Pc::new(&fs, "nas", 0, false);
+    nas.helper_start();
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["half"#);
+    let r = nas.told("f", "Day000");
+    assert_eq!(r.unreadable, vec![("f".to_string(), rel.to_string())]);
+    assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": ["kept"] } })), "its record kept");
+    // Still broken: said again, still kept
+    assert_eq!(nas.look().unreadable.len(), 1);
+    // Written right, in place (its folder's time stays): the next look reads it
+    fs.lock().unwrap().write(&footage(rel), br#"{"tags":["kept","fixed"]}"#);
+    let r = nas.look();
+    assert!(r.unreadable.is_empty());
+    assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": ["kept", "fixed"] } })));
+    assert_eq!(nas.look().changes, 0, "and settled");
+}
+
+/// A moment deleted in Finder (into the NAS's #recycle) goes from the catalog at the Library's regular look of the
+/// project's folder; put back, it's read again as new.
+#[test]
+fn a_moment_deleted_and_put_back_in_finder() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 2);
+    let rel = "Generated/2026-11-01 Moments/Day000/C0000 m.mp4";
+    let mut mac = Pc::new(&fs, "mac", 0, false);
+    mac.look();
+    assert!(mac.has("p", rel));
+    let bin = Path::new(PROJECT).join("#recycle/C0000 m.mp4");
+    fs.lock().unwrap().rename(&Path::new(PROJECT).join(rel), &bin);
+    mac.look_own();
+    assert!(!mac.has("p", rel), "deleted: gone from the catalog");
+    fs.lock().unwrap().rename(&bin, &Path::new(PROJECT).join(rel));
+    mac.look_own();
+    assert_eq!(mac.meta("p", rel), read_meta(&moment_bytes("h0x0", "Day000/C0000.mp4", 0)));
+}
+
+// --- Out of what the looks can see, on demand: the check against the files ---
+
+/// A file whose insides change while its size and time stay (a restore from a backup that keeps times) is out of what
+/// the looks can see — the deep look lists every folder and reads nothing. The check against the files (Checks' "Read
+/// every file again", afp-catalog check) reads every file of ours, corrects the record, says which; a second check
+/// finds nothing and writes nothing.
+#[test]
+fn the_check_against_the_files_corrects_a_restore_that_kept_times() {
     let fs = Fs::new();
     project(&fs, 2, 4, 2);
     let mut a = Pc::new(&fs, "a", 0, false);
@@ -203,43 +387,23 @@ fn today_a_change_keeping_size_and_time_is_never_seen() {
         f.remove(&path);
         f.rename(&tmp, &path);
     }
-    let r = a.look();
-    assert!(r.listed >= 1, "its folder was listed (its time changed)");
-    let d = a.deep();
-    assert_eq!(d.inspected, 0, "the deep look lists every folder but reads nothing");
-    assert!(d.listed > 5);
-    assert_ne!(a.meta("p", rel), read_meta(&new), "today: the catalog keeps the old insides for good");
+    a.look();
+    assert_eq!(a.deep().inspected, 0, "the looks, deep too, read only files whose size or time changed");
+    assert_ne!(a.meta("p", rel), read_meta(&new), "so the restore isn't seen by them");
+    let c = a.check();
+    assert_eq!(c.corrected, vec![("p".to_string(), rel.to_string())]);
+    assert_eq!(a.meta("p", rel), read_meta(&new));
+    let c = a.check();
+    assert!(c.corrected.is_empty() && c.changes == 0 && c.inspected > 0, "nothing to correct, nothing written: {c:?}");
 }
 
-/// A file of a location written in place by something not ours (its folder's time stays) when the NAS's watcher
-/// doesn't hear it (down, or the change made before it started): the NAS's 30-minute look and the Library's looks go
-/// by folders' times and don't list it; only a deep look at the locations would, and no program does one. (Safeguard:
-/// the periodic re-reading covering the locations' own files.)
-#[test]
-fn today_an_in_place_change_in_a_location_waits_for_ever_without_inotify() {
-    let fs = Fs::new();
-    project(&fs, 2, 4, 0);
-    let rel = "Day001/C0002.afp.json";
-    let file = Path::new(FOOTAGE).join(rel);
-    fs.lock().unwrap().write(&file, br#"{"tags":[]}"#);
-    let mut mac = Pc::new(&fs, "mac", 0, false);
-    let mut nas = Pc::new(&fs, "nas", 0, false);
-    mac.look();
-    nas.look();
-    fs.lock().unwrap().write(&file, br#"{"tags":["edited in a text editor"]}"#);
-    for _ in 0..3 { nas.look(); mac.look_own(false); mac.look_own(true); }
-    mac.cat.refresh().unwrap();
-    assert_eq!(mac.meta("f", rel), Some(json!({ "own": { "tags": [] } })), "today: not seen");
-    // A deep look over the locations would see it (its size and time changed)
-    assert_eq!(nas.deep().inspected, 1);
-    mac.cat.refresh().unwrap();
-    assert_eq!(mac.meta("f", rel), Some(json!({ "own": { "tags": ["edited in a text editor"] } })));
-}
+// --- Limits kept ---
 
 /// A disk whose times are coarse (exFAT 10 ms, FAT 2 s) as a location: a file added to a folder in the same tick as
-/// the folder's last listing leaves its time as recorded, and no look but a deep one lists it.
+/// the folder's last listing leaves its time as recorded, and only a deep look lists it — within a day, by the looks
+/// after (cards are taken in, not kept as locations: this is unlikely).
 #[test]
-fn today_a_coarse_folder_time_hides_a_new_file_until_a_deep_look() {
+fn a_coarse_folder_time_hides_a_new_file_until_a_deep_look() {
     #[derive(Clone)]
     struct Coarse(SimStore);
     impl Coarse { fn fix(s: Stat) -> Stat { Stat { mtime: s.mtime - s.mtime.rem_euclid(10_000_000), ..s } } }
@@ -264,13 +428,13 @@ fn today_a_coarse_folder_time_hides_a_new_file_until_a_deep_look() {
     let look = |cat: &mut Catalog, deep: bool| cat.sweep(&roots(), &rd, &Sweep { deep, ..Default::default() }).unwrap();
     // Start the folder's coarse tick afresh, then: listed (and listed again, the recheck), then a clip added
     { let mut f = fs.lock().unwrap(); f.tick = (f.tick / 10_000_000 + 1) * 10_000_000; }
-    fs.lock().unwrap().write(&Path::new(FOOTAGE).join("Day000/NEW1.mp4"), b"x");
+    fs.lock().unwrap().write(&footage("Day000/NEW1.mp4"), b"x");
     look(&mut cat, false);
     look(&mut cat, false);
-    fs.lock().unwrap().write(&Path::new(FOOTAGE).join("Day000/NEW2.mp4"), b"y");
+    fs.lock().unwrap().write(&footage("Day000/NEW2.mp4"), b"y");
     for _ in 0..3 { look(&mut cat, false); }
     assert!(cat.state.get("f", "Day000/NEW1.mp4").is_some());
-    assert!(cat.state.get("f", "Day000/NEW2.mp4").is_none(), "today: not seen by the looks");
+    assert!(cat.state.get("f", "Day000/NEW2.mp4").is_none(), "not seen by the looks by folders' times");
     look(&mut cat, true);
     assert!(cat.state.get("f", "Day000/NEW2.mp4").is_some(), "the deep look sees it");
 }
@@ -298,5 +462,18 @@ fn the_version_gate_holds_for_a_catalog_already_open() {
     let rd = Reader { store: Arc::new(DiskStore), old: true };
     assert!(matches!(cat.sweep(&[root], &rd, &Sweep::default()), Err(afp_catalog::Error::TooNew(_))));
     assert!(matches!(cat.compact(), Err(afp_catalog::Error::TooNew(_))));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// The real disk: a clip's own file that isn't JSON is an error for the catalog, not a clip without tags
+#[test]
+fn a_sidecar_that_isnt_json_is_an_error_on_the_real_disk() {
+    let dir: PathBuf = std::env::temp_dir().join(format!("afp-bad-own-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let f = dir.join("A.afp.json");
+    std::fs::write(&f, br#"{"tags":["x""#).unwrap();
+    assert_eq!(afp_catalog::inspect::read(&f).unwrap_err().kind(), io::ErrorKind::InvalidData);
+    std::fs::write(&f, br#"{"tags":["x"]}"#).unwrap();
+    assert_eq!(afp_catalog::inspect::read(&f).unwrap().unwrap()["own"]["tags"], json!(["x"]));
     let _ = std::fs::remove_dir_all(&dir);
 }

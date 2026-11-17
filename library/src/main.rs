@@ -1530,6 +1530,21 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
     }).await.map_err(|e| e.to_string())
 }
 
+// Checks' catalog part: every folder looked at again now (after a script changed files in place), or every file of ours
+// read again against the catalog (after a restore that kept times); and how the last of those went
+#[tauri::command]
+async fn catalog_look(shared: State<'_, Shared>, check: bool) -> Result<(), String> {
+    let g = shared.lock().unwrap();
+    let w = g.watch.as_ref().ok_or("Open a project first")?;
+    seen::look_deep(Some(&w.runner), check);
+    Ok(())
+}
+
+#[tauri::command]
+async fn catalog_care(shared: State<'_, Shared>) -> Result<Value, String> {
+    Ok(seen::care(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner)))
+}
+
 // The links whose original isn't where they say, as last counted: [{ file, tree, kind }]
 #[tauri::command]
 async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> {
@@ -2631,7 +2646,7 @@ fn main() {
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
-                                                 export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
+                                                 export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
                                                  albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
         .on_window_event(move |window, event| {
