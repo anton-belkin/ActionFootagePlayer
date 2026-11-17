@@ -33,8 +33,8 @@ const DIGITAL_LENSES: &[(&str, &str)] = &[
 ];
 
 /// Why the warp can't render this clip as the VapourSynth path does, if it can't: the lens or digital lens it has no
-/// GLSL for, a lens correction below 100 % (the root solve isn't ported), the equirect output, a horizontal rolling
-/// shutter, IBIS/OIS, lens breathing or a mesh (Sony)
+/// GLSL for, the equirect output, a horizontal rolling shutter, IBIS/OIS, lens breathing or a mesh (Sony). A lens
+/// correction below 100 % renders (warp.glsl's blend_ray, LENS_BLEND)
 pub fn unsupported(clip: &Clip) -> Option<String> {
     let p = &clip.params;
     let lens = p.distortion_model.id();
@@ -42,7 +42,6 @@ pub fn unsupported(clip: &Clip) -> Option<String> {
     if let Some(d) = &p.digital_lens {
         if !DIGITAL_LENSES.iter().any(|(id, _)| *id == d.id()) { return Some(format!("digital lens {}", d.id())); }
     }
-    if p.lens_correction_amount < 1.0 { return Some(format!("lens correction {:.0} %", p.lens_correction_amount * 100.0)); }
     if p.output_projection == gyroflow_core::stabilization::projection::EQUIRECT { return Some("equirect output".into()); }
     if p.frame_readout_direction.is_horizontal() && clip.rows() > 1 { return Some("horizontal rolling shutter".into()); }
     let tr = clip.transform(clip.frame_count / 2, clip.output_size);
@@ -339,7 +338,7 @@ impl Table {
                 {
                     // Red's and blue's index over green's where the frame is under water and the fringes are taken out
                     let n = kp.light_refraction_coefficient as f64;
-                    let k = if opts.chromatic && n > 1.0 && kp.lens_correction_amount >= 0.999 { crate::dispersion::water_ratios(n) } else { [1.0, 1.0] };
+                    let k = if opts.chromatic && n > 1.0 { crate::dispersion::water_ratios(n) } else { [1.0, 1.0] };
                     [kp.input_horizontal_stretch, kp.input_vertical_stretch, k[0], k[1]]
                 },
                 {
@@ -396,16 +395,23 @@ impl Table {
     }
 }
 
+/// Whether the lens correction is below 100 % anywhere in the clip: warp.glsl then solves each pixel's ray (LENS_BLEND)
+pub fn lens_blend(clip: &Clip) -> bool {
+    let p = &clip.params;
+    p.output_projection != gyroflow_core::stabilization::projection::EQUIRECT
+        && (p.lens_correction_amount < 0.999 || p.keyframes.is_keyframed(&gyroflow_core::keyframes::KeyframeType::LensCorrectionStrength))
+}
+
 /// The clip's constants for warp.glsl
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}\n#define LENS_BLEND {}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
         bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
-        (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
+        (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32, lens_blend(clip) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
 /// warp.glsl with \n line ends, whatever the checkout gave it: Git for Windows (core.autocrlf, also on GitHub's
@@ -874,7 +880,7 @@ mod tests {
 
     #[repr(C)]
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, cam: [f32; 4], zoom: f32, _pad: f32 }
+    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, cam: [f32; 4], zoom: f32, time_offset: f32 }
 
     const GRID_TEX: (u32, u32) = (600, 340);
 
@@ -890,7 +896,7 @@ mod tests {
         if uv_out { defs += "\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)"; }
         let head = format!("#version 450
 {}
-layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; float gyroflow_cam_x; float gyroflow_cam_y; float gyroflow_cam_z; float gyroflow_cam_w; float gyroflow_cam_zoom; }};
+layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; float gyroflow_cam_x; float gyroflow_cam_y; float gyroflow_cam_z; float gyroflow_cam_w; float gyroflow_cam_zoom; float gyroflow_time_offset; }};
 layout(set = 0, binding = 1) uniform texture2D hooked_t;
 layout(set = 0, binding = 2) uniform sampler hooked_s;
 layout(set = 0, binding = 3) uniform texture2D table_t;
@@ -972,7 +978,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let grid_rb_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
         let q = cam.map(camera_quat).unwrap_or_else(UnitQuaternion::identity);
         let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1,
-                    cam: [q.i as f32, q.j as f32, q.k as f32, q.w as f32], zoom: cam.map(|c| c.zoom as f32).unwrap_or(1.0), _pad: 0.0 };
+                    cam: [q.i as f32, q.j as f32, q.k as f32, q.w as f32], zoom: cam.map(|c| c.zoom as f32).unwrap_or(1.0), time_offset: 0.0 };
         let buf = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<U>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         g.queue.write_buffer(&buf, 0, bytemuck::bytes_of(&u));
         let sampler = d.create_sampler(&wgpu::SamplerDescriptor::default());
@@ -1180,7 +1186,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                 for y in 0..out.1 {
                     for x in 0..out.0 {
                         let s = uv[y * out.0 + x];
-                        let c = Stabilization::undistort_coord(Vector2::new(x as f32, y as f32), kp, &tr.matrices, &clip.params.distortion_model, None, &[], &out_c, &out_f);
+                        let c = Stabilization::undistort_coord(Vector2::new(x as f32, y as f32), kp, &tr.matrices, &clip.params.distortion_model, clip.params.digital_lens.as_ref(), &[], &out_c, &out_f);
                         let inside = |p: Vector2<f32>| p.x >= 0.0 && p.y >= 0.0 && p.x <= clip.size.0 as f32 - 1.0 && p.y <= clip.size.1 as f32 - 1.0;
                         if let Some(c) = c.filter(|c| inside(*c)) {
                             if s[0] < -1000.0 { mismatched += 1; continue; }
@@ -1192,9 +1198,13 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                     }
                 }
                 eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out", sum / n.max(1) as f64);
-                assert!(n > out.0 * out.1 / 2, "frame {frame}: too few pixels compared");
+                // Zoomed out (the camera's 1.25) on a lens left as recorded, less than half of the output is the frame
+                assert!(n > out.0 * out.1 / if camera && lens_blend(&clip) { 4 } else { 2 }, "frame {frame}: too few pixels compared");
                 // The bilinear grid with a camera zoomed out (wider than the clip, more of the lens's curve): up to 0.2 px
-                assert!(worst < if camera && opts.grid_linear { 0.25 } else { 0.1 }, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
+                // A lens correction below 100 % (the lens's own curve, LENS_BLEND) bends the map more between grid points: the
+                // 32 px grid (not the player's) up to 0.15 px there
+                let bound = if (camera && opts.grid_linear) || (lens_blend(&clip) && opts.mode != Mode::Exact && opts.grid_step >= 32) { 0.25 } else { 0.1 };
+                assert!(worst < bound, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
                 assert!(mismatched < out.0, "frame {frame}: {mismatched} pixels the shader left out");
             }
         }

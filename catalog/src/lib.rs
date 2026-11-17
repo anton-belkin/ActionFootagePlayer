@@ -15,6 +15,7 @@ pub mod finder;
 pub mod inspect;
 pub mod locations;
 pub mod project;
+pub mod range;
 pub mod journal;
 pub mod live;
 pub mod sim;

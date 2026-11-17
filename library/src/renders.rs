@@ -77,6 +77,7 @@ pub struct Ctx {
     locs: Vec<crate::locations::Location>,
     names: Option<HashSet<String>>,
     clips: RefCell<HashMap<String, ClipFacts>>,
+    ranges: RefCell<HashMap<String, Option<afp_catalog::range::Range>>>,
 }
 
 impl Ctx {
@@ -90,7 +91,7 @@ impl Ctx {
         }).into_iter().collect());
         let preset = defaults["preset"].as_str().map(Path::new).filter(|p| p.is_file()).and_then(crate::checks::fingerprint_kept).map(Value::from).unwrap_or(Value::Null);
         Ctx { root: root.to_path_buf(), defaults, preset, locs: crate::locations::locations(root, &crate::locations::mounts()),
-              names, clips: RefCell::new(HashMap::new()) }
+              names, clips: RefCell::new(HashMap::new()), ranges: RefCell::new(HashMap::new()) }
     }
 
     fn has(&self, name: &str) -> bool {
@@ -398,7 +399,39 @@ pub struct Found {
     pub stale: Option<PathBuf>,
 }
 
+/// The profile an item is rendered in when `profile` is asked for: an SDR clip's HDR is its SDR render (gyroflow-export
+/// keeps an SDR clip's colors as they are in both: one file, not two of the same pixels). A log clip, an HLG or PQ one,
+/// or one that can't be read keeps its HDR. Reads the clip's MP4 once per Ctx (afp_catalog::range)
+pub fn resolve(ctx: &Ctx, item: &Item, profile: &'static Profile) -> &'static Profile {
+    if profile.name != "HDR" || ctx.is_sdr(item) != Some(true) { return profile; }
+    self::profile("SDR").unwrap()
+}
+
+impl Ctx {
+    /// Whether the clip an item is of is SDR (not log, not HLG or PQ): None where it can't be told
+    pub fn is_sdr(&self, item: &Item) -> Option<bool> {
+        let tree = item.tree()?;
+        if let Some(r) = self.ranges.borrow().get(tree) { return r.map(|r| r == afp_catalog::range::Range::Sdr); }
+        let facts = self.clip(tree);
+        let curve = facts.doc["source"]["curve"].as_str().or(facts.doc["view"]["curve"].as_str());
+        let r = facts.file.as_deref().and_then(|f| afp_catalog::range::of(f, curve));
+        self.ranges.borrow_mut().insert(tree.to_string(), r);
+        r.map(|r| r == afp_catalog::range::Range::Sdr)
+    }
+}
+
 pub fn find(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
+    let found = find_as(ctx, item, profile);
+    // An SDR clip's HDR is its SDR render (resolve): looked for only where the HDR's own isn't there and an SDR one is
+    if profile.name == "HDR" && found.file.is_none() && !profile.photo {
+        let sdr = self::profile("SDR").unwrap();
+        let other = find_as(ctx, item, sdr);
+        if other.file.is_some() && ctx.is_sdr(item) == Some(true) { return other; }
+    }
+    found
+}
+
+fn find_as(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
     let recipe = recipe(ctx, item, profile);
     let hash = hash(&recipe);
     let mut found = Found { recipe, hash, file: None, stale: None };
@@ -569,6 +602,34 @@ mod tests {
                            link: json!({ "v": 1, "kind": "photo", "clip": "Day 1/A.MP4", "size": 4096, "t": 2.5 }) };
         let clip = Item { kind: Kind::Clip, file: None, rel: "Day 1/A.MP4".into(), link: Value::Null, name: "A".into() };
         (root, moment, photo, clip)
+    }
+
+    // An SDR clip (not log, not HLG or PQ) has one render for both video profiles: its HDR is its SDR (resolve, find)
+    #[test]
+    fn an_sdr_clip_s_hdr_is_its_sdr_render() {
+        let (root, moment, _, clip) = project("sdr-one-render");
+        let (hdr, sdr) = (profile("HDR").unwrap(), profile("SDR").unwrap());
+        // The test's clip can't be read as an MP4: it keeps its HDR
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");
+        // An MP4 with no colr and no log curve: SDR
+        std::fs::write(root.join("Day 1/A.MP4"), [0u8, 0, 0, 8, b'm', b'o', b'o', b'v']).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"}}"#).unwrap();
+        for item in [&moment, &clip] {
+            let ctx = look(&root, true);
+            assert_eq!(resolve(&ctx, item, hdr).name, "SDR");
+            assert_eq!(resolve(&ctx, item, sdr).name, "SDR");
+            let f = find(&ctx, item, sdr);
+            assert!(find(&ctx, item, hdr).file.is_none());
+            std::fs::create_dir_all(root.join(DIR)).unwrap();
+            std::fs::write(cache_path(&root, &f.hash, sdr, "mov"), b"x").unwrap();
+            // The SDR render is the HDR one too; the page shows both current
+            assert_eq!(find(&look(&root, true), item, hdr).file, find(&look(&root, true), item, sdr).file);
+            assert_eq!(states(&look(&root, false), item), json!({ "HDR": "current", "SDR": "current" }));
+        }
+        // Its own log curve: HDR is HDR
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     // The same cases the player's transform.render_settings is checked against (tests/render_settings_test.lua)
