@@ -131,6 +131,12 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
                    it, as the player's workspace plugin finds it
   --force          replace an existing output instead of skipping the video
   --interpolation  bilinear | bicubic | lanczos (default lanczos)
+  --gpu <auto|on|off>  the GPU path: one ffmpeg decoding, running the player's own shaders (libplacebo filter) and
+                   encoding, the frames on the GPU throughout (docs/export-gpu-path.md). auto (default): where this
+                   ffmpeg and the clip allow it, else the pipes, with a line saying why; on: only it
+  --gpu-interpolation <i>  its warp's interpolation: bilinear, bspline, bicubic, bicubic9, lanczos, ewa (default:
+                   the player's, lanczos up to 31 fps, bicubic9 above)
+  --with-translation  the translation compensation kept for the clip (the player's Ctrl+j), on the GPU path
   --encoder <name> ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265
                    (default: VideoToolbox on macOS, else the first of these that works)
   --progress <file>  write the progress there as JSON, twice a second
@@ -232,6 +238,12 @@ struct Options {
     project: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
+    // The GPU path (docs/export-gpu-path.md): None where it can, Some(true) only it, Some(false) never
+    gpu: Option<bool>,
+    // The GPU warp's interpolation (warp.glsl's INTERP); None: the player's for the clip's frame rate
+    gpu_interp: Option<i32>,
+    // The translation compensation kept for the clip, as the player draws it with Ctrl+j (GPU path)
+    with_translation: bool,
     encoder: Option<String>,
     progress: Progress,
     control: Option<PathBuf>,
@@ -312,7 +324,7 @@ fn main() {
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
-                             interpolation: Interpolation::Lanczos4, encoder: None, progress: Progress(None), control: None,
+                             interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
@@ -403,6 +415,15 @@ fn main() {
                 other => fail(&format!("unknown interpolation {other}")),
             },
             "--encoder" => opts.encoder = Some(value("--encoder")),
+            "--gpu" => opts.gpu = match value("--gpu").as_str() {
+                "auto" => None, "on" => Some(true), "off" => Some(false),
+                other => fail(&format!("--gpu {other}: auto, on or off")),
+            },
+            "--gpu-interpolation" => opts.gpu_interp = Some(match value("--gpu-interpolation").as_str() {
+                "bilinear" => 0, "bspline" => 1, "bicubic" => 2, "lanczos" | "lanczos4" => 3, "ewa" => 4, "bicubic9" => 5,
+                other => fail(&format!("unknown GPU interpolation {other} (bilinear, bspline, bicubic, bicubic9, lanczos, ewa)")),
+            }),
+            "--with-translation" => opts.with_translation = true,
             "--progress" => opts.progress = Progress(Some(PathBuf::from(value("--progress")))),
             "--control" => opts.control = Some(PathBuf::from(value("--control"))),
             "--photo" => opts.photo = Some(parse_time(&value("--photo"))),
@@ -601,6 +622,9 @@ fn catch_signals() {
 }
 
 fn stopped() -> bool { STOP.load(Relaxed) != 0 }
+// AFP_TIMES: the GPU workers' time in the engine and the LUT, summed over the workers
+static ENGINE_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static LUT_NS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 // --control: the word in the file, as the signals would set it
 fn read_control(path: &Path) {
@@ -865,6 +889,8 @@ fn tool(name: &str) -> PathBuf {
         if let Some(p) = here { return p; }
     }
     if cfg!(target_os = "macos") {
+        // In the app: its own (Contents/Helpers), whoever runs this
+        if let Some(p) = app_contents().map(|c| c.join("Helpers").join(&name)).filter(|p| p.is_file()) { return p; }
         for dir in ["/opt/homebrew/bin", "/usr/local/bin"] {
             let p = Path::new(dir).join(&name);
             if p.is_file() { return p; }
@@ -873,11 +899,19 @@ fn tool(name: &str) -> PathBuf {
     PathBuf::from(name)
 }
 
+/// The app's Contents folder when this runs from inside ActionFootagePlayer.app (Contents/Resources/plugins/gyroflow/)
+fn app_contents() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?.canonicalize().ok()?;
+    exe.ancestors().find(|a| a.file_name().is_some_and(|n| n == "Contents") && a.join("Helpers").is_dir()).map(Path::to_path_buf)
+}
+
 // Run without a console window of its own on Windows: mpv runs this one without a console, and each ffmpeg would
 // open one
-fn ffmpeg_command(name: &str) -> Command {
+fn ffmpeg_command(name: &str) -> Command { ffmpeg_at(tool(name)) }
+
+fn ffmpeg_at(program: PathBuf) -> Command {
     #[allow(unused_mut)]
-    let mut cmd = Command::new(tool(name));
+    let mut cmd = Command::new(program);
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -1234,6 +1268,8 @@ struct Part {
     sdr: Option<&'static str>,
     // Where its photo was taken (ISO 6709), as its QuickTime location
     location: Option<String>,
+    // When its photo was taken, as its QuickTime creation date
+    created: Option<String>,
 }
 
 // How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
@@ -1523,6 +1559,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let (dec_first, dec_last) = if all_frames { (dec_first, dec_last) } else { (first_frame, last_frame) };
 
     let mut graph = graph;
+    // The look's LUT, for the GPU path's look shader
+    let look_cube = lut_job.as_ref().map(|(c, _, _)| c.clone());
     let gpu_lut = match lut_job {
         None => None,
         Some((cube, matrix, cpu_graph)) => {
@@ -1559,6 +1597,51 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let enc = if preview.is_some() { encoder("", false) } else { pick_encoder(opts, prores)? };
     if !cfg!(target_os = "macos") && preview.is_none() { eprintln!("  encoder: {}", enc.name); }
     if dv_rpus.is_some() && enc.name != "hevc_videotoolbox" { return Err(format!("--dv-rpu: needs hevc_videotoolbox, not {}", enc.name)); }
+
+    // The GPU path (docs/export-gpu-path.md): one ffmpeg, the frames on the GPU from the decoder to the encoder, the
+    // player's own shaders. Else the pipes below, saying why
+    if preview.is_none() && part.is_none() && opts.gpu != Some(false) {
+        let why: Result<GpuPlan, String> = (|| {
+            if youtube.is_some() { return Err("the YouTube export".to_string()); }
+            // Asked for by name: only the GPU path draws it
+            if opts.with_translation { gpu_setup(&path).map_err(|e| format!("--with-translation needs the GPU path: {e}"))?; }
+            if opts.crop.is_some() { return Err("--crop".to_string()); }
+            if dv_rpus.is_some() && opts.dv_live_l1 { return Err("each frame's Dolby Vision L1 is measured on the pipes' GPU LUT".to_string()); }
+            if engine.is_none() && look_cube.is_none() && turn.is_empty() { return Err("nothing for the GPU to change".to_string()); }
+            let setup = gpu_setup(&path)?;
+            // Without the warp, the turn and the cut (--rotation, --aspect, the file's own) on the GPU too: VideoToolbox's
+            // transpose before the filter, the filter's crop
+            let (pre, crop) = if engine.is_none() { gpu_turn(&opts.frame.for_video(display_rotation(&path), None), (w, h)) } else { (String::new(), String::new()) };
+            let first_decoded = if denoise > 0 { dec_first } else { first_frame };
+            let mut text = String::new();
+            if let Some(e) = &engine {
+                let interp = opts.gpu_interp.unwrap_or(if fps <= PLAYER_SLOW_MAX_FPS { 3 } else { 5 });
+                // The translation's cache key: the player's name for the clip, its project, else the video
+                let key = source.as_ref().map_or(path.to_string_lossy().to_string(), |s| s.project.clone());
+                text = warp_shader(e, opts, &key, view, camera, fps, first_decoded, edges, interp, denoise)?.0;
+            }
+            if let Some(cube) = &look_cube { text += "\n"; text += &vs_gyroflow::gpu_table::look_shader(cube)?; }
+            let npass = vs_gyroflow::gpu_table::passes_per_frame(&text, 1);
+            let text = if engine.is_some() { vs_gyroflow::gpu_table::for_libplacebo(&text, npass)? } else { text };
+            // The denoise up to the clip's end: its last frame again, as the frames after it (the player shows the last
+            // frames with fewer after them: only those differ)
+            let short = (last_frame + denoise as u64).saturating_sub(dec_last);
+            let pad = (denoise > 0 && short > 0).then_some((dec_last - dec_first, short));
+            Ok(GpuPlan { setup, shader: text, pre, crop, first_decoded, skip: if denoise > 0 { first_frame + denoise as u64 - dec_first } else { 0 }, pad })
+        })();
+        match why {
+            Ok(plan) => {
+                let job = GpuJob { path: &path, info: &info, opts, tags: &tags, enc: &enc, prores, size: (ow, oh), fps, out_rate,
+                                   seek: if denoise > 0 { (dec_first as f64 - 0.25).max(0.0) / fps } else { seek },
+                                   until: if denoise > 0 { Some((dec_last as f64 + 0.5) / fps) } else { opt_to.map(|_| to) },
+                                   from_set: opt_from.is_some() || denoise > 0, video_start, to, opt_from, opt_to, total_frames, first_frame,
+                                   tmp_path: &tmp_path, out_path: &out_path, in_range, dv_rpus, dv_rpu, started: Instant::now() };
+                return export_gpu(job, plan);
+            }
+            Err(why) if opts.gpu == Some(true) || opts.with_translation => return Err(format!("--gpu on: {why}")),
+            Err(why) => eprintln!("  through the pipes, not the GPU path: {why}"),
+        }
+    }
 
     // Decoder: raw 10-bit planar frames on stdout. Elsewhere than on macOS, whatever hardware decoder ffmpeg finds,
     // else the CPU
@@ -1631,6 +1714,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
         if prores {
             enc_cmd.args(["-tag:v", "apch"]);
+        } else if enc.name == "ffv1" {
+            // Lossless, for comparing pictures (docs/export-gpu-path.md)
+            enc_cmd.args(["-level", "3"]);
         } else {
             enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
         }
@@ -1743,10 +1829,15 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
                             so += sw * sh * 2;
                             doff += dw * dh * 2;
                         }
-                        engine.process(timestamp_us, planes, !full_range, marker).map(|_| dst)
+                        let t = Instant::now();
+                        let r = engine.process(timestamp_us, planes, !full_range, marker).map(|_| dst);
+                        ENGINE_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
+                        r
                     }
                 };
+                let t = Instant::now();
                 let result = frame.and_then(|mut f| match lut.as_mut() { Some(l) => l.apply(&mut f).map(|l1| (f, l1)), None => Ok((f, None)) });
+                LUT_NS.fetch_add(t.elapsed().as_nanos() as u64, Relaxed);
                 if done_tx.send((n, result)).is_err() { break; }
             }
         })
@@ -1924,6 +2015,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let mut keys = Vec::new();
             if let Some(l) = link { keys.push((vs_gyroflow::mp4meta::LINK_KEY, l.as_str())); }
             if let Some(l) = part.and_then(|p| p.location.as_deref()) { keys.push((vs_gyroflow::mp4meta::LOCATION_KEY, l)); }
+            if let Some(c) = part.and_then(|p| p.created.as_deref()) { keys.push((vs_gyroflow::mp4meta::CREATION_DATE_KEY, c)); }
             if keys.is_empty() { Ok(read) } else { vs_gyroflow::mp4meta::write_keys(&tmp_path, &keys).map(|_| read) }
         }
     });
@@ -1947,6 +2039,10 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     let secs = started.elapsed().as_secs_f64();
     eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
+    if std::env::var_os("AFP_TIMES").is_some() && frames > 0 {
+        eprintln!("  GPU workers ({workers}): engine {:.1} ms a frame, LUT {:.1} ms a frame (summed over the workers)",
+                  ENGINE_NS.load(Relaxed) as f64 / 1e6 / frames as f64, LUT_NS.load(Relaxed) as f64 / 1e6 / frames as f64);
+    }
     Ok(Outcome::Done(out_path))
 }
 
@@ -1986,6 +2082,339 @@ fn youtube_mux(mov: &Path, mkv: &Path, cube: &Path, cube_name: &str, light: Opti
 // has on both sides. In the player's order: the fringes, then the denoise (on the GPU path both follow the warp)
 
 const CHROMATIC_GLSL: &str = include_str!("../../../mpv/scripts/gyroflow/chromatic.glsl");
+
+/// The player's GPU path: up to this frame rate its interpolation is Lanczos, above it bicubic (mpv/scripts/gyroflow/
+/// main.lua's INTERPOLATION_SLOW, INTERPOLATION_FAST, SLOW_MAX_FPS; gyroflow-gpu-table maps "bicubic" to bicubic9)
+const PLAYER_SLOW_MAX_FPS: f64 = 31.0;
+
+/// The player's GPU warp (gyroflow-gpu-table --player, gpu_table::Options::player) for this export's clip as the
+/// engine renders it: its view at the level, the camera, the edges asked for, the fringes where some frame has the
+/// lens under water, the translation compensation kept for it (--with-translation), the temporal denoise's passes
+/// (`denoise` frames each side, 0 none) at warp.glsl's INTERP `interp`; the first frame rendered `first_frame`.
+/// Always the RGB grid layout: the planes' (what the player uses where the colors aren't read apart) is within 66 dB
+/// of it and slower in ffmpeg's filter. Returns the shader and its output size
+#[allow(clippy::too_many_arguments)]
+fn warp_shader(engine: &Engine, opts: &Options, key: &str, view: u8, camera: vs_gyroflow::Camera, fps: f64, first_frame: u64, edges: EdgeMode,
+               interp: i32, denoise: usize) -> Result<(String, (usize, usize)), String> {
+    use vs_gyroflow::gpu_table::{ self, Clip, Table };
+    let index = engine.views.index(view, opts.level).min(engine.views.params.len() - 1);
+    let params = camera.apply(&engine.views.params[index]);
+    let clip = Clip { size: (params.width, params.height), output_size: (params.output_width, params.output_height), fps,
+                      frame_count: params.frame_count.max(1), frame_offset_us: engine.frame_offset_us, params };
+    if let Some(why) = gpu_table::unsupported(&clip) { return Err(format!("the GPU warp can't render it: {why}")); }
+    let wet = opts.chromatic && (0..clip.frame_count).step_by(15).any(|f| clip.transform(f, clip.output_size).kernel_params.light_refraction_coefficient > 1.0);
+    let edge_fill = match edges { EdgeMode::Off => None, _ => Some(opts.edge_settings.blur) };
+    let sphere = edges == EdgeMode::Sphere && edge_fill.is_some();
+    let mut o = gpu_table::Options::player(interp, wet, edge_fill, sphere, denoise > 0, first_frame as f64 / fps);
+    o.mode = gpu_table::Mode::Grid;
+    let table = Table::build(&clip, &o)?;
+    let trans = if opts.with_translation {
+        Some(vs_gyroflow::translation::cached(key).filter(|v| v.len() == clip.frame_count)
+            .ok_or("--with-translation: no translation compensation computed for this clip (gyroflow-export --translation)")?)
+    } else { None };
+    let mut text = gpu_table::shader_with(&clip, &o, &table, trans.as_deref());
+    if denoise > 0 {
+        // What the player sets for its clean frame (glsl-shader-opts), here the parameters' defaults
+        for (name, v) in [("gyroflow_dn_radius", denoise as f64), ("gyroflow_dn_after", denoise as f64),
+                          ("gyroflow_dn_strong", opts.denoise_strong as i32 as f64), ("gyroflow_dn_keep", opts.photo_grain as f64)] {
+            text = gpu_table::set_param_default(&text, name, v)?;
+        }
+    }
+    Ok((text, clip.output_size))
+}
+
+/// How the GPU path's ffmpeg decodes and encodes here, found once (gpu_setup)
+#[derive(Clone)]
+struct GpuSetup {
+    /// Before the inputs: a device for the filter and the encoder
+    global: Vec<String>,
+    /// Before the video's input: its hardware decoder, its frames left on the GPU
+    decode: Vec<String>,
+    /// After the filter, before the encoder: nothing where the encoder takes the filter's frames as they are
+    to_encoder: String,
+    /// The encoder, where it isn't the export's own (Vulkan Video's HEVC)
+    encoder: Option<&'static str>,
+    label: String,
+}
+
+/// `skip`: the filter's first frames not exported (the denoise's frames before); `pad`: (the decoded frame, how many
+/// times) repeated at the end, the denoise's frames after the clip's last
+/// `pre`: filters before libplacebo (a turn), `crop`: the filter's own crop options (`:crop_w=…`); `shader` empty: none
+struct GpuPlan { setup: GpuSetup, shader: String, pre: String, crop: String, first_decoded: u64, skip: u64, pad: Option<(u64, u64)> }
+
+/// A clip turned (and cut) without the warp, on the GPU: the turn as filters on the decoder's frames (VideoToolbox's
+/// transpose_vt on a Mac, Vulkan's transpose elsewhere; a 180 degree turn as two flips there), the cut as the
+/// libplacebo filter's crop of the upright frame. `size`: the decoded frame's, as the sensor has it
+fn gpu_turn(frame: &vs_gyroflow::Frame, size: (usize, usize)) -> (String, String) {
+    let mac = cfg!(target_os = "macos");
+    let pre = match (frame.rotation, mac) {
+        (90, true) => "transpose_vt=dir=clock,", (180, true) => "transpose_vt=dir=reversal,", (270, true) => "transpose_vt=dir=cclock,",
+        (90, false) => "transpose_vulkan=dir=clock,", (180, false) => "transpose_vulkan=dir=clock,transpose_vulkan=dir=clock,",
+        (270, false) => "transpose_vulkan=dir=cclock,",
+        _ => "",
+    }.to_string();
+    let (w, h) = frame.size(size);
+    let crop = if (w, h) != frame.rotated(size) {
+        let (x, y) = frame.offset(size);
+        format!(":crop_x={x}:crop_y={y}:crop_w={w}:crop_h={h}")
+    } else { String::new() };
+    (pre, crop)
+}
+
+/// The GPU path's ffmpeg: AFP_GPU_FFMPEG, else the one the export runs. On a Mac it loads Vulkan (MoltenVK) at run
+/// time: the app's Frameworks, else Homebrew's
+fn gpu_ffmpeg() -> Command {
+    let mut cmd = match std::env::var_os("AFP_GPU_FFMPEG") { Some(p) => ffmpeg_at(PathBuf::from(p)), None => ffmpeg_command("ffmpeg") };
+    if cfg!(target_os = "macos") {
+        let mut dirs: Vec<PathBuf> = std::env::var_os("DYLD_FALLBACK_LIBRARY_PATH").map(|v| std::env::split_paths(&v).collect()).unwrap_or_default();
+        // The app's (its ffmpeg's libraries are in Frameworks, relinked; MoltenVK's manifest in Resources)
+        let contents = app_contents().or_else(|| std::env::var_os("GYROFLOW_TOOLS").and_then(|t| Some(Path::new(&t).parent()?.to_path_buf())));
+        if let Some(contents) = contents {
+            dirs.push(contents.join("Frameworks"));
+            // MoltenVK for the Vulkan loader, as macos/player.sh points mpv to it, when this runs without it
+            let icd = contents.join("Resources/vulkan/icd.d/MoltenVK_icd.json");
+            if std::env::var_os("VK_DRIVER_FILES").is_none() && icd.is_file() { cmd.env("VK_DRIVER_FILES", &icd).env("VK_ICD_FILENAMES", &icd); }
+        }
+        dirs.extend(["/opt/homebrew/lib", "/usr/local/lib", "/usr/lib"].map(PathBuf::from));
+        if let Ok(v) = std::env::join_paths(dirs) { cmd.env("DYLD_FALLBACK_LIBRARY_PATH", v); }
+    }
+    cmd
+}
+
+fn gpu_test(global: &[&str], vf: &str, encoder: &str) -> Result<(), String> {
+    let out = gpu_ffmpeg().args(["-nostdin", "-hide_banner", "-v", "error"]).args(global)
+        .args(["-f", "lavfi", "-i", "color=black:s=320x180:r=30", "-frames:v", "3", "-vf", vf, "-c:v", encoder, "-f", "null", "-"])
+        .stdin(Stdio::null()).stdout(Stdio::null()).output().map_err(|e| format!("ffmpeg: {e}"))?;
+    if out.status.success() { Ok(()) } else { Err(String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("failed").trim().to_string()) }
+}
+
+/// Whether this ffmpeg runs the GPU path, and how: on a Mac VideoToolbox's frames into the libplacebo filter and out
+/// of it with no copies (tools/export-gpu's build of ffmpeg, patched); elsewhere Vulkan's (Vulkan Video's decoder and
+/// HEVC encoder where the GPU's driver has them, else a copy each way)
+fn gpu_setup(video: &Path) -> Result<GpuSetup, String> {
+    static FOUND: std::sync::OnceLock<Result<GpuSetup, String>> = std::sync::OnceLock::new();
+    let base = FOUND.get_or_init(|| {
+        let help = gpu_ffmpeg().args(["-hide_banner", "-h", "filter=libplacebo"]).stdin(Stdio::null()).stderr(Stdio::null()).output()
+            .map_err(|e| format!("ffmpeg: {e}"))?;
+        if !String::from_utf8_lossy(&help.stdout).contains("custom_shader_path") { return Err("this ffmpeg has no libplacebo filter".into()); }
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        if cfg!(target_os = "macos") {
+            gpu_test(&["-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt"], "format=p010le,hwupload,libplacebo=format=p010le", "hevc_videotoolbox")
+                .map_err(|e| format!("this ffmpeg's libplacebo filter doesn't take VideoToolbox frames (tools/export-gpu's build does): {e}"))?;
+            return Ok(GpuSetup { global: vec![], decode: s(&["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]),
+                                 to_encoder: String::new(), encoder: None, label: "VideoToolbox -> Vulkan (MoltenVK) -> VideoToolbox, no copies".into() });
+        }
+        let vk = ["-init_hw_device", "vulkan=vk", "-filter_hw_device", "vk"];
+        gpu_test(&vk, "format=p010le,hwupload,libplacebo=format=p010le", "rawvideo").map_err(|e| format!("no Vulkan device for the libplacebo filter: {e}"))?;
+        let direct = gpu_test(&vk, "format=p010le,hwupload,libplacebo=format=p010le", "hevc_vulkan").is_ok();
+        Ok(GpuSetup { global: s(&vk), decode: vec![], to_encoder: if direct { String::new() } else { ",hwdownload,format=p010le".into() },
+                      encoder: direct.then_some("hevc_vulkan"),
+                      label: if direct { "Vulkan -> Vulkan Video's HEVC encoder".into() } else { "Vulkan, a copy to the encoder".into() } })
+    });
+    let mut setup = base.clone()?;
+    if !cfg!(target_os = "macos") {
+        // The video decoded by Vulkan Video where the driver can, its frames staying there; else decoded as it can
+        // be and uploaded (a copy)
+        let decodes = gpu_ffmpeg().args(["-nostdin", "-v", "error"]).args(&setup.global).args(["-hwaccel", "vulkan", "-hwaccel_output_format", "vulkan", "-i"])
+            .arg(video).args(["-map", "0:v:0", "-frames:v", "1", "-f", "null", "-"])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok_and(|s| s.success());
+        if decodes {
+            setup.decode = ["-hwaccel", "vulkan", "-hwaccel_output_format", "vulkan"].map(String::from).to_vec();
+            setup.label = format!("Vulkan Video's decoder -> {}", setup.label);
+        } else {
+            setup.label = format!("decoded, uploaded (a copy) -> {}", setup.label);
+        }
+    }
+    Ok(setup)
+}
+
+/// What export() hands the GPU path
+struct GpuJob<'a> {
+    path: &'a Path, info: &'a VideoInfo, opts: &'a Options, tags: &'a [String], enc: &'a Encoder, prores: bool,
+    size: (usize, usize), fps: f64, out_rate: (u64, u64),
+    /// Where the decoder starts (s) and stops (s, None: the end); whether it seeks at all
+    seek: f64, until: Option<f64>, from_set: bool,
+    /// The export's own start (the audio's) and end, as asked
+    video_start: f64, to: f64, opt_from: Option<f64>, opt_to: Option<f64>,
+    total_frames: u64, first_frame: u64,
+    tmp_path: &'a Path, out_path: &'a Path, in_range: &'a str,
+    dv_rpus: Option<Vec<Vec<u8>>>, dv_rpu: Option<&'a PathBuf>, started: Instant,
+}
+
+/// The GPU path: one ffmpeg decoding the video (its frames left on the GPU), running the player's shaders in the
+/// libplacebo filter (`plan.shader`: the warp, its edges, fringes and denoise, then the look, as the player has them)
+/// and encoding, with the audio and metadata from the source as the pipes' encoder takes them. Its output, progress,
+/// stop, background, Dolby Vision, link and dates as export()'s
+fn export_gpu(job: GpuJob, plan: GpuPlan) -> Result<Outcome, String> {
+    let GpuJob { path, info, opts, tags, enc, prores, size: (w, h), fps, out_rate, seek, until, from_set, video_start, to, opt_from, opt_to,
+                 total_frames, first_frame, tmp_path, out_path, in_range, dv_rpus, dv_rpu, started } = job;
+    eprintln!("  on the GPU: {}", plan.setup.label);
+    // The shaders' file, next to the output, gone with the export (AFP_GPU_KEEP keeps it)
+    let shader_path = tmp_path.with_extension("glsl");
+    std::fs::write(&shader_path, &plan.shader).map_err(|e| format!("{}: {e}", shader_path.display()))?;
+    let _shader = (std::env::var_os("AFP_GPU_KEEP").is_none()).then(|| TempFile(shader_path.clone()));
+
+    let encoder = plan.setup.encoder.unwrap_or(&enc.name);
+    let pix_fmt = if prores { "p210le" } else { "p010le" };
+    let range = if tags[3] == "pc" { "pc" } else { "tv" };
+    // The frames tagged as what the shaders' output is: libplacebo then passes MAIN through (as the dlogm plugin tags
+    // the video for mpv); the matrix and range stay the source's, for its conversion to RGB
+    let mut vf = plan.pad.map(|(at, n)| format!("loop=loop={n}:size=1:start={at},")).unwrap_or_default();
+    let shader_opt = if plan.shader.is_empty() { String::new() } else { format!(":custom_shader_path={}", filter_path(&shader_path)) };
+    vf += &format!("{}setparams=color_primaries={}:color_trc={},libplacebo=w={w}:h={h}:format={pix_fmt}:colorspace={}:color_primaries={}:color_trc={}:\
+                          range={range}:dithering=none{}{shader_opt}", plan.pre, tags[0], tags[1], tags[2], tags[0], tags[1], plan.crop);
+    // The denoise shows a frame `denoise` frames behind the newest: its first ones are the frames before the export's
+    if plan.skip > 0 { vf += &format!(",trim=start_frame={}", plan.skip); }
+    vf += ",setpts=PTS-STARTPTS";
+    vf += &plan.setup.to_encoder;
+    let _ = (in_range, plan.first_decoded);
+
+    let mut cmd = gpu_ffmpeg();
+    cmd.args(["-nostdin", "-hide_banner", "-v", "error", "-nostats", "-progress", "pipe:2", "-stats_period", "0.5", "-y"]).args(&plan.setup.global).args(&plan.setup.decode);
+    if from_set || opt_from.is_some() { cmd.args(["-ss", &format!("{seek:.6}")]); }
+    if let Some(u) = until { cmd.args(["-to", &format!("{u:.6}")]); }
+    cmd.args(["-noautorotate", "-i"]).arg(path);
+    // The audio and metadata from the source, from the export's first frame's time, as the pipes' encoder has them
+    if dv_rpus.is_none() {
+        if opt_from.is_some() { cmd.args(["-ss", &format!("{video_start:.6}")]); }
+        if opt_to.is_some() { cmd.args(["-to", &format!("{to:.6}")]); }
+        cmd.arg("-i").arg(path).args(["-map", "0:v:0", "-map", "1:a?", "-map_metadata", "1", "-c:a", "copy"]);
+    } else {
+        cmd.args(["-map", "0:v:0"]);
+    }
+    cmd.args(["-frames:v", &total_frames.to_string(), "-vf", &vf, "-c:v", encoder]);
+    if plan.setup.encoder.is_none() { cmd.args(&enc.args); } else { cmd.args(["-profile:v", "main10"]); }
+    // VideoToolbox's real-time mode: 82 fps for 4K HEVC Main10 against 50, the same quality at the same bit rate
+    // (docs/export-gpu-path.md)
+    if encoder == "hevc_videotoolbox" { cmd.args(["-realtime", "1", "-prio_speed", "1"]); }
+    let bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (w * h) as f64 / (info.width * info.height).max(1) as f64;
+    if prores { cmd.args(["-tag:v", "apch"]); } else { cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]); }
+    cmd.args(["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]]);
+    let moov_size = 512 * 1024 + total_frames * 64;
+    if dv_rpus.is_none() && opts.link.is_some() {
+        cmd.args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(tmp_path).stdout(Stdio::null());
+    } else if dv_rpus.is_none() {
+        cmd.args(["-movflags", "+faststart", "-f", "mov"]).arg(tmp_path).stdout(Stdio::null());
+    } else {
+        cmd.args(["-bf", "0", "-f", "hevc", "-"]).stdout(Stdio::piped());
+    }
+    cmd.stdin(Stdio::null()).stderr(Stdio::piped());
+    if std::env::var_os("AFP_TIMES").is_some() { eprintln!("  {cmd:?}"); }
+    let mut child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+
+    // Dolby Vision: the encoder's HEVC, its RPUs replaced with ours, into a MOV with the source's audio and metadata
+    let color = [ "-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]];
+    let mut muxer = None;
+    let mut rewriter = None;
+    if let Some(rpus) = dv_rpus {
+        let mut mux_cmd = ffmpeg_command("ffmpeg");
+        mux_cmd.args(["-nostdin", "-v", "error", "-y", "-f", "hevc", "-r", &format!("{}/{}", out_rate.0, out_rate.1), "-i", "-"]);
+        if opt_from.is_some() { mux_cmd.args(["-ss", &format!("{video_start:.6}")]); }
+        if opt_to.is_some() { mux_cmd.args(["-to", &format!("{to:.6}")]); }
+        mux_cmd.arg("-i").arg(path)
+            .args(["-map", "0:v", "-map", "1:a?", "-map_metadata", "1", "-c", "copy", "-tag:v", "hvc1"]).args(color)
+            .args(["-moov_size", &moov_size.to_string(), "-f", "mov"]).arg(tmp_path)
+            .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped());
+        let mut mux = mux_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+        let mut mux_in = std::io::BufWriter::with_capacity(1 << 20, mux.stdin.take().unwrap());
+        let mut enc_out = child.stdout.take().unwrap();
+        rewriter = Some(std::thread::spawn(move || -> Result<u64, String> {
+            let mut injector = RpuInjector::new(rpus, first_frame);
+            let mut buf = vec![0u8; 1 << 20];
+            loop {
+                let n = enc_out.read(&mut buf).map_err(|e| format!("reading the encoder: {e}"))?;
+                if n == 0 { break; }
+                injector.feed(&buf[..n], &mut mux_in).map_err(|e| format!("muxer stopped: {e}"))?;
+            }
+            injector.finish(&mut mux_in).and_then(|_| mux_in.flush()).map_err(|e| format!("muxer stopped: {e}"))?;
+            Ok(injector.frames)
+        }));
+        muxer = Some(mux);
+    }
+
+    // ffmpeg's progress (frame=) and its errors, from its stderr
+    let done = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let errors = Arc::new(Mutex::new(String::new()));
+    let reader = {
+        let (done, errors, err) = (done.clone(), errors.clone(), child.stderr.take().unwrap());
+        std::thread::spawn(move || {
+            use std::io::BufRead;
+            for line in std::io::BufReader::new(err).lines().map_while(Result::ok) {
+                if let Some(n) = line.strip_prefix("frame=") { if let Ok(n) = n.trim().parse() { done.store(n, Relaxed); } continue; }
+                if line.contains('=') && !line.contains(' ') { continue; }
+                let mut e = errors.lock();
+                if e.len() < 4000 { e.push_str(&line); e.push('\n'); }
+            }
+        })
+    };
+    let (mut last_report, mut last_control, mut reported, mut rate) = (Instant::now(), Instant::now(), 0u64, 0.0f64);
+    let mut background = None;
+    let status = loop {
+        if let Some(control) = &opts.control {
+            if last_control.elapsed().as_millis() >= 250 { read_control(control); last_control = Instant::now(); }
+        }
+        if stopped() {
+            let _ = child.kill();
+            if let Some(m) = muxer.as_mut() { let _ = m.kill(); }
+            break None;
+        }
+        let want = BACKGROUND.load(Relaxed);
+        if background != Some(want) {
+            let mut pids = vec![0, child.id()];
+            if let Some(m) = &muxer { pids.push(m.id()); }
+            set_background(&pids, want);
+            background = Some(want);
+        }
+        if let Some(s) = child.try_wait().map_err(|e| e.to_string())? { break Some(s); }
+        if last_report.elapsed().as_millis() >= 500 {
+            let d = done.load(Relaxed);
+            let now = d.saturating_sub(reported) as f64 / last_report.elapsed().as_secs_f64();
+            rate = if reported == 0 { now } else { rate * 0.7 + now * 0.3 };
+            last_report = Instant::now();
+            reported = d;
+            let pct = (d as f64 / total_frames as f64 * 100.0).min(100.0);
+            let eta = ((total_frames as f64 - d as f64).max(0.0) / rate.max(1e-3)).min(359_999.0) as u64;
+            eprint!("\r  {pct:3.0}%  {rate:4.0} fps  ETA {}:{:02}   ", eta / 60, eta % 60);
+            opts.progress.write(serde_json::json!({
+                "pid": std::process::id(), "done": d, "total": total_frames, "fps": rate, "eta": eta, "background": want, "partial": tmp_path,
+            }));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let _ = reader.join();
+    eprint!("\r{:60}\r", "");
+    let rewritten = rewriter.map(|r| r.join().map_err(|_| "the RPU rewriter panicked".to_string()));
+    let mux_status = match muxer.as_mut() { Some(m) => Some(m.wait().map_err(|e| e.to_string())?), None => None };
+    let mux_err = muxer.as_mut().and_then(|m| m.stderr.take()).map(|mut e| { let mut s = String::new(); let _ = e.read_to_string(&mut s); s }).unwrap_or_default();
+    let frames = done.load(Relaxed);
+    let result = (|| -> Result<u64, String> {
+        let Some(status) = status else { return Err("cancelled".into()) };
+        if !status.success() { return Err(format!("ffmpeg (GPU path): {}", errors.lock().trim())); }
+        if frames == 0 { return Err("no frames encoded".into()); }
+        if let Some(r) = rewritten {
+            let n = r??;
+            if !mux_status.is_some_and(|s| s.success()) { return Err(format!("muxing: {}", mux_err.trim())); }
+            if n != frames { return Err(format!("Dolby Vision: {n} pictures for {frames} frames")); }
+            let (compatibility, profile) = if tags[1] == "smpte2084" { (1, "8.1") } else { (4, "8.4") };
+            let level = dv_mux::patch_dvvc(tmp_path, fps, compatibility)?;
+            eprintln!("  Dolby Vision {profile}, level {level}: {n} RPUs from {}", dv_rpu.map_or(String::new(), |p| p.display().to_string()));
+        }
+        if let Some(l) = &opts.link { vs_gyroflow::mp4meta::write_keys(tmp_path, &[(vs_gyroflow::mp4meta::LINK_KEY, l.as_str())])?; }
+        Ok(frames)
+    })();
+    let frames = match result {
+        Ok(f) => f,
+        Err(e) => { let _ = std::fs::remove_file(tmp_path); return Err(e); }
+    };
+    // The source's dates, as export() sets them
+    let modified = opts.dates.map(|d| d.system_time()).or_else(|| std::fs::metadata(path).and_then(|m| m.modified()).ok());
+    if let (Some(modified), Ok(f)) = (modified, std::fs::File::options().write(true).open(tmp_path)) { let _ = f.set_modified(modified); }
+    if out_path.exists() { copy_finder_attributes(out_path, tmp_path); }
+    std::fs::rename(tmp_path, out_path).map_err(|e| e.to_string())?;
+    let secs = started.elapsed().as_secs_f64();
+    eprintln!("  {frames} frames in {:.0}:{:02.0} ({:.0} fps)", (secs / 60.0).floor(), secs % 60.0, frames as f64 / secs.max(1e-3));
+    Ok(Outcome::Done(out_path.to_path_buf()))
+}
 
 struct Post {
     shaders: vs_gyroflow::user_shader::Shaders,
@@ -2100,6 +2529,37 @@ impl Post {
 // the camera), cleaned up from its neighbours as the player's clean still frame is (still.rs), in the SDR look with
 // the HDR one as a gain map (photo.rs): HEIC through afp-photo on macOS (macos/photo.swift), else an Ultra HDR JPEG
 
+/// When the frame at `t` s into the clip was taken, and whether its zone is known: the clip's start as the Library
+/// dates it (geotag::read: the camera's GPS time, else its clock read per camera, GoPro's TZON zone), plus `t`. The zone:
+/// the camera's own (TZON), else a DJI name's (its local time against the UTC it writes), else this computer's,
+/// assumed. An older GoPro writes its local time with no zone: that local time is kept as it is. None where the
+/// camera's clock was never set and its name says nothing either
+fn moment_dates(path: &Path, camera: &str, created: Option<&str>, t: f64) -> Option<(Dates, bool)> {
+    let mvhd = created.and_then(parse_dates).map(|d| d.unix);
+    let (clock, _) = vs_gyroflow::geotag::read(path, camera, mvhd.map(|c| c.round() as i64));
+    let stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
+    let named = clip_start_local(path).filter(|_| stem.starts_with("DJI_"));
+    match (clock.basis, clock.utc) {
+        ("local", Some(local)) => {
+            let off = (local_offset(local as i64) / 60) as i32;
+            Some((Dates { unix: local - off as f64 * 60.0 + t, offset_min: off }, false))
+        }
+        (_, Some(utc)) => {
+            // An older GoPro (no TZON) writes its local time as mvhd's: against the GPS's UTC, that is its zone
+            let gopro_local = (clock.basis == "gps" && camera.to_lowercase().starts_with("gopro")).then_some(()).and(mvhd).map(|m| ((m - utc) / 900.0).round() as i32 * 15)
+                .filter(|z| z.abs() <= 14 * 60);
+            let zone = clock.zone_min.or_else(|| mvhd.and_then(|m| zone_of_name(&stem, m))).or(gopro_local);
+            let (off, known) = match zone { Some(z) => (z, true), None => ((local_offset(utc as i64) / 60) as i32, false) };
+            Some((Dates { unix: utc + t, offset_min: off }, known))
+        }
+        // A clock never set: a DJI name's local time, if any
+        _ => named.map(|local| {
+            let off = (local_offset(local) / 60) as i32;
+            (Dates { unix: (local - off as i64 * 60) as f64 + t, offset_min: off }, false)
+        }),
+    }
+}
+
 /// When the clip started, local time, as seconds since 1970 counted in local time: from a DJI file's name
 /// (DJI_YYYYMMDDHHMMSS_…, the camera's own clock), else the container's creation time (UTC) in this computer's zone
 fn clip_start_local(path: &Path) -> Option<i64> {
@@ -2125,10 +2585,14 @@ fn local_offset(utc: i64) -> i64 {
 #[cfg(not(unix))]
 fn local_offset(_utc: i64) -> i64 { 0 }
 
-fn exif_time(local: i64) -> String {
-    let (y, m, d) = civil_from_days(local.div_euclid(86400));
-    let s = local.rem_euclid(86400);
-    format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+
+/// A file's modified and (on a Mac) created dates
+fn set_file_dates(path: &Path, at: std::time::SystemTime) {
+    let Ok(f) = std::fs::File::options().write(true).open(path) else { return };
+    let times = std::fs::FileTimes::new().set_modified(at).set_accessed(at);
+    #[cfg(target_os = "macos")]
+    let times = { use std::os::macos::fs::FileTimesExt; times.set_created(at) };
+    let _ = f.set_times(times);
 }
 
 // Photos: the project's _Stills (beside its _Exports, docs/moments-and-workspaces.md), else stabilized/ next to the clip
@@ -2539,6 +3003,12 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let (make, model) = (maker.as_ref().map(|m| m.0.clone()), maker.and_then(|m| m.1));
     let place = vs_gyroflow::geotag::photo_place(&path, make.as_deref().unwrap_or(""), n as f64 / fps);
     lap("place");
+    // When the frame was taken: the clip's start plus the frame's time (--dates: the clip's start as given)
+    let camera = format!("{} {}", make.as_deref().unwrap_or(""), model.as_deref().unwrap_or("")).trim().to_string();
+    let dates = match opts.dates {
+        Some(d) => Some((Dates { unix: d.unix + n as f64 / fps, offset_min: d.offset_min }, true)),
+        None => moment_dates(&path, &camera, info.created.as_deref(), n as f64 / fps),
+    };
     let place = place.as_ref();
 
     std::thread::scope(|scope| {
@@ -2553,7 +3023,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let to = (t + half).min(info.duration.max(from + 1.0 / fps));
             let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
             let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr,
-                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)) };
+                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)), created: dates.map(|(d, _)| d.quicktime()) };
             // The photo's frame in it: the part starts at `first`
             let at = (n - first) as f64 / fps;
             scope.spawn(move || {
@@ -2575,10 +3045,10 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             Some(Err(_)) => { eprintln!("  no motion, the photo alone: its export failed"); None }
         };
 
-        let taken = clip_start_local(&path).map(|s| exif_time(s + (n as f64 / fps) as i64));
+        let taken = dates.map(|(d, known)| ph::Taken::at(d.unix, d.offset_min, known));
         let link = photo_link(&path, opts, n as f64 / fps);
         if jpeg {
-            let exif = ph::exif(taken.as_deref(), make.as_deref(), model.as_deref(), place.map(|p| &p.0));
+            let exif = ph::exif(taken.as_ref(), make.as_deref(), model.as_deref(), place.map(|p| &p.0));
             let video = match &live { Some((f, _)) => Some(std::fs::read(&f.0).map_err(|e| format!("{}: {e}", f.0.display()))?), None => None };
             let motion = video.as_deref().zip(live.as_ref()).map(|(v, (_, at))| ph::Motion { video: v, presentation_us: (at * 1e6).round() as i64 });
             let bytes = ph::ultra_hdr_jpeg(&sdr, hdr.as_ref(), opts.quality, Some(exif), motion.as_ref(), Some(&link))?;
@@ -2592,7 +3062,12 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             cmd.args(["--width", &sdr.width.to_string(), "--height", &sdr.height.to_string(), "--quality", &format!("{:.2}", opts.quality as f64 / 100.0)])
                 .arg("--sdr").arg(&sdr_file.0).arg("--out").arg(&out_path);
             if let Some(f) = &hdr_file { cmd.arg("--hdr").arg(&f.0); }
-            if let Some(t) = &taken { cmd.args(["--taken", t]); }
+            if let Some(t) = &taken {
+                cmd.args(["--taken", &t.local, "--subsec", &t.subsec]);
+                if let Some(o) = &t.offset { cmd.args(["--offset", o]); }
+            }
+            // The Live Photo's video: QuickTime's creation date (local time and zone, as an iPhone writes it)
+            if let Some((d, _)) = &dates { cmd.args(["--created", &d.quicktime()]); }
             if let Some(m) = &make { cmd.args(["--make", m]); }
             if let Some(m) = &model { cmd.args(["--model", m]); }
             if let Some((p, _)) = place { cmd.args(["--gps", &gps_arg(p)]); }
@@ -2604,6 +3079,11 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             }
             let out = cmd.output().map_err(|e| format!("afp-photo: {e}"))?;
             if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).trim().to_string()); }
+        }
+        // The files' own dates: the moment's too
+        if let Some((d, _)) = &dates {
+            let mov = out_path.with_extension("mov");
+            for f in std::iter::once(&out_path).chain(live.as_ref().filter(|_| !jpeg).map(|_| &mov)) { set_file_dates(f, d.system_time()); }
         }
         lap("written");
         eprintln!("  {label} · {}x{}{} · {}", sdr.width, sdr.height,

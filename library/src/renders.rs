@@ -15,8 +15,9 @@ use std::collections::{ HashMap, HashSet };
 use std::path::{ Path, PathBuf };
 
 pub const DIR: &str = "_Renders";
-/// Raised when the renderer's pixels change for the same recipe: every render is then another one
-pub const VERSION: u64 = 2;
+/// Raised when the renderer's pixels change for the same recipe: every render is then another one. 4: gyroflow-export
+/// renders on the GPU path where it can, the player's own shaders (docs/export-gpu-path.md), not Gyroflow's engine
+pub const VERSION: u64 = 4;
 
 pub struct Profile {
     pub name: &'static str,
@@ -28,8 +29,9 @@ pub struct Profile {
 }
 
 pub const PROFILES: [Profile; 3] = [
-    Profile { name: "HDR", photo: false, look: "hdr", exts: &["mov"] },
-    Profile { name: "SDR", photo: false, look: "nbcu", exts: &["mov"] },
+    // (.mp4: a moment with nothing to change, its part of the original cut as it is: share.rs `as_recorded`)
+    Profile { name: "HDR", photo: false, look: "hdr", exts: &["mov", "mp4"] },
+    Profile { name: "SDR", photo: false, look: "nbcu", exts: &["mov", "mp4"] },
     Profile { name: "Photo", photo: true, look: "photo", exts: &["heic", "jpg"] },
 ];
 
@@ -61,16 +63,21 @@ impl Item {
 
 // What a clip's own files say that decides a render of it
 #[derive(Clone, Default)]
-struct ClipFacts { view: Value, input: Value, gyroflow: Value, size: Value, file: Option<PathBuf> }
+struct ClipFacts { doc: Value, gyroflow: Value, size: Value, file: Option<PathBuf> }
 
 /// A look at the cache: the project, the player's defaults, and what's in _Renders (listed once for a scan of many
 /// items; `fresh` asks the disk for each one instead, when something is about to be made or copied)
 pub struct Ctx {
     pub root: PathBuf,
+    /// The player's render defaults (its render-defaults.json): { defaults (the bundle), edges, edges_blur,
+    /// temporal_denoise, preset }
     pub defaults: Value,
+    /// The fingerprint of the Gyroflow preset the player stabilizes with where a clip has no project
+    preset: Value,
     locs: Vec<crate::locations::Location>,
     names: Option<HashSet<String>>,
     clips: RefCell<HashMap<String, ClipFacts>>,
+    ranges: RefCell<HashMap<String, Option<afp_catalog::range::Range>>>,
 }
 
 impl Ctx {
@@ -82,8 +89,9 @@ impl Ctx {
         let names = (!fresh).then(|| crate::seen::names_in(&dir).unwrap_or_else(|| {
             std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()
         }).into_iter().collect());
-        Ctx { root: root.to_path_buf(), defaults, locs: crate::locations::locations(root, &crate::locations::mounts()),
-              names, clips: RefCell::new(HashMap::new()) }
+        let preset = defaults["preset"].as_str().map(Path::new).filter(|p| p.is_file()).and_then(crate::checks::fingerprint_kept).map(Value::from).unwrap_or(Value::Null);
+        Ctx { root: root.to_path_buf(), defaults, preset, locs: crate::locations::locations(root, &crate::locations::mounts()),
+              names, clips: RefCell::new(HashMap::new()), ranges: RefCell::new(HashMap::new()) }
     }
 
     fn has(&self, name: &str) -> bool {
@@ -95,8 +103,7 @@ impl Ctx {
         let mut facts = ClipFacts::default();
         if let Ok((own, clip)) = crate::tags::clip_own_in(&self.locs, tree) {
             let doc = index::read_json(&own).unwrap_or(Value::Null);
-            facts.view = doc["view"].clone();
-            facts.input = doc["source"].clone();
+            facts.doc = doc;
             // The clip's Gyroflow project, beside it (<stem>.gyroflow, or <name.ext>.gyroflow)
             let name = clip.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             facts.gyroflow = [clip.with_extension("gyroflow"), clip.with_file_name(format!("{name}.gyroflow"))].iter()
@@ -113,36 +120,168 @@ impl Ctx {
 
 }
 
-/// The player's own defaults that decide the pixels where a clip or a moment doesn't say (its gyroflow.conf: the
-/// transform's keys, how much of the denoise this computer does, what fills the edges). As they're written there; none: {}
+/// What a render takes from this computer's player: what it wrote last (gyroflow/main.lua `publish`, every time it
+/// starts, a batch too: <its data>/gyroflow/render-defaults.json, AFL_PLAYER_DEFAULTS to point elsewhere), else worked
+/// out from its gyroflow.conf (AFL_PLAYER_OPTS) as the player would. A batch tells what it would have used, and a
+/// share compares (main.rs `share_collect`)
 fn player_defaults() -> Value {
-    // (tests never read this computer's player)
-    if cfg!(test) { return json!({}); }
+    // (tests never read this computer's player, but those run with one: AFL_PLAYER)
+    if cfg!(test) && std::env::var_os("AFL_PLAYER").is_none() { return json!({}); }
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let file = env("AFL_PLAYER_OPTS").or_else(|| {
-        let base = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
-                   else if cfg!(windows) { env("LOCALAPPDATA")? }
-                   else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
-        Some(base.join("ActionFootagePlayer").join("mpv").join("script-opts").join("gyroflow.conf"))
-    });
-    defaults_of(&file.and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default())
+    let base = || -> Option<PathBuf> {
+        let b = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
+                else if cfg!(windows) { env("LOCALAPPDATA")? }
+                else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
+        Some(b.join("ActionFootagePlayer"))
+    };
+    let written = env("AFL_PLAYER_DEFAULTS").or_else(|| base().map(|b| b.join("gyroflow").join("render-defaults.json")));
+    if let Some(v) = written.and_then(|f| index::read_json(&f)).filter(|v| v["defaults"].is_object()) { return v; }
+    let conf = env("AFL_PLAYER_OPTS").or_else(|| base().map(|b| b.join("mpv").join("script-opts").join("gyroflow.conf")));
+    let data_preset = base().map(|b| b.join("gyroflow").join("default.gyroflow")).filter(|p| p.is_file());
+    let mut v = defaults_of(&conf.and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default());
+    if let Some(p) = data_preset { v["preset"] = json!(p.display().to_string()); }
+    v
 }
 
+/// The player's defaults from its gyroflow.conf, as gyroflow/main.lua's `defaults_bundle` makes them (its options'
+/// own defaults where the file doesn't say). The preset's horizon isn't known here: "no"
 fn defaults_of(conf: &str) -> Value {
-    const KEYS: [&str; 13] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "still", "denoise_strong",
-                              "temporal_denoise", "edges", "edges_blur"];
-    let mut out = serde_json::Map::new();
+    let mut o = serde_json::Map::new();
     for line in conf.lines() {
-        let Some((k, v)) = line.trim().split_once('=') else { continue };
-        if KEYS.contains(&k.trim()) { out.insert(k.trim().to_string(), json!(v.trim())); }
+        let line = line.trim();
+        if line.starts_with('#') { continue; }
+        if let Some((k, v)) = line.split_once('=') { o.insert(k.trim().to_string(), json!(v.trim())); }
+    }
+    let get = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+    let yes = |k: &str, default: bool| match get(k).as_str() { "yes" | "true" => true, "no" | "false" => false, _ => default };
+    let one = |k: &str, of: &[&str], default: &str| { let v = get(k); if of.contains(&v.as_str()) { v } else { default.to_string() } };
+    let split = split_frame(&json!({ "aspect": if get("aspect").is_empty() { "original".to_string() } else { get("aspect") },
+                                     "orientation": if get("orientation").is_empty() { Value::Null } else { json!(get("orientation")) } }));
+    let blur: f64 = get("edges_blur").parse().unwrap_or(2.0);
+    json!({
+        "defaults": {
+            "view": if get("view") == "wide" { "wide" } else { "normal" },
+            "level": one("level", &["weak", "medium", "strong"], "medium"),
+            "horizon_lock": one("horizon_lock", &["yes", "no"], "no"),
+            "chromatic": yes("chromatic", true),
+            "aspect": split["aspect"], "orientation": split["orientation"],
+            "projection": one("projection", &["linear", "stereographic", "equidistant", "equisolid", "orthographic"], "linear"),
+            "lens": if get("lens") == "as-recorded" { "as-recorded" } else { "corrected" },
+            "denoise": yes("still", true),
+            "denoise_strong": yes("denoise_strong", false),
+            "preset_horizon": "no",
+        },
+        "edges": if get("edges").is_empty() { "sphere".to_string() } else { get("edges") },
+        "edges_blur": blur,
+        "temporal_denoise": one("temporal_denoise", &["full", "light", "off"], "full"),
+    })
+}
+
+// ---------- What a render is made with: the player's transform.render_settings, the same way ----------
+// (mpv/scripts/workspace/transform.lua; both are checked against tests/render_settings.json)
+
+const BUNDLE_KEYS: [&str; 10] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong"];
+
+fn valid(k: &str, v: &Value) -> bool {
+    let s = v.as_str().unwrap_or("");
+    match k {
+        "view" => matches!(s, "normal" | "wide" | "off"),
+        "level" => matches!(s, "weak" | "medium" | "strong"),
+        "horizon_lock" => matches!(s, "yes" | "no"),
+        "chromatic" | "denoise" | "denoise_strong" => v.is_boolean(),
+        // Any ratio landscape-wise (W >= H), "original"
+        "aspect" => match s.split_once(':') {
+            Some((w, h)) if !w.is_empty() && !h.is_empty() && w.chars().chain(h.chars()).all(|c| c.is_ascii_digit()) => {
+                let (w, h): (f64, f64) = (w.parse().unwrap_or(0.0), h.parse().unwrap_or(0.0));
+                w >= h && h > 0.0
+            }
+            _ => s == "original",
+        },
+        "orientation" => matches!(s, "as-is" | "landscape" | "portrait"),
+        "projection" => matches!(s, "linear" | "stereographic" | "equidistant" | "equisolid" | "orthographic" | "project"),
+        "lens" => matches!(s, "corrected" | "as-recorded"),
+        _ => false,
+    }
+}
+
+/// The bundle's keys of a view, None for none (transform.pick)
+fn pick(view: &Value) -> Option<Value> {
+    let o = view.as_object()?;
+    let out: serde_json::Map<String, Value> = BUNDLE_KEYS.iter().filter_map(|k| o.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect();
+    (!out.is_empty()).then_some(Value::Object(out))
+}
+
+/// An aspect from before the orientation was a key: the ratio as it showed (transform's split_frame)
+fn split_frame(b: &Value) -> Value {
+    let Some(o) = b.as_object() else { return b.clone() };
+    let Some(aspect) = o.get("aspect").filter(|a| !a.is_null()) else { return b.clone() };
+    if o.get("orientation").is_some_and(|x| valid("orientation", x)) { return b.clone(); }
+    let mut out = o.clone();
+    let text = match aspect { Value::String(s) => s.clone(), x => x.to_string() };
+    let ratio = text.split_once(':').filter(|(w, h)| !w.is_empty() && !h.is_empty() && w.chars().chain(h.chars()).all(|c| c.is_ascii_digit()));
+    match ratio {
+        Some((w, h)) if w.parse::<u64>().unwrap_or(0) < h.parse::<u64>().unwrap_or(0) => {
+            out.insert("aspect".into(), json!(format!("{h}:{w}")));
+            out.insert("orientation".into(), json!("portrait"));
+        }
+        Some(_) => { out.insert("orientation".into(), json!("landscape")); }
+        None => { out.insert("orientation".into(), json!("as-is")); }
     }
     Value::Object(out)
 }
 
-/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/night-handover-share.md):
-/// v, kind, clip { hash | path, size }, in / out (a moment), t / crop / camera (a photo), stab / alone (a moment's own
-/// transform), view (the clip's saved one: a photo, a clip), input (the clip's source settings), gyroflow (the
-/// fingerprint of the Gyroflow project used), defaults (the player's), profile { name, look }
+/// The bundle with every key: a missing one NEUTRAL's, else the session's (transform.complete)
+fn complete(bundle: &Value, session: &Value) -> serde_json::Map<String, Value> {
+    let bundle = split_frame(bundle);
+    let neutral = json!({ "aspect": "original", "orientation": "as-is", "projection": "linear", "denoise_strong": false });
+    let mut out = serde_json::Map::new();
+    for k in BUNDLE_KEYS {
+        let mut v = bundle.get(k).cloned().unwrap_or(Value::Null);
+        if k == "horizon_lock" && v == json!("project") { v = session["preset_horizon"].clone(); }
+        if !valid(k, &v) {
+            v = if k == "lens" && bundle.as_object().is_some_and(|o| !o.is_empty()) {
+                json!(if out.get("view") == Some(&json!("off")) { "as-recorded" } else { "corrected" })
+            } else if !neutral[k].is_null() { neutral[k].clone() } else { session[k].clone() };
+            if !valid(k, &v) { continue; }
+        }
+        out.insert(k.to_string(), v);
+    }
+    out
+}
+
+/// An old .afp.json's input out of `view` into `source` (transform.migrate_source): the source as it reads then
+fn migrated_source(doc: &Value) -> serde_json::Map<String, Value> {
+    let mut s = doc["source"].as_object().cloned().unwrap_or_default();
+    let v = &doc["view"];
+    if v.is_object() {
+        if !v["curve"].is_null() && s.get("curve").is_none_or(Value::is_null) { s.insert("curve".into(), v["curve"].clone()); }
+        if !v["underwater"].is_null() && v["underwater"] != json!("project") && s.get("underwater").is_none_or(Value::is_null) {
+            s.insert("underwater".into(), v["underwater"].clone());
+        }
+        let r = v["rotation"].as_f64().or_else(|| v["rotation"].as_str().and_then(|x| x.parse().ok()));
+        let plain = v["aspect"].is_null() || v["aspect"] == json!("original");
+        if !v["rotation"].is_null() && (r == Some(0.0) || plain) && s.get("rotation").is_none_or(Value::is_null) {
+            if let Some(r) = r.filter(|r| *r != 0.0) { s.insert("rotation".into(), json!(r)); }
+        }
+    }
+    s
+}
+
+/// What a render of a source is made with: the bundle (a moment's own `own`, else the source's saved view, else the
+/// player's `defaults`) made whole with the defaults, the source's input over it. `doc`: the source's .afp.json
+pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
+    let bundle = pick(own).or_else(|| pick(&doc["view"])).unwrap_or_else(|| defaults.clone());
+    let mut out = complete(&bundle, defaults);
+    if doc.is_object() { for (k, v) in migrated_source(doc) { out.insert(k, v); } }
+    Value::Object(out)
+}
+
+/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/share-fixes.md):
+/// v, kind, clip { hash | path, size }, in / out / alone (a moment), t / crop / camera (a photo), settings (what it's
+/// rendered with: `settings` from the clip's own file, a moment's own bundle and the player's defaults: the player
+/// renders with exactly these, sent in its request), opts (the player's edge fill and temporal denoise), gyroflow (the
+/// fingerprint of the Gyroflow project used: a moment's own, else the clip's), preset (the player's preset's, where
+/// there is no project), profile { name, look }
 pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value {
     let l = &item.link;
     let tree = item.tree().unwrap_or("");
@@ -151,29 +290,57 @@ pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value {
     let hash = l["hash"].as_str().filter(|h| !h.is_empty());
     let clip = json!({ "hash": hash, "path": if hash.is_none() { json!(tree) } else { Value::Null },
                        "size": if l["size"].is_number() { l["size"].clone() } else { facts.size.clone() } });
-    let mut r = json!({ "v": VERSION, "kind": item.kind.name(), "clip": clip, "input": facts.input, "defaults": ctx.defaults,
-                        "profile": { "name": profile.name, "look": profile.look } });
+    let own = if item.kind == Kind::Moment { l["stab"].clone() } else { Value::Null };
+    let d = &ctx.defaults;
+    let mut r = json!({ "v": VERSION, "kind": item.kind.name(), "clip": clip,
+                        "settings": settings(&facts.doc, &own, &d["defaults"]),
+                        "opts": { "edges": d["edges"], "edges_blur": d["edges_blur"], "temporal_denoise": d["temporal_denoise"] },
+                        "gyroflow": facts.gyroflow, "profile": { "name": profile.name, "look": profile.look } });
     match item.kind {
         Kind::Moment => {
-            // Its own Gyroflow project, beside it
-            let own = item.file.as_ref().map(|f| {
-                let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                f.with_file_name(format!("{}.gyroflow", name.trim_end_matches(index::LINK_EXT)))
-            });
-            r["gyroflow"] = own.filter(|o| o.is_file()).and_then(|o| crate::checks::fingerprint(&o)).map(Value::from).unwrap_or(Value::Null);
-            for k in ["in", "out", "stab", "alone"] { r[k] = l[k].clone(); }
+            // Its own Gyroflow project, beside it (else the clip's, which gyroflow-export finds itself)
+            if let Some(own) = own_project(item).filter(|o| o.is_file()).and_then(|o| crate::checks::fingerprint(&o)) { r["gyroflow"] = json!(own); }
+            for k in ["in", "out"] { r[k] = l[k].clone(); }
+            // Stabilized on its own: a moment kept as made (snap) that says so (the player's render_moments)
+            if l["snap"] == json!(true) && l["alone"] == json!(true) { r["alone"] = json!(true); }
         }
-        Kind::Photo => {
-            r["gyroflow"] = facts.gyroflow;
-            r["view"] = facts.view;
-            for k in ["t", "crop", "camera"] { r[k] = l[k].clone(); }
-        }
-        Kind::Clip => {
-            r["gyroflow"] = facts.gyroflow;
-            r["view"] = facts.view;
-        }
+        Kind::Photo => { for k in ["t", "crop", "camera"] { r[k] = l[k].clone(); } }
+        Kind::Clip => {}
     }
+    if r["gyroflow"].is_null() { r["preset"] = ctx.preset.clone(); }
     trimmed(&r).unwrap_or(Value::Null)
+}
+
+/// A moment's own Gyroflow project: <name>.gyroflow beside its link
+fn own_project(item: &Item) -> Option<PathBuf> {
+    item.file.as_ref().map(|f| {
+        let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        f.with_file_name(format!("{}.gyroflow", name.trim_end_matches(index::LINK_EXT)))
+    })
+}
+
+/// What the player renders a recipe with (its request's `view`): the settings and the opts in one
+pub fn render_view(recipe: &Value) -> Value {
+    let mut v = recipe["settings"].as_object().cloned().unwrap_or_default();
+    for (k, x) in recipe["opts"].as_object().into_iter().flatten() { v.insert(k.clone(), x.clone()); }
+    Value::Object(v)
+}
+
+/// Whether what the player would have taken by itself (its batch's `used`) is what the recipe says: the keys that
+/// differ, empty when none
+pub fn differs(recipe: &Value, player: &Value) -> Vec<String> {
+    let want = render_view(recipe);
+    let mut keys: Vec<String> = want.as_object().into_iter().flatten().map(|(k, _)| k.clone())
+        .chain(player.as_object().into_iter().flatten().map(|(k, _)| k.clone())).collect();
+    keys.sort();
+    keys.dedup();
+    keys.into_iter().filter(|k| {
+        let (a, b) = (trimmed(&want[k.as_str()]).unwrap_or(Value::Null), trimmed(&player[k.as_str()]).unwrap_or(Value::Null));
+        let (mut x, mut y) = (String::new(), String::new());
+        canonical(&a, &mut x);
+        canonical(&b, &mut y);
+        x != y
+    }).collect()
 }
 
 // A value written one way only: keys in order, whole numbers without a fraction, others to six places
@@ -232,7 +399,39 @@ pub struct Found {
     pub stale: Option<PathBuf>,
 }
 
+/// The profile an item is rendered in when `profile` is asked for: an SDR clip's HDR is its SDR render (gyroflow-export
+/// keeps an SDR clip's colors as they are in both: one file, not two of the same pixels). A log clip, an HLG or PQ one,
+/// or one that can't be read keeps its HDR. Reads the clip's MP4 once per Ctx (afp_catalog::range)
+pub fn resolve(ctx: &Ctx, item: &Item, profile: &'static Profile) -> &'static Profile {
+    if profile.name != "HDR" || ctx.is_sdr(item) != Some(true) { return profile; }
+    self::profile("SDR").unwrap()
+}
+
+impl Ctx {
+    /// Whether the clip an item is of is SDR (not log, not HLG or PQ): None where it can't be told
+    pub fn is_sdr(&self, item: &Item) -> Option<bool> {
+        let tree = item.tree()?;
+        if let Some(r) = self.ranges.borrow().get(tree) { return r.map(|r| r == afp_catalog::range::Range::Sdr); }
+        let facts = self.clip(tree);
+        let curve = facts.doc["source"]["curve"].as_str().or(facts.doc["view"]["curve"].as_str());
+        let r = facts.file.as_deref().and_then(|f| afp_catalog::range::of(f, curve));
+        self.ranges.borrow_mut().insert(tree.to_string(), r);
+        r.map(|r| r == afp_catalog::range::Range::Sdr)
+    }
+}
+
 pub fn find(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
+    let found = find_as(ctx, item, profile);
+    // An SDR clip's HDR is its SDR render (resolve): looked for only where the HDR's own isn't there and an SDR one is
+    if profile.name == "HDR" && found.file.is_none() && !profile.photo {
+        let sdr = self::profile("SDR").unwrap();
+        let other = find_as(ctx, item, sdr);
+        if other.file.is_some() && ctx.is_sdr(item) == Some(true) { return other; }
+    }
+    found
+}
+
+fn find_as(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
     let recipe = recipe(ctx, item, profile);
     let hash = hash(&recipe);
     let mut found = Found { recipe, hash, file: None, stale: None };
@@ -330,6 +529,53 @@ pub fn delete(root: &Path, items: &[String], stale_only: bool) -> (usize, Vec<St
     (n, problems)
 }
 
+/// Whether a file in _Renders is one Share made: named by its recipe's hash (<24 hex>.<profile>.<ext>), or carrying a
+/// render's link (made the old way, at a moment's path). Anything else there (a photo moved in by hand, the one-off
+/// script's) is kept by `clear`
+fn ours(file: &Path) -> bool {
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let mut parts = name.splitn(3, '.');
+    let (h, p, e) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+    if h.len() == 24 && h.chars().all(|c| c.is_ascii_hexdigit()) && PROFILES.iter().any(|x| x.name == p && x.exts.contains(&e.to_lowercase().as_str())) {
+        return true;
+    }
+    index::link(file).is_some_and(|l| l["kind"] == "render" || l["render"].is_object())
+}
+
+fn walk(dir: &Path, out: &mut Vec<(PathBuf, u64)>, dirs: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let Ok(t) = e.file_type() else { continue };
+        if t.is_dir() { dirs.push(e.path()); walk(&e.path(), out, dirs); }
+        else if t.is_file() { out.push((e.path(), e.metadata().map(|m| m.len()).unwrap_or(0))); }
+    }
+}
+
+/// The render cache's room: { files, bytes } of what Share made there (what `clear` would remove)
+pub fn cache_size(root: &Path) -> Value {
+    let (mut files, mut dirs) = (Vec::new(), Vec::new());
+    walk(&root.join(DIR), &mut files, &mut dirs);
+    let mine: Vec<&(PathBuf, u64)> = files.iter().filter(|(f, _)| ours(f)).collect();
+    json!({ "files": mine.len(), "bytes": mine.iter().map(|(_, b)| b).sum::<u64>(), "others": files.len() - mine.len() })
+}
+
+/// The render cache emptied (Project settings' Clear: never by itself): every render Share made, a photo's half-made
+/// folder (.making), the folders left empty. Anything else there is kept. { files, bytes } freed, { kept }, problems
+pub fn clear(root: &Path) -> (Value, Vec<String>) {
+    let (mut files, mut dirs) = (Vec::new(), Vec::new());
+    walk(&root.join(DIR), &mut files, &mut dirs);
+    let (mut n, mut bytes, mut kept, mut problems, mut gone) = (0u64, 0u64, 0u64, Vec::new(), Vec::new());
+    for (f, b) in files {
+        let making = f.ancestors().any(|a| a.extension().is_some_and(|e| e == "making"));
+        if !(making || ours(&f)) { kept += 1; continue; }
+        match std::fs::remove_file(&f) { Ok(_) => { n += 1; bytes += b; gone.push(f); } Err(e) => problems.push(format!("{}: {e}", f.display())) }
+    }
+    // The folders left empty, deepest first
+    dirs.sort_by_key(|d| std::cmp::Reverse(d.components().count()));
+    for d in dirs { let _ = std::fs::remove_dir(&d); }
+    crate::seen::note_now(&gone);
+    (json!({ "files": n, "bytes": bytes, "kept": kept }), problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,6 +604,47 @@ mod tests {
         (root, moment, photo, clip)
     }
 
+    // An SDR clip (not log, not HLG or PQ) has one render for both video profiles: its HDR is its SDR (resolve, find)
+    #[test]
+    fn an_sdr_clip_s_hdr_is_its_sdr_render() {
+        let (root, moment, _, clip) = project("sdr-one-render");
+        let (hdr, sdr) = (profile("HDR").unwrap(), profile("SDR").unwrap());
+        // The test's clip can't be read as an MP4: it keeps its HDR
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");
+        // An MP4 with no colr and no log curve: SDR
+        std::fs::write(root.join("Day 1/A.MP4"), [0u8, 0, 0, 8, b'm', b'o', b'o', b'v']).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"}}"#).unwrap();
+        for item in [&moment, &clip] {
+            let ctx = look(&root, true);
+            assert_eq!(resolve(&ctx, item, hdr).name, "SDR");
+            assert_eq!(resolve(&ctx, item, sdr).name, "SDR");
+            let f = find(&ctx, item, sdr);
+            assert!(find(&ctx, item, hdr).file.is_none());
+            std::fs::create_dir_all(root.join(DIR)).unwrap();
+            std::fs::write(cache_path(&root, &f.hash, sdr, "mov"), b"x").unwrap();
+            // The SDR render is the HDR one too; the page shows both current
+            assert_eq!(find(&look(&root, true), item, hdr).file, find(&look(&root, true), item, sdr).file);
+            assert_eq!(states(&look(&root, false), item), json!({ "HDR": "current", "SDR": "current" }));
+        }
+        // Its own log curve: HDR is HDR
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    // The same cases the player's transform.render_settings is checked against (tests/render_settings_test.lua)
+    #[test]
+    fn settings_are_worked_out_as_the_player_does() {
+        let doc: Value = serde_json::from_str(include_str!("../../tests/render_settings.json")).unwrap();
+        let mut bad = Vec::new();
+        for c in doc["cases"].as_array().unwrap() {
+            let got = settings(&c["doc"], &c["own"], &doc["defaults"]);
+            let same = |a: &Value, b: &Value| { let (mut x, mut y) = (String::new(), String::new()); canonical(a, &mut x); canonical(b, &mut y); x == y };
+            if !same(&got, &c["want"]) { bad.push(format!("{}:\n  got  {got}\n  want {}", c["name"], c["want"])); }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
     #[test]
     fn the_same_recipe_hashes_the_same_and_every_setting_changes_it() {
         let (root, moment, photo, clip) = project("hash");
@@ -380,7 +667,11 @@ mod tests {
         differs("the stabilization", hash(&recipe(&ctx, &with("stab", json!({ "view": "wide" })), hdr)));
         differs("the horizon", hash(&recipe(&ctx, &with("stab", json!({ "view": "normal", "horizon_lock": "yes" })), hdr)));
         differs("the crop's shape", hash(&recipe(&ctx, &with("stab", json!({ "view": "normal", "aspect": "9:16" })), hdr)));
-        differs("stabilized alone", hash(&recipe(&ctx, &with("alone", json!(true)), hdr)));
+        // Stabilized on its own: a moment kept as made (snap) that says so; without snap the player doesn't read it
+        assert_eq!(hash(&recipe(&ctx, &with("alone", json!(true)), hdr)), base, "alone without snap changed the hash");
+        let mut snapped = with("alone", json!(true));
+        snapped.link["snap"] = json!(true);
+        differs("stabilized alone", hash(&recipe(&ctx, &snapped, hdr)));
         differs("the original", hash(&recipe(&ctx, &with("hash", json!("abd")), hdr)));
         differs("the original's size", hash(&recipe(&ctx, &with("size", json!(4097)), hdr)));
         // The moment's own Gyroflow project
@@ -393,9 +684,18 @@ mod tests {
         differs("the source's input", hash(&recipe(&look(&root, true), &moment, hdr)));
         std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
         // The player's defaults
-        differs("the player's default", hash(&recipe(&Ctx::with(&root, true, defaults_of("level=high\nlive_photo=live\n")), &moment, hdr)));
+        let strong = hash(&recipe(&Ctx::with(&root, true, defaults_of("level=strong\nlive_photo=live\n")), &moment, hdr));
         // (an option that isn't about the pixels: nothing)
-        assert!(!seen.insert(hash(&recipe(&Ctx::with(&root, true, defaults_of("# mine\nlevel = high\nlive_photo=no\n")), &moment, hdr))));
+        assert_eq!(hash(&recipe(&Ctx::with(&root, true, defaults_of("# mine\nlevel = strong\nlive_photo=no\n")), &moment, hdr)), strong);
+        differs("the player's defaults", strong);
+        differs("the player's edge fill", hash(&recipe(&Ctx::with(&root, true, defaults_of("edges=black\n")), &moment, hdr)));
+        differs("the player's temporal denoise", hash(&recipe(&Ctx::with(&root, true, defaults_of("temporal_denoise=light\n")), &moment, hdr)));
+        // A moment with no bundle of its own renders with the clip's saved view
+        let plain = with("stab", Value::Null);
+        let before = hash(&recipe(&look(&root, true), &plain, hdr));
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"strong"},"source":{"curve":"dlogm"}}"#).unwrap();
+        assert_ne!(hash(&recipe(&look(&root, true), &plain, hdr)), before, "the clip's view didn't change a moment without its own bundle");
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
 
         // A photo: its frame, its crop, its camera, the clip's saved view
         let p = profile("Photo").unwrap();
@@ -466,6 +766,28 @@ mod tests {
         assert_eq!(readable(&moment, profile("SDR").unwrap(), "mov"), "Best turtle (SDR).mov");
         assert_eq!(readable(&photo, p, "heic"), "A_2.50s.heic");
         let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn clearing_the_cache_takes_only_what_share_made() {
+        let root = temp("clear");
+        let dir = root.join(DIR);
+        std::fs::create_dir_all(dir.join("Reef")).unwrap();
+        std::fs::create_dir_all(dir.join("0123456789abcdef01234567.Photo.making")).unwrap();
+        std::fs::write(dir.join("0123456789abcdef01234567.HDR.mov"), vec![1u8; 100]).unwrap();
+        std::fs::write(dir.join("0123456789abcdef01234568.Photo.heic"), vec![1u8; 10]).unwrap();
+        std::fs::write(dir.join("0123456789abcdef01234567.Photo.making/x.heic"), vec![1u8; 5]).unwrap();
+        std::fs::write(dir.join("Reef/Turtle.HDR.mov"), crate::index::tests::tests_mp4_with_link(r#"{"v":1,"kind":"render","clip":"A.MP4"}"#)).unwrap();
+        std::fs::write(dir.join("Reef/Kept.heic"), b"a photo of someone's").unwrap();
+        let size = cache_size(&root);
+        assert_eq!((size["files"].as_u64(), size["others"].as_u64()), (Some(3), Some(2)), "{size}");
+        let (freed, problems) = clear(&root);
+        assert!(problems.is_empty(), "{problems:?}");
+        assert_eq!(freed["files"], json!(4));
+        assert_eq!(freed["kept"], json!(1));
+        assert!(dir.join("Reef/Kept.heic").is_file());
+        assert!(!dir.join("0123456789abcdef01234567.Photo.making").exists());
+        assert_eq!(cache_size(&root)["files"], json!(0));
     }
 
     #[test]

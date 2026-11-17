@@ -20,6 +20,11 @@
   ];
   function install(w, opts) {
     opts = opts || w.__VIEWS_MOCK__ || {};
+    // `places: true`: twelve more places in other countries, for long lists of countries and places (ui_fixes_shots.js)
+    if (opts.places && PLACES.length === 12) [["Tromsø", "Troms", "Norway", 69.65, 18.96], ["Cairns", "Queensland", "Australia", -16.92, 145.77], ["Cape Town", "Western Cape", "South Africa", -33.92, 18.42],
+      ["Queenstown", "Otago", "New Zealand", -45.03, 168.66], ["Banff", "Alberta", "Canada", 51.18, -115.57], ["Cusco", "Cusco", "Peru", -13.53, -71.97], ["Kyoto", "Kyoto", "Japan", 35.01, 135.77],
+      ["Hội An", "Quảng Nam", "Vietnam", 15.88, 108.33], ["Zanzibar City", "Zanzibar", "Tanzania", -6.16, 39.19], ["Dubrovnik", "Dubrovnik-Neretva", "Croatia", 42.65, 18.09],
+      ["Tulum", "Quintana Roo", "Mexico", 20.21, -87.46], ["Marrakesh", "Marrakesh-Safi", "Morocco", 31.63, -8.0]].forEach((p) => PLACES.push([p[3], p[4], { locality: p[0], region: p[1], country: p[2] }]));
     const inner = w.__TAURI__.core.invoke;
     const ROOT = "/p/Trips";
     const loc = (i, dlat, dlon, named) => { const p = PLACES[i]; const l = { lat: p[0] + (dlat || 0), lon: p[1] + (dlon || 0), source: "photos" }; if (named !== false) l.place = p[2]; return l; };

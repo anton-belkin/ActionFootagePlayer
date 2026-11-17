@@ -14,7 +14,7 @@ const errors = [];
 w.addEventListener("error", (e) => errors.push(String(e.error && e.error.stack || e.message)));
 const scripts = Array.from(fs.readFileSync(path.join(ui, "index.html"), "utf8").matchAll(/<script src="([^"]+)">/g)).map((m) => m[1]);
 w.eval(scripts.map((s) => fs.readFileSync(path.join(ui, s), "utf8").replace(/^"use strict";/, "")).join("\n;\n") +
-  "\n;window.__T = { S, renderAll, poll, SHARE_DESTS };");
+  "\n;window.__T = { S, renderAll, poll, SHARE_DESTS, openSettings };");
 
 const $ = (id) => w.document.getElementById(id);
 const tick = (ms = 40) => new Promise((r) => setTimeout(r, ms));
@@ -37,6 +37,7 @@ const sheet = () => $("sheet").textContent;
   // Albums: a mixed selection (a moment rendered already, a photo link, a clip, a rendered photo's neighbours)
   click(tab("footage")); await tick(120);
   ok(!by("share"), "nothing selected: no Share… on the bar");
+  click(by("aview", "mine")); await tick();
   dbl(by("pick", "f:Best of the year")); await tick();
   await pick("Turtle");
   ok(!!w.document.querySelector('.selbar [data-a="share"]'), "a moment selected: Share… on the bar");
@@ -108,9 +109,18 @@ const sheet = () => $("sheet").textContent;
   ok(sheet().includes("Share 2 items") && sheet().includes("2 clips") && sheet().includes("whole"), "clips are shared whole");
   click(by("closesheet")); await tick();
   // The Renders filter knows photo links
-  click(tab("footage")); await tick(120); dbl(by("pick", "f:Best of the year")); await tick();
+  click(tab("footage")); await tick(120); click(by("aview", "mine")); await tick(); dbl(by("pick", "f:Best of the year")); await tick();
   T.S.filtersOpen = true; T.renderAll(); await tick();
   ok($("fpanel").textContent.includes("Renders"), "the Renders filter is there for an album with a photo link and a moment");
+  // Project settings, General: the render cache's room and its Clear (never by itself)
+  await T.openSettings(); await tick(60);
+  click(by("stab", "gen")); await tick();
+  ok(sheet().includes("_Renders") && sheet().includes("3 files · 52 MB") && sheet().includes("1 other file there is kept"), "settings: the render cache's room, what Clear leaves");
+  ok(!!by("clearrenders") && !by("clearrenders").disabled, "…and Clear the render cache");
+  click(by("clearrenders")); await tick(120);
+  ok(!!last("clear_renders") && /Render cache cleared: 52 MB freed \(3 files\)/.test($("toast").textContent), "cleared: how much it freed (" + $("toast").textContent + ")");
+  ok(by("clearrenders") && by("clearrenders").disabled && sheet().includes("0 files"), "…and the sheet shows it empty");
+  click(by("closesheet")); await tick();
   ok(errors.length === 0, "no script errors" + (errors.length ? ": " + errors.join(" | ") : ""));
   process.exit(process.exitCode || 0);
 })();

@@ -23,6 +23,7 @@ const [ui, out, scheme] = process.argv.slice(2);
   // The view that was Footage, as a grid: its top, an album, the side panel's Moments part
   await click('[data-a="view"][data-v="footage"]'); await click('[data-a="layout"][data-v="grid"]');
   await shot("albums-top");
+  await click('[data-a="aview"][data-v="mine"]'); // (the user's albums in My albums; not on older pages)
   if (await dbl('[data-a="pick"][data-v="f:Egypt"]')) {
     await click('#main [data-a="pick"]:not([data-v^="f:"])');
     await click('[data-a="tab"][data-v="info"]');
@@ -40,6 +41,7 @@ const [ui, out, scheme] = process.argv.slice(2);
   }
   await click('[data-a="view"][data-v="footage"]'); await click('[data-a="layout"][data-v="grid"]'); await click('[data-a="crumb"][data-v="0"]');
   const pickName = (name, meta) => page.evaluate((n, meta) => { const el = Array.from(document.querySelectorAll('#main [data-a="pick"]')).find((e) => e.querySelector(".nm") && e.querySelector(".nm").textContent === n); if (el) el.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1, metaKey: !!meta })); return !!el; }, name, meta);
+  await click('[data-a="aview"][data-v="mine"]');
   if (await dbl('[data-a="pick"][data-v="f:Best of the year"]')) {
     if (await pickName("Turtle")) {
       await wait();

@@ -60,7 +60,9 @@ pub fn project_id(project: &Path) -> String {
 /// written without its location, and the locations went from the view).
 ///   1  before locations (up to 0.10)          2  with its locations (the Library, 0.11)
 ///   3  the catalog keeps a clip's location (0.12)
-pub const VERSION: u64 = 3;
+///   4  the catalog keeps Accept / Reject and the stars, and whatever else a clip's own file holds (0.13: they were
+///      added under 3, and the NAS Helper of before them wiped them from the views, 2026-11-17)
+pub const VERSION: u64 = 4;
 
 /// The version the project's file says (1 when it says none; None: no file, or not one to read)
 pub fn version(project: &Path) -> Option<u64> {

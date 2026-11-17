@@ -257,9 +257,9 @@ test("a change to something just renamed, when the rename fails: taken back with
 });
 
 test("an album renamed: what's in it follows at once, its moments and its clips' links", async () => {
-  const { page, views } = await start({ delay: { rename_item: 120 } });
+  const { page, views } = await start({ delay: { rename_album: 120 } });
   await inMoments(page);
-  page.get("S.path = []; renderAll()");
+  page.get("S.path = [AV_MARK + 'My albums']; renderAll()"); // the user's albums are in My albums
   const albums = () => val(page, "DATA.footage.dirs").filter((d) => !d.startsWith("Other folders"));
   assert.deepEqual(albums(), ["Day 1", "Day 2", "Reef"]);
   // An album of moments: its folder in _Moments
@@ -269,7 +269,7 @@ test("an album renamed: what's in it follows at once, its moments and its clips'
   assert.equal(shown(page, "moments", "_Moments/Sea/Turtle.afplink.mp4").path, "/P/_Moments/Sea/Turtle.afplink.mp4");
   assert.equal(page.get("DATA.footage.items.find((x) => x.key === 'm:_Moments/Sea/Turtle.afplink.mp4').dir"), "Sea");
   // (asked from Albums: the folder is named by its path)
-  assert.deepEqual(page.calls("rename_item")[0].args, { view: "footage", kind: "folder", path: "/P/_Moments/Reef", name: "Sea" });
+  assert.deepEqual(page.calls("rename_album")[0].args, { paths: ["/P/_Moments/Reef"], name: "Sea" });
   await page.quiet(80);
   assert.deepEqual(albums(), ["Day 1", "Day 2", "Sea"]);
   assert.deepEqual(views.moments.dirs, ["_Moments", "_Moments/Sea"]);

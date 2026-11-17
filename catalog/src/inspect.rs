@@ -138,15 +138,36 @@ pub fn is_video(lower: &str) -> bool { lower.ends_with(".mp4") || lower.ends_wit
 pub fn is_photo(lower: &str) -> bool { [".heic", ".heif", ".jpg", ".jpeg", ".png"].iter().any(|e| lower.ends_with(e)) }
 pub fn is_sidecar(lower: &str) -> bool { lower.ends_with(".afp.json") || lower.ends_with(".marks.json") }
 
-/// What's inside a file that counts, by its kind (None: nothing of ours in it)
+/// What a clip's own file holds that the catalog always says, each null when the file has none. A change of this list
+/// (or of what `read` gives for a link or a photo) is a change of what the catalog keeps: project::VERSION is raised
+/// with it (the test at the end of this file holds the two together)
+pub const OWN_KEPT: [&str; 7] = ["marks", "view", "source", "tags", "rating", "pick", "location"];
+/// What's in a clip's own file about the file itself, not kept
+const OWN_LEFT: [&str; 4] = ["format", "version", "clip", "synced"];
+
+/// A clip's own file as the catalog keeps it: OWN_KEPT, and whatever else it holds as it is. A program older than a
+/// field carries it through, where it used to drop it and so wipe it from every view (2026-11-11 the locations,
+/// 2026-11-17 Accept / Reject and the stars)
+pub fn own_kept(own: &Value) -> Value {
+    let mut out = serde_json::Map::new();
+    for k in OWN_KEPT { out.insert(k.to_string(), own.get(k).cloned().unwrap_or(Value::Null)); }
+    for (k, v) in own.as_object().into_iter().flatten() {
+        if !OWN_LEFT.contains(&k.as_str()) && !out.contains_key(k) { out.insert(k.clone(), v.clone()); }
+    }
+    Value::Object(out)
+}
+
+/// What's inside a file that counts, by its kind (None: nothing of ours in it; InvalidData: a clip's own file that
+/// isn't JSON)
 pub fn read(path: &Path) -> io::Result<Option<Value>> {
     crate::store::nas::read();
     let lower = path.to_string_lossy().to_lowercase();
     if is_sidecar(&lower) {
         let text = std::fs::read(path)?;
-        let Ok(own) = serde_json::from_slice::<Value>(&text) else { return Ok(None) };
-        let pick = |k: &str| own.get(k).cloned().unwrap_or(Value::Null);
-        return Ok(Some(json!({ "own": { "marks": pick("marks"), "view": pick("view"), "source": pick("source"), "tags": pick("tags"), "rating": pick("rating"), "pick": pick("pick"), "location": pick("location") } })));
+        // Not JSON (being written by something that doesn't write it whole, or written wrong): an error, not a clip
+        // without tags, so that its record stays as it was until the file reads right (docs/catalog-safeguards.md)
+        let own = serde_json::from_slice::<Value>(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
+        return Ok(Some(json!({ "own": own_kept(&own) })));
     }
     if is_video(&lower) {
         let keys = mp4_keys(path)?;
@@ -197,5 +218,46 @@ impl Inspect for Ours {
     fn leave(&self, root: &str, rel: &str, _dir: bool) -> bool {
         // A project that is its footage's folder (no folder of footage of its own) is looked at whole
         self.own_only && (root != "p" || self.footage_in_project.iter().any(|d| !d.is_empty() && (rel == d || rel.starts_with(&format!("{d}/")))))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// What the catalog keeps of each kind of file, with the project's version it is kept under. Changed one without
+    /// the other, an older program (the NAS Helper, another computer's Library) goes on writing its own way into a
+    /// project it should refuse. Raise project::VERSION (and the player's M.VERSION, projectfile.lua) and say what the
+    /// new number means there, then change this line
+    #[test]
+    fn what_is_kept_goes_with_the_projects_version() {
+        let dir = std::env::temp_dir().join(format!("afp-kept-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let keys = |v: &Value| v.as_object().map(|o| { let mut k: Vec<&str> = o.keys().map(String::as_str).collect(); k.sort(); k.join(" ") }).unwrap_or_default();
+        let own = dir.join("A.afp.json");
+        std::fs::write(&own, br#"{"format":"actionfootageplayer-clip","version":1,"clip":{"file":"A.MP4","size":1},"synced":{"finder":[]}}"#).unwrap();
+        let sidecar = read(&own).unwrap().unwrap();
+        let photo = dir.join("A.jpg");
+        std::fs::write(&photo, "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1}</afp:link><dc:subject><rdf:Bag><rdf:li>sun</rdf:li></rdf:Bag></dc:subject></x:xmpmeta>").unwrap();
+        let photo = read(&photo).unwrap().unwrap();
+        let kept = format!("sidecar: {} / own: {} / photo: {}", keys(&sidecar), keys(&sidecar["own"]), keys(&photo));
+        assert_eq!((crate::project::VERSION, kept.as_str()),
+                   (4, "sidecar: own / own: location marks pick rating source tags view / photo: link tags"),
+                   "what the catalog keeps changed, or the version did: they change together (see this test's comment)");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A field this program doesn't know is carried through as it is; what's about the file itself is left
+    #[test]
+    fn an_unknown_field_is_kept() {
+        let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "clip": { "file": "A.MP4" }, "synced": {}, "pick": "reject", "later": { "x": 1 } });
+        assert_eq!(own_kept(&own), json!({ "marks": null, "view": null, "source": null, "tags": null, "rating": null, "pick": "reject", "location": null, "later": { "x": 1 } }));
+    }
+
+    /// The player's copy of the version is the same number
+    #[test]
+    fn the_players_version_is_the_same() {
+        let lua = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/scripts/workspace/projectfile.lua")).unwrap();
+        assert!(lua.lines().any(|l| l.trim() == format!("M.VERSION = {}", crate::project::VERSION)), "projectfile.lua's M.VERSION isn't {}", crate::project::VERSION);
     }
 }

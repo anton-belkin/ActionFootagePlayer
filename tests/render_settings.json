@@ -1,0 +1,31 @@
+{
+  "about": "What a render is made with, worked out from a clip's .afp.json (doc), a moment's own bundle (own) and the player's defaults: the player's transform.render_settings (tests/render_settings_test.lua) and the Library's renders::settings (library/src/renders.rs) must both give `want`. A case added here is checked on both sides.",
+  "defaults": { "view": "normal", "level": "medium", "horizon_lock": "no", "chromatic": true, "aspect": "original", "orientation": "as-is",
+                "projection": "linear", "lens": "corrected", "denoise": true, "denoise_strong": false, "preset_horizon": "yes" },
+  "cases": [
+    { "name": "nothing saved: the defaults", "doc": null, "own": null,
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal"} },
+    { "name": "a clip's saved view and its log curve", "doc": { "view": { "view": "wide", "level": "strong", "horizon_lock": "yes", "chromatic": false, "aspect": "16:9", "orientation": "landscape", "projection": "stereographic", "lens": "corrected", "denoise": false, "denoise_strong": true }, "source": { "curve": "dlogm" } }, "own": null,
+      "want": {"aspect": "16:9", "chromatic": false, "curve": "dlogm", "denoise": false, "denoise_strong": true, "horizon_lock": "yes", "lens": "corrected", "level": "strong", "orientation": "landscape", "projection": "stereographic", "view": "wide"} },
+    { "name": "a moment's own bundle over the clip's view", "doc": { "view": { "view": "off", "level": "weak" }, "source": { "curve": "dlogm", "underwater": "yes" } }, "own": { "view": "wide" },
+      "want": {"aspect": "original", "chromatic": true, "curve": "dlogm", "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "underwater": "yes", "view": "wide"} },
+    { "name": "an old view: the input moved to the source", "doc": { "view": { "view": "normal", "curve": "dlogm", "rotation": 90, "underwater": "no", "aspect": "original" } }, "own": null,
+      "want": {"aspect": "original", "chromatic": true, "curve": "dlogm", "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "rotation": 90, "underwater": "no", "view": "normal"} },
+    { "name": "an old view: a turn with another aspect stays", "doc": { "view": { "view": "normal", "rotation": 90, "aspect": "4:3" } }, "own": null,
+      "want": {"aspect": "4:3", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "landscape", "projection": "linear", "view": "normal"} },
+    { "name": "an old 9:16 frame: portrait 16:9", "doc": { "view": { "view": "normal", "aspect": "9:16" } }, "own": null,
+      "want": {"aspect": "16:9", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "portrait", "projection": "linear", "view": "normal"} },
+    { "name": "horizon as the preset says", "doc": { "view": { "horizon_lock": "project" } }, "own": null,
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "yes", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal"} },
+    { "name": "stabilization off before the lens was a key: as recorded", "doc": { "view": { "view": "off" } }, "own": null,
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "as-recorded", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "off"} },
+    { "name": "values it doesn't know: the defaults'", "doc": { "view": { "view": "sideways", "level": 3, "aspect": "2:3", "projection": "fisheye" } }, "own": null,
+      "want": {"aspect": "3:2", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "portrait", "projection": "linear", "view": "normal"} },
+    { "name": "the source's other keys go along", "doc": { "source": { "curve": "none", "lens_type": "normal", "rotation": 180 } }, "own": null,
+      "want": {"aspect": "original", "chromatic": true, "curve": "none", "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "lens_type": "normal", "level": "medium", "orientation": "as-is", "projection": "linear", "rotation": 180, "view": "normal"} },
+    { "name": "an empty own bundle: the clip's view", "doc": { "view": { "level": "strong" } }, "own": {},
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "strong", "orientation": "as-is", "projection": "linear", "view": "normal"} },
+    { "name": "an own bundle of keys it doesn't know: the clip's view", "doc": { "view": { "level": "strong" } }, "own": { "speed": 2 },
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "strong", "orientation": "as-is", "projection": "linear", "view": "normal"} }
+  ]
+}

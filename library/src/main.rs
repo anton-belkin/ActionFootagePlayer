@@ -416,6 +416,30 @@ fn recent_names(e: &RecentEntry) -> Vec<String> {
     out
 }
 
+/// A project kept before its share was (recent.json of 0.12 had paths alone), not reachable now: its share guessed from
+/// where its path is (/Volumes/<share>/…, as the Mac mounts one) and the NAS this computer has shares of (mounted now,
+/// or the other projects' kept): the entry with that share, and the names to try. None: no guess (not under /Volumes,
+/// no NAS known)
+fn guess_share(e: &RecentEntry, mounts: &[(String, PathBuf)], kept: &[String]) -> Option<(RecentEntry, Vec<String>)> {
+    if e.share.is_some() || !cfg!(target_os = "macos") { return None; }
+    let rest = Path::new(&e.path).strip_prefix("/Volumes").ok()?;
+    let mut parts = rest.components().map(|c| c.as_os_str().to_string_lossy().into_owned());
+    let vol = parts.next()?;
+    let rel = parts.collect::<Vec<_>>().join("/");
+    // The NAS's names, each once as spelled, and the user its shares are mounted as
+    let (mut names, mut user): (Vec<String>, Option<String>) = (Vec::new(), None);
+    for src in mounts.iter().map(|(s, _)| s.as_str()).chain(kept.iter().map(String::as_str)) {
+        let Some((host, _, _)) = locations::network(src) else { continue };
+        let (u, h) = host.rsplit_once('@').map(|(u, h)| (Some(u.to_string()), h.to_string())).unwrap_or((None, host.clone()));
+        let h = h.trim_end_matches('.').to_string();
+        if user.is_none() { user = u; }
+        if !names.iter().any(|n: &String| n.eq_ignore_ascii_case(&h)) { names.push(h); }
+    }
+    let first = names.first()?;
+    let share = format!("//{}{first}/{vol}", user.map(|u| format!("{u}@")).unwrap_or_default());
+    Some((RecentEntry { share: Some(share), rel, ..e.clone() }, names))
+}
+
 fn remember(app: &tauri::AppHandle, root: &Path) {
     let p = root.display().to_string();
     let (share, rel) = share_of(root, &locations::mounts()).map(|(s, r)| (Some(s), r)).unwrap_or_default();
@@ -670,6 +694,8 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
     if let Some(f) = st.get("made_paths").and_then(Value::as_array) {
         job.made_paths = f.iter().filter_map(Value::as_str).map(str::to_string).collect();
     }
+    // A share's: what the player would have rendered each with by itself
+    if let (Some(s), Some(u)) = (job.share.as_mut(), st.get("used").and_then(Value::as_array)) { s.used = u.clone(); }
     if let Some(f) = st.get("left_out").and_then(Value::as_array) {
         job.left_out = f.iter().filter_map(|p| {
             let p = p.as_array()?;
@@ -920,6 +946,7 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
     tauri::async_runtime::spawn_blocking(move || -> Vec<Recent> {
     let mounts = locations::mounts();
     let mut list = recent_list(&app);
+    let kept: Vec<String> = list.iter().filter_map(|e| e.share.clone()).collect();
     let mut changed = false;
     let out = list.iter_mut().map(|e| {
         let here = recent_here(e, &mounts);
@@ -931,10 +958,13 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
             let hp = h.display().to_string();
             if e.path != hp { e.path = hp; changed = true; }
         }
-        let share = e.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
+        // Its share not kept (a list of before): guessed, to connect it all the same
+        let guess = if here.is_none() { guess_share(e, &mounts, &kept) } else { None };
+        let known = guess.as_ref().map(|g| &g.0).unwrap_or(e);
+        let share = known.share.as_deref().and_then(locations::network).map(|(h, n, _)| format!("//{}/{n}", h.rsplit_once('@').map(|x| x.1).unwrap_or(&h).trim_end_matches('.').trim_end_matches("._smb._tcp.local")));
         Recent { name: Path::new(&e.path).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| e.path.clone()),
-                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && e.share.is_some(), share, path: e.path.clone(),
-                 names: if here.is_none() { recent_names(e) } else { Vec::new() }, at_start: e.at_start }
+                 here: here.is_some(), connect: here.is_none() && cfg!(target_os = "macos") && known.share.is_some(), share, path: e.path.clone(),
+                 names: match (&here, &guess) { (Some(_), _) => Vec::new(), (None, Some(g)) => g.1.clone(), (None, None) => recent_names(e) }, at_start: e.at_start }
     }).collect();
     if changed { write_recent(&app, &list); }
     out
@@ -991,10 +1021,14 @@ async fn forget_recent(app: tauri::AppHandle, path: String) -> Result<(), String
 #[tauri::command]
 async fn connect_project(app: tauri::AppHandle, path: String, host: Option<String>) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
-        let e = recent_list(&app).into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        let list = recent_list(&app);
+        let kept: Vec<String> = list.iter().filter_map(|e| e.share.clone()).collect();
+        let e = list.into_iter().find(|e| e.path == path).ok_or("It isn't in the list")?;
+        // Its share as kept, else guessed from its path and the NAS known here
+        let (e, names) = match guess_share(&e, &locations::mounts(), &kept) { Some(g) => g, None => { let n = recent_names(&e); (e, n) } };
         let share = e.share.clone().ok_or("Its share isn't known: connect it in Finder, then open it")?;
         // By the name chosen, else each of the NAS's names in turn
-        mount_share(&share, &host.map(|h| vec![h]).unwrap_or_else(|| recent_names(&e)))?;
+        mount_share(&share, &host.map(|h| vec![h]).unwrap_or(names))?;
         recent_here(&e, &locations::mounts()).map(|p| p.display().to_string())
             .ok_or_else(|| format!("{share} is connected, but {} isn't on it", e.path))
     }).await.map_err(|e| e.to_string())?
@@ -1087,7 +1121,7 @@ async fn changes_since(shared: State<'_, Shared>, probes: State<'_, index::Share
     let (root, now) = { let g = shared.lock().unwrap(); (g.project.clone().ok_or("Open a project first")?, g.watch.as_ref().map(|w| w.changes.load(std::sync::atomic::Ordering::Relaxed)).unwrap_or(0)) };
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let changed = seen::since(since, now).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
+        let changed = seen::since(since, now).map(seen::not_ours).and_then(|files| changed::of_files(&root, &files)).map(|c| c.with_probes(&probes));
         json!({ "upto": now, "changed": changed })
     }).await.map_err(|e| e.to_string())
 }
@@ -1207,7 +1241,8 @@ async fn project_settings(app: tauri::AppHandle, shared: State<'_, Shared>) -> R
                    "never_rename": locations::never_rename(&root),
                    "tag_stores": locations::tag_stores(&root), "finder_here": cfg!(target_os = "macos"),
                    "generated_runs": doc.get("generated_runs").and_then(Value::as_bool).unwrap_or(false),
-                   "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()) }))
+                   "next_to_footage": doc.get("locations").and_then(Value::as_array).is_none_or(|a| a.is_empty()),
+                   "renders": renders::cache_size(&root) }))
     }).await.map_err(|e| e.to_string())?
 }
 
@@ -1277,6 +1312,17 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     if !stores.is_empty() { doc["tag_stores"] = json!(stores); }
     std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }).await.map_err(|e| e.to_string())?
+}
+
+// The project's render cache (_Renders) emptied: what Share made there, never anything else. Only on the user's Clear
+// (Project settings, General); nothing cleans it by itself. { files, bytes } freed, { kept }
+#[tauri::command]
+async fn clear_renders(shared: State<'_, Shared>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (freed, problems) = renders::clear(&root);
+        if problems.is_empty() { Ok(freed) } else { Err(format!("Couldn't remove {} of them: {}", problems.len(), problems[0])) }
+    }).await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1530,6 +1576,21 @@ async fn apply_moved(shared: State<'_, Shared>, found: Vec<Value>) -> Result<Vec
     }).await.map_err(|e| e.to_string())
 }
 
+// Checks' catalog part: every folder looked at again now (after a script changed files in place), or every file of ours
+// read again against the catalog (after a restore that kept times); and how the last of those went
+#[tauri::command]
+async fn catalog_look(shared: State<'_, Shared>, check: bool) -> Result<(), String> {
+    let g = shared.lock().unwrap();
+    let w = g.watch.as_ref().ok_or("Open a project first")?;
+    seen::look_deep(Some(&w.runner), check);
+    Ok(())
+}
+
+#[tauri::command]
+async fn catalog_care(shared: State<'_, Shared>) -> Result<Value, String> {
+    Ok(seen::care(shared.lock().unwrap().watch.as_ref().map(|w| &w.runner)))
+}
+
 // The links whose original isn't where they say, as last counted: [{ file, tree, kind }]
 #[tauri::command]
 async fn missing_links(shared: State<'_, Shared>) -> Result<Vec<Value>, String> {
@@ -1723,6 +1784,33 @@ async fn lens_info(path: String) -> Result<Value, String> {
     }).await.map_err(|e| e.to_string())?
 }
 
+/// The lens of the Gyroflow project beside this clip kept as the default for its camera, mode and size, in the user's
+/// lens list (gyroflow-probe --save-lens: vs-gyroflow's lens_pick::save_default). Every clip of that camera is read
+/// again: the ones of that mode and size, without a lens of their own, have it now. {"camera", "type", "type_label",
+/// "size", "lens", "profile", "file", "again" (how many clips are read again)}
+#[tauri::command]
+async fn save_project_lens(probes: State<'_, index::SharedProbes>, path: String) -> Result<Value, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there")?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&probe);
+        cmd.arg("--save-lens").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't save a lens: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        // Saved for any mode: the camera's clips of that size have it at once (their answers asked again behind)
+        let whole = (v["type"].as_str() == Some("any")).then(|| (v["size"].as_str().unwrap_or("").to_string(),
+            format!("{}, from your list: {}", v["type_label"].as_str().unwrap_or("Any mode"), v["lens"].as_str().unwrap_or("").replace('_', " "))));
+        let again = probes.lock().unwrap().lens_saved_for(v["camera"].as_str().unwrap_or(""), &before, whole.as_ref().map(|(s, l)| (s.as_str(), l.as_str())));
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
 async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
@@ -1844,6 +1932,36 @@ async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedP
         // What it is now, and that the old name is gone (changed.rs); its new path is the answer
         Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
+}
+
+/// An album renamed: each of its folders (in _Clips, _Moments, _Stills: up to three) given the name, as one change.
+/// When one can't be, the ones renamed already get their old name back, and nothing is changed (the window then
+/// shows the album as it was, whole); the folders are read again after it, as for a folder renamed
+#[tauri::command]
+async fn rename_album(shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
+    let shared = shared.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
+        let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+        let to = rename_album_in(&root, &paths, &name)?;
+        Ok(changed::Changed { answer: json!(to), ..Default::default() }.reload_all())
+    }).await.map_err(|e| e.to_string())?
+}
+
+pub(crate) fn rename_album_in(root: &Path, paths: &[String], name: &str) -> Result<Vec<String>, String> {
+    let mut done: Vec<(String, String)> = Vec::new();
+    for p in paths {
+        match rename_in(root, "footage", "folder", p, name) {
+            Ok(to) => done.push((p.clone(), to)),
+            Err(e) => {
+                // Back as it was, the last first
+                let was = |p: &str| Path::new(p).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                let mut also = Vec::new();
+                for (from, to) in done.iter().rev() { if let Err(b) = rename_in(root, "footage", "folder", to, &was(from)) { also.push(b); } }
+                return Err(if also.is_empty() { e } else { format!("{e}; and couldn't be named back: {}", also.join(" · ")) });
+            }
+        }
+    }
+    Ok(done.into_iter().map(|(_, t)| t).collect())
 }
 
 fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Result<String, String> {
@@ -2134,16 +2252,20 @@ async fn open_in_gyroflow(paths: Vec<String>) -> Result<(), String> {
 // A new folder in a view's own folder (_Clips, _Moments, _Stills, _Exports), inside `parent` (its path there): its
 // path there, named "untitled folder" (" 2"… when taken), for renaming at once
 #[tauri::command]
-async fn new_folder(shared: State<'_, Shared>, view: String, parent: String) -> Result<String, String> {
+async fn new_folder(shared: State<'_, Shared>, view: String, parent: String, name: Option<String>) -> Result<String, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
-        new_folder_in(&root, &view, &parent)
+        new_folder_named(&root, &view, &parent, name.as_deref())
     }).await.map_err(|e| e.to_string())?
 }
 
-fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String> {
+fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String> { new_folder_named(root, view, parent, None) }
+
+/// …named as the window already shows it (screen first: it showed the folder before asking), when that name is free
+/// and one a file can have; else "untitled folder" as before. Its path in the project's folder is the answer
+fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -> Result<String, String> {
     let root = root.to_path_buf();
     // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
     if !matches!(view, "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
@@ -2152,6 +2274,7 @@ fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String
     let mut name = "untitled folder".to_string();
     let mut n = 1;
     while dir.join(&name).exists() { n += 1; name = format!("untitled folder {n}"); }
+    if let Some(w) = want.and_then(|w| good_name(w).ok()).filter(|w| !dir.join(w).exists()) { name = w; }
     std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
     // In the catalog at once: the views list folders from it
     seen::note_now(&[dir.join(&name)]);
@@ -2353,8 +2476,12 @@ fn share_collect(shared: &Shared) {
             (j.id, s.clone(), j.failures.clone(), j.state == JobState::Stopped)
         }).collect()
     };
+    // afp-cut, beside the player's gyroflow-probe: a moment with nothing to change is its part cut as it is
+    if ended.is_empty() { return; }
+    let cut = index::probe_tool(player().ok().as_deref())
+        .map(|p| p.with_file_name(if cfg!(windows) { "afp-cut.exe" } else { "afp-cut" })).filter(|p| p.is_file());
     for (id, mut s, failures, stopped) in ended {
-        let written = share::collect(&mut s, &failures, stopped);
+        let written = share::collect(&mut s, &failures, stopped, cut.as_deref(), player_ffmpeg().as_deref());
         seen::note_now(&written);
         let mut inner = shared.lock().unwrap();
         if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) { share_sum(j, s); }
@@ -2408,11 +2535,11 @@ async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folde
             inner.jobs.push(Job { id, kind: "share".into(), title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                                   project: root.display().to_string(), state: JobState::Looking, done: 0, total: n as u64, failed: 0, made: None, fraction: None,
                                   current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request: Value::Null,
-                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ended: false }) });
+                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ..Default::default() }) });
             id
         };
         let (planned, asked) = share::plan(&root, &items, &look);
-        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ended: false };
+        let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ..Default::default() };
         let show = |s: &share::Share, request: Option<Value>| {
             let mut inner = shared.lock().unwrap();
             if let Some(j) = inner.jobs.iter_mut().find(|j| j.id == id) {
@@ -2630,10 +2757,10 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, delete_items,
-                                                 export_library, mend, missing_links, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info,
-                                                 albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
+                                                 export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
+                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -2948,6 +3075,18 @@ mod tests {
         assert_eq!(names, ["DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
         let e = RecentEntry { share: Some("//u@DISKSTATIONDXP._smb._tcp.local/ssd".into()), hosts: names, ..e };
         assert_eq!(recent_names(&e), ["DISKSTATIONDXP._smb._tcp.local", "DISKSTATIONDXP", "web.nas", "192.168.50.186"]);
+        // One of a list of before (its path alone), offline: its share guessed from its path and the NAS known here (the
+        // Mac's /Volumes)
+        if cfg!(target_os = "macos") {
+        let old = RecentEntry { path: "/Volumes/ssd/Action Footage Library".into(), ..Default::default() };
+        let mounted = [("//antonadmin@DISKSTATIONDXP/photo".to_string(), PathBuf::from("/Volumes/photo"))];
+        let (g, names) = guess_share(&old, &mounted, &["//antonadmin@DISKSTATIONDXP._smb._tcp.local/ssd".into()]).unwrap();
+        assert_eq!((g.share.as_deref(), g.rel.as_str()), (Some("//antonadmin@DISKSTATIONDXP/ssd"), "Action Footage Library"));
+        assert_eq!(names, ["DISKSTATIONDXP", "DISKSTATIONDXP._smb._tcp.local"]);
+        // Nothing known, or not under /Volumes: no guess
+        assert!(guess_share(&old, &[], &[]).is_none());
+        assert!(guess_share(&RecentEntry { path: "/Users/a/P".into(), ..Default::default() }, &mounted, &[]).is_none());
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 
@@ -3185,9 +3324,14 @@ mod share_e2e {
     fn a_share_with_the_player() {
         let (Some(_), Some(trip)) = (std::env::var_os("AFL_PLAYER"), std::env::var_os("AFL_SHARE_TRIP")) else { return };
         let root = PathBuf::from(&trip);
-        let clip = "Day 1/A.MP4";
+        // AFL_SHARE_CLIP: the clip's path in the trip (a real camera clip, with its .afp.json and .gyroflow if it has them)
+        let clip_owned = std::env::var("AFL_SHARE_CLIP").unwrap_or_else(|_| "Day 1/A.MP4".into());
+        let clip = clip_owned.as_str();
         let size = std::fs::metadata(root.join(clip)).unwrap().len();
         let jpeg = std::fs::read(root.join("thumb.jpg")).unwrap();
+        if !root.join(PROJECT_FILE).is_file() {
+            std::fs::write(root.join(PROJECT_FILE), r#"{"format":"actionfootage-project","version":3,"id":"share-e2e"}"#).unwrap();
+        }
         for d in ["_Moments/Reef", "_Stills/Reef"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
         let roots = json!([root.display().to_string()]);
         std::fs::write(root.join("_Moments/Reef/Turtle.afplink.mp4"),
@@ -3199,9 +3343,11 @@ mod share_e2e {
         std::fs::create_dir_all(&folder).unwrap();
         let items = [json!({ "kind": "moment", "path": "_Moments/Reef/Turtle.afplink.mp4", "name": "Turtle" }),
                      json!({ "kind": "photo", "path": "_Stills/Reef/A_1.00s.afplink.jpg", "name": "A_1.00s" }),
-                     json!({ "kind": "clip", "path": clip, "name": "A" })];
+                     json!({ "kind": "clip", "path": clip, "name": clip.rsplit('/').next().unwrap_or(clip).split('.').next().unwrap_or("A") })];
         let look = std::env::var("AFL_SHARE_LOOK").unwrap_or_else(|_| "HDR".into());
-        let (planned, asked) = share::plan(&root, &items, &look);
+        let (mut planned, asked) = share::plan(&root, &items, &look);
+        // What the cache has is handed over at once, as the command does
+        for i in planned.iter_mut().filter(|i| i.state == "copying") { share::deliver("folder", &folder, i); }
         println!("planned: {}", serde_json::to_string(&planned.iter().map(|i| (&i.name, &i.state, &i.message)).collect::<Vec<_>>()).unwrap());
         println!("asked of the player: {}", serde_json::to_string_pretty(&asked).unwrap());
         let shared: Shared = Arc::new(Mutex::new(Inner::default()));
@@ -3214,7 +3360,7 @@ mod share_e2e {
                 state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
                 failures: vec![], left_out: vec![], made_paths: vec![],
                 request: json!({ "kind": "share", "project": root.display().to_string(), "items": asked }),
-                share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ended: false }),
+                share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ..Default::default() }),
             });
         }
         let t0 = Instant::now();
@@ -3239,6 +3385,9 @@ mod share_e2e {
         println!("_Renders: {:?}", list(&root.join("_Renders")));
         println!("shared: {:?}", list(&folder));
         assert!(j.share.as_ref().unwrap().items.iter().all(|i| i.state == "copied"), "not everything was saved");
+        // The player rendered with the recipe's settings, and they're what it would have taken by itself
+        assert!(!j.share.as_ref().unwrap().items.iter().any(|i| i.message.as_deref().is_some_and(|m| m.contains("differ"))),
+                "the Library's recipe and the player's own settings differ");
         assert_eq!(j.state, JobState::Done, "{:?}", j.message);
     }
 }

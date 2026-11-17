@@ -1,7 +1,8 @@
 // afp-photo: a HEIC with a gain map from a still's two renditions, for gyroflow-export --photo on macOS.
 //
 //   afp-photo --width W --height H [--sdr <file>] [--hdr <file>] [--out <file.heic>] [--sdr-out <file>]
-//             [--quality 0-1] [--taken "YYYY:MM:DD HH:MM:SS"] [--make <name>] [--model <name>] [--content-id <UUID>]
+//             [--quality 0-1] [--taken "YYYY:MM:DD HH:MM:SS"] [--offset "+02:00"] [--subsec "123"] [--created <QuickTime date>]
+//             [--make <name>] [--model <name>] [--content-id <UUID>]
 //             [--link <json>] [--gps <lat,lon[,alt]>]
 //   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds> [--gps <lat,lon[,alt]>]
 //   afp-photo --set-meta <file.heic> [--link <json>] [--tags <json list>]
@@ -99,6 +100,15 @@ func liveVideo(from input: URL, to output: URL, id: String, still: Double) {
     identifier.value = id as NSString
     identifier.dataType = kCMMetadataBaseDataType_UTF8 as String
     writer.metadata = [identifier]
+    // When it was taken, as an iPhone writes it ("2026-10-22T15:28:42+0200": local time and zone)
+    if let created = args["created"] {
+        let date = AVMutableMetadataItem()
+        date.keySpace = .quickTimeMetadata
+        date.key = "com.apple.quicktime.creationdate" as NSString
+        date.value = created as NSString
+        date.dataType = kCMMetadataBaseDataType_UTF8 as String
+        writer.metadata.append(date)
+    }
     // Where it was taken, as an iPhone writes it (ISO 6709: "+46.10200+007.91928+1780.429/")
     if let gps {
         let location = AVMutableMetadataItem()
@@ -245,6 +255,10 @@ guard let outPath = args["out"] else { exit(0) }
 var props: [CFString: Any] = [:]
 var exif: [CFString: Any] = [:]
 if let taken = args["taken"] { exif[kCGImagePropertyExifDateTimeOriginal] = taken; exif[kCGImagePropertyExifDateTimeDigitized] = taken }
+if let subsec = args["subsec"] { exif[kCGImagePropertyExifSubsecTimeOriginal] = subsec; exif[kCGImagePropertyExifSubsecTimeDigitized] = subsec }
+if let offset = args["offset"] {
+    exif[kCGImagePropertyExifOffsetTimeOriginal] = offset; exif[kCGImagePropertyExifOffsetTimeDigitized] = offset; exif[kCGImagePropertyExifOffsetTime] = offset
+}
 if !exif.isEmpty { props[kCGImagePropertyExifDictionary] = exif }
 var tiff: [CFString: Any] = [:]
 if let make = args["make"] { tiff[kCGImagePropertyTIFFMake] = make }

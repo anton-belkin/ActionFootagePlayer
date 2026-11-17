@@ -23,7 +23,10 @@ const readViews = () => { const v = {}; for (const n of ["footage", "moments", "
 
 // Whether the page is the one that takes a command's own account of what it changed (the pinpoint update): the mock
 // then answers as the app does since, each command taking the time to say it too
-const pinpoint = fs.readFileSync(path.join(__dirname, "..", "ui", "changes.js"), "utf8").includes("changes_since");
+const UIDIR = process.env.AFL_UI || path.join(__dirname, "..", "ui");
+const pinpoint = fs.readFileSync(path.join(UIDIR, "changes.js"), "utf8").includes("changes_since");
+// …and the album commands' account of what they made (albums shown at once)
+const albumsSay = fs.readFileSync(path.join(UIDIR, "albums.js"), "utf8").includes("Writes.define(\"albumadd\"");
 
 // How long a command takes in a mode ("own": at once), by how many items it's for
 function delayFor(mode) {
@@ -43,6 +46,10 @@ function delayFor(mode) {
       case "delete_items": return sized("delete_items: ", a.items.length, " moment(s)") + saying(a.items.length, true);
       // What the catalog says changed, as items (the command's own change, told back)
       case "changes_since": return of("what the catalog says changed, as items: 1 clip's own file");
+      // Albums: the command, and (the page that takes it) saying what it made
+      case "album_add": { const n = a.clips.length; return (n <= 1 ? of("album_add: 1 clip(s)") : of("album_add: 300 clip(s)") * n / 300) + (albumsSay ? of(n <= 1 ? "saying what changed: album_add 1" : "saying what changed: album_add 300") : 0); }
+      case "album_move": return of("album_move: 50 links") * a.files.length / 50 + (albumsSay ? of("saying what changed: album_move 50") : 0);
+      case "photo_add": return of("photo_add: 20 marks") * a.photos.length / 20 + (albumsSay ? of("saying what changed: photo_add 20") : 0);
       default: return 0;
     }
   };
@@ -54,7 +61,44 @@ const clipIds = (views, n) => views.footage.items.filter((it) => it.preview).sli
 const row = (page, id) => page.$('#main [data-v="' + page.window.CSS.escape("i:" + id) + '"]');
 const item = (page, view, id) => page.get("(DATA." + view + ".items.find((x) => x.id === " + JSON.stringify(id) + ") || null)");
 
+// Clips with no link yet (Originals: not in an album), and a clip's row in Originals
+const unlinked = (views, n) => { const has = new Set((views.footage.links || []).map((l) => l.clip)); return views.footage.items.filter((it) => !has.has(it.id)).slice(0, n).map((it) => it.id); };
+const inAlbum = (page, id) => page.get("((DATA.sources.items.find((x) => x.id === " + JSON.stringify(id) + ") || {}).albums || 0)") > 0;
+// Into the album sheet as the menu opens it, a new album typed: the click on Add / Move is what's timed
+async function sheet(page, mode, name) {
+  await page.get("askAlbum(" + JSON.stringify(mode) + ")");
+  await page.until(() => page.get("S.sheet === 'album'"), 60000);
+  page.get("albumTyped(" + JSON.stringify(name) + ")");
+  return () => page.click('[data-a="albumgo"]');
+}
 const SCENARIOS = [
+  { name: "Add 1 clip to a new album", async run(page, views) {
+    const ids = unlinked(views, 1);
+    page.get("S.view = 'sources'; S.path = " + JSON.stringify(FOLDER) + "; renderAll()");
+    page.select(ids, "i:s");
+    return { act: await sheet(page, "add", "Perf"), shown: () => inAlbum(page, ids[0]) };
+  } },
+  { name: "Add 300 clips to a new album", async run(page, views) {
+    const ids = unlinked(views, 300);
+    page.get("S.view = 'sources'; S.path = " + JSON.stringify(FOLDER) + "; renderAll()");
+    page.select(ids, "i:s");
+    return { act: await sheet(page, "add", "Perf"), shown: () => inAlbum(page, ids[0]) && inAlbum(page, ids[299]) };
+  } },
+  { name: "Move 50 links to a new album", async run(page, views) {
+    const links = views.footage.links.filter((l) => l.rel.startsWith("_Clips/Trip 01/")).slice(0, 50);
+    page.get("S.view = 'footage'; S.path = ['Trip 01', 'Day 01']; renderAll()");
+    page.select(links.map((l) => l.rel), "i:a");
+    const last = "_Clips/Moved/" + links[49].rel.split("/").pop();
+    return { act: await sheet(page, "move", "Moved"), shown: () => page.get("RAW_FOOTAGE.links.some((l) => l.rel === " + JSON.stringify(last) + ")") };
+  } },
+  { name: "Photo links of 20 marks", async run(page, views) {
+    // 5 clips with 4 marks each (their probes say so), selected in Originals
+    const ids = unlinked(views, 5);
+    page.get("for (const id of " + JSON.stringify(ids) + ") { const c = RAW_FOOTAGE.items.find((x) => x.id === id); PROBES[c.path] = Object.assign({}, PROBES[c.path] || {}, { marks: { times: [2, 4, 6, 8] } }); } S.view = 'sources'; S.path = " + JSON.stringify(FOLDER) + "; renderAll()");
+    page.select(ids, "i:s");
+    const last = ids[4];
+    return { act: () => page.get("photoLinks()"), shown: () => page.get("(DATA.stills.items || []).filter((p) => p.link && p.link.clip === " + JSON.stringify(last) + ").length === 4") };
+  } },
   { name: "Add a tag to 1 clip", async run(page, views) {
     const ids = clipIds(views, 1);
     page.get("S.path = " + JSON.stringify(FOLDER) + "; showTab('tags'); renderAll()");
@@ -110,10 +154,10 @@ const SCENARIOS = [
   const modes = (process.env.AFL_PERF_MODES || "own,local,nas").split(",");
   const out = [];
   for (const sc of SCENARIOS) {
-    if (only && !sc.name.toLowerCase().includes(only.toLowerCase())) continue;
+    if (only && !only.split("|").some((o) => sc.name.toLowerCase().includes(o.toLowerCase()))) continue;
     for (const mode of modes) {
       const views = readViews();
-      const app = fake(views, { changed: pinpoint });
+      const app = fake(views, { changed: pinpoint, albums: albumsSay });
       // Opening isn't what's measured: the project opens with the app answering at once
       let live = false;
       const d = delayFor(mode);
@@ -125,7 +169,8 @@ const SCENARIOS = [
       const mark = page.mark();
       const t = Date.now();
       act();
-      await page.until(shown, 600000, sc.name + " to show");
+      try { await page.until(shown, +(process.env.AFL_PERF_WAIT || 600000), sc.name + " to show"); }
+      catch (e) { console.error("not shown: errors " + JSON.stringify(page.errors.map(String)) + ", error box " + JSON.stringify(page.get("$('error').textContent")) + ", sheet " + page.get("S.sheet") + ", asked " + page.since(mark).map((c) => c.cmd).join(",")); throw e; }
       const tShown = Date.now() - t;
       await page.quiet(150, 600000);
       const tQuiet = Date.now() - t - 150;

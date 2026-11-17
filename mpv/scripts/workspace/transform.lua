@@ -183,4 +183,18 @@ function M.migrate_source(doc)
     return changed
 end
 
+-- What a render of a source is made with (the Library's Share, the batches): the bundle (a moment's own `own`, else
+-- the source's saved view, else the app's `defaults`) made whole with the defaults, and the source's input (its
+-- .afp.json's `source`, an old view's moved there first) over it. `doc`: the source's .afp.json as read (changed by
+-- migrate_source). Action Footage Library works it out the same way (library/src/renders.rs `settings`), checked
+-- against the same cases (tests/render_settings.json): the recipe it hashes is what the player renders with
+function M.render_settings(doc, own, defaults)
+    local bundle = M.complete(M.pick(own) or M.pick(type(doc) == "table" and doc.view or nil) or defaults, defaults)
+    local rendered = {}
+    for k, v in pairs(bundle) do rendered[k] = v end
+    if type(doc) == "table" then M.migrate_source(doc) end
+    for k, v in pairs(type(doc) == "table" and type(doc.source) == "table" and doc.source or {}) do rendered[k] = v end
+    return bundle, rendered
+end
+
 return M

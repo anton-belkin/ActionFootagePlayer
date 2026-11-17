@@ -414,15 +414,49 @@ fn gps_entries(p: &crate::geotag::Fix) -> Vec<Entry> {
     e
 }
 
-/// A minimal Exif segment's payload: when it was taken (local time, "YYYY:MM:DD HH:MM:SS"), the camera, and where (the
-/// GPS IFD)
-pub fn exif(taken: Option<&str>, make: Option<&str>, model: Option<&str>, place: Option<&crate::geotag::Fix>) -> Vec<u8> {
+/// When a photo was taken, as Exif has it: the local time ("YYYY:MM:DD HH:MM:SS"), its zone ("+02:00", where known) and
+/// the fraction of the second ("123": milliseconds)
+#[derive(Clone, Debug, PartialEq)]
+pub struct Taken { pub local: String, pub offset: Option<String>, pub subsec: String }
+
+impl Taken {
+    /// From unix seconds (UTC) and the zone, minutes east (`known`: written as OffsetTime; else only the local time)
+    pub fn at(unix: f64, offset_min: i32, known: bool) -> Taken {
+        let ms = ((unix + offset_min as f64 * 60.0) * 1000.0).round() as i64;
+        let (secs, ms) = (ms.div_euclid(1000), ms.rem_euclid(1000));
+        let days = secs.div_euclid(86400);
+        // civil_from_days (Howard Hinnant's)
+        let z = days + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z - era * 146_097;
+        let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let d = doy - (153 * mp + 2) / 5 + 1;
+        let m = if mp < 10 { mp + 3 } else { mp - 9 };
+        let y = yoe + era * 400 + (m <= 2) as i64;
+        let s = secs.rem_euclid(86400);
+        let o = offset_min.abs();
+        Taken { local: format!("{y:04}:{m:02}:{d:02} {:02}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60),
+                offset: known.then(|| format!("{}{:02}:{:02}", if offset_min < 0 { '-' } else { '+' }, o / 60, o % 60)),
+                subsec: format!("{ms:03}") }
+    }
+}
+
+/// A minimal Exif segment's payload: when it was taken (DateTimeOriginal and Digitized, their OffsetTime and SubSecTime),
+/// the camera, and where (the GPS IFD)
+pub fn exif(taken: Option<&Taken>, make: Option<&str>, model: Option<&str>, place: Option<&crate::geotag::Fix>) -> Vec<u8> {
     // Big-endian TIFF: IFD0 with Make, Model and the Exif and GPS IFDs' pointers, then the Exif IFD with
     // DateTimeOriginal, then the GPS IFD
     let mut ifd0: Vec<Entry> = Vec::new();
     if let Some(m) = make { ifd0.push(ascii(0x010F, m)); }
     if let Some(m) = model { ifd0.push(ascii(0x0110, m)); }
-    let exif_ifd: Vec<Entry> = taken.map(|t| vec![ascii(0x9003, t), ascii(0x9004, t)]).unwrap_or_default();
+    if let Some(t) = taken { ifd0.push(ascii(0x0132, &t.local)); }
+    let exif_ifd: Vec<Entry> = taken.map(|t| {
+        let mut e = vec![ascii(0x9003, &t.local), ascii(0x9004, &t.local), ascii(0x9291, &t.subsec), ascii(0x9292, &t.subsec)];
+        if let Some(o) = &t.offset { e.extend([ascii(0x9010, o), ascii(0x9011, o), ascii(0x9012, o)]); }
+        e
+    }).unwrap_or_default();
     let gps_ifd: Vec<Entry> = place.map(gps_entries).unwrap_or_default();
     // An IFD's length with the values that don't fit in its entries after it
     let ifd_len = |e: &[Entry], pointers: usize| 2 + (e.len() + pointers) * 12 + 4 + e.iter().map(|x| if x.data.len() > 4 { x.data.len() + (x.data.len() & 1) } else { 0 }).sum::<usize>();
@@ -462,6 +496,22 @@ pub fn exif(taken: Option<&str>, make: Option<&str>, model: Option<&str>, place:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn taken_is_the_local_time_with_its_zone_and_fraction() {
+        // 2026-10-22T13:29:40.5Z at UTC+2
+        let t = Taken::at(1_792_675_780.5, 120, true);
+        assert_eq!(t, Taken { local: "2026:10:22 15:29:40".into(), offset: Some("+02:00".into()), subsec: "500".into() });
+        // A zone not known: none written
+        let t = Taken::at(1_792_675_780.25, -150, false);
+        assert_eq!((t.local.as_str(), t.offset, t.subsec.as_str()), ("2026:10:22 10:59:40", None, "250"));
+        assert_eq!(Taken::at(1_792_675_780.0, -150, true).offset.as_deref(), Some("-02:30"));
+        // Written into the Exif IFD: DateTimeOriginal, SubSecTimeOriginal, OffsetTimeOriginal (and IFD0's DateTime)
+        let e = exif(Some(&Taken::at(1_792_675_780.5, 120, true)), None, None, None);
+        let has = |s: &[u8]| e.windows(s.len()).any(|w| w == s);
+        assert!(has(b"2026:10:22 15:29:40\0") && has(b"500\0") && has(b"+02:00\0"));
+        for tag in [0x9003u16, 0x9011, 0x9291, 0x0132] { assert!(has(&tag.to_be_bytes()), "tag {tag:04x}"); }
+    }
 
     #[test]
     fn hlg_reference_white_is_sdr_white() {
@@ -523,7 +573,7 @@ mod tests {
             let (x, y) = ((i % w) as f32 / w as f32, (i / w) as f32 / h as f32);
             let v = if (0.4..0.6).contains(&y) { 0.75 + 0.25 * x } else { 0.75 * x };
             [v, v * 0.95, v * 0.8] }).collect() };
-        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap()).unwrap();
+        std::fs::write(&path, ultra_hdr_jpeg(&sdr, Some(&hdr), 92, Some(exif(Some(&Taken::at(1_793_872_800.0, 0, false)), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap()).unwrap();
     }
 
     #[test]
@@ -531,7 +581,7 @@ mod tests {
         let (w, h) = (64, 32);
         let sdr = Image { width: w, height: h, pixels: vec![[0.5, 0.4, 0.3]; w * h] };
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some(&Taken::at(1_793_872_800.0, 0, false)), Some("DJI"), Some("Osmo Action 6"), None)), None, None).unwrap();
         // The MPF's entries: the primary's size, and the gain map where it says
         let at = file.windows(4).position(|w| w == b"MPF\0").unwrap();
         let tiff = at + 4;
@@ -552,7 +602,7 @@ mod tests {
         let hdr = Image { width: w, height: h, pixels: vec![[0.7, 0.6, 0.5]; w * h] };
         let video = b"\0\0\0\x18ftypmp42 a video, not really".to_vec();
         let m = Motion { video: &video, presentation_us: 1_500_000 };
-        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some("2026:11:05 10:00:00"), None, None, None)), Some(&m), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#)).unwrap();
+        let file = ultra_hdr_jpeg(&sdr, Some(&hdr), 90, Some(exif(Some(&Taken::at(1_793_872_800.0, 0, false)), None, None, None)), Some(&m), Some(r#"{"v":1,"kind":"photo","clip":"Day 1/A & B.MP4","t":1.5}"#)).unwrap();
         assert!(file.ends_with(&video));
         // The directory's lengths: the gain map and the video tightly after the primary
         let xmp = String::from_utf8_lossy(&file[file.windows(XMP_NS.len()).position(|w| w == XMP_NS).unwrap()..]).to_string();
@@ -596,7 +646,7 @@ mod tests {
         let rational = |b: &[u8], i: usize| u32::from_be_bytes(b[i * 8..i * 8 + 4].try_into().unwrap()) as f64 / u32::from_be_bytes(b[i * 8 + 4..i * 8 + 8].try_into().unwrap()) as f64;
         let degrees = |b: &[u8]| rational(b, 0) + rational(b, 1) / 60.0 + rational(b, 2) / 3600.0;
         for (lat, lon, alt) in [(46.1020017, 7.9192771, Some(1780.429)), (-8.65, -115.2167, Some(-12.5)), (27.25, 33.8116, None), (0.99999999, 179.9999999, None)] {
-            let e = exif(Some("2026:11:05 10:00:00"), Some("DJI"), None, Some(&Fix { lat, lon, alt, t: None }));
+            let e = exif(Some(&Taken::at(1_793_872_800.0, 0, false)), Some("DJI"), None, Some(&Fix { lat, lon, alt, t: None }));
             assert_eq!(&e[..6], b"Exif\0\0");
             let tiff = &e[6..];
             let ifd0 = read_ifd(tiff, 8);
@@ -621,7 +671,7 @@ mod tests {
             }
         }
         // No place: no GPS IFD
-        let e = exif(Some("2026:11:05 10:00:00"), None, None, None);
+        let e = exif(Some(&Taken::at(1_793_872_800.0, 0, false)), None, None, None);
         assert!(!read_ifd(&e[6..], 8).contains_key(&0x8825));
     }
 }

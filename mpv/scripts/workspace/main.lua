@@ -2611,13 +2611,9 @@ end
 -- the session's: a moment is kept as made, and the session may be a try of the moment), whole; and its input, which
 -- the preview or photo is rendered with too. The bundle alone goes into a moment's link
 local function made_view_of(file, movie, own)
-    local doc = sidecar.read(file)
-    local defaults = mp.get_property_native("user-data/gyroflow/defaults")
-    -- `own`: a moment's own bundle, which it keeps whatever the source's is now
-    local bundle = transform.complete(transform.pick(own) or transform.pick(doc and doc.view) or defaults, defaults)
-    local rendered = copy(bundle)
-    if doc then transform.migrate_source(doc) end
-    for k, v in pairs(doc and doc.source or {}) do rendered[k] = v end
+    -- `own`: a moment's own bundle, which it keeps whatever the source's is now (transform.render_settings: the
+    -- Library's recipe works it out the same way)
+    local bundle, rendered = transform.render_settings(sidecar.read(file), own, mp.get_property_native("user-data/gyroflow/defaults"))
     -- The frame's W:H for this source: its ratio turned for its orientation and the source's shape, upright (the
     -- file's turn and the input's)
     local w, h = movie and movie.width, movie and movie.height
@@ -2889,7 +2885,7 @@ local function export_next()
     if not j then return end
     if j.stopping or j.done >= #j.queue then
         export_job = nil
-        if batch then batch.finished({ made = j.made, failed = j.failed, failures = j.failures, stopped = j.stopping }) end
+        if batch then batch.finished({ made = j.made, failed = j.failed, failures = j.failures, stopped = j.stopping, used = j.used }) end
         return
     end
     local m = j.queue[j.done + 1]
@@ -3030,7 +3026,7 @@ end
 local function render_moments(root, profiles, items)
     if export_job then return end
     if batch then batch.looking() end
-    local queue, failures = {}, {}
+    local queue, failures, share_used = {}, {}, {}
     for _, it in ipairs(items or {}) do
         local name = tostring(it.name or it.file or it.clip or "")
         local l = it.of == "moment" and it.file and utils.parse_json(fs.read_link(it.file) or "") or {}
@@ -3043,12 +3039,28 @@ local function render_moments(root, profiles, items)
             local movie = markers and markers.movie and markers.movie(original) or nil
             local _, rendered = made_view_of(original, movie, it.of == "moment" and l.stab or nil)
             local own = it.of == "moment" and own_project(it.file) or nil
-            queue[#queue + 1] = {
+            local m = {
                 name = name, link = l, original = original, rendered = rendered,
                 project = own and fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
                 sdr = it.sdr == true, render_out = it.out, render_link = it.link,
                 photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
             }
+            -- The settings the Library's recipe has (renders.rs `settings`): rendered with them, so the render is what
+            -- its hash says; what this player would have taken by itself is told back, for the Library to compare
+            if type(it.view) == "table" then
+                local mine = {}
+                for k, v in pairs(rendered) do if k ~= "frame_aspect" then mine[k] = v end end
+                mine.edges = mp.get_property_native("user-data/gyroflow/edges")
+                mine.edges_blur = mp.get_property_native("user-data/gyroflow/edges_blur")
+                mine.temporal_denoise = mp.get_property_native("user-data/gyroflow/temporal_denoise")
+                share_used[#share_used + 1] = { out = it.out, player = mine }
+                local w, h = movie and movie.width, movie and movie.height
+                if w and h and (((movie.turn or 0) + (tonumber(it.view.rotation) or 0)) % 180) == 90 then w, h = h, w end
+                m.rendered = copy(it.view)
+                m.rendered.frame_aspect = transform.concrete(it.view.aspect, it.view.orientation, w, h)
+                if it.alone ~= nil then m.alone = it.alone == true end
+            end
+            queue[#queue + 1] = m
         end
     end
     for _, m in ipairs(items and {} or moments.scan(root, nil).list) do
@@ -3083,14 +3095,14 @@ local function render_moments(root, profiles, items)
     end
     if #queue == 0 then
         if batch then
-            return batch.finished({ made = 0, failed = #failures, failures = failures,
+            return batch.finished({ made = 0, failed = #failures, failures = failures, used = share_used,
                                     nothing = #failures == 0 and "Every render asked for is current" or nil })
         end
         return
     end
     mkdir(ws.join(root, RENDERS))
     local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
-    export_job = { root = root, sdr = false, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0,
+    export_job = { root = root, sdr = false, queue = queue, done = 0, made = 0, failed = #failures, failures = failures, id = 0, used = share_used,
                    progress = utils.join_path(tmp, "afp-batch-render-" .. tostring(utils.getpid()) .. ".json") }
     export_next()
 end
@@ -3404,6 +3416,56 @@ if not os.getenv("AFP_BATCH") or os.getenv("AFP_BATCH") == "" then
     end
 end
 
+-- A photo link (the gyroflow plugin's Alt+s, crop mode's Enter: docs/albums-photos-share-concept.md, "Photos as
+-- objects"): { t (the clip's time), crop, camera (Save frame's), picture (the frame as it showed, a JPEG at the video's
+-- size) }. Written as <clip>_<t>s.afplink.jpg in the project's _Stills/Generated/ (as the Library's photo links are
+-- named): the picture cropped and at most 1280 px, its afp:link (kind photo, the clip by its path in the project, its
+-- size and time, the crop, the camera) by afp-meta. Nothing is rendered: the Library's Share renders it when it's
+-- shared. (A function of its own: the main chunk is at Lua's 200 locals)
+;(function()
+mp.register_script_message("photo-link", function(json)
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or type(req.t) ~= "number" then return end
+    local function done(msg) if req.picture then os.remove(req.picture) end; if msg then mp.osd_message(msg, 4) end end
+    local root = need_project("Saving a photo")
+    if not root or not state.clip then return done() end
+    local meta = plugin_tool("afp-meta")
+    if not meta then return done("Photo: afp-meta isn't installed") end
+    if not req.picture then return done("Photo: mpv couldn't take the frame") end
+    local dir = ws.join(root, native(moments_lib.generated_rel("Photos", os.time(), true, generated_runs(root))))
+    mkdir(dir)
+    local stem = (ws.name(state.clip):gsub("%.[^.]*$", ""))
+    local file, final = moments.unique_file(dir, string.format("%s_%.2fs", stem, req.t), ".afplink.jpg")
+    local info = utils.file_info(state.clip)
+    local l = { v = 1, kind = "photo", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
+                created = state.created, t = req.t, crop = req.crop, camera = req.camera, name = final, roots = { root } }
+    -- Cropped (in shares of the picture) and at most 1280 px on its long side: visibly a link, not the photo
+    local c = type(req.crop) == "table" and req.crop
+    local vf = (c and string.format("crop=iw*%.5f:ih*%.5f:iw*%.5f:ih*%.5f,", c.w, c.h, c.x, c.y) or "")
+        .. "scale='if(gte(iw,ih),min(1280,iw),-2)':'if(gte(iw,ih),-2,min(1280,ih))'"
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                              args = { "ffmpeg", "-v", "error", "-y", "-i", req.picture, "-vf", vf, "-q:v", "3", file } }, function(_, r)
+        -- Without ffmpeg: the picture as it is
+        if not (r and r.status == 0 and fs.is_file(file)) then
+            mp.msg.warn("photo link: ffmpeg: " .. tostring(r and r.stderr))
+            local i, o = io.open(req.picture, "rb"), io.open(file, "wb")
+            if i and o then o:write(i:read("*a")) end
+            if i then i:close() end
+            if o then o:close() end
+        end
+        local w = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                      args = { meta, file, "--link", utils.format_json(l) } })
+        if not (w and w.status == 0) then
+            os.remove(file)
+            mp.msg.warn("photo link: afp-meta: " .. tostring(w and w.stderr))
+            return done("Photo failed: its link couldn't be written")
+        end
+        catalog.note(root, { file })
+        done("Photo: " .. final .. " (rendered when it's shared)")
+    end)
+end)
+end)()
+
 -- Batch mode: Action Footage Library runs the player with no window and AFP_BATCH set to a request file, a JSON
 -- { kind, project, status, stop, photo, sdr, only, layout, alone }: kind clips or clips-again (previews of the clips
 -- without one; layout: tree, flat or trips), moments (moments of all marks; alone: stabilized on their own), photos
@@ -3458,6 +3520,8 @@ do
                     status.done = status.total
                 end
                 status.failures = sum.failures
+                -- A share's: the settings this player would have rendered each with by itself (render_moments)
+                status.used = sum.used and #sum.used > 0 and sum.used or nil
                 status.message = sum.nothing or sum.error
                 status.fraction, status.current = nil, nil
                 write_status()

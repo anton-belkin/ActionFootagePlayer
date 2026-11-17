@@ -145,9 +145,7 @@ fn player_shader(loaded: &gpu_table::PlayerClip, j: &serde_json::Value, out: &st
     // The sphere trail needs the RGB layout too (gpu_sphere: the player's say, where its GPU has the room)
     let sphere = s("edges") == "sphere" && j.get("gpu_sphere").and_then(|v| v.as_bool()).unwrap_or(true);
     let rgb = wet || sphere;
-    let opts = Options { mode: if rgb { gpu_table::Mode::Grid } else { gpu_table::Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
-                         chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset,
-                         denoise: j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), knots: 33, interp, shrink: false, range: None };
+    let opts = Options::player(interp, wet, edge_fill, sphere, j.get("gpu_denoise").and_then(|v| v.as_bool()).unwrap_or(false), time_offset);
     let table = match loaded.table(view, &clip, &opts) { Ok(t) => t, Err(e) => return serde_json::json!({ "error": e }) };
     lap("table");
     // The translation compensation, where it was computed for the clip (gyroflow-export --translation) and is wanted

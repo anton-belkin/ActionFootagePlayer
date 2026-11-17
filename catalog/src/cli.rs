@@ -25,7 +25,10 @@ const USAGE: &str = "usage: afp-catalog derived <project> [--hash <fingerprint>]
        afp-catalog status <project>       the catalog: its snapshot, journals, size
        afp-catalog look <project> [--own] [--every <s>] [--deep]
                                           look at the folders and note what changed (--own: the project's own files,
-                                          what the player asks for; folds the journals when they've grown)
+                                          what the player asks for; --deep: every folder listed, whatever its time,
+                                          as after a script changed files in place; folds the journals when they've grown)
+       afp-catalog check <project>        every file whose insides count read again, whatever its size and time, and
+                                          the catalog corrected where it differs (after a restore that kept times)
        afp-catalog watch <project> [--share <name>=<path>]... [--every <s>]
                                           keep the catalog, on the NAS (Docker): told by the system what changes
        afp-catalog fold <project>         a new snapshot from the journals, and clearing up (what the Library does)";
@@ -68,6 +71,11 @@ fn observe(ours: &Ours, root: &str, rel: &str, path: &Path) -> std::io::Result<O
     }
 }
 
+/// Records' (root, path in it) as full paths
+fn paths(roots: &[crate::Root], keys: &[(String, String)]) -> Vec<String> {
+    keys.iter().filter_map(|(r, rel)| roots.iter().find(|x| x.id == *r).map(|x| x.dir.join(rel).display().to_string())).collect()
+}
+
 /// The project a file is in: a Project.afproject above it, else the project its location's .afplocation names
 pub fn project_for(file: &Path) -> Option<PathBuf> {
     let mounts = crate::locations::mounts();
@@ -104,12 +112,21 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
     let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
     let mut watcher = notify::recommended_watcher(move |e| { let _ = tx.send(e); }).ok();
     let mut told = false;
+    // The roots the system tells of: vouched for to the other computers while this runs (care.rs)
+    let mut watched: Vec<crate::Root> = Vec::new();
     if let Some(w) = watcher.as_mut() {
         for r in roots { match w.watch(&r.dir, notify::RecursiveMode::Recursive) {
-            Ok(()) => told = true,
+            Ok(()) => { told = true; watched.push(r.clone()); }
             Err(e) => eprintln!("afp-catalog: {} not watched ({e}): looked at every {every} s", r.dir.display()),
         } }
     }
+    // Every folder listed at the start (what changed while this wasn't running, in place too), and again only when
+    // the system lost count or this was held up longer than its watch can vouch for: while it watches, the system
+    // tells it of every change, and nothing more is needed (no deep look on a schedule)
+    let mut deep = true;
+    let mut last_beat = Instant::now();
+    // A deep look that failed (the disk away) tried again only after a while
+    let mut deep_tried: Option<Instant> = None;
     if !told { eprintln!("afp-catalog: no notices from the system: every folder's time looked at every {every} s"); }
     let mut loaded = false;
     let mut everything = true;
@@ -135,7 +152,7 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
         while let Ok(e) = rx.try_recv() {
             match e {
                 Ok(e) => {
-                    if e.need_rescan() { everything = true; }
+                    if e.need_rescan() { deep = true; }
                     if matches!(e.kind, notify::EventKind::Access(_)) { continue; }
                     for p in e.paths {
                         if p.components().any(|c| c.as_os_str().to_string_lossy().starts_with('.')) { continue; }
@@ -146,12 +163,35 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
                     }
                     last_event = Instant::now();
                 }
-                Err(_) => everything = true,
+                Err(_) => deep = true,
             }
+        }
+        if !deep && last_beat.elapsed() >= crate::care::BEAT_EVERY && !watched.is_empty() {
+            crate::care::watching(&cat, &watched, false);
+            last_beat = Instant::now();
         }
         if !told && last_all.elapsed() >= Duration::from_secs(every.min(30)) { everything = true; }
         if last_all.elapsed() >= Duration::from_secs(every) { everything = true; }
-        let r = if everything {
+        // Held up (a long look, the process stopped): what happened meanwhile isn't vouched for
+        if last_beat.elapsed() >= Duration::from_nanos(crate::care::BEAT_FRESH_NS as u64) && !watched.is_empty() { deep = true; }
+        let r = if deep && deep_tried.is_none_or(|t| t.elapsed() >= Duration::from_secs(30)) {
+            deep_tried = Some(Instant::now());
+            eprintln!("afp-catalog: every folder looked at (deep)");
+            let r = cat.sweep(roots, ours, &Sweep { deep: true, ..Default::default() });
+            if let Ok(rep) = &r {
+                let looked: Vec<crate::Root> = roots.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect();
+                crate::care::mark_deep(&cat, &looked);
+                let vouched: Vec<crate::Root> = watched.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect();
+                crate::care::watching(&cat, &vouched, true);
+                deep = false;
+                deep_tried = None;
+                everything = false;
+                last_all = Instant::now();
+                last_beat = Instant::now();
+                pending.clear();
+            }
+            Some(r)
+        } else if everything {
             everything = false;
             last_all = Instant::now();
             pending.clear();
@@ -168,19 +208,20 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
             Some(Ok(rep)) => {
                 if !rep.skipped_roots.is_empty() { eprintln!("afp-catalog: not there, or without its {} marker: {}", crate::locations::LOCATION_EXT, rep.skipped_roots.join(", ")); }
                 if rep.changes > 0 { eprintln!("afp-catalog: {} changes ({} folders listed, {} read)", rep.changes, rep.listed, rep.inspected); }
+                for (r, rel) in &rep.unreadable { eprintln!("afp-catalog: {r}/{rel} isn't what it should be (not JSON?): its record kept as it was"); }
                 if cat.should_compact() || cat.manifest.is_none() {
                     match cat.compact() { Ok(n) => { let removed = cat.clean().unwrap_or(0); eprintln!("afp-catalog: folded into {n}, {removed} removed"); } Err(e) => eprintln!("afp-catalog: fold: {e}") }
                 }
             }
             Some(Err(Error::Gap(_))) => loaded = false,
-            Some(Err(Error::TooNew(e))) => { eprintln!("afp-catalog: {e}"); std::process::exit(3) }
+            Some(Err(Error::TooNew(e))) => { eprintln!("afp-catalog: {e}"); crate::care::stop_watching(&cat, &watched); std::process::exit(3) }
             Some(Err(e)) => eprintln!("afp-catalog: {e}"),
             None => {}
         }
         if stamp(&pf) != pf_at {
             let (now, _) = project::roots_with(proj, &shares_of());
             let ids = |r: &[crate::Root]| r.iter().map(|x| (x.id.clone(), x.dir.clone(), x.exclude.clone())).collect::<Vec<_>>();
-            if ids(&now) != ids(roots) { eprintln!("afp-catalog: the project's sources changed: starting again"); std::process::exit(3); }
+            if ids(&now) != ids(roots) { eprintln!("afp-catalog: the project's sources changed: starting again"); crate::care::stop_watching(&cat, &watched); std::process::exit(3); }
         }
         std::thread::sleep(Duration::from_millis(250));
     }
@@ -382,13 +423,17 @@ pub fn main() -> ExitCode {
             if every > 0 && now_s.saturating_sub(last) < every { println!("{}", json!({ "skipped": true, "seconds_ago": now_s.saturating_sub(last) })); return ExitCode::SUCCESS; }
             if let Err(e) = load(&mut cat, &Want::All) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } cat = project::open(&proj); }
             let t = std::time::Instant::now();
-            match cat.sweep(&roots, &ours, &Sweep { deep: a.iter().any(|x| x == "--deep"), ..Default::default() }) {
+            let deep = a.iter().any(|x| x == "--deep");
+            match cat.sweep(&roots, &ours, &Sweep { deep, ..Default::default() }) {
                 Ok(r) => {
                     let _ = std::fs::write(&stamp, now_s.to_string());
+                    // Every folder of these roots listed: the other computers needn't today (not with --own: the
+                    // footage inside the project's folder was left as on record)
+                    if deep && !own { crate::care::mark_deep(&cat, &roots.iter().filter(|x| !r.skipped_roots.contains(&x.id)).cloned().collect::<Vec<_>>()); }
                     // The journals folded when they've grown (in the background, at low priority)
                     let folded = if cat.should_compact() || cat.manifest.is_none() { cat.compact().ok().map(|n| { let _ = cat.clean(); n }) } else { None };
                     println!("{}", json!({ "seconds": t.elapsed().as_secs_f64(), "folders": r.dirs, "listed": r.listed, "read": r.inspected, "changes": r.changes,
-                                           "errors": r.errors, "roots_not_there": r.skipped_roots, "folded": folded }));
+                                           "errors": r.errors, "unreadable": paths(&roots, &r.unreadable), "roots_not_there": r.skipped_roots, "folded": folded }));
                     ExitCode::SUCCESS
                 }
                 Err(e) => fail(e.to_string()),
@@ -404,6 +449,21 @@ pub fn main() -> ExitCode {
             let (roots, ours) = project::roots_with(&proj, &shares);
             eprintln!("afp-catalog: watching {} as {} ({} roots: {})", proj.display(), cat.me, roots.len(), roots.iter().map(|r| r.dir.display().to_string()).collect::<Vec<_>>().join(", "));
             watch(&proj, cat, &roots, &ours, every)
+        }
+        "check" => {
+            background();
+            if let Err(e) = load(&mut cat, &Want::All) { if !matches!(e, Error::Damaged(_)) { return fail(e.to_string()); } cat = project::open(&proj); }
+            let t = std::time::Instant::now();
+            match cat.sweep(&roots, &ours, &Sweep { reread: true, ..Default::default() }) {
+                Ok(r) => {
+                    crate::care::mark_deep(&cat, &roots.iter().filter(|x| !r.skipped_roots.contains(&x.id)).cloned().collect::<Vec<_>>());
+                    println!("{}", json!({ "seconds": t.elapsed().as_secs_f64(), "folders": r.dirs, "read": r.inspected, "changes": r.changes,
+                                           "corrected": paths(&roots, &r.corrected), "unreadable": paths(&roots, &r.unreadable), "errors": r.errors,
+                                           "roots_not_there": r.skipped_roots }));
+                    ExitCode::SUCCESS
+                }
+                Err(e) => fail(e.to_string()),
+            }
         }
         "fold" => {
             if let Err(e) = load(&mut cat, &Want::All) { return fail(e.to_string()); }

@@ -254,7 +254,7 @@ test("a sequence of changes, corrected item by item, ends where reading the view
   await settle("the renamed moment tagged");
   each((p) => { p.select([RAY]); p.get("deleteSelection()"); });
   await settle("a moment deleted");
-  each((p) => { go(p, "footage", [], "tags"); p.select(["_Stills/A_1.5s.jpg"]); p.get("setTags(['print'], [])"); });
+  each((p) => { go(p, "footage", ["\u200bMy albums"], "tags"); p.select(["_Stills/A_1.5s.jpg"]); p.get("setTags(['print'], [])"); });
   await settle("a photo tagged");
   each((p) => { p.select(["_Stills/A_1.5s.jpg"]); p.key("5", { code: "Digit5" }); });
   await settle("a photo rated");
@@ -279,7 +279,7 @@ test("a sequence of changes, corrected item by item, ends where reading the view
   each((p) => { go(p, "footage", ["Day 2"]); p.select([E]); p.click('#main [data-a="albumout"]'); });
   await settle("a clip taken out of its album");
   assert.deepEqual(one.page.calls("scan").slice(before).map((c) => c.args.view), ["footage"]);
-  each((p) => { go(p, "footage", [], "tags"); p.select(["Day 1"], "f"); p.get("startRename()"); p.$("#rename").value = "First day"; p.key("Enter", {}, p.$("#rename")); });
+  each((p) => { go(p, "footage", ["\u200bMy albums"], "tags"); p.select(["Day 1"], "f"); p.get("startRename()"); p.$("#rename").value = "First day"; p.key("Enter", {}, p.$("#rename")); });
   const scans = await settle("an album renamed (its views are read again)");
   assert.ok(scans > before + 1, "the album's rename reads its views again");
 });

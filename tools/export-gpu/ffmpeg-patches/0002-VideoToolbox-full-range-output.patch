@@ -1,0 +1,39 @@
+diff --git a/libavcodec/videotoolboxenc.c b/libavcodec/videotoolboxenc.c
+index de52923..28a2f1d 100644
+--- a/libavcodec/videotoolboxenc.c
++++ b/libavcodec/videotoolboxenc.c
+@@ -1053,7 +1053,7 @@ static int create_cv_pixel_buffer_info(AVCodecContext* avctx,
+     CFMutableDictionaryRef pixel_buffer_info = NULL;
+     int cv_color_format;
+     int status = get_cv_pixel_format(avctx,
+-                                     avctx->pix_fmt,
++                                     avctx->pix_fmt == AV_PIX_FMT_VIDEOTOOLBOX ? avctx->sw_pix_fmt : avctx->pix_fmt,
+                                      avctx->color_range,
+                                      &cv_color_format,
+                                      NULL);
+@@ -1724,7 +1724,10 @@ static int vtenc_configure_encoder(AVCodecContext *avctx)
+                              kCFBooleanTrue);
+     }
+ 
+-    if (avctx->pix_fmt != AV_PIX_FMT_VIDEOTOOLBOX) {
++    /* VideoToolbox frames handed over as they are: described too when they're full range (their sw format, xf20…),
++     * else the session takes them as video range and writes that in the stream's VUI */
++    if (avctx->pix_fmt != AV_PIX_FMT_VIDEOTOOLBOX ||
++        (avctx->color_range == AVCOL_RANGE_JPEG && avctx->sw_pix_fmt != AV_PIX_FMT_NONE)) {
+         status = create_cv_pixel_buffer_info(avctx, &pixel_buffer_info);
+         if (status)
+             goto init_cleanup;
+diff --git a/libavfilter/vf_libplacebo.c b/libavfilter/vf_libplacebo.c
+index 16f043a..b33fb28 100644
+--- a/libavfilter/vf_libplacebo.c
++++ b/libavfilter/vf_libplacebo.c
+@@ -1592,6 +1592,9 @@ static int libplacebo_config_output(AVFilterLink *outlink)
+         vtfc->sw_format = s->out_format;
+         vtfc->width     = outlink->w;
+         vtfc->height    = outlink->h;
++        /* The pool's pixel format by the output's range: a full-range output in full-range buffers (xf20), else the
++         * encoder takes them as video range and tags the stream so */
++        ((AVVTFramesContext *) vtfc->hwctx)->color_range = outlink->color_range;
+         if ((err = av_hwframe_ctx_init(frames)) < 0) {
+             av_buffer_unref(&frames);
+             return err;

@@ -33,8 +33,8 @@ const DIGITAL_LENSES: &[(&str, &str)] = &[
 ];
 
 /// Why the warp can't render this clip as the VapourSynth path does, if it can't: the lens or digital lens it has no
-/// GLSL for, a lens correction below 100 % (the root solve isn't ported), the equirect output, a horizontal rolling
-/// shutter, IBIS/OIS, lens breathing or a mesh (Sony)
+/// GLSL for, the equirect output, a horizontal rolling shutter, IBIS/OIS, lens breathing or a mesh (Sony). A lens
+/// correction below 100 % renders (warp.glsl's blend_ray, LENS_BLEND)
 pub fn unsupported(clip: &Clip) -> Option<String> {
     let p = &clip.params;
     let lens = p.distortion_model.id();
@@ -42,7 +42,6 @@ pub fn unsupported(clip: &Clip) -> Option<String> {
     if let Some(d) = &p.digital_lens {
         if !DIGITAL_LENSES.iter().any(|(id, _)| *id == d.id()) { return Some(format!("digital lens {}", d.id())); }
     }
-    if p.lens_correction_amount < 1.0 { return Some(format!("lens correction {:.0} %", p.lens_correction_amount * 100.0)); }
     if p.output_projection == gyroflow_core::stabilization::projection::EQUIRECT { return Some("equirect output".into()); }
     if p.frame_readout_direction.is_horizontal() && clip.rows() > 1 { return Some("horizontal rolling shutter".into()); }
     let tr = clip.transform(clip.frame_count / 2, clip.output_size);
@@ -339,7 +338,7 @@ impl Table {
                 {
                     // Red's and blue's index over green's where the frame is under water and the fringes are taken out
                     let n = kp.light_refraction_coefficient as f64;
-                    let k = if opts.chromatic && n > 1.0 && kp.lens_correction_amount >= 0.999 { crate::dispersion::water_ratios(n) } else { [1.0, 1.0] };
+                    let k = if opts.chromatic && n > 1.0 { crate::dispersion::water_ratios(n) } else { [1.0, 1.0] };
                     [kp.input_horizontal_stretch, kp.input_vertical_stretch, k[0], k[1]]
                 },
                 {
@@ -396,16 +395,23 @@ impl Table {
     }
 }
 
+/// Whether the lens correction is below 100 % anywhere in the clip: warp.glsl then solves each pixel's ray (LENS_BLEND)
+pub fn lens_blend(clip: &Clip) -> bool {
+    let p = &clip.params;
+    p.output_projection != gyroflow_core::stabilization::projection::EQUIRECT
+        && (p.lens_correction_amount < 0.999 || p.keyframes.is_keyframed(&gyroflow_core::keyframes::KeyframeType::LensCorrectionStrength))
+}
+
 /// The clip's constants for warp.glsl
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}",
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}\n#define LENS_BLEND {}",
         clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
         bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
-        (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
+        (opts.sphere && opts.edge_fill.is_some() && opts.mode == Mode::Grid) as i32, lens_blend(clip) as i32) + &if opts.mode == Mode::Exact { String::new() } else { format!("\n#define GRID_STEP {}\n#define GRID_LINEAR {}", opts.grid_step, opts.grid_linear as i32) }
 }
 
 /// warp.glsl with \n line ends, whatever the checkout gave it: Git for Windows (core.autocrlf, also on GitHub's
@@ -636,6 +642,64 @@ pub fn dn_layout(slot: (usize, usize), max: usize) -> Option<(usize, usize)> {
 
 impl Options {
     fn chromatic_bilinear_planes(&self) -> bool { self.chroma_bilinear }
+
+    /// The player's GPU path (gyroflow-gpu-table --player) for these choices: `interp` warp.glsl's INTERP, `wet` the
+    /// color fringes taken out (some frame under water), `edge_fill` the smooth fill's blur, `sphere` the sphere trail.
+    /// The colors read apart (fringes, sphere) need the RGB layout (grid at MAIN), else the planes. gyroflow-export's
+    /// libplacebo path asks for the same shader (export_shader)
+    pub fn player(interp: i32, wet: bool, edge_fill: Option<f32>, sphere: bool, denoise: bool, time_offset: f64) -> Options {
+        let rgb = wet || sphere;
+        Options { mode: if rgb { Mode::Grid } else { Mode::Planes }, grid_step: 8, grid_linear: true, chroma_bilinear: interp == 5,
+                  chromatic: wet, chromatic_fast: true, edge_fill, sphere, time_offset, denoise, knots: 33, interp, shrink: false, range: None }
+    }
+}
+
+/// A .cube LUT as the player's look shader (tools/cube_to_glsl.py with shaders/log_hlg.glsl.in: an `rgba16` 3-D
+/// texture sampled trilinearly at MAIN), for gyroflow-export's GPU path: the look the export picks (its .cube, the
+/// NBCU one composed as gpu_lut::compose_nbcu makes it) drawn as playback draws its looks
+pub fn look_shader(cube: &std::path::Path) -> Result<String, String> {
+    const TEMPLATE: &str = include_str!("../../shaders/log_hlg.glsl.in");
+    let (n, data) = crate::gpu_lut::read_cube(cube)?;
+    let mut hex = String::with_capacity(data.len() / 3 * 16);
+    let unorm = |v: f32| ((v * 65535.0).round().clamp(0.0, 65535.0)) as u16;
+    for rgb in data.chunks(3) {
+        for v in [unorm(rgb[0]), unorm(rgb[1]), unorm(rgb[2]), 65535] {
+            let b = v.to_le_bytes();
+            hex.push_str(&format!("{:02x}{:02x}", b[0], b[1]));
+        }
+    }
+    Ok(TEMPLATE.replace("\r\n", "\n").replace("@LUT_SIZE@", &n.to_string()).replace("@LUT_DATA@", &hex))
+}
+
+/// A `//!PARAM`'s default value set to `value` (what mpv's glsl-shader-opts would set: the filter has no way to)
+pub fn set_param_default(shader: &str, name: &str, value: f64) -> Result<String, String> {
+    let head = format!("//!PARAM {name}\n");
+    let at = shader.find(&head).ok_or_else(|| format!("no parameter {name}"))?;
+    let mut lines: Vec<&str> = shader[at..].splitn(16, '\n').collect();
+    // The directives after the name, then the value line
+    let i = lines.iter().skip(1).position(|l| !l.starts_with("//!")).map(|i| i + 1).ok_or("no value")?;
+    let kind_int = lines[1..i].iter().any(|l| l.contains(" int"));
+    let v = if kind_int { format!("{}", value.round() as i64) } else { format!("{value:.6}") };
+    lines[i] = &v;
+    Ok(format!("{}{}", &shader[..at], lines.join("\n")))
+}
+
+/// The hook passes a frame runs through, in a shader made by shader_with (each `//!HOOK` once; CHROMA's once for each
+/// chroma plane libplacebo hooks: 1 for NV12/P010, 2 for planar 4:2:0). Every pass has `//!WHEN gyroflow_gpu_on`, on
+/// by default
+pub fn passes_per_frame(shader: &str, chroma_planes: usize) -> usize {
+    shader.lines().filter(|l| l.starts_with("//!HOOK ")).map(|l| if l.trim_end() == "//!HOOK CHROMA" { chroma_planes } else { 1 }).sum()
+}
+
+/// The player's shader for ffmpeg's libplacebo filter (gyroflow-export's GPU path), which feeds no PTS: each pass finds
+/// its frame by libplacebo's own counter instead, `frame` (1, 2, ... over every pass this shader's hook runs, from the
+/// first frame the filter renders: `npass` of them a frame). The first frame is the clip's at `time_offset`
+pub fn for_libplacebo(shader: &str, npass: usize) -> Result<String, String> {
+    const PTS_PARAM: &str = "//!PARAM PTS\n//!TYPE DYNAMIC float\n0.0\n";
+    if !shader.contains(PTS_PARAM) { return Err("warp.glsl: no PTS parameter where it's expected".into()); }
+    if npass == 0 { return Err("no passes".into()); }
+    // In every pass, after libplacebo's own #define frame: the defines come first in each pass's text (hook_pass)
+    Ok(shader.replace(PTS_PARAM, "").replace("#define SRC_W ", &format!("#define PTS (float((frame - 1) / {npass}) / FPS)\n#define SRC_W ")))
 }
 
 /// The shader file mpv loads
@@ -816,7 +880,7 @@ mod tests {
 
     #[repr(C)]
     #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, cam: [f32; 4], zoom: f32, _pad: f32 }
+    struct U { hooked_size: [f32; 2], out_size: [f32; 2], pts: f32, on: i32, cam: [f32; 4], zoom: f32, time_offset: f32 }
 
     const GRID_TEX: (u32, u32) = (600, 340);
 
@@ -832,7 +896,7 @@ mod tests {
         if uv_out { defs += "\n#define UV_OUT 1\n#undef BACKGROUND\n#define BACKGROUND vec4(-1.0e6)"; }
         let head = format!("#version 450
 {}
-layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; float gyroflow_cam_x; float gyroflow_cam_y; float gyroflow_cam_z; float gyroflow_cam_w; float gyroflow_cam_zoom; }};
+layout(set = 0, binding = 0, std140) uniform Params {{ vec2 hooked_size; vec2 out_size; float PTS; int gyroflow_gpu_on; float gyroflow_cam_x; float gyroflow_cam_y; float gyroflow_cam_z; float gyroflow_cam_w; float gyroflow_cam_zoom; float gyroflow_time_offset; }};
 layout(set = 0, binding = 1) uniform texture2D hooked_t;
 layout(set = 0, binding = 2) uniform sampler hooked_s;
 layout(set = 0, binding = 3) uniform texture2D table_t;
@@ -914,7 +978,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let grid_rb_tex = texture(g, GRID_TEX.0 as usize, GRID_TEX.1 as usize, None, wgpu::TextureUsages::STORAGE_BINDING);
         let q = cam.map(camera_quat).unwrap_or_else(UnitQuaternion::identity);
         let u = U { hooked_size: [src_size.0 as f32, src_size.1 as f32], out_size: [out.0 as f32, out.1 as f32], pts, on: 1,
-                    cam: [q.i as f32, q.j as f32, q.k as f32, q.w as f32], zoom: cam.map(|c| c.zoom as f32).unwrap_or(1.0), _pad: 0.0 };
+                    cam: [q.i as f32, q.j as f32, q.k as f32, q.w as f32], zoom: cam.map(|c| c.zoom as f32).unwrap_or(1.0), time_offset: 0.0 };
         let buf = d.create_buffer(&wgpu::BufferDescriptor { label: None, size: std::mem::size_of::<U>() as u64, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
         g.queue.write_buffer(&buf, 0, bytemuck::bytes_of(&u));
         let sampler = d.create_sampler(&wgpu::SamplerDescriptor::default());
@@ -988,6 +1052,45 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let (head2, common2, passes2) = split_sections(&normalized);
         assert_eq!((head2, common2, passes2.len()), (head, common, passes.len()));
         assert!(!pass_body(passes[0].0).is_empty());
+    }
+
+    #[test]
+    fn parameter_defaults_and_look_shaders() {
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let text = fill_head(&t, "", "PASSES", 1.5);
+        let text = set_param_default(&text, "gyroflow_dn_radius", 3.0).unwrap();
+        let text = set_param_default(&text, "gyroflow_cam_zoom", 1.25).unwrap();
+        let params = crate::user_shader::param_values(&text).expect("parses");
+        assert!(params.contains(&("gyroflow_dn_radius".to_string(), 3.0)) && params.contains(&("gyroflow_cam_zoom".to_string(), 1.25)), "{params:?}");
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 1.5)));
+        assert!(set_param_default(&text, "nope", 1.0).is_err());
+        let dir = std::env::temp_dir().join(format!("afp-look-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cube = dir.join("t.cube");
+        let mut c = String::from("LUT_3D_SIZE 2\n");
+        for b in 0..2 { for g in 0..2 { for r in 0..2 { c += &format!("{r} {g} {b}\n"); } } }
+        std::fs::write(&cube, c).unwrap();
+        let sh = look_shader(&cube).unwrap();
+        assert!(sh.contains("//!SIZE 2 2 2") && sh.contains("const float N = 2.0;"));
+        // texels 0 and 1 (black, then r = 1), little-endian, alpha 0xffff
+        assert!(sh.contains("000000000000ffffffff00000000ffff"), "{}", &sh[..200.min(sh.len())]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn libplacebo_counts_passes_for_pts() {
+        // ffmpeg's libplacebo filter feeds no PTS: each pass takes its frame from libplacebo's pass counter
+        let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
+        let body = "//!HOOK LUMA\n//!DESC a\n#define SRC_W 1\nx\n//!HOOK CHROMA\n//!DESC b\n#define SRC_W 1\ny\n//!HOOK MAIN\n#define SRC_W 1\n";
+        let text = fill_head(&t, "", body, 0.0);
+        assert_eq!((passes_per_frame(&text, 1), passes_per_frame(&text, 2)), (3, 4));
+        let lp = for_libplacebo(&text, 3).unwrap();
+        assert!(!lp.contains("//!PARAM PTS"));
+        assert_eq!(lp.matches("#define PTS (float((frame - 1) / 3) / FPS)\n#define SRC_W ").count(), 3);
+        // Still a file libplacebo's parser takes, its other parameters intact
+        let params = crate::user_shader::param_values(&lp).expect("parses");
+        assert!(params.iter().any(|(n, _)| n == "gyroflow_time_offset") && !params.iter().any(|(n, _)| n == "PTS"));
+        assert!(for_libplacebo("no param", 3).is_err());
     }
 
     #[test]
@@ -1083,7 +1186,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                 for y in 0..out.1 {
                     for x in 0..out.0 {
                         let s = uv[y * out.0 + x];
-                        let c = Stabilization::undistort_coord(Vector2::new(x as f32, y as f32), kp, &tr.matrices, &clip.params.distortion_model, None, &[], &out_c, &out_f);
+                        let c = Stabilization::undistort_coord(Vector2::new(x as f32, y as f32), kp, &tr.matrices, &clip.params.distortion_model, clip.params.digital_lens.as_ref(), &[], &out_c, &out_f);
                         let inside = |p: Vector2<f32>| p.x >= 0.0 && p.y >= 0.0 && p.x <= clip.size.0 as f32 - 1.0 && p.y <= clip.size.1 as f32 - 1.0;
                         if let Some(c) = c.filter(|c| inside(*c)) {
                             if s[0] < -1000.0 { mismatched += 1; continue; }
@@ -1095,9 +1198,13 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                     }
                 }
                 eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out", sum / n.max(1) as f64);
-                assert!(n > out.0 * out.1 / 2, "frame {frame}: too few pixels compared");
+                // Zoomed out (the camera's 1.25) on a lens left as recorded, less than half of the output is the frame
+                assert!(n > out.0 * out.1 / if camera && lens_blend(&clip) { 4 } else { 2 }, "frame {frame}: too few pixels compared");
                 // The bilinear grid with a camera zoomed out (wider than the clip, more of the lens's curve): up to 0.2 px
-                assert!(worst < if camera && opts.grid_linear { 0.25 } else { 0.1 }, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
+                // A lens correction below 100 % (the lens's own curve, LENS_BLEND) bends the map more between grid points: the
+                // 32 px grid (not the player's) up to 0.15 px there
+                let bound = if (camera && opts.grid_linear) || (lens_blend(&clip) && opts.mode != Mode::Exact && opts.grid_step >= 32) { 0.25 } else { 0.1 };
+                assert!(worst < bound, "frame {frame}, {label}: the shader is {worst} px off Gyroflow");
                 assert!(mismatched < out.0, "frame {frame}: {mismatched} pixels the shader left out");
             }
         }

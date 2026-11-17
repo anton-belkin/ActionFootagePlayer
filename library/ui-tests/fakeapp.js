@@ -14,7 +14,9 @@ const VIEW_OF = { clip: "footage", moment: "moments", still: "stills", export: "
 // they are now), and `changes_since` says which items the catalog's changes were; without it they answer as before
 // (lists of problems), and the page reads its views again
 function fake(views, o) {
-  const app = { views, fail: {}, failItems: null, page: null, done: [], log: [], changed: !!(o && o.changed) };
+  const app = { views, fail: {}, failItems: null, page: null, done: [], log: [], changed: !!(o && o.changed),
+    // (`o.albums: false`: the album commands answer as before they said what they made, for measuring the older page)
+    albums: !(o && o.albums === false) && !!(o && o.changed) };
   const find = (kind, id) => (views[VIEW_OF[kind]] || { items: [] }).items.find((it) => it.id === id);
   const copy = (v) => JSON.parse(JSON.stringify(v));
   // What a change was, for changes_since: [[view, id]…] (null: can't be said), and the files that went
@@ -240,6 +242,130 @@ function fake(views, o) {
       return answer({ done, to: done ? ["the Trash"] : [], problems }, folders ? [] : what, folders ? { reload: ALL } : links ? { reload: ["footage"] } : null);
     },
   };
+  // ---------- albums (src/albums.rs) ----------
+  // The names a folder of the project's folder has (every view's files there), lower-cased
+  const namesIn = (dir) => {
+    const out = new Set();
+    for (const l of views.footage.links || []) if (parent(l.rel) === dir) out.add(l.rel.split("/").pop().toLowerCase());
+    for (const n of ["moments", "stills", "exports"]) for (const it of (views[n] || { items: [] }).items) if (it.dir === dir) out.add(it.id.split("/").pop().toLowerCase());
+    return out;
+  };
+  const free = (names, stem, ext) => { let name = stem + ext, n = 2; while (names.has(name.toLowerCase())) name = stem + " " + n++ + ext; names.add(name.toLowerCase()); return name; };
+  const parts = (file) => { const l = file.toLowerCase(); const n = l.endsWith(".afplink.mp4") || l.endsWith(".afplink.jpg") ? 12 : l.endsWith(".mp.jpg") ? 7 : file.length - file.lastIndexOf("."); return [file.slice(0, file.length - n), file.slice(file.length - n)]; };
+  const rootDir = () => views.footage.root;
+  const listDir = (dir) => { const f = views.footage; f.clips_dirs = f.clips_dirs || []; for (let d = dir; d && !f.clips_dirs.includes(d); d = parent(d)) f.clips_dirs.push(d); f.clips_dirs.sort(); };
+  const linkOf = (rel, clip) => ({ path: rootDir() + "/" + rel, rel, clip, draft: false, size: 20480, mtime: 1763300000 });
+  // What an album command says it made (src/changed.rs's of_album), or its old answer; the catalog told of its own
+  // files: the app's notice of them asks for nothing now (seen.rs's ours), before it made Footage be read again
+  const albumAnswer = (plain, what, links, linksGone) => {
+    told(app.albums ? [] : null);
+    return app.albums ? changedOf(what, { answer: plain, problems: plain.problems || (plain.failed || []).map((f) => f[0] + ": " + f[1]), links: links || [], links_gone: linksGone || [] }) : plain;
+  };
+  app.commands.album_add = (a) => {
+    refuse("album_add", a);
+    const f = views.footage, names = namesIn(a.album);
+    const made = [], links = [], what = [];
+    let already = 0;
+    for (const c of a.clips) {
+      if ((f.links || []).some((l) => l.clip === c.tree && parent(l.rel) === a.album)) { already++; continue; }
+      const rel = a.album + "/" + free(names, c.tree.split("/").pop().replace(/\.[^.]+$/, ""), ".afplink.mp4");
+      const l = linkOf(rel, c.tree);
+      (f.links = f.links || []).push(l);
+      links.push(l); made.push(l.path); what.push(["footage", c.tree]);
+      const it = f.items.find((x) => x.id === c.tree);
+      if (it && !it.preview) { it.preview = l.path; it.pdir = a.album; }
+    }
+    if (made.length) listDir(a.album);
+    app.done.push(["album_add", a]);
+    return albumAnswer({ made, already, album: a.album, failed: [], ms: 5 * made.length }, what, links);
+  };
+  app.commands.album_copy = (a) => {
+    refuse("album_copy", a);
+    const names = namesIn(a.album), what = [];
+    let copied = 0;
+    for (const file of a.files) for (const n of ["moments", "stills"]) {
+      const v = views[n], it = v && v.items.find((x) => x.path === file);
+      if (!it || it.dir === a.album) continue;
+      const [stem, ext] = parts(file.split("/").pop());
+      const id = a.album + "/" + free(names, stem, ext);
+      const c = Object.assign(copy(it), { id, dir: a.album, path: rootDir() + "/" + id, name: it.kind === "moment" ? parts(id.split("/").pop())[0] : id.split("/").pop() });
+      v.items.push(c); v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)); redirs(v);
+      what.push([n, id]); copied++;
+    }
+    app.done.push(["album_copy", a]);
+    return albumAnswer({ copied, album: a.album, problems: [] }, what);
+  };
+  app.commands.album_move = (a) => {
+    refuse("album_move", a);
+    const f = views.footage, names = namesIn(a.album), what = [], links = [], gone = [];
+    let moved = 0;
+    for (const file of a.files) {
+      const l = (f.links || []).find((x) => x.path === file);
+      const [stem, ext] = parts(file.split("/").pop());
+      if (l) {
+        if (parent(l.rel) === a.album) continue;
+        const rel = a.album + "/" + free(names, stem, ext);
+        l.rel = rel; l.path = rootDir() + "/" + rel;
+        const it = f.items.find((x) => x.id === l.clip);
+        if (it && it.preview === file) { it.preview = l.path; it.pdir = a.album; }
+        listDir(a.album);
+        links.push(copy(l)); gone.push(file); what.push(["footage", l.clip]); moved++;
+        continue;
+      }
+      for (const n of ["moments", "stills"]) {
+        const v = views[n], it = v && v.items.find((x) => x.path === file);
+        if (!it || it.dir === a.album) continue;
+        const was = it.id;
+        it.id = a.album + "/" + free(names, stem, ext); it.dir = a.album; it.path = rootDir() + "/" + it.id;
+        it.name = it.kind === "moment" ? parts(it.id.split("/").pop())[0] : it.id.split("/").pop();
+        v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)); redirs(v);
+        what.push([n, was], [n, it.id]); moved++;
+      }
+    }
+    app.done.push(["album_move", a]);
+    return albumAnswer({ moved, album: a.album, problems: [] }, what, links, gone);
+  };
+  app.commands.photo_add = (a) => {
+    refuse("photo_add", a);
+    const v = views.stills, names = namesIn(a.album), made = [], what = [];
+    let already = 0;
+    for (const ph of a.photos) {
+      if (v.items.some((x) => x.dir === a.album && x.link && x.link.clip === ph.tree && Math.abs((+x.link.t || 0) - ph.t) < 0.05)) { already++; continue; }
+      const id = a.album + "/" + free(names, ph.tree.split("/").pop().replace(/\.[^.]+$/, "") + "_" + ph.t.toFixed(2) + "s", ".afplink.jpg");
+      v.items.push({ kind: "still", id, dir: a.album, name: id.split("/").pop(), path: rootDir() + "/" + id, size: 30000, mtime: 1763300000, tags: [], linked: true, form: "Photo link",
+        link: { v: 1, kind: "photo", clip: ph.tree, t: Math.round(ph.t * 1000) / 1000, size: ph.size || 0 } });
+      made.push(rootDir() + "/" + id); what.push(["stills", id]);
+    }
+    v.items.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0)); redirs(v);
+    app.done.push(["photo_add", a]);
+    return albumAnswer({ made, already, album: a.album, failed: [], ms: 180 * made.length }, what);
+  };
+  app.commands.new_folder = (a) => {
+    refuse("new_folder", a);
+    const dir = (n) => (a.parent ? a.parent + "/" : "") + n;
+    const taken = (n) => ALL.some((v) => views[v] && ((views[v].dirs || []).includes(dir(n)) || (views[v].clips_dirs || []).includes(dir(n)))) || namesIn(a.parent).has(n.toLowerCase());
+    let name = "untitled folder", k = 1;
+    while (taken(name)) name = "untitled folder " + ++k;
+    if (a.name && !taken(a.name)) name = a.name;
+    if (a.view === "footage") listDir(dir(name)); else { const v = views[a.view]; v.empty = (v.empty || []).concat([dir(name)]); redirs(v); }
+    app.done.push(["new_folder", a]);
+    told(null);
+    return dir(name);
+  };
+  // An album's folders renamed as one (src/main.rs's rename_album): the ones done named back when one can't be
+  app.commands.rename_album = (a) => {
+    refuse("rename_album", a);
+    const done = [];
+    try {
+      for (const p of a.paths) { app.commands.rename_item({ view: "footage", kind: "folder", path: p, name: a.name }); done.push(p); }
+    } catch (e) {
+      for (const p of done.reverse()) app.commands.rename_item({ view: "footage", kind: "folder", path: parent(p) + "/" + a.name, name: p.split("/").pop() });
+      throw e;
+    }
+    const to = a.paths.map((p) => parent(p) + "/" + a.name);
+    return app.changed ? changedOf([], { answer: to, reload: ALL }) : to;
+  };
+
   // What changed since the page's count, as items; null when a change among them can't be said item by item
   app.commands.changes_since = (a) => {
     const upto = app.page ? app.page.state.changes : 0;

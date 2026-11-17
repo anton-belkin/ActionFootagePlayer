@@ -36,6 +36,28 @@ INSTALL_NAME_TOOL=$(xcrun -f install_name_tool 2>/dev/null || echo /usr/bin/inst
 command -v brew >/dev/null || { echo "Missing Homebrew (https://brew.sh): the app carries its mpv and ffmpeg" >&2; exit 1; }
 prefix=$(brew --prefix)
 [ -x "$prefix/bin/ffmpeg" ] || { echo "Missing ffmpeg: brew install ffmpeg" >&2; exit 1; }
+# ffmpeg with libplacebo for gyroflow-export's GPU path (tools/export-gpu/build_ffmpeg_libplacebo.sh) when it's built,
+# else Homebrew's (the export then takes the pipes, saying why)
+FFPL_DIR="${FFPL_DIR:-$HOME/Library/Caches/afp-ffmpeg-build}"
+if [ -z "${FFMPEG_BIN:-}" ]; then
+    # Built once (about 10 minutes), then kept there, and again when this tree's patches (tools/export-gpu/ffmpeg-patches)
+    # aren't the ones it was built for; NO_GPU_FFMPEG=1 takes Homebrew's instead
+    if [ -z "${NO_GPU_FFMPEG:-}" ]; then
+        want=$(tools/export-gpu/build_ffmpeg_libplacebo.sh --stamp)
+        have=$(cat "$FFPL_DIR/prefix/afp-ffmpeg.stamp" 2>/dev/null || echo none)
+        if [ ! -x "$FFPL_DIR/prefix/bin/ffmpeg" ] || [ "$have" != "$want" ]; then
+            echo "== ffmpeg with libplacebo for the GPU export (tools/export-gpu/build_ffmpeg_libplacebo.sh, into $FFPL_DIR; stamp $have, this tree's $want)"
+            FFPL_DIR="$FFPL_DIR" tools/export-gpu/build_ffmpeg_libplacebo.sh > "$FFPL_DIR.log" 2>&1 \
+                || { echo "Building it failed: $FFPL_DIR.log (NO_GPU_FFMPEG=1 builds the app with Homebrew's)" >&2; exit 1; }
+        fi
+        if [ -x "$FFPL_DIR/prefix/bin/ffmpeg" ]; then
+            FFMPEG_BIN="$FFPL_DIR/prefix/bin/ffmpeg"
+            # And it keeps a full-range clip full range on the GPU path (ffmpeg-patches/0002): about a second
+            tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >/dev/null || { tools/export-gpu/check_ffmpeg_range.sh "$FFMPEG_BIN" >&2; echo "Not bundling it" >&2; exit 1; }
+        fi
+    fi
+fi
+[ -z "${FFMPEG_BIN:-}" ] || export FFMPEG_BIN
 # The release's mpv (tools/build_mpv.sh) when it's built, else Homebrew's
 if [ -z "${MPV_BIN:-}" ] && [ -x build/mpv-afp/out/mpv ]; then
     MPV_BIN=build/mpv-afp/out/mpv
@@ -76,7 +98,9 @@ done
 
 mpv_from="Homebrew's mpv"
 [ -z "${MPV_BIN:-}" ] || mpv_from="$MPV_BIN"
-echo "== The app, with $mpv_from and Homebrew's ffmpeg in it"
+ffmpeg_from="Homebrew's ffmpeg"
+[ -z "${FFMPEG_BIN:-}" ] || ffmpeg_from="$FFMPEG_BIN (GPU export)"
+echo "== The app, with $mpv_from and $ffmpeg_from in it"
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$BUILD/dlogm_hlg.glsl"
 app="$BUILD/ActionFootagePlayer.app"
 rm -rf "$app"

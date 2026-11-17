@@ -884,6 +884,29 @@ function publish()
         lens = current_lens or false,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
+    -- What a render takes from this computer's settings, for Action Footage Library's recipes (library/src/renders.rs
+    -- reads it; a batch writes it too): the defaults' bundle, the edge fill, how much temporal denoise, the preset
+    -- used where a clip has no Gyroflow project. Written when it changes (what was written is kept beside the
+    -- presets, a key ipairs doesn't see: the main chunk has no locals to spare)
+    if DATA and DATA ~= "" then
+        local preset
+        for _, p in ipairs(PRESETS) do if file_exists(p) then preset = p; break end end
+        local text = utils.format_json({ v = 1, defaults = DEFAULTS, edges = o.edges, edges_blur = o.edges_blur,
+                                         temporal_denoise = o.temporal_denoise, preset = preset })
+        if text and text ~= PRESETS.defaults_written then
+            local path = utils.join_path(DATA, "render-defaults.json")
+            if not utils.file_info(DATA) then
+                mp.command_native({ name = "subprocess", playback_only = false,
+                                    args = platform.windows and { "cmd", "/d", "/c", "mkdir", DATA } or { "mkdir", "-p", DATA } })
+            end
+            local f = io.open(path .. ".tmp", "w")
+            if f then
+                f:write(text); f:close()
+                os.remove(path)
+                if os.rename(path .. ".tmp", path) then PRESETS.defaults_written = text end
+            end
+        end
+    end
 end
 
 -- The filter set up again for current_source (the horizon lock, the lens, or the rate changing with the edge fill);
@@ -2495,23 +2518,35 @@ end
 
 -- The command that opens the project (or a video) in Gyroflow and returns (status 0) once it's started, without
 -- waiting for it. nil on Windows for a video without gyroflow_app: the app videos open with is the player's
-local function gyroflow_command(file)
-    if platform.macos then return { "/usr/bin/open", "-b", GYROFLOW_APP, file } end
+-- `preset`: Gyroflow's preset as JSON (' for "), applied once the video is open (its --open and --preset): a video
+-- without a project opened with what the player knows of it (the lens under water)
+local function gyroflow_command(file, preset)
+    if platform.macos then
+        -- A new one: one already open wouldn't be given the preset
+        if preset then return { "/usr/bin/open", "-n", "-b", GYROFLOW_APP, "--args", "--open", file, "--preset", preset } end
+        return { "/usr/bin/open", "-b", GYROFLOW_APP, file }
+    end
     if platform.windows then
-        if o.gyroflow_app ~= "" then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, file } end
+        if o.gyroflow_app ~= "" then
+            if preset then return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, "--open", file, "--preset", preset } end
+            return { "cmd", "/d", "/c", "start", "", o.gyroflow_app, file }
+        end
         -- The app .gyroflow files are associated with (Gyroflow's installer sets it)
         if not file:lower():match("%.gyroflow$") then return nil end
         return { "cmd", "/d", "/c", "start", "", file }
     end
     -- Started in the background, and fails when there's no such program
     local app = o.gyroflow_app ~= "" and o.gyroflow_app or "gyroflow"
+    if preset then
+        return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" --open "$2" --preset "$3" >/dev/null 2>&1 &', "sh", app, file, preset }
+    end
     return { "sh", "-c", 'command -v "$1" >/dev/null || exit 127; "$1" "$2" >/dev/null 2>&1 &', "sh", app, file }
 end
 
 -- `project`: the project to watch for changes; nil for a video without one (`file`, the video itself), to watch
 -- for the project Gyroflow saves next to it
-local function open_in_gyroflow(file, project, opened_message)
-    local args = gyroflow_command(file)
+local function open_in_gyroflow(file, project, opened_message, preset)
+    local args = gyroflow_command(file, preset)
     if not args then
         mp.osd_message("Gyroflow: set gyroflow_app in gyroflow.conf to open videos in it", 4)
         return
@@ -2550,9 +2585,14 @@ mp.add_key_binding("Ctrl+e", "edit", function()
     local project = find_project(path)
     if project then return edit_project(project) end
     if not current_source or current_source.kind == "lens" then
-        return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data:\n"
+        -- Gyroflow's "Lens is underwater" for it: the player's Lens under water (yes: water's refraction, no: none);
+        -- auto says nothing (Gyroflow's own default)
+        local r = underwater == "yes" and "1.33" or underwater == "no" and "1.0" or nil
+        local preset = r and ("{'version': 2, 'light_refraction_coefficient': " .. r .. "}") or nil
+        return open_in_gyroflow(path, nil, "Gyroflow: opened " .. platform.file_name(path) .. ", which has no motion data"
+            .. (preset and (underwater == "yes" and " (its lens under water)" or " (its lens above water)") or "") .. ":\n"
             .. "let it find the motion from the picture (optical flow) and save the project next to the video,\n"
-            .. "then it plays here stabilized")
+            .. "then it plays here stabilized", preset)
     end
     if not file_exists(PROJECT_WRITER) then
         mp.osd_message("Gyroflow: gyroflow-project isn't installed", 2)
