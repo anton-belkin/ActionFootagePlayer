@@ -1660,7 +1660,9 @@ end
 -- macOS shows the window's title bar over the video's top when the mouse moves there: the panel starts below it
 local TITLE_BAR = 28
 
-local function draw(w, h, s, hovered)
+local drawn
+-- final: the last try (drawn), whatever the scroll still wants: nil is never returned then
+local function draw(w, h, s, hovered, final)
     local u = ui.new(s)
     u.hover = hovered
     -- The drop-downs: which is open, how one opens, the row the keys are on
@@ -1699,8 +1701,20 @@ local function draw(w, h, s, hovered)
         local y0 = top + 14 * s
         local off = scroll[tab] or 0
         local fn = PARTS[tab]
-        local y_end = fn and fn(u, x, cw, y0 - off) or y0
+        -- A part that fails says so in its place, and the log names the cause: the rail, the other parts and the bar
+        -- are still drawn (an error here once left the panel and the bar black)
+        local ok, y_end = true, y0
+        if fn then
+            ok, y_end = xpcall(fn, debug.traceback, u, x, cw, y0 - off)
+            if not ok then
+                mp.msg.error("the " .. tostring(tab) .. " part failed: " .. tostring(y_end))
+                for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
+                u.hits = {}
+                y_end = u:caption(x, cw, y0, "This part couldn't be drawn (the log says why)")
+            end
+        end
         u.clip = nil
+        if redraw and final then redraw = false end
         if redraw then
             redraw = false
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
@@ -1711,7 +1725,7 @@ local function draw(w, h, s, hovered)
         local content = y_end + off - y0 + 24 * s
         local room = bottom - top
         local max = math.max(0, content - room)
-        if off > max then
+        if off > max and not final then
             scroll[tab] = max
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
             u.hits = {}
@@ -1796,6 +1810,22 @@ local function bar_shown()
 end
 
 local bar_timer
+-- The panel drawn: again while it moves its own scroll (a part bringing a row into view, the scroll past the end
+-- clamped), at most a few times, the last drawn as it is. An error outside the parts (they're guarded in draw) is
+-- logged and the panel hidden (Tab shows it again), so its margin isn't left there unpainted
+function drawn(w, h, s, hovered)
+    for i = 1, 4 do
+        local ok, u = xpcall(draw, debug.traceback, w, h, s, hovered, i == 4)
+        if not ok then
+            mp.msg.error("the panel failed to draw, hidden: " .. tostring(u))
+            shown, open = false, false
+            if popover then popover = nil end
+            return ui.new(s)
+        end
+        if u then return u end
+    end
+    return ui.new(s)
+end
 local function render_bar()
     local d = dims
     if d.w <= 0 then return end
@@ -1848,8 +1878,7 @@ local function render()
     if not d or d.w <= 0 then return end
     dims = d
     local s = scale()
-    local u = draw(d.w, d.h, s, hover)
-    if not u then u = draw(d.w, d.h, s, hover) end
+    local u = drawn(d.w, d.h, s, hover)
     hits = u.hits
     overlay.res_x, overlay.res_y = d.w, d.h
     overlay.data = u:render()
@@ -2075,7 +2104,7 @@ end)
 mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
     read_keys()
     w, h, s = tonumber(w), tonumber(h), tonumber(s) or 1
-    local u = draw(w, h, s, hovered) or draw(w, h, s, hovered)
+    local u = drawn(w, h, s, hovered)
     if not bar_never then
         local b = ui.new(s)
         b.hover = hovered

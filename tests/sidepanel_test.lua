@@ -56,6 +56,7 @@ package.preload.mp = function() return mp end
 package.preload["mp.options"] = function() return { read_options = function(o) o.shown, o.open, o.tab = true, true, "output" end } end
 
 local ui = require 'ui'
+local tl = require 'timeline'
 local new = ui.new
 
 dofile("mpv/scripts/side-panel/main.lua")
@@ -489,6 +490,33 @@ messages.tab("quality")
 expect("Quality: the frame rate as buttons", find("fps:30") ~= nil, true)
 expect("Quality: the edges stay a drop-down (long labels)", find("edges") ~= nil and find("edges:smooth") == nil, true)
 expect("Quality: the size (five) a drop-down", find("size") ~= nil, true)
+
+-- The Playlist tab (the rail's button, F8) with the clip playing near the end of a long list: opening it scrolls the
+-- clip into the middle, past the list's end, and the panel was drawn twice and given up (render's `draw() or draw()`
+-- both nil): an error in render, the panel and the bar left unpainted, black (Anton). Now drawn until it settles
+local list = {}
+for i = 1, 60 do list[i] = { filename = ("/footage/DJI_%04d.MP4"):format(i), current = i == 59 or nil, playing = i == 59 or nil } end
+mp.set_property_native("video-exts", { "mp4" })
+mp.set_property_native("playlist", list)
+mp.set_property_native("playlist-count", 60)
+mp.set_property_native("playlist-pos", 58)
+mp.set_property_native("osd-dimensions", { w = 1280, h = 700 })
+for _, open_it in ipairs({ function() messages.tab("playlist") end, function() bindings.playlist.fn() end,
+                           function() messages.tab("output"); click("rail:playlist") end }) do
+    local ok, err = pcall(open_it)
+    expect("the playlist opens near the list's end without an error" .. (ok and "" or (": " .. tostring(err))), ok, true)
+    expect("…and the panel is drawn (its rail)", find("rail:playlist") ~= nil, true)
+    expect("…the clip playing in view", find("pl:58") ~= nil, true)
+    events["file-loaded"]()
+end
+-- An error in a part's drawing doesn't take the panel down: the part says so, the rail and the bar are still drawn
+local list_rows = tl.playlist_rows
+tl.playlist_rows = function() error("boom") end
+local ok = pcall(function() messages.tab("playlist") end)
+expect("a part that fails: no error out of the panel", ok, true)
+expect("…the rail still drawn", find("rail:playlist") ~= nil, true)
+tl.playlist_rows = list_rows
+mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
