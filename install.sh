@@ -269,6 +269,8 @@ put mpv/scripts/side-panel/bar.lua  "$PANEL/bar.lua" 644
 put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
+put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
+put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
