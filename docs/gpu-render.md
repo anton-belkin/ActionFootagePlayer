@@ -410,6 +410,30 @@ out no more, at about 1.6 times the cost, so they stay out. Cost (offline, the w
 measures): as #151 at 1080p (3.7 ms), +5 % at the XDR's size and 4K; Light about 25 % less. No ghosts on 0126's
 bubbles and diver or 0087's fish; paused-frame crops and the rig in the review's notes.
 
+**The noise measured only where the frames match, 2026-11-18** (Anton, on GoPro HERO4 clip GOPR1030, indoors, 4K30
+8-bit H.264, handheld with fast moves: "bands on smooth gradients", an elbow at 2.74 s with lines across the skin).
+They weren't the 8-bit steps: they were other frames' edges and shading averaged in. The upper quartile of the
+differences against the frame before took every pixel, and on this clip over a quarter of them missed (motion blur,
+an arm moving its own way): the quartile went past the histogram's end (16 codes), so the noise read 9.7 8-bit codes in
+every bin for about 1.2 on a white wall, and the weights took in anything within three times that. Now a pixel is
+sampled for the noise only where its 4x4 (the quarter-size luma, the weight's own patch term) matched the frame before
+within 2.5 times the noise measured so far (never under half an 8-bit code). It starts low and only takes what fits,
+so it doesn't feed itself: a looser gate (4 times) or one by the median of the patch differences (more than half of
+this clip's pixels miss) let the ghosts back. Measured with `gyroflow-export --gpu on --prores` (the player's shader,
+4K), against the frame without the denoise; noise left on the flattest blocks (fine scale) and the most it changes the
+picture at large scale (a Gaussian of 6 px, 99.9th percentile, 8-bit codes):
+
+| clip | noise read (8-bit codes) | noise left, until now / now | changed at large scale, until now / now |
+|---|---|---|---|
+| GOPR1030, wall (61-64 s) | 9.7 / 1.2-1.5 | 49-78 % / 75-90 % | 6.0-6.5 / 1.2-2.3 |
+| GOPR1030, 0-20 s | 9.7 / 1-5 by brightness | 45-64 % / 64-86 % | 5.6-6.7 / 1.0-2.3 |
+| 0087, Thistlegorm | as it was | 45-48 % / 48-50 % | 1.0-1.3 / 1.0-1.2 |
+| 0126, reef | 5-25 % lower in some bins | 58 % / 65-67 % | 3.7-4.2 / 3.3-3.7 |
+
+On GOPR1030 the lines on the elbow, the steps on the wall and the ragged dark halo along the ceiling's edge are gone;
+less grain goes than before because before the frames were smeared together, not denoised. On 0126 the open water keeps
+a little more grain and the reef and fish are sharper (before, the bright bins read at the histogram's end there too).
+
 **What the frames can't take out, and Stronger, 2026-11-09** (Anton, on 0087 at 37 s, open water with the wreck faint
 through it: "fairly strong noise" left; the dark dots are noise, particles in the water are white). Measured on the
 player's shader, 1080p, a 480x360 crop of that water, noise in 10-bit codes by scale (fine: the picture minus a

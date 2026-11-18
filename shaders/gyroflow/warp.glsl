@@ -1399,8 +1399,13 @@ vec4 hook()
         sum += w * h;
         wsum += w;
         // The noise's sample: against the frame before, its nearest pixel (between pixels, the bilinear mix would
-        // halve it)
-        if (n == 0) {
+        // halve it). Only where the 4x4 around it matched that frame within the noise (2.5 times it on the quarter-size
+        // luma, whose own noise is about half a pixel's; never under half an 8-bit code): where the motion isn't
+        // followed, the difference is the picture's, not its noise. Handheld GoPro HERO4 clip GOPR1030 (8-bit, fast
+        // motion, motion blur): over a quarter of the pixels missed, the upper quartile went past the histogram's end
+        // and the noise read 9.7 codes for 1.2, so every frame was averaged in, ghosts and other frames' edges with them
+        // (lines and steps on skin and walls). Under water (0087) the measure is as it was
+        if (n == 0 && abs(eq) < 1.8 * max(2.5 * s, 0.002)) {
             noise_diff = abs(l - lum(near));
             noise_c = abs(chroma(cur).x - chroma(near).x);
         }
@@ -1571,7 +1576,9 @@ void hook()
         // it for three quarters of them). Not the lower quartile (still.rs's): HEVC copies many blocks from the frame
         // before, whose difference is about none, and the rest is fresh noise, so the lower quartile read the noise
         // two or three times too low, swinging with each frame (clip 0087: 2-10 codes for about 8), and the noise was
-        // taken for motion. Smoothed over the frames (a tenth of each); a bin with too few keeps what it had, and
+        // taken for motion. Only the pixels whose surroundings matched (dn_blend), else on a fast handheld clip the
+        // misses are the upper quartile, the noise reads several times too high and other frames' edges are averaged in.
+        // Smoothed over the frames (a tenth of each); a bin with too few keeps what it had, and
         // starts from 4 codes, negated until it's measured
         uint total = 0u;
         for (uint st = 0u; st < 256u; st++) total += gdn_hist[k * 256u + st];
