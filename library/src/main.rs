@@ -2513,7 +2513,7 @@ fn share_sum(job: &mut Job, s: share::Share) {
 // render cache has is copied at once; the rest is rendered first by the player, as a job in the queue, and copied when
 // it's made. The folder chosen, or nothing when the choice was cancelled
 #[tauri::command]
-async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folder: Option<String>, look: Option<String>) -> Result<Option<String>, String> {
+async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folder: Option<String>, look: Option<String>, settings: Option<Value>) -> Result<Option<String>, String> {
     if !share::DESTINATIONS.iter().any(|(id, _)| *id == dest) { return Err(format!("no such destination: {dest}")); }
     if items.is_empty() { return Err("Select what to share".into()); }
     let folder = match folder.filter(|f| !f.is_empty()) {
@@ -2538,7 +2538,8 @@ async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folde
                                   share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ..Default::default() }) });
             id
         };
-        let (planned, asked) = share::plan(&root, &items, &look);
+        // The export's settings (the sheet's: size, encoding, quality), else the defaults
+        let (planned, asked) = share::plan(&root, &items, &look, &settings.unwrap_or(Value::Null));
         let mut s = share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: planned, ..Default::default() };
         let show = |s: &share::Share, request: Option<Value>| {
             let mut inner = shared.lock().unwrap();
@@ -3345,7 +3346,9 @@ mod share_e2e {
                      json!({ "kind": "photo", "path": "_Stills/Reef/A_1.00s.afplink.jpg", "name": "A_1.00s" }),
                      json!({ "kind": "clip", "path": clip, "name": clip.rsplit('/').next().unwrap_or(clip).split('.').next().unwrap_or("A") })];
         let look = std::env::var("AFL_SHARE_LOOK").unwrap_or_else(|_| "HDR".into());
-        let (mut planned, asked) = share::plan(&root, &items, &look);
+        // AFL_SHARE_SETTINGS: the export's settings as the sheet sends them (JSON), else the defaults
+        let settings = std::env::var("AFL_SHARE_SETTINGS").ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()).unwrap_or(Value::Null);
+        let (mut planned, asked) = share::plan(&root, &items, &look, &settings);
         // What the cache has is handed over at once, as the command does
         for i in planned.iter_mut().filter(|i| i.state == "copying") { share::deliver("folder", &folder, i); }
         println!("planned: {}", serde_json::to_string(&planned.iter().map(|i| (&i.name, &i.state, &i.message)).collect::<Vec<_>>()).unwrap());

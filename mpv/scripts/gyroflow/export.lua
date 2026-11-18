@@ -53,6 +53,7 @@
 local mp = require 'mp'
 local utils = require 'mp.utils'
 local platform = require 'platform'
+local es = require 'exportsettings'
 
 local EXPORT = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-export"))
 -- Shift+E twice within this many seconds cancels
@@ -261,6 +262,13 @@ end
 
 local run_export
 
+-- The export's settings (exportsettings.lua, docs/export-settings.md): a video's (size, encode, quality) and a photo's
+-- (size, quality), kept in gyroflow.conf (export_*, photo_*), published by main.lua as user-data/gyroflow/export_settings
+local function settings(kind)
+    local all = mp.get_property_native("user-data/gyroflow/export_settings")
+    return es.normalize(type(all) == "table" and all[kind] or nil, kind)
+end
+
 -- The output's lens (the gyroflow plugin's projection), as gyroflow-export names it; linear is its default
 local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true, orthographic = true }
 
@@ -295,7 +303,7 @@ local function cleanup_args(args, denoise, strong, chromatic, amount)
     table.insert(args, "--chromatic"); table.insert(args, chromatic and "yes" or "no")
 end
 
-local function as_it_plays(args, sdr, photo, live)
+local function as_it_plays(args, sdr, photo, live, s)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
         table.insert(args, "--curve"); table.insert(args, "none")
@@ -347,13 +355,13 @@ local function as_it_plays(args, sdr, photo, live)
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
     if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
-    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"))
+    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"), es.amount(s, nil))
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
 -- args, for a clip that isn't the one playing (the Project tab's moments and photos of marks): what isn't saved is
 -- gyroflow-export's own default (the curve from the clip's metadata, the preset's), the edge fill as it's set here
-local function view_args(args, v)
+local function view_args(args, v, s)
     local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
     if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
     -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
@@ -380,7 +388,7 @@ local function view_args(args, v)
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
-    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, v.temporal_denoise)
+    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, es.amount(s, v.temporal_denoise))
 end
 
 -- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
@@ -415,8 +423,11 @@ local function start(path, how, named)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    as_it_plays(args, how == "sdr", false, false)
+    -- The export's settings: its size, encoder and quality preset
+    local s = settings("video")
+    as_it_plays(args, how == "sdr", false, false, s)
     if how == "youtube" then youtube_args(args) end
+    es.apply(args, s, "video")
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
     if named and named.from and named.to then a, b = named.from, named.to end
@@ -654,7 +665,9 @@ mp.register_script_message("export-batch", function(json)
     local args = { EXPORT, "--force" }
     if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
     if control then table.insert(args, "--control"); table.insert(args, control) end
-    view_args(args, type(req.view) == "table" and req.view or {})
+    -- The Library's export settings (Share's dialog), else the defaults
+    local s = es.normalize(req.export, "video")
+    view_args(args, type(req.view) == "table" and req.view or {}, s)
     if req.sdr == true then table.insert(args, "--nbcu") end
     if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
     if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
@@ -663,6 +676,7 @@ mp.register_script_message("export-batch", function(json)
     add("--to", req.to and string.format("%.3f", req.to))
     add("--output", req.output)
     add("--link", req.link)
+    es.apply(args, s, "video")
     table.insert(args, req.clip)
     mp.msg.info("export (batch): " .. table.concat(args, " "))
     local job = { control = control, progress = req.progress, state = {} }
@@ -804,7 +818,9 @@ local function photo_full()
     if live then table.insert(args, "--live") end
     -- A Motion Photo is a JPEG (the default off macOS)
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
-    as_it_plays(args, false, true, live)
+    -- The photo's settings: its size and quality preset (its motion's too)
+    local s = settings("photo")
+    as_it_plays(args, false, true, live, s)
     -- A moment stabilized on its own (by its part's motion alone, the gyroflow plugin's fixed()), as it plays: its
     -- part of the clip; one with a project of its own, the project's "only within the trim range" as it's viewed
     local moment = type(ws) == "table" and ws.path == mp.get_property("path")
@@ -820,9 +836,12 @@ local function photo_full()
     if f then table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h)) end
     local dir = photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
-    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
-    local frame_args, frame_file = gpu_frame()
+    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again); at the
+    -- highest quality gyroflow-export renders it itself, at its best
+    local frame_args, frame_file
+    if s.quality ~= "highest" then frame_args, frame_file = gpu_frame() end
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
+    es.apply(args, s, "photo")
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
@@ -904,7 +923,9 @@ mp.register_script_message("photo-at", function(json)
     if mode == "live" or mode == "motion" then table.insert(args, "--live") end
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     local view = type(req.view) == "table" and req.view or {}
-    view_args(args, view)
+    -- Its settings: the Library's (Share's dialog), else this player's for photos
+    local s = type(req.export) == "table" and es.normalize(req.export, "photo") or settings("photo")
+    view_args(args, view, s)
     -- A photo link's own frame (its crop in shares of the frame, its camera), and what its link is to carry
     local c, f = req.camera, req.crop
     if type(c) == "table" and c.yaw and c.pitch and c.roll and c.zoom then
@@ -923,6 +944,7 @@ mp.register_script_message("photo-at", function(json)
     -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
     local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
+    es.apply(args, s, "photo")
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
@@ -932,6 +954,22 @@ mp.register_script_message("photo-at", function(json)
         mp.msg.warn("photo: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
+end)
+
+-- export-setting <video|photo> <size|encode|quality> <value>: one of the export's settings (exportsettings.lua), kept
+-- in gyroflow.conf at once (export_size, photo_quality, ...)
+mp.register_script_message("export-setting", function(kind, key, value)
+    if not es.KEYS[kind] then return end
+    local all = mp.get_property_native("user-data/gyroflow/export_settings")
+    all = type(all) == "table" and all or {}
+    local now = es.normalize(all[kind], kind)
+    if now[key] == nil then return end
+    now[key] = value
+    now = es.normalize(now, kind)
+    if now[key] ~= value then return end
+    all[kind] = now
+    mp.set_property_native("user-data/gyroflow/export_settings", all)
+    platform.save_options("gyroflow", { { (kind == "photo" and "photo_" or "export_") .. key, value } })
 end)
 
 -- Live Photos need afp-photo (macOS)

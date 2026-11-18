@@ -75,6 +75,13 @@ function M.busy(kind, v)
     return nil
 end
 
+-- Why the export's settings (size, encoding, quality) can't be had for this kind, nil when they can: the 360° exports
+-- are their own renderer, their size set in the 360° tab (as the gyroflow plugin's exportsettings.lua says)
+function M.settings_unavailable(kind)
+    if kind == "360" or kind == "flat" then return "Not for 360° exports: their size is set in the 360° tab" end
+    return nil
+end
+
 local SUFFIX = { sdr = "SDR", youtube = "YouTube", ["360"] = "360°", flat = "flat" }
 
 -- The button's label: "Export the clip · HDR", "Export the part 0:12–0:47 · flat". a, b: the part marked (ab-loop-a,

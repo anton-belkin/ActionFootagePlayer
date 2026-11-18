@@ -172,7 +172,8 @@ function Ui:saved_dot(right, top)
     self:shape(circle_path(right - 5 * s, top + 5 * s, 2.6 * s), M.C.saved)
 end
 
--- options: { { label, cmd, disabled } }, selected: the index chosen (or nil), saved: the index saved (a dot; nil: none)
+-- options: { { label, cmd, disabled, key = its place's id (else id .. ":" .. index) } }, selected: the index chosen (or
+-- nil), saved: the index saved (a dot; nil: none)
 function Ui:segmented(x, w, y, id, options, selected, disabled, saved)
     local s = self.s
     local h, pad = 30 * s, 2 * s
@@ -181,7 +182,7 @@ function Ui:segmented(x, w, y, id, options, selected, disabled, saved)
     for i, opt in ipairs(options) do
         local bx = x + pad + (i - 1) * (bw + pad)
         local off = disabled or opt[3]
-        local key = id .. ":" .. i
+        local key = opt.key or (id .. ":" .. i)
         if i == selected then
             self:box(bx, y + pad, bw, h - 2 * pad, 6, M.C.accent, { alpha = disabled and "80" or "00" })
         elseif self:hovered(key) and not off then
@@ -470,11 +471,49 @@ function Ui:select(x, w, y, id, rows, chosen, opts)
     return y + h + 6 * s
 end
 
+-- A short list (2 to BUTTONS_MAX choices) is a row of buttons, the chosen one lit, as the panel had them before
+-- every choice became a drop-down (#196); a longer one, or one whose labels don't fit a button each, stays a drop-down
+M.BUTTONS_MAX = 3
+
+-- Whether select_row draws these rows as buttons in a row w wide: 2 to BUTTONS_MAX of them, the value shown being one
+-- of them (opts.text: a value off the list, as the speed's 1.5×), each label fitting its button
+function M.as_buttons(rows, w, s, opts)
+    if #rows < 2 or #rows > M.BUTTONS_MAX or (opts and opts.text) then return false end
+    local bw = (w - 4 * s - (#rows - 1) * 2 * s) / #rows
+    for _, r in ipairs(rows) do
+        if M.text_width(r.label, 12, s) > bw - 6 * s then return false end
+    end
+    return true
+end
+
+-- The label (its key at the right), and the buttons under it across the row: a click runs the row's cmd. rows, chosen,
+-- opts as select_row's. Each button's place is id .. ":" .. kind, as the drop-down's rows are
+function Ui:buttons_row(x, w, y, id, label, rows, chosen, opts)
+    opts = opts or {}
+    local s = self.s
+    local cy = y + 10 * s
+    self:text(x, cy, label, { size = 13, alpha = dim_alpha(opts.disabled) })
+    if opts.key then self:kbd(x + w, cy, opts.key) end
+    local list, selected, saved = {}, nil, nil
+    for i, r in ipairs(rows) do
+        local cmd = r.cmd
+        list[i] = { r.label, cmd, r.disabled,
+                    key = id .. ":" .. tostring(r.kind) }
+        if r.kind == chosen then selected = i end
+        if opts.saved ~= nil and r.kind == opts.saved then saved = i end
+    end
+    if saved == selected then saved = nil end
+    local next_y = self:segmented(x, w, y + 22 * s, id, list, selected, opts.disabled, saved)
+    return next_y
+end
+
 -- A drop-down in a row: the label at the left (a key at its right, before the field), the field at the right. opts as
--- select's, and field (its width in pixels; else a little over half the row). Returns the next y
+-- select's, and field (its width in pixels; else a little over half the row). A short list is a row of buttons
+-- instead (as_buttons). Returns the next y
 function Ui:select_row(x, w, y, id, label, rows, chosen, opts)
     opts = opts or {}
     local s = self.s
+    if M.as_buttons(rows, w, s, opts) then return self:buttons_row(x, w, y, id, label, rows, chosen, opts) end
     local fw = opts.field or math.floor(w * 0.56)
     local cy = y + 14 * s
     -- The label and its key before the field: the field narrower for them, down to two fifths of the row; the key left
