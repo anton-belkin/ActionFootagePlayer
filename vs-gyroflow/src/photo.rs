@@ -22,6 +22,48 @@ pub struct Image {
     pub pixels: Vec<[f32; 3]>,
 }
 
+impl Image {
+    /// The image made smaller to `w` x `h` (an export's --resolution): each output pixel the tent-weighted average of the
+    /// source pixels under it, a filter as wide as the step, so nothing aliases. Not larger: as it is then
+    pub fn downscaled(&self, w: usize, h: usize) -> Image {
+        if w >= self.width || h >= self.height || w == 0 || h == 0 {
+            return Image { width: self.width, height: self.height, pixels: self.pixels.clone() };
+        }
+        // One axis's weights: for each output index, (first source index, weights)
+        fn taps(from: usize, to: usize) -> Vec<(usize, Vec<f32>)> {
+            let step = from as f64 / to as f64;
+            (0..to).map(|i| {
+                let c = (i as f64 + 0.5) * step;
+                let (lo, hi) = (((c - step).floor().max(0.0)) as usize, ((c + step).ceil() as usize).min(from));
+                let mut ws: Vec<f32> = (lo..hi).map(|j| (1.0 - ((j as f64 + 0.5 - c).abs() / step)).max(0.0) as f32).collect();
+                let sum: f32 = ws.iter().sum();
+                if sum > 0.0 { for x in &mut ws { *x /= sum; } }
+                (lo, ws)
+            }).collect()
+        }
+        let (tx, ty) = (taps(self.width, w), taps(self.height, h));
+        // Across, then down
+        let mut across = vec![[0f32; 3]; w * self.height];
+        for y in 0..self.height {
+            let row = &self.pixels[y * self.width..(y + 1) * self.width];
+            for (x, (lo, ws)) in tx.iter().enumerate() {
+                let mut acc = [0f32; 3];
+                for (k, wgt) in ws.iter().enumerate() { let p = row[lo + k]; for c in 0..3 { acc[c] += p[c] * wgt; } }
+                across[y * w + x] = acc;
+            }
+        }
+        let mut pixels = vec![[0f32; 3]; w * h];
+        for (y, (lo, ws)) in ty.iter().enumerate() {
+            for x in 0..w {
+                let mut acc = [0f32; 3];
+                for (k, wgt) in ws.iter().enumerate() { let p = across[(lo + k) * w + x]; for c in 0..3 { acc[c] += p[c] * wgt; } }
+                pixels[y * w + x] = acc;
+            }
+        }
+        Image { width: w, height: h, pixels }
+    }
+}
+
 /// A .cube 3D LUT, applied by tetrahedral interpolation as the player's shaders and gyroflow-export's do
 pub struct Cube {
     n: usize,
@@ -495,6 +537,22 @@ pub fn exif(taken: Option<&Taken>, make: Option<&str>, model: Option<&str>, plac
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_image_is_made_smaller_without_aliasing_and_never_larger() {
+        use super::Image;
+        // A 1-px checkerboard averages to grey; a flat field stays itself
+        let (w, h) = (64, 36);
+        let pixels = (0..w * h).map(|i| { let v = ((i % w + i / w) % 2) as f32; [v, v, v] }).collect();
+        let img = Image { width: w, height: h, pixels };
+        let small = img.downscaled(32, 18);
+        assert_eq!((small.width, small.height), (32, 18));
+        for p in &small.pixels { assert!((p[0] - 0.5).abs() < 0.1, "{p:?}"); }
+        let flat = Image { width: w, height: h, pixels: vec![[0.25, 0.5, 0.75]; w * h] }.downscaled(20, 11);
+        for p in &flat.pixels { for c in 0..3 { assert!((p[c] - [0.25, 0.5, 0.75][c]).abs() < 1e-5); } }
+        let same = img.downscaled(128, 72);
+        assert_eq!((same.width, same.height), (w, h));
+    }
+
     use super::*;
 
     #[test]

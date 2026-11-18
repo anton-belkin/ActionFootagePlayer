@@ -60,6 +60,27 @@ const sheet = () => $("sheet").textContent;
   $("sharelook").value = "SDR"; $("sharelook").dispatchEvent(new w.Event("change", { bubbles: true })); await tick();
   ok($("sharelook").value === "SDR" && /1 moment\s*to render/.test(sheet().replace(/(\d+ moment)/, "$1 ")), "SDR is another render: to render");
   $("sharelook").value = "HDR"; $("sharelook").dispatchEvent(new w.Event("change", { bubbles: true })); await tick();
+  // The export's settings (docs/export-settings.md): the videos' size, encoding and quality, the photos' size and
+  // quality, the player's names; the defaults first (what was rendered before them)
+  const sel = (id) => $(id);
+  const opts = (id) => Array.from(sel(id).options).map((o) => o.value).join(",");
+  ok(!!sel("share-video-size") && !!sel("share-video-encode") && !!sel("share-video-quality"), "videos: size, encoding, quality");
+  ok(!!sel("share-photo-size") && !!sel("share-photo-quality") && !sel("share-photo-encode"), "photos: size and quality, no encoding");
+  ok(opts("share-video-size") === "original,2160,1080,720" && opts("share-video-encode") === "fast,quality" && opts("share-video-quality") === "displayed,quickest,highest", "the player's choices, in its order");
+  ok(sel("share-video-size").value === "original" && sel("share-video-encode").value === "fast" && sel("share-video-quality").value === "displayed", "the defaults: as rendered before");
+  ok(Array.from(sel("share-video-quality").options).map((o) => o.textContent).join("|") === "As displayed|Quickest|Highest", "the presets' names: As displayed, Quickest, Highest");
+  ok(sheet().includes("As this computer plays it"), "the preset chosen is said: " + w.document.querySelector("#sheet .sharenote").textContent);
+  ok(sheet().includes("Videos") && sheet().includes("Photos"), "videos and photos selected: a heading each");
+  const change = async (id, v) => { sel(id).value = v; sel(id).dispatchEvent(new w.Event("change", { bubbles: true })); await tick(); };
+  await change("share-video-size", "1080");
+  ok(/1 moment\s*to render/.test(sheet().replace(/(\d+ moment)/, "$1 ")), "another size is another render: the moment to render");
+  ok(w.localStorage.getItem("afl.share.video.size") === "1080", "remembered on this computer");
+  await change("share-video-quality", "highest");
+  ok(sheet().includes("Each at its best"), "highest: said what it does");
+  await change("share-photo-quality", "quickest");
+  await change("share-video-size", "original"); await change("share-video-quality", "displayed");
+  ok(/1 moment\s*rendered already/.test(sheet().replace(/(\d+ moment)/, "$1 ")), "back to the defaults: rendered already");
+  await change("share-video-encode", "quality");
   // The folder's dialog cancelled: the sheet stays as it was, nothing queued
   state.shareFolder = null;
   click(by("sharego", "folder")); await tick(80);
@@ -69,6 +90,8 @@ const sheet = () => $("sheet").textContent;
   click(by("sharego", "folder")); await tick(120);
   const a = last("share")[1];
   ok(a.dest === "folder" && a.look === "HDR" && a.folder === undefined, "share is asked for with the destination and the look; the folder is the system dialog's");
+  ok(JSON.stringify(a.settings) === JSON.stringify({ video: { size: "original", encode: "quality", quality: "displayed" }, photo: { size: "original", quality: "quickest" } }),
+    "…and the settings: " + JSON.stringify(a.settings));
   ok(JSON.stringify(a.items.map((i) => i.kind + ":" + i.path)) === JSON.stringify(["clip:Egypt 2026/Day 2/GX010123.MP4", "moment:_Moments/Best of the year/Turtle.afplink.mp4", "photo:_Clips/Best of the year/GX010123_14.00s.afplink.jpg"])
     || a.items.length === 3 && a.items.some((i) => i.kind === "clip" && i.path === "Egypt 2026/Day 2/GX010123.MP4") && a.items.some((i) => i.kind === "moment" && i.path === "_Moments/Best of the year/Turtle.afplink.mp4") && a.items.some((i) => i.kind === "photo" && i.path === "_Clips/Best of the year/GX010123_14.00s.afplink.jpg"),
     "its items: the clip by its path in the tree, the moment and the photo link by theirs in the project: " + a.items.map((i) => i.kind + ":" + i.path).join(" | "));

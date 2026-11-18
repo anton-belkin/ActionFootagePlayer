@@ -137,6 +137,13 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --gpu-interpolation <i>  its warp's interpolation: bilinear, bspline, bicubic, bicubic9, lanczos, ewa (default:
                    the player's, lanczos up to 31 fps, bicubic9 above)
   --with-translation  the translation compensation kept for the clip (the player's Ctrl+j), on the GPU path
+  --resolution <r> the output's short side at most: 2160, 1080, 720 (or any number of pixels), never enlarged;
+                   original (the default) as it's always been: the clip's or its Gyroflow project's size. The GPU path
+                   renders the warp at that size directly, the pipes scale the stabilized frames; a photo is scaled
+                   at the end (docs/export-settings.md)
+  --encode <fast|quality>  fast (the default): the encoder's real-time mode on the GPU path (VideoToolbox), its
+                   default on the pipes, the source's bit rate for the output's size; quality: the encoder's quality
+                   mode on both paths (VideoToolbox not real-time, NVENC p7, x265 slow) and 1.5x that bit rate
   --encoder <name> ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265
                    (default: VideoToolbox on macOS, else the first of these that works)
   --progress <file>  write the progress there as JSON, twice a second
@@ -245,6 +252,9 @@ struct Options {
     // The translation compensation kept for the clip, as the player draws it with Ctrl+j (GPU path)
     with_translation: bool,
     encoder: Option<String>,
+    // --resolution: the output's short side at most (None: as it is); --encode quality
+    resolution: Option<usize>,
+    encode_quality: bool,
     progress: Progress,
     control: Option<PathBuf>,
     dv_rpu: Option<PathBuf>,
@@ -324,7 +334,7 @@ fn main() {
     catch_signals();
     let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
-                             interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, progress: Progress(None), control: None,
+                             interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, resolution: None, encode_quality: false, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
@@ -415,6 +425,8 @@ fn main() {
                 other => fail(&format!("unknown interpolation {other}")),
             },
             "--encoder" => opts.encoder = Some(value("--encoder")),
+            "--resolution" => { let v = value("--resolution"); opts.resolution = parse_resolution(&v).unwrap_or_else(|| fail(&format!("--resolution {v}: original, 2160, 1080, 720 or a number of pixels"))); }
+            "--encode" => opts.encode_quality = match value("--encode").as_str() { "fast" => false, "quality" => true, e => fail(&format!("--encode {e}: fast or quality")) },
             "--gpu" => opts.gpu = match value("--gpu").as_str() {
                 "auto" => None, "on" => Some(true), "off" => Some(false),
                 other => fail(&format!("--gpu {other}: auto, on or off")),
@@ -935,6 +947,54 @@ struct Encoder {
 
 const VAAPI_DEVICE: &str = "/dev/dri/renderD128";
 
+/// --resolution's value: Some(None) original, Some(Some(n)) the short side at most n pixels
+fn parse_resolution(v: &str) -> Option<Option<usize>> {
+    match v.trim().trim_end_matches('p') {
+        "original" | "" => Some(None),
+        "4k" | "4K" => Some(Some(2160)),
+        n => n.parse::<usize>().ok().filter(|n| *n >= 16).map(Some),
+    }
+}
+
+/// A frame of `size` with its short side at most `cap`: the same shape, sides even, never enlarged
+fn capped(size: (usize, usize), cap: Option<usize>) -> (usize, usize) {
+    let Some(cap) = cap else { return size };
+    let short = size.0.min(size.1);
+    if short <= cap { return size; }
+    let k = cap as f64 / short as f64;
+    let even = |v: usize| ((v as f64 * k).round() as usize).max(2) & !1;
+    if size.0 <= size.1 { (cap & !1, even(size.1)) } else { (even(size.0), cap & !1) }
+}
+
+/// The bit rate an export is encoded at: the source's, for the output's size; --encode quality half as much again
+fn export_bit_rate(source: Option<u64>, source_px: usize, out_px: usize, quality: bool) -> f64 {
+    let r = source.unwrap_or(80_000_000) as f64 * out_px as f64 / source_px.max(1) as f64;
+    if quality { r * 1.5 } else { r }
+}
+
+/// The encoder's own mode for --encode: on the GPU path (`gpu`), fast is VideoToolbox's real-time mode (82 fps for 4K
+/// HEVC Main10 against 50, the same quality at the same bit rate: docs/export-gpu-path.md), the pipes keep each
+/// encoder's default; quality is each one's quality mode on both
+fn encode_mode_args(encoder: &str, quality: bool, gpu: bool) -> Vec<String> {
+    let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    match (encoder, quality) {
+        ("hevc_videotoolbox", false) if gpu => v(&["-realtime", "1", "-prio_speed", "1"]),
+        ("hevc_videotoolbox", true) => v(&["-realtime", "0", "-prio_speed", "0"]),
+        ("hevc_nvenc", true) => v(&["-preset", "p7", "-tune", "hq"]),
+        ("libx265", true) => v(&["-preset", "slow"]),
+        ("hevc_qsv", true) => v(&["-preset", "veryslow"]),
+        ("hevc_amf", true) => v(&["-quality", "quality"]),
+        _ => vec![],
+    }
+}
+
+/// The pipes' scale of the stabilized frames to --resolution's size (empty: none), by --interpolation's filter
+fn scale_filter(from: (usize, usize), to: (usize, usize), interp: Interpolation) -> String {
+    if from == to { return String::new(); }
+    let flags = match interp { Interpolation::Bilinear => "bilinear", Interpolation::Bicubic => "bicubic", _ => "lanczos" };
+    format!("scale={}:{}:flags={flags}", to.0, to.1)
+}
+
 fn encoder(name: &str, prores: bool) -> Encoder {
     let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
     let mut e = Encoder { name: name.to_string(), global: vec![], args: vec![], pix_fmt: "p010le", upload: "" };
@@ -1306,6 +1366,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         (Err(_), None) if !opts.frame.is_none() => None,
         // A photo's motion (Live or Motion Photo): the video around it, whatever there is to change
         (Err(_), None) if part.is_some() => None,
+        // Made smaller (--resolution): that much to change
+        (Err(_), None) if opts.resolution.is_some_and(|cap| ffprobe(&path).is_ok_and(|i| i.width.min(i.height) > cap)) => None,
         // HDR that isn't log, in SDR (--nbcu) or with Dolby Vision (--dv-rpu): the color to change
         (Err(_), None) if hdr_in(&path) && (opts.nbcu || dv_rpu.is_some() || youtube.is_some()) => None,
         (Err(why), None) => return Ok(Outcome::Skipped(format!("{why}, and not log: nothing to change"))),
@@ -1542,6 +1604,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             (Some((x0, y0, cw, ch)), (even(cw as f64 * k).max(2), even(ch as f64 * k).max(2)))
         }
     };
+    // --resolution: the short side at most that (a preview has its own size)
+    let (fw, fh) = if preview.is_none() { capped((fw, fh), opts.resolution) } else { (fw, fh) };
 
     // The player's shaders over the stabilized frame (Post): the denoise takes frames on both sides of each one, so the
     // export decodes some before its first (as many again to settle its measure of the noise) and after its last
@@ -1631,7 +1695,8 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         })();
         match why {
             Ok(plan) => {
-                let job = GpuJob { path: &path, info: &info, opts, tags: &tags, enc: &enc, prores, size: (ow, oh), fps, out_rate,
+                // --resolution: the warp renders at that size (it's its own scaler: warp.glsl's RT is the output's)
+                let job = GpuJob { path: &path, info: &info, opts, tags: &tags, enc: &enc, prores, size: (fw, fh), fps, out_rate,
                                    seek: if denoise > 0 { (dec_first as f64 - 0.25).max(0.0) / fps } else { seek },
                                    until: if denoise > 0 { Some((dec_last as f64 + 0.5) / fps) } else { opt_to.map(|_| to) },
                                    from_set: opt_from.is_some() || denoise > 0, video_start, to, opt_from, opt_to, total_frames, first_frame,
@@ -1666,7 +1731,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // Encoder: the stabilized frames, audio and metadata from the source
     // A photo's motion: the first audio track alone (a Motion Photo has one at most; DJI's cameras record two)
     let audio = if part.is_some() { "1:a:0?" } else { "1:a?" };
-    let mut bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (fw * fh) as f64 / (w * h) as f64;
+    let mut bit_rate = export_bit_rate(info.bit_rate, w * h, fw * fh, opts.encode_quality);
     // A photo's motion: no more than a phone gives its own
     if let Some(p) = part { bit_rate = bit_rate.min(p.bits_per_pixel * (fw * fh) as f64 * fps / step as f64); }
     let mut enc_cmd = ffmpeg_command("ffmpeg");
@@ -1691,10 +1756,15 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // The frames carry the input's BT.709 tags through the filters, and the encoder writes the frames' tags, not
     // the -color_* options, so the target's are set on the frames
     let setparams = format!("setparams=color_primaries={}:color_trc={}:colorspace={}:range={}", tags[0], tags[1], tags[2], tags[3]);
-    let cut = crop.map(|(x, y, cw, ch)| {
-        let scale = if (fw, fh) != (cw, ch) { format!(",scale={fw}:{fh}:flags=lanczos") } else { String::new() };
-        format!("crop={cw}:{ch}:{x}:{y}{scale},")
-    }).unwrap_or_default();
+    // --crop's part, and the size it's saved at (a photo's motion, --resolution): by --interpolation's filter (Lanczos
+    // by default)
+    let cut = match crop {
+        Some((x, y, cw, ch)) => {
+            let scale = scale_filter((cw, ch), (fw, fh), opts.interpolation);
+            format!("crop={cw}:{ch}:{x}:{y}{}{scale},", if scale.is_empty() { "" } else { "," })
+        }
+        None => { let s = scale_filter((ow, oh), (fw, fh), opts.interpolation); if s.is_empty() { s } else { s + "," } }
+    };
     let graph = if graph.is_empty() { format!("{cut}format={pix_fmt},{setparams}") } else { format!("{cut}{graph},format={pix_fmt},{setparams}") };
     let color = ["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]];
     if preview.is_some() {
@@ -1712,6 +1782,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     } else {
         enc_cmd.args(["-vf", &format!("{graph}{}", enc.upload)]);
         enc_cmd.args(["-c:v", &enc.name]).args(&enc.args);
+        if !prores { enc_cmd.args(encode_mode_args(&enc.name, opts.encode_quality, false)); }
         if prores {
             enc_cmd.args(["-tag:v", "apch"]);
         } else if enc.name == "ffv1" {
@@ -2284,10 +2355,9 @@ fn export_gpu(job: GpuJob, plan: GpuPlan) -> Result<Outcome, String> {
     }
     cmd.args(["-frames:v", &total_frames.to_string(), "-vf", &vf, "-c:v", encoder]);
     if plan.setup.encoder.is_none() { cmd.args(&enc.args); } else { cmd.args(["-profile:v", "main10"]); }
-    // VideoToolbox's real-time mode: 82 fps for 4K HEVC Main10 against 50, the same quality at the same bit rate
-    // (docs/export-gpu-path.md)
-    if encoder == "hevc_videotoolbox" { cmd.args(["-realtime", "1", "-prio_speed", "1"]); }
-    let bit_rate = info.bit_rate.unwrap_or(80_000_000) as f64 * (w * h) as f64 / (info.width * info.height).max(1) as f64;
+    // --encode: VideoToolbox's real-time mode by default, its quality mode with quality (encode_mode_args)
+    if !prores { cmd.args(encode_mode_args(encoder, opts.encode_quality, true)); }
+    let bit_rate = export_bit_rate(info.bit_rate, info.width * info.height, w * h, opts.encode_quality);
     if prores { cmd.args(["-tag:v", "apch"]); } else { cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]); }
     cmd.args(["-color_primaries", &tags[0], "-color_trc", &tags[1], "-colorspace", &tags[2], "-color_range", &tags[3]]);
     let moov_size = 512 * 1024 + total_frames * 64;
@@ -3037,6 +3107,14 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         // (said here: the stop makes the caller say only "cancelled")
         if let Err(e) = &made { eprintln!("  no photo: {e}"); STOP.store(libc::SIGTERM, Relaxed); }
         let (sdr, hdr, label, cleaned) = made?;
+        // --resolution: the image's short side at most that, both renditions alike
+        let (sdr, hdr) = match capped((sdr.width, sdr.height), opts.resolution) {
+            (w, h) if (w, h) != (sdr.width, sdr.height) => {
+                eprintln!("  scaled to {w}x{h} (--resolution)");
+                (sdr.downscaled(w, h), hdr.map(|i| i.downscaled(w, h)))
+            }
+            _ => (sdr, hdr),
+        };
         let live = match motion.map(|m| m.join()) {
             None => None,
             Some(Ok(Ok(v))) => Some(v),
@@ -3101,6 +3179,43 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // docs/export-settings.md: the export's settings (--resolution, --encode, the quality preset's --interpolation) on
+    // each path's command line
+    #[test]
+    fn export_settings_on_the_command_line() {
+        // --resolution: the short side at most, the shape kept, even, never larger; original: as it is
+        assert_eq!(parse_resolution("original"), Some(None));
+        assert_eq!(parse_resolution("1080"), Some(Some(1080)));
+        assert_eq!(parse_resolution("1080p"), Some(Some(1080)));
+        assert_eq!(parse_resolution("4K"), Some(Some(2160)));
+        assert_eq!(parse_resolution("huge"), None);
+        assert_eq!(capped((3840, 2160), Some(1080)), (1920, 1080));
+        assert_eq!(capped((3840, 2160), Some(720)), (1280, 720));
+        assert_eq!(capped((2160, 3840), Some(1080)), (1080, 1920), "portrait: its width is the short side");
+        assert_eq!(capped((4000, 3000), Some(1080)), (1440, 1080), "4:3");
+        assert_eq!(capped((2704, 1520), Some(1080)), (1920, 1080), "2.7K: 1921.3 wide, even");
+        assert_eq!(capped((1920, 1080), Some(2160)), (1920, 1080), "never enlarged");
+        assert_eq!(capped((3840, 2160), None), (3840, 2160));
+        // The bit rate: the source's for the size, quality half as much again
+        assert_eq!(export_bit_rate(Some(120_000_000), 3840 * 2160, 1920 * 1080, false), 30_000_000.0);
+        assert_eq!(export_bit_rate(Some(120_000_000), 3840 * 2160, 3840 * 2160, true), 180_000_000.0);
+        // --encode: the GPU path's VideoToolbox real-time by default (as before), the pipes the encoder's default (as
+        // before); quality its quality mode on both
+        let s = |v: Vec<String>| v.join(" ");
+        assert_eq!(s(encode_mode_args("hevc_videotoolbox", false, true)), "-realtime 1 -prio_speed 1");
+        assert_eq!(s(encode_mode_args("hevc_videotoolbox", false, false)), "");
+        assert_eq!(s(encode_mode_args("hevc_videotoolbox", true, true)), "-realtime 0 -prio_speed 0");
+        assert_eq!(s(encode_mode_args("hevc_videotoolbox", true, false)), "-realtime 0 -prio_speed 0");
+        assert_eq!(s(encode_mode_args("hevc_nvenc", true, false)), "-preset p7 -tune hq");
+        assert_eq!(s(encode_mode_args("libx265", true, true)), "-preset slow");
+        assert_eq!(s(encode_mode_args("hevc_vulkan", true, true)), "", "Vulkan's encoder has no mode: the bit rate alone");
+        // The pipes scale by --interpolation's filter (quickest: bilinear; highest and the default: Lanczos); not at all
+        // at the same size. The GPU path has no scale: the warp renders at the size (libplacebo's w and h)
+        assert_eq!(scale_filter((3840, 2160), (1920, 1080), Interpolation::Lanczos4), "scale=1920:1080:flags=lanczos");
+        assert_eq!(scale_filter((3840, 2160), (1920, 1080), Interpolation::Bilinear), "scale=1920:1080:flags=bilinear");
+        assert_eq!(scale_filter((3840, 2160), (3840, 2160), Interpolation::Bilinear), "");
+    }
 
     #[test]
     fn dates() {

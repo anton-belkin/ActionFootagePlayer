@@ -2931,11 +2931,11 @@ local function export_next()
         mkdir(m.making)
         return mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
             id = tostring(j.id), clip = m.original, t = m.photo.t, view = m.rendered, crop = m.photo.crop, camera = m.photo.camera,
-            link = utils.format_json(l), still = true, out_dir = m.making, reply = mp.get_script_name(), done = "export-batch-done" }))
+            link = utils.format_json(l), still = true, out_dir = m.making, export = m.export, reply = mp.get_script_name(), done = "export-batch-done" }))
     end
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
-        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr,
+        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr, export = m.export,
         progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
     }))
 end
@@ -3044,6 +3044,8 @@ local function render_moments(root, profiles, items)
                 project = own and fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
                 sdr = it.sdr == true, render_out = it.out, render_link = it.link,
                 photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
+                -- The Library's export settings (docs/export-settings.md): size, encoder, quality preset
+                export = type(it.export) == "table" and it.export or nil,
             }
             -- The settings the Library's recipe has (renders.rs `settings`): rendered with them, so the render is what
             -- its hash says; what this player would have taken by itself is told back, for the Library to compare

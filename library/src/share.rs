@@ -72,13 +72,15 @@ fn failed(name: &str, kind: &str, why: String) -> Item {
 
 /// What sharing `items` takes: each one's file when the cache (or the item itself) has it, else what the player is to
 /// render, as its batch's `items`. `items`: { kind: moment | photo | clip | file, path, name }, a moment's or photo
-/// link's path in the project's folder, a clip's in the project's tree, a file's on disk. `look`: HDR or SDR, for videos
-pub fn plan(root: &Path, items: &[Value], look: &str) -> (Vec<Item>, Vec<Value>) {
+/// link's path in the project's folder, a clip's in the project's tree, a file's on disk. `look`: HDR or SDR, for videos.
+/// `settings`: the export's (docs/export-settings.md), { video: { size, encode, quality }, photo: { size, quality } };
+/// null: the defaults. A render made with other settings is another render (renders::export_settings in its recipe)
+pub fn plan(root: &Path, items: &[Value], look: &str, settings: &Value) -> (Vec<Item>, Vec<Value>) {
     let ctx = renders::Ctx::new(root, true);
-    plan_in(&ctx, items, look)
+    plan_in(&ctx, items, look, settings)
 }
 
-pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, Vec<Value>) {
+pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str, settings: &Value) -> (Vec<Item>, Vec<Value>) {
     let root = &ctx.root;
     let (mut out, mut asked): (Vec<Item>, Vec<Value>) = (Vec::new(), Vec::new());
     for it in items {
@@ -99,7 +101,8 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
         // An SDR clip's HDR is its SDR render: one file (the sheet says so)
         let profile = renders::resolve(ctx, &item, wanted);
         let note = (profile.name != wanted.name).then(|| "this clip is SDR: its SDR render".to_string());
-        let found = renders::find(ctx, &item, profile);
+        let export = renders::export_settings(settings, item.kind == Kind::Photo);
+        let found = renders::find_with(ctx, &item, profile, &export);
         let ext_of = |f: &Path| f.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_else(|| profile.exts[0].to_string());
         if let Some(file) = found.file.clone() {
             let save_as = renders::readable(&item, profile, &ext_of(&file));
@@ -118,7 +121,7 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str) -> (Vec<Item>, V
             asked.push(renders::trimmed_request(&json!({
                 "of": item.kind.name(), "name": shown, "file": item.file.as_ref().map(|f| f.display().to_string()), "clip": original.display().to_string(),
                 "t": item.link["t"], "crop": item.link["crop"], "camera": item.link["camera"], "sdr": profile.name == "SDR", "out": made,
-                "view": renders::render_view(&found.recipe), "alone": found.recipe["alone"],
+                "view": renders::render_view(&found.recipe), "alone": found.recipe["alone"], "export": export,
                 "link": renders::link(ctx, &item, profile, &found) })));
         }
         let part = (item.kind == Kind::Moment).then(|| (item.link["in"].as_f64(), item.link["out"].as_f64())).and_then(|(a, b)| Some((a?, b?)));
@@ -314,7 +317,7 @@ mod tests {
         let hdr = renders::profile("HDR").unwrap();
         let hit = renders::find(&ctx(), &turtle, hdr);
         std::fs::write(renders::cache_path(&root, &hit.hash, hdr, "mov"), b"turtle in hdr").unwrap();
-        let (mut items, asked) = plan_in(&ctx(), &sel, "HDR");
+        let (mut items, asked) = plan_in(&ctx(), &sel, "HDR", &Value::Null);
         let states: Vec<&str> = items.iter().map(|i| i.state.as_str()).collect();
         assert_eq!(states, ["copying", "waiting", "failed", "waiting", "waiting", "copying", "copying", "failed"]);
         assert_eq!(items[2].message.as_deref(), Some("its original isn't here now"));
@@ -324,13 +327,22 @@ mod tests {
         assert!(asked[1]["out"].as_str().unwrap().ends_with(".Photo") && asked[1]["t"] == json!(2.5) && asked[1]["link"]["render"]["id"].is_string());
         assert_eq!(asked[2]["clip"], json!(root.join("Day 1/A.MP4").display().to_string()));
         assert!(asked[2].get("file").is_none() && asked[2]["sdr"] == json!(false));
+        // With other settings (Share's dialog) they're other renders, asked of the player with those settings
+        let settings = json!({ "video": { "size": "1080", "encode": "fast", "quality": "highest" }, "photo": { "size": "720", "quality": "quickest" } });
+        let (with, asked_with) = plan_in(&ctx(), &sel[..5], "HDR", &settings);
+        assert_eq!(with[0].state, "waiting", "Turtle's render at the defaults isn't the one at 1080p");
+        assert_eq!(asked_with.iter().map(|a| a["export"].clone()).collect::<Vec<_>>(),
+                   [json!({ "size": "1080", "quality": "highest" }), json!({ "size": "1080", "quality": "highest" }), json!({ "size": "720", "quality": "quickest" }),
+                    json!({ "size": "1080", "quality": "highest" })]);
+        assert!(asked_with.iter().all(|a| asked.iter().all(|b| a["out"] != b["out"])), "another render's file");
+        assert!(asked.iter().all(|a| a.get("export").is_none()), "the defaults ask as before");
         // In SDR they're other renders: Turtle isn't there in that look
-        assert_eq!(plan_in(&ctx(), &sel[..1], "SDR").0[0].state, "waiting");
+        assert_eq!(plan_in(&ctx(), &sel[..1], "SDR", &Value::Null).0[0].state, "waiting");
         // A moment and its copy in an album: one render asked for
         std::fs::create_dir_all(root.join("_Clips/Egypt")).unwrap();
         std::fs::copy(root.join("_Moments/Reef/Shark.afplink.mp4"), root.join("_Clips/Egypt/Shark copy.afplink.mp4")).unwrap();
         let twice = [sel[1].clone(), json!({ "kind": "moment", "path": "_Clips/Egypt/Shark copy.afplink.mp4", "name": "Shark copy" })];
-        let (two, one) = plan_in(&ctx(), &twice, "HDR");
+        let (two, one) = plan_in(&ctx(), &twice, "HDR", &Value::Null);
         assert_eq!((two.len(), one.len()), (2, 1));
 
         // What's there is saved now, under readable names; what's in the folder already is left as it is
@@ -359,7 +371,7 @@ mod tests {
         assert_eq!(std::fs::read(root.join("_Moments/Reef/Turtle.afplink.mp4")).unwrap(), moment);
         assert!(renders::cache_path(&root, &hit.hash, hdr, "mov").is_file());
         // Shared again: everything made is a hit, nothing is asked of the player
-        let (again, asked) = plan_in(&ctx(), &sel[3..5], "HDR");
+        let (again, asked) = plan_in(&ctx(), &sel[3..5], "HDR", &Value::Null);
         assert!(asked.is_empty() && again.iter().all(|i| i.state == "copying"));
         // Another destination isn't built
         let mut it = again[0].clone();
