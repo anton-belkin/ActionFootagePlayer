@@ -615,8 +615,14 @@ mp.register_script_message("preview", function(json)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
-    -- Another clip's (req.view: its saved view), or as this one plays
-    if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+    local ok, err = xpcall(function()
+        if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    end, debug.traceback)
+    if not ok then
+        mp.msg.error("preview: " .. tostring(err))
+        return reply(false, tostring(err):match("^[^\n]*"))
+    end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
     -- on its own
     if req.project ~= nil then

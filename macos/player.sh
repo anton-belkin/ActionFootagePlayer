@@ -67,6 +67,16 @@ elif [ ! -f "$DLOGM_DATA/shaders/dlogm_lut3d.glsl" ]; then
 fi
 
 [ -z "${AFP_BATCH:-}" ] && export MPVBUNDLE=true
+# The player's log, a file a run (~/Library/Logs/ActionFootagePlayer/player-<time>-<pid>.log), the last five kept:
+# what to look at when something didn't work. A --log-file given (the Library's batches) is used instead: it's later
+# in the arguments
+if [ -z "${AFP_BATCH:-}" ]; then
+    logs="$HOME/Library/Logs/ActionFootagePlayer"
+    if mkdir -p "$logs" 2>/dev/null; then
+        ls -t "$logs"/player-*.log 2>/dev/null | tail -n +5 | while IFS= read -r old; do rm -f "$old"; done
+        set -- "--log-file=$logs/player-$(date +%Y%m%d-%H%M%S)-$$.log" "$@"
+    fi
+fi
 contents="$app/Contents"
 if [ -x "$contents/Helpers/mpv" ]; then
     # VapourSynth's Python (and the `vapoursynth` command that tells VSScript where it is), the Vulkan driver
