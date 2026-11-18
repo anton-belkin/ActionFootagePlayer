@@ -848,6 +848,26 @@ local function subtitles_block(u, x, w, y, heading)
     return y
 end
 
+-- An export's settings (the gyroflow plugin's exportsettings.lua publishes them with their choices: docs/
+-- export-settings.md): kind (video, photo)'s rows, a pick kept for this computer at once. why: the reason they can't
+-- be had for this export (greyed, said under them)
+local SETTING_LABELS = { size = "Size", encode = "Encoding", quality = "Quality" }
+local function settings_rows(u, x, w, y, g, kind, why)
+    local es = type(g) == "table" and g.export_settings
+    if type(es) ~= "table" or type(es.choices) ~= "table" then return y end
+    local now = type(es[kind]) == "table" and es[kind] or {}
+    local note
+    for _, k in ipairs(kind == "photo" and { "size", "quality" } or { "size", "encode", "quality" }) do
+        local rows = {}
+        for _, c in ipairs(es.choices[k] or {}) do
+            rows[#rows + 1] = { kind = c[1], label = c[2], cmd = "script-message-to gyroflow export-setting " .. kind .. " " .. k .. " " .. c[1] }
+            if k == "quality" and c[1] == now[k] then note = c[3] end
+        end
+        y = u:select_row(x, w, y, kind .. "-" .. k, SETTING_LABELS[k], rows, now[k], { disabled = why ~= nil })
+    end
+    return u:caption(x, w, y, why or note or "")
+end
+
 local function output_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
@@ -913,6 +933,8 @@ local function output_part(u, x, w, y)
                 r.cmd = function() export_choice[clip_kind] = k; set_popover(nil) end
             end
             local busy = exportkind.busy(kind, v)
+            -- Its settings: size, encoding, quality (360° exports have their own)
+            y = settings_rows(u, x, w, y + 4 * s, g, "video", exportkind.settings_unavailable(kind))
             -- Cut only when it's sure not to fit: the part's times are digits, which the estimate takes as wide
             local label, room = exportkind.label(kind, d, a, b, clock), w - (ui.SPLIT_ARROW + 12) * s
             if ui.text_width(label, 12, s, true) > room then label = fit(label, room, 12, s, true) end
@@ -923,7 +945,10 @@ local function output_part(u, x, w, y)
             if busy then y = u:caption(x, w, y, busy) end
         end
         y = u:button(x, w, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
-        y = u:caption(x, w, y, "A still or a Live Photo: Save frame")
+        -- A photo of the frame on screen, as its key makes it (Alt+s); its kind, size and quality are Save frame's
+        y = u:heading(x, w, y + 10 * s, "Photo", keys["script-binding gyroflow/photo"])
+        y = u:button(x, w, y - 2 * s, "photo", "Save a photo of this frame", "script-message-to gyroflow photo", { primary = true })
+        y = u:caption(x, w, y, "Its kind (Live Photo…), size and quality, and framing it: Save frame")
     end
     return y
 end
@@ -1288,10 +1313,34 @@ local function crop_part(u, x, w, y)
         return u:button(x, w, y + 4 * s, "crop-gyroflow", g.available and "Open in Gyroflow…" or "Stabilize in Gyroflow…",
                         "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
     end
+    -- The photo: its kind (alone, Live, Motion), size and quality, and the button saving it (Alt+s's photo); framing,
+    -- Enter does it too
+    local function photo_block(y, framing)
+        local mode = g.live_photo or "no"
+        local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
+        if platform ~= "darwin" then table.remove(modes, 2) end
+        y = u:heading(x, w, y + 10 * s, "Photo", keys["script-binding gyroflow/photo"])
+        y = u:select_row(x, w, y - 2 * s, "crop-live", "Kind", choices(modes, "script-message-to gyroflow live-photo"), mode)
+        y = settings_rows(u, x, w, y, g, "photo")
+        y = u:button(x, w, y + 4 * s, "crop-photo", framing and "Save the frame as a photo" or "Save a photo of this frame",
+                     "script-message-to gyroflow photo", { primary = true, key = framing and "Enter" or nil })
+        local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
+                  or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
+                  or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+        -- In a project the key keeps a photo link (the workspace plugin's), rendered by the Library's Share with its own
+        -- settings; elsewhere gyroflow-export renders it now, into stabilized/ next to the clip
+        local ws = state("workspace")
+        if type(ws) == "table" and ws.project then
+            return u:caption(x, w, y, "In this project it's kept as a photo link in _Stills/Generated: the Library's Share renders it, "
+                                      .. "with the size and quality chosen there. Rendered now with these: Alt+Shift+s")
+        end
+        return u:caption(x, w, y, what .. " in the stabilized folder by the clip: the SDR look, brighter where the screen has HDR")
+    end
     y = u:switch(x, w, y, "crop", "Frame the photo", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
     if not c.active then
         y = u:caption(x, w, y, "A frame over the video, for a photo of the frame on screen. Where the clip is stabilized, "
                                .. "moving the picture turns the camera, and zoom is its angle of view")
+        y = photo_block(y, false)
         return whole_video(y)
     end
     local function set(key, v) mp.commandv("script-message-to", "gyroflow", "crop-set", key, string.format("%.5f", v)) end
@@ -1336,20 +1385,7 @@ local function crop_part(u, x, w, y)
         y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
         y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
     end
-    -- The photo alone, or with the video around it as Apple's devices (macOS only) or Android's take it
-    local mode = g.live_photo or "no"
-    local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
-    if platform ~= "darwin" then table.remove(modes, 2) end
-    y = u:select_row(x, w, y + 10 * s, "crop-live", "Photo", choices(modes, "script-message-to gyroflow live-photo"), mode)
-    y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
-    local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
-              or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
-              or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-    -- Where gyroflow-export puts it: the project's _Stills/Generated (the gyroflow plugin says), else
-    -- stabilized/ next to the clip
-    local ws = state("workspace")
-    local where = type(ws) == "table" and ws.project and "the project's _Stills/Generated" or "the stabilized folder by the clip"
-    y = u:caption(x, w, y, what .. " in " .. where .. ": the SDR look, brighter where the screen has HDR")
+    y = photo_block(y, true)
     y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
     return whole_video(y)
 end
@@ -1624,7 +1660,9 @@ end
 -- macOS shows the window's title bar over the video's top when the mouse moves there: the panel starts below it
 local TITLE_BAR = 28
 
-local function draw(w, h, s, hovered)
+local drawn
+-- final: the last try (drawn), whatever the scroll still wants: nil is never returned then
+local function draw(w, h, s, hovered, final)
     local u = ui.new(s)
     u.hover = hovered
     -- The drop-downs: which is open, how one opens, the row the keys are on
@@ -1663,8 +1701,20 @@ local function draw(w, h, s, hovered)
         local y0 = top + 14 * s
         local off = scroll[tab] or 0
         local fn = PARTS[tab]
-        local y_end = fn and fn(u, x, cw, y0 - off) or y0
+        -- A part that fails says so in its place, and the log names the cause: the rail, the other parts and the bar
+        -- are still drawn (an error here once left the panel and the bar black)
+        local ok, y_end = true, y0
+        if fn then
+            ok, y_end = xpcall(fn, debug.traceback, u, x, cw, y0 - off)
+            if not ok then
+                mp.msg.error("the " .. tostring(tab) .. " part failed: " .. tostring(y_end))
+                for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
+                u.hits = {}
+                y_end = u:caption(x, cw, y0, "This part couldn't be drawn (the log says why)")
+            end
+        end
         u.clip = nil
+        if redraw and final then redraw = false end
         if redraw then
             redraw = false
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
@@ -1675,7 +1725,7 @@ local function draw(w, h, s, hovered)
         local content = y_end + off - y0 + 24 * s
         local room = bottom - top
         local max = math.max(0, content - room)
-        if off > max then
+        if off > max and not final then
             scroll[tab] = max
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
             u.hits = {}
@@ -1760,6 +1810,22 @@ local function bar_shown()
 end
 
 local bar_timer
+-- The panel drawn: again while it moves its own scroll (a part bringing a row into view, the scroll past the end
+-- clamped), at most a few times, the last drawn as it is. An error outside the parts (they're guarded in draw) is
+-- logged and the panel hidden (Tab shows it again), so its margin isn't left there unpainted
+function drawn(w, h, s, hovered)
+    for i = 1, 4 do
+        local ok, u = xpcall(draw, debug.traceback, w, h, s, hovered, i == 4)
+        if not ok then
+            mp.msg.error("the panel failed to draw, hidden: " .. tostring(u))
+            shown, open = false, false
+            if popover then popover = nil end
+            return ui.new(s)
+        end
+        if u then return u end
+    end
+    return ui.new(s)
+end
 local function render_bar()
     local d = dims
     if d.w <= 0 then return end
@@ -1812,8 +1878,7 @@ local function render()
     if not d or d.w <= 0 then return end
     dims = d
     local s = scale()
-    local u = draw(d.w, d.h, s, hover)
-    if not u then u = draw(d.w, d.h, s, hover) end
+    local u = drawn(d.w, d.h, s, hover)
     hits = u.hits
     overlay.res_x, overlay.res_y = d.w, d.h
     overlay.data = u:render()
@@ -2039,7 +2104,7 @@ end)
 mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
     read_keys()
     w, h, s = tonumber(w), tonumber(h), tonumber(s) or 1
-    local u = draw(w, h, s, hovered) or draw(w, h, s, hovered)
+    local u = drawn(w, h, s, hovered)
     if not bar_never then
         local b = ui.new(s)
         b.hover = hovered

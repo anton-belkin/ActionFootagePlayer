@@ -2926,6 +2926,7 @@ document.addEventListener("change", (e) => {
   // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
   if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
   if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
+  if (a === "sharesetting") { shareSetting(el.dataset.v, el.value); renderSheet(); renderSide(); return; }
   if (a === "sharelook") { if (S.share) { S.share.look = el.value === "SDR" ? "SDR" : "HDR"; S.share.sel = shareSel(S.share.list, S.share.look); remember("afl.share.look", S.share.look); renderSheet(); renderSide(); } return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
