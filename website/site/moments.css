@@ -1,0 +1,42 @@
+/* Moments page: the problem in a muted band of its own, the fix's three answers, the trip's folder as a tree in the
+   deep band, sharing and editing side by side, and the proof: real frames and screenshots. */
+
+/* The problem: a plain list in a muted band, not cards like the solution's sections */
+.mo-problem { background: var(--surface); border-block: 1px solid var(--line); }
+.mo-pains { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+.mo-pains li { display: grid; gap: 6px; align-content: start; padding-left: 18px; border-left: 2px solid var(--line); }
+.mo-pains h3 { font-size: 1.1rem; }
+.mo-pains p { color: var(--muted); }
+.mo-bridge { margin-top: 40px; max-width: 34ch; font-family: var(--f-display); font-weight: 700; font-stretch: 105%; font-size: var(--step-2); line-height: 1.25; text-wrap: balance; color: var(--ink); }
+
+/* The fix: three answers, in the order of the pains */
+.mo-answers { list-style: none; margin: 0; padding: 0; display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.mo-answers li { display: grid; gap: 10px; align-content: start; padding-top: 16px; border-top: 3px solid var(--accent); }
+.mo-answers p { color: var(--muted); }
+.mo-more { margin: 32px 0 0; max-width: 70ch; color: var(--muted); }
+
+/* The trip's folder, in the deep band */
+.mo-tree, .mo-tree ul { list-style: none; margin: 0; padding: 0; }
+.mo-tree { display: grid; gap: 8px; padding: 18px 20px; border-radius: var(--radius); border: 1px dashed rgba(255, 255, 255, 0.18); font-family: var(--f-mono); font-size: 0.85rem; color: var(--deep-fg); overflow-wrap: anywhere; }
+.mo-tree ul { display: grid; gap: 8px; margin: 8px 0 0 0.35em; padding-left: 1.2em; border-left: 1px solid rgba(255, 255, 255, 0.14); }
+.mo-tree .dir::after { content: "/"; color: var(--deep-muted); }
+.mo-tree .c { display: block; font-family: var(--f-body); font-size: 0.8rem; color: var(--deep-muted); }
+
+/* Share tonight, edit later */
+.mo-share { display: grid; gap: 28px 40px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
+.mo-share > div { display: grid; gap: 10px; align-content: start; padding-top: 16px; border-top: 2px solid var(--ink); }
+.mo-share p { color: var(--muted); }
+.mo-share .meta { font-family: var(--f-mono); font-size: 0.78rem; color: var(--accent-ink); }
+
+/* Proof: the stabilization across the top, the seek bar and the Finder (or File Explorer) window under it */
+.mo-proof { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); align-items: start; }
+.mo-proof .mo-wide { grid-column: 1 / -1; }
+.mo-fit { margin: 36px 0 0; display: grid; gap: 18px 32px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.mo-fit div { display: grid; gap: 4px; align-content: start; padding-top: 12px; border-top: 1px solid var(--line); }
+.mo-fit dt { font-family: var(--f-mono); font-size: 0.78rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-ink); }
+.mo-fit dd { margin: 0; color: var(--muted); }
+.mo-trust { margin: 32px 0 18px; font-family: var(--f-mono); font-size: 0.85rem; color: var(--ink); }
+
+/* The hero's column never grows past the screen, whatever the picture's size (or while it's still loading) */
+.hero .wrap > * { min-width: 0; }
+.mo-proof .media-slot { aspect-ratio: 16 / 9; }  /* as tall as the seek-bar screenshot beside it */

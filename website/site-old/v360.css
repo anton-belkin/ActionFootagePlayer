@@ -1,0 +1,13 @@
+/* 360 video page: the sphere drawing. Builds on styles.css and stabilization.css (the limits list). */
+.v360-svg { display: block; width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.v360-svg .sky { fill: color-mix(in srgb, #4aa3d8 30%, var(--surface)); }
+.v360-svg .sea { fill: color-mix(in srgb, #0b5d7a 40%, var(--surface)); }
+.v360-svg .horizon { stroke: var(--ink); stroke-width: 1.5; opacity: 0.5; }
+.v360-svg .grid { stroke: var(--ink); stroke-width: 0.6; opacity: 0.15; fill: none; }
+.v360-svg .view { fill: color-mix(in srgb, var(--accent) 12%, transparent); stroke: var(--accent); stroke-width: 3; }
+.v360-svg .arrow { stroke: var(--accent); stroke-width: 2.5; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+.v360-svg .lbl { font-family: var(--f-mono); font-size: 13px; fill: var(--accent-ink); }
+.v360-svg .cap { font-family: var(--f-mono); font-size: 13px; fill: var(--muted); }
+@media (min-width: 900px) { .v360-two { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* The gestures are words, not keys: let them wrap on a phone */
+#look .key span:last-child { flex: 0 1 auto; }

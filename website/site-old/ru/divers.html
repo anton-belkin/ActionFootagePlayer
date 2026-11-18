@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Action Footage Player для дайверов</title>
+<meta name="description" content="Видео с погружений и снорклинга — без тряски под водой и в тот же вечер на телефонах у всех. Стабилизация, сделанная для воды, log в HDR, глубина на экране. Бесплатный плеер для Mac и Windows.">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/divers">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/divers">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/divers">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/divers">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/divers">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Roboto+Flex:wdth,wght@100..125,500..900&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../divers.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player, на главную">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="Сайт">
+      <details class="navmenu"><summary>Главная</summary>
+        <ul>
+          <li><a href="index.html">Главная страница</a></li>
+          <li><a href="index.html#features">Что он умеет</a></li>
+          <li><a href="index.html#how">Как это работает</a></li>
+          <li><a href="index.html#faq">Вопросы</a></li>
+          <li><a href="about.html">Об авторе</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">Для кого</summary>
+        <ul>
+          <li><a href="divers.html" aria-current="page">Дайверам и снорклерам</a></li>
+          <li><a href="moments.html">Активным путешественникам</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>Функции</summary>
+        <ul>
+          <li><a href="log.html">Log-записи</a></li>
+          <li><a href="stabilization.html">Стабилизация</a></li>
+          <li><a href="organizing.html">Организация</a></li>
+          <li><a href="photos.html">Фото</a></li>
+          <li><a href="360.html">360-видео</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
+          <li><a href="features.html" class="nm-all">Все функции</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">Скачать</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="Меню"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">Главная</li>
+        <li><a href="index.html">Главная страница</a></li>
+        <li><a href="index.html#features">Что он умеет</a></li>
+        <li><a href="index.html#how">Как это работает</a></li>
+        <li><a href="index.html#faq">Вопросы</a></li>
+        <li><a href="about.html">Об авторе</a></li>
+        <li class="sm-group">Для кого</li>
+        <li><a href="divers.html" aria-current="page">Дайверам и снорклерам</a></li>
+        <li><a href="moments.html">Активным путешественникам</a></li>
+        <li class="sm-group">Функции</li>
+        <li><a href="log.html">Log-записи</a></li>
+        <li><a href="stabilization.html">Стабилизация</a></li>
+        <li><a href="organizing.html">Организация</a></li>
+        <li><a href="photos.html">Фото</a></li>
+        <li><a href="360.html">360-видео</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
+        <li><a href="features.html">Все функции</a></li>
+        <li class="sm-dl"><a href="download.html">Скачать</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="Язык: русский"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>RU</summary>
+      <ul>
+        <li><a href="../divers.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/divers.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/divers.html" hreflang="ru" lang="ru" aria-current="page">Русский</a></li>
+        <li><a href="../zh/divers.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../divers.html" hreflang="en">Читать оригинал на английском</a></p>
+</div>
+
+<main id="top">
+  <!-- Hero: steady under water, on everyone's phone tonight -->
+  <section class="hero dv-hero band">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Для дайверов и любителей снорклинга</p>
+        <h1>Ровно под водой. Сегодня же — на телефонах у всех.</h1>
+        <p class="lede">Под водой стабилизация камеры сдаётся. Выключите её, и Action Footage Player выровняет погружение прямо во время просмотра — по данным о движении, которые записала сама камера, в том свете, который вы видели, с глубиной на экране. Отметьте черепаху, нажмите одну клавишу — и до ужина клип готов к отправке <span class="os-mac">по AirDrop</span><span class="os-win">всем на телефоны</span>.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать бесплатно для Mac</span><span class="os-win">Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Windows</span><span class="os-win">Скачать бесплатно для Windows</span> <small>10 / 11 · альфа</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>Бесплатно, открытый код</span>
+          <span>Без учётной записи</span>
+          <span>Исходные файлы меняются, только если вы попросите</span>
+          <span>Сделано дайвером из Женевы</span>
+        </div>
+      </div>
+
+      <figure class="media dv-loop">
+        <div class="halves"><span>Как записано</span><span>Как играет здесь</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="../media/stab-underwater.jpg" width="1920" height="540" src="../media/stab-underwater.mp4" aria-label="Одно и то же погружение рядом: слева — с тряской, как его записала камера, справа — ровно, как оно воспроизводится здесь."></video>
+        <figcaption>Настоящее погружение, Osmo Action 6, EIS выкл. Слева — как записано. Справа — как воспроизводится.</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Pain -->
+  <section class="section band" id="why">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Почему подводное видео разочаровывает</p>
+        <h2>Камера всё сняла. Самое трудное — потом это увидеть.</h2>
+      </div>
+      <div class="gap-grid pairs">
+        <div class="gap-item">
+          <h3>Шатается, даже со стабилизацией</h3>
+          <p>Встроенная стабилизация настроена для суши. Под водой клип всё равно шатается: с EIS от DJI, как показали проверки, скорее всего потому, что вода преломляет свет и объектив ведёт себя как более длиннофокусный. Это видел каждый дайвер.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Серое или плоское</h3>
+          <p>Снимаете в log — каждый клип выходит серым. Снимаете в обычном режиме — яркая поверхность и тёмный риф сжаты в одну плоскую картинку.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Чтобы исправить, нужны монтажная программа и целый вечер</h3>
+          <p>Цвет и стабилизация обычно означают программу для монтажа, проект на каждый клип и долгий рендер. До большинства погружений руки так и не доходят.</p>
+        </div>
+        <div class="gap-item">
+          <h3>Черепаха где-то в часе синевы</h3>
+          <p>Пока приложение камеры скопирует и перекодирует клип, а вы найдёте нужную минуту, группа уже занята другим.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Solution: the evening after the dive -->
+  <section class="section band tight-top" id="evening">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Вечер после погружения</p>
+        <h2>Дважды щёлкните по клипу. Он выглядит так, как выглядело погружение.</h2>
+        <p class="lede">Ни импорта, ни цветокоррекции, ничего не нужно рендерить заранее. Всё происходит во время воспроизведения, а исходные файлы меняются, только если вы сами попросите.</p>
+      </div>
+      <div class="dv-evening">
+        <ol class="dv-steps">
+          <li>
+            <h3>Ровно, и под водой тоже</h3>
+            <p>Когда стабилизация камеры выключена, плеер выравнивает клип по движению, которое записала камера, с поправкой на то, как вода преломляет свет. Цветная кайма, которую вода добавляет по краям кадра, тоже исчезает.</p>
+          </li>
+          <li>
+            <h3>Тот свет, что вы видели, без цветокоррекции</h3>
+            <p>Видео в log сразу воспроизводится в HDR: и яркая поверхность, и тени на рифе сохраняют детали. Никакого стиля не добавляется; экспозиция остаётся такой, какой вы её сняли.</p>
+          </li>
+          <li>
+            <h3>Глубина на экране</h3>
+            <p>На Osmo Action 6 поверх видео видны глубина и то, находится ли камера в воде. В боксе камера не может измерить глубину, но статус «в воде» всё равно показывается.</p>
+          </li>
+          <li>
+            <h3>Сразу к черепахе</h3>
+            <p>Нажимайте кнопку хайлайтов на камере во время погружения, и отметки появятся на панели под видео. <kbd>Ctrl</kbd>+<kbd>]</kbd> переходит к следующей.</p>
+          </li>
+          <li id="noise">
+            <h3>Старые шумные погружения — чистыми</h3>
+            <p>Погружение, которое выравнивает плеер, ещё и воспроизводится без шума от тусклого подводного света: каждый кадр усредняется с соседними, и каждый из них сначала совмещается с ним по движению между ними, так что детали рифа остаются. Старые шумные погружения теперь смотрятся хорошо. С файлами ничего не делается: вы просто смотрите их чистыми, а исходники остаются как были. Поставьте на паузу — и стоп-кадр тоже чистый. <kbd>Ctrl</kbd>+<kbd>p</kbd> выключает это и включает снова.</p>
+          </li>
+          <li>
+            <h3>Сохраните важные моменты</h3>
+            <p>Нажмите <kbd>l</kbd> в начале, <kbd>l</kbd> в конце, потом <kbd>k</kbd> и дайте моменту имя. Он сохранится маленьким файлом в папке <code>_Moments</code> вашей поездки — прямо в <span class="os-mac">Finder</span><span class="os-win">Проводнике</span>, в цвете. В первый раз выберите папку поездки на вкладке Project боковой панели.</p>
+          </li>
+          <li>
+            <h3>Поделитесь в тот же вечер</h3>
+            <p><kbd>Shift</kbd>+<kbd>E</kbd> превращает отрезок в один файл, ровный и в цвете, который iPhone и Mac показывают правильно. Если экспортировать его на Mac в стиле <i>HLG+DV</i> — том, что включается сразу на экране Mac без HDR, — в нём будет ещё и информация Dolby Vision, по которой iPhone, iPad и Mac хорошо показывают его и на экранах без HDR.</p>
+          </li>
+        </ol>
+        <figure class="media dv-shot">
+          <img src="../media/player-marks.jpg" width="1600" height="900" loading="lazy" alt="Плеер на паузе на погружении к затонувшему судну, над ним дайверы; рядом с видео открыта боковая панель, а хайлайты камеры — янтарные ромбы на панели навигации под видео.">
+          <figcaption>Янтарные отметки на панели под видео — это хайлайты, которые записала камера.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Proof -->
+  <section class="section band dive" id="measured">
+    <div class="wrap">
+      <div class="stack dv-proof-head">
+        <p class="eyebrow">Измерено, а не обещано</p>
+        <h2>Ровно — и измерено.</h2>
+        <p class="lede">Доказательство — в ролике: одно и то же погружение, как его записала камера и как оно воспроизводится здесь. Настройки по умолчанию сделаны для воды, так что настраивать ничего не нужно.</p>
+      </div>
+      <figure class="media dv-loop dv-proof">
+        <div class="halves"><span>Как записано</span><span>Как играет здесь</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="../media/stab-underwater.jpg" width="1920" height="540" src="../media/stab-underwater.mp4" aria-label="Одно и то же погружение рядом: слева — с тряской, как его записала камера, справа — ровно, как оно воспроизводится здесь."></video>
+        <figcaption>Osmo Action 6, EIS выкл., настройки плеера по умолчанию: после погружения ничего не настраивалось.</figcaption>
+      </figure>
+      <div class="stat dv-stat">
+        <p class="eyebrow">Остаточное дрожание между кадрами, один тестовый клип</p>
+        <div class="num"><span>0,16</span><span class="arrow">→</span><span>0,02</span><span class="unit">px</span></div>
+        <p>С поправкой на то, как вода преломляет свет, остаточного дрожания примерно в 8 раз меньше, чем при стабилизации как на суше. Osmo Action 6, EIS выкл., один тестовый клип.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Cameras -->
+  <section class="section band" id="cameras">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Камеры, с которыми ныряют</p>
+        <h2>Работает ли это с моей камерой?</h2>
+        <p class="lede">Проверено на настоящих погружениях с DJI Osmo Action 6 и на GoPro HERO12 Black. Для остальных поддержка сделана, и они должны работать. Короткий клип с вашей камеры поможет её проверить.</p>
+      </div>
+      <div class="compare-wrap dv-cams-wrap">
+        <table class="cams dv-cams">
+          <thead><tr><th scope="col">Камера</th><th scope="col">Log</th><th scope="col">Стабилизация</th><th scope="col">Примечания</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">DJI Osmo Action 6</th><td data-label="Log"><span class="pill ok">Проверена</span><br><span class="cam-sub">D-Log M</span></td><td data-label="Стабилизация"><span class="pill ok">Проверена</span><br><span class="cam-sub">EIS выкл., FOV Wide</span></td><td data-label="Примечания">Глубина, статус «в воде» и хайлайты. Проверено на настоящих погружениях.</td></tr>
+            <tr><th scope="row">DJI Osmo 360</th><td data-label="Log"><span class="pill exp">Должна работать</span><br><span class="cam-sub">D-Log M</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">EIS выкл., FOV Wide</span></td><td data-label="Примечания">MP4 с одного объектива.</td></tr>
+            <tr><th scope="row">GoPro HERO12 Black</th><td data-label="Log"><span class="pill ok">Проверена</span><br><span class="cam-sub">GP-Log</span></td><td data-label="Стабилизация"><span class="pill ok">Проверена</span><br><span class="cam-sub">HyperSmooth выкл.</span></td><td data-label="Примечания">GP-Log — начиная с прошивки 1.20.</td></tr>
+            <tr><th scope="row">GoPro HERO13 Black</th><td data-label="Log"><span class="pill exp">Должна работать</span><br><span class="cam-sub">GP-Log</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">HyperSmooth выкл.</span></td><td data-label="Примечания" class="dv-empty"></td></tr>
+            <tr><th scope="row">GoPro MISSION 1, MISSION 1 PRO</th><td data-label="Log"><span class="pill exp">Должна работать</span><br><span class="cam-sub">GP-Log2</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">HyperSmooth выкл.</span></td><td data-label="Примечания" class="dv-empty"></td></tr>
+            <tr><th scope="row">GoPro MAX2</th><td data-label="Log"><span class="pill part">Пока нет</span><br><span class="cam-sub">GP-Log</span></td><td data-label="Стабилизация"><span class="cam-sub">Пока неизвестно</span></td><td data-label="Примечания">Её GP-Log экспонирован на две ступени ярче, чем у HERO, и требует собственного преобразования; пока что <kbd>Ctrl</kbd>+<kbd>l</kbd> применяет GP-Log вручную, но картинка получается слишком светлой.</td></tr>
+            <tr><th scope="row">GoPro от HERO5 Black до HERO11 Black</th><td data-label="Log"><span class="pill part">Без log</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">HyperSmooth выкл.</span></td><td data-label="Примечания">Flat — это не log.</td></tr>
+            <tr><th scope="row">DJI Osmo Action 4, Action 5 Pro</th><td data-label="Log"><span class="pill exp">Должна работать*</span><br><span class="cam-sub">D-Log M</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">EIS выкл., FOV Wide</span></td><td data-label="Примечания">* D-Log M включается вручную, клавишами <kbd>Ctrl</kbd>+<kbd>l</kbd>.</td></tr>
+            <tr><th scope="row">Insta360 с одним объективом</th><td data-label="Log"><span class="pill exp">Должна работать*</span><br><span class="cam-sub">I-Log 10 бит</span></td><td data-label="Стабилизация"><span class="pill exp">Должна работать</span><br><span class="cam-sub">FlowState выкл.</span></td><td data-label="Примечания">* I-Log включается вручную, клавишами <kbd>Ctrl</kbd>+<kbd>l</kbd>. I-Log 8 бит не поддерживается.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note"><span class="pill ok">Проверена</span> воспроизводится в плеере на настоящих записях. <span class="pill exp">Должна работать</span> поддержка сделана по опубликованным производителем метаданным или образцам клипов, но на настоящих записях ещё не проверена. <span class="pill exp">Должна работать*</span> то же самое, но с одним шагом вручную, описанным в строке камеры. <span class="pill part">Пока нет</span> пока не работает.</p>
+      <p class="note">Ныряете с камерой из тех, что «Должна работать»? Короткий пример клипа в <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">issue на GitHub</a> — самый быстрый способ её проверить.</p>
+    </div>
+  </section>
+
+  <!-- Before your next dive -->
+  <section class="section band tight-top" id="setup">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Перед следующим погружением</p>
+        <h2>Две настройки на камере. Потом один двойной щелчок.</h2>
+        <p class="lede">Настройте их один раз, и каждое следующее погружение будет воспроизводиться ровно и в цвете.</p>
+      </div>
+      <ol class="checklist">
+        <li>
+          <h3>Выберите цветовой профиль log</h3>
+          <p>D-Log M на DJI. GP-Log на GoPro HERO12 Black (прошивка 1.20 или новее) и HERO13 Black. I-Log 10 бит на Insta360 — его потом выбирают в плеере клавишами <kbd>Ctrl</kbd>+<kbd>l</kbd>; I-Log 8 бит не поддерживается. Flat на GoPro — это не log, а у HERO8–HERO11 log нет вовсе. На вашей камере нет log? Пропустите этот шаг: стабилизация всё равно работает.</p>
+        </li>
+        <li>
+          <h3>Выключите стабилизацию камеры</h3>
+          <p>EIS на DJI, HyperSmooth на GoPro, FlowState на Insta360. На DJI ещё и оставьте широкий угол обзора, Wide: только тогда камера записывает своё движение. Клип, уже стабилизированный камерой, воспроизводится как есть.</p>
+        </li>
+        <li>
+          <h3>Копируйте клипы прямо с карты</h3>
+          <p>Приложение, которое обрезает или экспортирует клипы, удаляет данные о движении, по которым плеер их выравнивает.</p>
+        </li>
+        <li>
+          <h3>Дважды щёлкните по клипу</h3>
+          <p>Вот и всё.</p>
+        </li>
+      </ol>
+      <p class="dv-wb"><strong>Баланс белого:</strong> выставляйте как обычно. Плеер показывает то, что было записано.</p>
+      <div class="btns dv-after">
+        <span class="os-mac"><a class="btn primary" href="download.html#mac">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Скачать бесплатно для Mac <small>Apple Silicon</small>
+        </a></span>
+        <span class="os-win"><a class="btn primary" href="download.html#windows">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          Скачать бесплатно для Windows <small>10 / 11 · альфа</small>
+        </a></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band tight-top" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Что спрашивают дайверы</p>
+        <h2>Прежде чем скачать.</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>Я только плаваю с маской. Это для меня?</summary>
+          <div class="a"><p>Да, и даже больше. У поверхности контраст между солнцем и тенью максимален, а камера качается с каждой волной. Именно для этого Action Footage Player и создан.</p></div>
+        </details>
+        <details>
+          <summary>Я снимаю во Flat. Это log?</summary>
+          <div class="a"><p>Нет. Flat на GoPro — более блёклая картинка, но не запись в log, поэтому она воспроизводится как записана, без преобразования в HDR. Log у GoPro — это GP-Log, на HERO12 Black (прошивка 1.20 или новее) и HERO13 Black; у HERO8–HERO11 его нет.</p><p>Клипы во Flat, снятые с выключенным HyperSmooth, всё равно воспроизводятся ровно.</p></div>
+        </details>
+        <details>
+          <summary>Работает ли это в подводном боксе?</summary>
+          <div class="a"><p>Да. Стабилизация и цвет работают так же. В боксе камера не может измерить глубину: её датчик давления чувствует только воздух внутри, поэтому глубина не показывается. На Osmo Action 6 статус «в воде» всё равно виден.</p></div>
+        </details>
+        <details>
+          <summary>А как же кадры над водой?</summary>
+          <div class="a"><p>На Osmo Action 6 поправка на воду следует за собственным статусом камеры «в воде», так что клип, который то уходит под воду, то выходит из неё, исправляется только там, где камера в воде.</p><p>Над водой встроенная стабилизация камеры работает хорошо, так что там её можно не выключать. Для клипа, снятого на воздухе с выключенной стабилизацией, <kbd>Ctrl</kbd>+<kbd>u</kbd> отключает поправку на воду.</p></div>
+        </details>
+        <details>
+          <summary>Нужен ли мне HDR-экран?</summary>
+          <div class="a"><p>Нет, хотя с ним лучше. Свежие iPhone, MacBook Pro, HDR-телевизоры и мониторы показывают всё, что записано в log. На устройствах Apple подводное видео хорошо выглядит и на обычном экране — и в плеере, и в клипах, которые вы экспортируете. На некоторых других телефонах, компьютерах и телевизорах экспортированный клип может выглядеть чуть более плоским.</p><p>Стабилизация и показ глубины полезны на любом экране.</p></div>
+        </details>
+        <details>
+          <summary>Он вернёт красный цвет, потерянный на глубине?</summary>
+          <div class="a"><p>Нет. Вода поглощает красный свет ещё до того, как он дойдёт до камеры, а Action Footage Player показывает то, что было записано, во всём диапазоне. Чтобы вернуть красные тона, нужен красный фильтр, подводный фонарь или баланс белого на камере — либо цветокоррекция потом.</p></div>
+        </details>
+        <details>
+          <summary>Разве мобильное приложение камеры не показывает мои погружения в HDR?</summary>
+          <div class="a"><p>Некоторые приложения умеют. Но их HDR-режимы обычно заново подбирают экспозицию при каждой смене сцены и задавливают глубокие тени в чёрное — это стиль для соцсетей. Под водой это заметно: тени на рифе уходят в черноту, а яркость скачет, пока вы плывёте.</p><p>Action Footage Player сохраняет экспозицию, записанную камерой, и детали в тенях. Экспорт тоже обходится без добавленного стиля, так что его можно настроить на свой вкус. Стиль, вшитый в файл, уже не убрать.</p></div>
+        </details>
+        <details>
+          <summary>Мои старые подводные видео станут лучше?</summary>
+          <div class="a"><p>Клипы, снятые с выключенным EIS и углом обзора Wide, воспроизводятся ровно прямо из папки: ничего не рендерится и не копируется. Клипы, снятые в log, — в HDR. Те, что плеер выравнивает, ещё и воспроизводятся без шума от тусклого подводного света, а в файлах ничего не меняется. Клипы, снятые в обычном режиме с включённой стабилизацией, выглядят как всегда: Action Footage Player не может добавить то, что не было записано.</p></div>
+        </details>
+        <details>
+          <summary>Он изменяет мои исходные файлы?</summary>
+          <div class="a"><p>Только если вы попросите. Чтобы вырезать из клипа испорченный кусок (<kbd>Ctrl</kbd>+<kbd>x</kbd>), плеер перезаписывает клип без него, ничего не перекодируя, а оригинал отправляется в Корзину. В остальном ваши исходные файлы остаются как есть.</p><p>Экспорт сохраняется в папку поездки <code>_Exports</code>, моменты, которые вы сохраняете, — в <code>_Moments</code>; ваши отметки — маленький файл рядом с клипом.</p></div>
+        </details>
+        <details>
+          <summary>Есть ли версия для Windows?</summary>
+          <div class="a"><p>Да, для Windows 10 и 11. Каждый день используется приложение для Mac; приложение для Windows тоже работает, но это альфа-версия, которую пока мало тестировали.</p></div>
+        </details>
+        <details>
+          <summary>Он бесплатный?</summary>
+          <div class="a"><p>Да, это открытое ПО под лицензией GPL-3.0. Ничего не заблокировано, и заводить учётную запись не нужно.</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Final download, then the community -->
+  <section class="section band tight-top" id="download">
+    <div class="wrap">
+      <div class="dv-final">
+        <h2>Следующее погружение — ровное и на телефонах у всех.</h2>
+        <p class="lede">Бесплатно, открытый код, без учётной записи.</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Скачать для Mac</span><span class="os-win">Mac</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">Windows</span><span class="os-win">Скачать для Windows</span> <small>альфа</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>Расскажите напарникам по погружениям</h3>
+          <p>Большинство дайверов, которым это нужно, о нём даже не слышали. Сообщение в чате вашего клуба или дайв-центра сделает больше любой рекламы.</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer">Поделиться проектом</a>
+        </div>
+        <div class="help-card">
+          <h3>Пришлите пример погружения</h3>
+          <p>Короткий клип с вашей камеры поможет перевести её из «Должна работать» в «Проверена».</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">Создать issue на GitHub</a>
+        </div>
+        <div class="help-card">
+          <h3>Не только дайвинг?</h3>
+          <p>Action Footage Player делает то же самое с любым клипом в log с вашей экшн-камеры — и над водой тоже.</p>
+          <a href="index.html">Всё о плеере</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · открытый код, GPL-3.0 · <a href="about.html">Сделано дайвером из Женевы, Швейцария</a></span>
+      <a href="index.html">Главная</a>
+      <a href="about.html">Об авторе</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">Все функции</a>
+      <a href="download.html">Загрузки</a>
+    </div>
+    <p>Создано с благодарностью на основе движка стабилизации Gyroflow и библиотеки telemetry-parser от Adrian Eddy, с HDR LUT для D-Log M и GP-Log, построенными на shaper LUT от Zeb Gardner (используются с разрешения), и с кривыми log, опубликованными DJI, GoPro и Insta360. Проект не связан с DJI, GoPro или Insta360.</p>
+    <p class="tm">Dolby, Dolby Vision и символ двойного D являются товарными знаками Dolby Laboratories Licensing Corporation. Action Footage Player не связан с Dolby и не одобрен ею. Плеер сам записывает метаданные Dolby Vision с помощью открытой библиотеки <code>dolby_vision</code> (MIT); никакого ПО Dolby в его составе нет.</p>
+    <p class="mt-foot">Эта страница переведена с английского машинным переводом и может содержать неточности. <a href="../divers.html" hreflang="en">Читать оригинал на английском</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

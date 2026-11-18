@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Action Footage Player: the player for action-camera footage</title>
+<meta name="description" content="A free, open-source video player for GoPro, DJI and Insta360 footage on Mac and Windows. Log clips play in full color, clips shot with the camera's stabilization off play steady, even under water, and one key saves the part worth sharing.">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="b.css">
+<script>
+  // The visitor's own system first in the download buttons and in the words (Finder or File Explorer)
+  document.documentElement.dataset.os = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "mac" : "win";
+</script>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#top"><img src="icon.svg" alt="">Action Footage Player</a>
+    <nav class="nav" aria-label="Site">
+      <a href="#features">Features</a>
+      <a href="#specs">Cameras</a>
+      <a href="features.html">Guides</a>
+      <a href="about.html">About</a>
+    </nav>
+    <a class="pill" href="download.html">Download</a>
+  </div>
+</header>
+
+<main id="top">
+
+  <section class="hero">
+    <div class="wrap">
+      <h1>Your action&#8209;camera clips are <em>ready to play</em>, in color and steady.</h1>
+      <p class="lede">No grading, no stabilizing, no import. Log clips look grey in every other app, and clips shot under water shake: here you double-click one and watch it.</p>
+      <div class="btns">
+        <a class="btn dl-mac" href="download.html#mac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Mac</span></a>
+        <a class="btn dl-win" href="download.html#windows"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Windows <i>alpha</i></span></a>
+      </div>
+      <p class="meta">Free and open source · v0.13.0 · macOS 15 or later, Windows 10 and 11 · GoPro, DJI, Insta360</p>
+      <div class="hero-shot">
+        <div class="cams" role="img" aria-label="Drawings of the cameras whose footage plays: a DJI action camera and a GoPro on the left, an Insta360 360 camera and a drone on the right.">
+          <figure class="cam c-dji"><svg viewBox="0 0 100 72" aria-hidden="true"><rect x="14" y="0" width="18" height="7" rx="2.5" fill="#c8402f"/><rect x="2" y="4" width="96" height="66" rx="11" fill="#2f3136"/><rect x="2" y="4" width="96" height="66" rx="11" fill="none" stroke="#45484f" stroke-width="1.5"/><rect x="10" y="18" width="30" height="30" rx="4" fill="#0e0f11" stroke="#3d4046"/><circle cx="68" cy="37" r="25" fill="#17181b"/><circle cx="68" cy="37" r="20" fill="none" stroke="#4a4d54" stroke-width="2"/><circle cx="68" cy="37" r="14" fill="#0b1626"/><circle cx="68" cy="37" r="7.7" fill="#16304f"/><circle cx="63.1" cy="32.1" r="2.8" fill="#8fb4e6" opacity=".8"/></svg><figcaption>DJI</figcaption></figure>
+          <figure class="cam c-gopro"><svg viewBox="0 0 100 80" aria-hidden="true"><rect x="38" y="60" width="7" height="19" rx="2.5" fill="#1d1e21"/><rect x="55" y="60" width="7" height="19" rx="2.5" fill="#1d1e21"/><rect x="2" y="2" width="96" height="64" rx="9" fill="#27292d"/><rect x="2" y="2" width="96" height="64" rx="9" fill="none" stroke="#43464c" stroke-width="1.5"/><rect x="10" y="12" width="33" height="25" rx="3" fill="#0e0f11" stroke="#3d4046"/><rect x="53" y="8" width="39" height="39" rx="8" fill="#111214" stroke="#4a4d54" stroke-width="1.5"/><circle cx="72.5" cy="27.5" r="13" fill="#0b1626"/><circle cx="72.5" cy="27.5" r="7.2" fill="#16304f"/><circle cx="68.0" cy="22.9" r="2.6" fill="#8fb4e6" opacity=".8"/></svg><figcaption>GoPro</figcaption></figure>
+        </div>
+        <div class="lap">
+        <div class="laptop">
+          <div class="laptop-screen">
+            <div class="compare" id="compare" style="--pos: 50%">
+              <div class="cmp-side cmp-after">
+                <video autoplay muted loop playsinline preload="metadata" poster="media/hero-compare.jpg" src="media/hero-compare.mp4" aria-label="A dive clip as Action Footage Player plays it: in color and steady."></video>
+                <span class="cmp-label">Action Footage Player <em>HDR</em></span>
+                <div class="cmp-bar" aria-hidden="true"><div class="cmp-track"><i class="cmp-mark" style="left:14%"></i><i class="cmp-mark" style="left:60%"></i><i class="cmp-mark" style="left:91%"></i><i class="cmp-knob"></i></div></div>
+              </div>
+              <div class="cmp-side cmp-before">
+                <video autoplay muted loop playsinline preload="metadata" poster="media/hero-compare.jpg" src="media/hero-compare.mp4" aria-label="The same clip as a normal video player shows it: flat, grey and shaky."></video>
+                <span class="cmp-label">Normal video player</span>
+                <div class="cmp-bar" aria-hidden="true"><div class="cmp-track"><i class="cmp-knob"></i></div></div>
+              </div>
+              <div class="cmp-handle" role="slider" tabindex="0" aria-label="Dividing line between the normal video player and Action Footage Player" aria-valuemin="0" aria-valuemax="100" aria-valuenow="50"><b></b></div>
+            </div>
+          </div>
+          <div class="laptop-base"></div>
+        </div>
+        </div>
+        <div class="cams">
+          <figure class="cam c-x"><svg viewBox="0 0 46 130" aria-hidden="true"><rect x="3" y="2" width="40" height="126" rx="13" fill="#2a2c30"/><rect x="3" y="2" width="40" height="126" rx="13" fill="none" stroke="#45484f" stroke-width="1.5"/><circle cx="23" cy="24" r="16" fill="#111214" stroke="#4a4d54" stroke-width="1.5"/><circle cx="23" cy="24" r="11.5" fill="#0b1626"/><circle cx="23" cy="24" r="6.3" fill="#16304f"/><circle cx="19.0" cy="20.0" r="2.3" fill="#8fb4e6" opacity=".8"/><rect x="9" y="48" width="28" height="56" rx="5" fill="#0e0f11" stroke="#3d4046"/><circle cx="23" cy="116" r="4.5" fill="none" stroke="#5a5e66" stroke-width="1.5"/></svg><figcaption>Insta360</figcaption></figure>
+          <figure class="cam c-drone"><svg viewBox="0 0 150 84" aria-hidden="true"><ellipse cx="24" cy="14" rx="23" ry="2.6" fill="#8d939c" opacity=".55"/><ellipse cx="126" cy="14" rx="23" ry="2.6" fill="#8d939c" opacity=".55"/><rect x="20" y="14" width="8" height="12" rx="3" fill="#6f747c"/><rect x="122" y="14" width="8" height="12" rx="3" fill="#6f747c"/><path d="M24 24 L58 44 M126 24 L92 44" stroke="#aeb3bb" stroke-width="7" stroke-linecap="round"/><path d="M52 58 L40 74 M98 58 L110 74" stroke="#9aa0a8" stroke-width="4" stroke-linecap="round"/><rect x="48" y="34" width="54" height="26" rx="12" fill="#c9cdd3"/><rect x="48" y="34" width="54" height="26" rx="12" fill="none" stroke="#a4a9b1" stroke-width="1.5"/><rect x="62" y="56" width="26" height="22" rx="7" fill="#2a2c30"/><circle cx="75" cy="67" r="7.5" fill="#0b1626"/><circle cx="75" cy="67" r="4.1" fill="#16304f"/><circle cx="72.4" cy="64.4" r="1.5" fill="#8fb4e6" opacity=".8"/></svg><figcaption>Drones</figcaption></figure>
+        </div>
+      </div>
+      <p class="note">Our own drawings of the cameras, not the makers&rsquo; pictures. The same clip on both sides of the line: drag it. The amber marks are the highlights pressed on the camera. DJI Osmo Action 6, D-Log M, its stabilization off.</p>
+    </div>
+  </section>
+
+  <section class="show white" id="features">
+    <div class="wrap row">
+      <div class="txt">
+        <p class="kicker">Color</p>
+        <h2>Log, in full color.</h2>
+        <p class="big">Log is your camera&rsquo;s richest color setting, and it looks flat and grey everywhere else. Here it opens in full color, with the bright sky and the dark shadows both kept. No grading, no look added.</p>
+        <p>D-Log M, GP-Log and 10-bit I-Log. DJI and GoPro clips are recognized by themselves. Log shows its best on HDR screens; on ordinary screens the player has looks made for them.</p>
+        <a class="more" href="log.html">Log footage ›</a>
+      </div>
+      <div class="pic"><img src="media/log-grey-color.jpg" width="1600" height="900" loading="lazy" alt="A lake under mountains, split down the middle: grey and flat as log on the left, in full color on the right."></div>
+    </div>
+  </section>
+
+  <section class="show">
+    <div class="wrap row flip">
+      <div class="txt">
+        <p class="kicker">Stabilization</p>
+        <h2>Steady, even under water.</h2>
+        <p class="big">Under water the camera&rsquo;s own stabilization gives up. Turn it off, and the camera records how it moves: the player steadies the clip from that as it plays, and corrects for how water bends light.</p>
+        <p>Built on Gyroflow&rsquo;s open-source engine. Measured on a test clip: 8× less jitter than stabilizing as on land.</p>
+        <a class="more" href="stabilization.html">Stabilization ›</a>
+      </div>
+      <div class="pic"><div class="half"><video autoplay muted loop playsinline preload="metadata" poster="media/stab-underwater.jpg" src="media/stab-underwater.mp4" aria-label="An underwater clip as the player plays it: steady."></video></div></div>
+    </div>
+  </section>
+
+  <section class="show white">
+    <div class="wrap row">
+      <div class="txt">
+        <p class="kicker">Sharing</p>
+        <h2>And ready to share.</h2>
+        <p class="big">The player doesn&rsquo;t only play. One key exports the part you like as a file that looks right wherever you send it: your phone, your TV, YouTube.</p>
+        <p>A video, a single frame, or a frame with the seconds around it, each in the format the other side expects.</p>
+        <div class="chips"><span><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="3.5" width="17" height="13" rx="3"/><path class="f" d="M8 7l5 3-5 3z"/></svg>Video <b>HDR</b></span><span><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="1.5" y="5" width="17" height="12" rx="3"/><path d="M6.5 5l1.3-2h4.4l1.3 2"/><circle cx="10" cy="11" r="3.2"/></svg>Photo <b>HDR</b></span><span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke-dasharray="1.2 2.2"/><circle cx="10" cy="10" r="5.2"/><circle cx="10" cy="10" r="1.8" class="f"/></svg>Live Photo</span><span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5" stroke-dasharray="1.2 2.2"/><circle cx="10" cy="10" r="5.6"/><path class="f" d="M8.6 7.4l4 2.6-4 2.6z"/></svg>Motion Photo</span><span><svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="8.5"/><ellipse cx="10" cy="10" rx="3.8" ry="8.5"/><path d="M1.5 10h17M3 5.6h14M3 14.4h14"/></svg>360° video</span></div>
+        <a class="more" href="photos.html">Photos and exports ›</a>
+      </div>
+      <div class="pic"><img src="media/photos-1.jpg" width="1600" height="900" loading="lazy" alt="The player paused on a coral reef, a 4:5 frame drawn over it and the Save frame panel beside the video, with Still, Live Photo and Motion Photo to choose from."></div>
+    </div>
+  </section>
+
+  <section class="quote">
+    <div class="wrap">
+      <span class="q" aria-hidden="true">&ldquo;</span>
+      <blockquote>I made this player for my own footage: to see it as it looked, without grading every clip, and steady under water, where divers told me digital stabilization could never work.</blockquote>
+      <p class="by">Anton Belkin · a diver in Geneva · <a href="about.html">Read the story ›</a></p>
+    </div>
+  </section>
+
+  <section class="list">
+    <div class="wrap">
+      <h2>It all happens while the clip plays.</h2>
+      <p class="sub">No import, no editing, nothing to wait for. Straight from the card.</p>
+      <div class="feats">
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path class="f" d="M12 3a9 9 0 0 1 0 18z"/></svg><div><h3>Log in color</h3><p>D-Log M, GP-Log and 10-bit I-Log open in full color, with the bright sky and the dark shadows both kept. No grading.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8c3-3 6 3 9 0s6 3 9 0M3 16h18"/></svg><div><h3>Steady under water</h3><p>The clip is steadied as it plays, from the motion the camera recorded, corrected for how water bends light.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l2 6 6 2-6 2-2 6-2-6-6-2 6-2z"/></svg><div><h3>Noise filter for dim light</h3><p>Deep under water or at dusk, the sensor&rsquo;s noise goes as the clip plays. Nothing is baked into your files.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l5 6-5 6-5-6zM12 15v6"/></svg><div><h3>Highlights and moments</h3><p>The highlights you marked with the camera&rsquo;s button sit on the bar under the video. Add your own marks, and save moments and intervals to view later.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V3M8 7l4-4 4 4M5 12v8h14v-8"/></svg><div><h3>Share with one key</h3><p>One key exports the part you marked as an HDR file that looks right on your phone, your TV and YouTube.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="14" rx="3"/><circle cx="12" cy="13" r="3.5"/><path d="M9 6l1.5-2h3L15 6"/></svg><div><h3>Photos from any frame</h3><p>Pause, frame it, press Enter. Live Photo and Motion Photo supported.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg><div><h3>HDR where you have it</h3><p>Log shows its best on HDR screens. On ordinary screens the player has looks made for them.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="13" rx="2.5"/><path d="M8 21h8"/><path class="f" d="M12 7.5l1.2 2.8 2.8 1.2-2.8 1.2L12 15.5l-1.2-2.8L8 11.5l2.8-1.2z"/></svg><div><h3>Dolby Vision</h3><p>Dolby Vision metadata is added to what you export, even where the camera recorded none, so it looks its best on the devices that support it: iPhone, iPad, Mac, Apple TV and Dolby Vision TVs.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><ellipse cx="12" cy="12" rx="4" ry="9"/><path d="M3 12h18"/></svg><div><h3>360 clips</h3><p>Open as a view you turn with the mouse, level and steady, and export flat for sharing.</p><button type="button" class="try" id="open360">Try it here ›</button></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18a8 8 0 1 1 16 0M12 18l4-6"/></svg><div><h3>Telemetry</h3><p>Depth, speed and GPS on screen while the clip plays, when the camera recorded them.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="3"/><circle cx="6" cy="17" r="3"/><path d="M8.5 8.5L20 18M8.5 15.5L20 6"/></svg><div><h3>Cut out a spoiled part</h3><p>The clip is rewritten without it, with nothing re-encoded, and the space it took is freed.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg><div><h3>Normal-mode clips too</h3><p>Clips you shot in the normal mode play as they always did, with your highlights, moments and one-key sharing.</p></div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dark" id="next">
+    <div class="wrap">
+      <h2>Then go further.</h2>
+      <p class="sub">The player doesn&rsquo;t lock you in. What it plays and what it makes are a starting point for whatever you do next, in your own tools and workflows.</p>
+      <div class="feats two">
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="7.5" r="1.4" class="f"/><circle cx="7.8" cy="11" r="1.4" class="f"/><circle cx="16.2" cy="11" r="1.4" class="f"/><path d="M12 21a3 3 0 0 1 0-6h1.5"/></svg><div><h3>Grade it your way</h3><p>An export is a neutral HDR clip, steady and with no look added: a clean starting point for your grading app, where the style is yours to add.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8c3-3 6 3 9 0s6 3 9 0M4 15h10M17 12v6M4 20h6M13 17v6" /></svg><div><h3>Fine-tune it in Gyroflow</h3><p>Gyroflow is the leading open-source tool for video stabilization, and its engine is already at work inside the player. Open the clip in the whole tool, with control over every setting. Its project is saved next to the clip and defines how the player plays it, still on the fly. <a href="https://gyroflow.xyz">gyroflow.xyz ›</a></p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h8l4 4v14H6zM14 3v4h4M9 12h6M9 16h6"/></svg><div><h3>All your data, as text</h3><p>Every mark, every moment, every setting: the player gives it all to you as text files in a documented format, to process in whatever tool you like.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M7 9l3 3-3 3M12.5 15H17"/></svg><div><h3>A command-line tool</h3><p>What the player does on screen, it also does from the command line: stabilize, convert and export clips in your own scripts.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="8" width="14" height="11" rx="3"/><path d="M12 8V4M9 13v2M15 13v2M2 13h3M19 13h3"/><circle cx="12" cy="3.5" r="1" class="f"/></svg><div><h3>Ready for your agents <span class="soon">Coming soon</span></h3><p>An MCP integration will let an AI agent work with the player, so it fits into the workflow you have built yourself.</p></div></div>
+        <div class="feat"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 5v4M16 5v4M10 13l4 2-4 2z"/></svg><div><h3>Take it to your editor <span class="soon">Coming soon</span></h3><p>Final Cut Pro, DaVinci Resolve and Premiere Pro will get your moments and marks, on the original files.</p></div></div>
+      </div>
+      <div class="together">
+        <div>
+          <h3>Your camera isn&rsquo;t on the list, or something didn&rsquo;t work at once?</h3>
+          <p>Send us a clip. We&rsquo;ll check it and add the camera. The player is free and open source, under GPL-3.0: let&rsquo;s build it together.</p>
+        </div>
+        <div class="acts">
+          <a class="pill" href="https://github.com/anton-belkin/ActionFootagePlayer/issues">Report a camera</a>
+          <a href="mailto:hello@actionfootageplayer.ch">hello@actionfootageplayer.ch</a>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer">Source code on GitHub ›</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="specs" id="specs">
+    <div class="wrap">
+      <h2>Cameras and computers</h2>
+      <table>
+        <tr><th>Log</th><td>D-Log M, GP-Log, 10-bit I-Log. DJI and GoPro clips are recognized by themselves; I-Log is chosen by hand.</td></tr>
+        <tr><th>Verified cameras</th><td>DJI Osmo Action 6, GoPro HERO3 to HERO13, Insta360 X5 (360), Insta360 single lens: played in the player on real footage.</td></tr>
+        <tr><th>Expected to work</th><td>GoPro MISSION 1 and 1 PRO, DJI Osmo 360, DJI Action 4, 5 Pro, Pocket 3. <a href="features.html#cameras">The full table ›</a></td></tr>
+        <tr><th>Stabilization</th><td>From the motion the camera recorded, with its own stabilization off (on DJI, keep the Wide field of view). A Gyroflow project file next to a clip is picked up by itself, and the clip plays with its settings. For clips with no motion data in them, the motion can be worked out from the picture, externally, by <a href="https://gyroflow.xyz">Gyroflow</a>. After that they play steady in the player as usual, with no export or rendering.</td></tr>
+        <tr><th>Exports</th><td>HDR video with Dolby Vision metadata added, HDR10 for YouTube, HDR photo, Live Photo, Motion Photo, 360° video, flat video from a 360 clip.</td></tr>
+        <tr><th>Screens</th><td>HDR where you have it: recent MacBook Pros, iPhones, HDR TVs and monitors. Looks made for ordinary screens, for watching and for exporting.</td></tr>
+        <tr><th>Requirements</th><td>Mac: Apple Silicon, macOS 15 or later, stable. Windows 10 and 11, on Intel, AMD or ARM: an alpha, working, with less testing so far. Linux: as plugins for the mpv player.</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="faq" id="faq">
+    <div class="wrap">
+      <h2>Common questions</h2>
+      <div class="qs">
+        <details>
+          <summary>Is it really free?</summary>
+          <div class="a"><p>Yes. The player is open source under GPL-3.0, and the code is on GitHub. Nothing in it is locked, and there is no account to make.</p></div>
+        </details>
+        <details>
+          <summary>Do I have to change my camera settings?</summary>
+          <div class="a"><p>No, but one setting gets you the most. Choose log as the color setting once: D-Log M on DJI, GP-Log on GoPro, 10-bit I-Log on Insta360. Under water, also turn the camera's stabilization off: the camera then records how it moves, and the player steadies the clip from that.</p><p>Clips you shot in the normal mode play as they always did, with your highlights, moments and one-key sharing.</p></div>
+        </details>
+        <details>
+          <summary>Do I need an HDR screen?</summary>
+          <div class="a"><p>No. Log shows its best on HDR screens, but on Apple devices it looks good on ordinary screens too, in the player and in the clips you export from it. For other screens the player has looks made for them; for DJI's D-Log M, the camera maker's own is among them.</p></div>
+        </details>
+        <details>
+          <summary>Does it change my original files?</summary>
+          <div class="a"><p>Only if you ask. To cut a spoiled part out of a clip (<kbd>Ctrl</kbd>+<kbd>x</kbd>), the player rewrites the clip without it, with nothing re-encoded, and the original goes to the Trash. Otherwise your originals stay as they are.</p></div>
+        </details>
+        <details>
+          <summary>Why not just use the camera maker's app?</summary>
+          <div class="a"><p>Use it if you like its look. Phone apps are great for quick edits. Action Footage Player converts log directly, keeps the scene's light as it was and adds no look of its own, so the clip looks the way the scene did. You can always add a look later; you can't take one out.</p><p>It also runs on your computer, plays your whole archive as it is, works with footage from several camera makers, and steadies clips while they play.</p></div>
+        </details>
+        <details>
+          <summary>Who needs the stabilization in the player?</summary>
+          <div class="a"><p>Above water, with the camera's stabilization on, you probably don't: it does a good job in air. It's for clips shot with it off. Under water, where the camera's own fails, that is the way to shoot.</p></div>
+        </details>
+        <details>
+          <summary>How do I install it?</summary>
+          <div class="a"><p>Download, open, drag to Applications. The apps aren't signed by a developer account yet: on a Mac, allow it once in System Settings, Privacy &amp; Security, Open Anyway; on Windows, choose More info, then Run anyway. <a href="download.html">Downloads ›</a></p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <section class="cta">
+    <div class="wrap">
+      <img src="icon.svg" alt="">
+      <h2>Plug in the card. Double-click a clip.</h2>
+      <p class="sub">Free and open source, for Macs with Apple Silicon and for Windows 10 and 11.</p>
+      <div class="btns">
+        <a class="btn dl-mac" href="download.html#mac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Mac</span></a>
+        <a class="btn dl-win" href="download.html#windows"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Windows <i>alpha</i></span></a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot">
+      <div>
+        <a class="brand" href="#top"><img src="icon.svg" alt="">Action Footage Player</a>
+        <p>The player for action-camera footage. Made by a diver in Geneva, Switzerland.</p>
+      </div>
+      <div>
+        <h4>Product</h4>
+        <ul>
+          <li><a href="features.html">All features</a></li>
+          <li><a href="download.html">Download</a></li>
+          <li><a href="360.html">360 video</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Guides</h4>
+        <ul>
+          <li><a href="log.html">Log footage</a></li>
+          <li><a href="stabilization.html">Stabilization</a></li>
+          <li><a href="organizing.html">Organizing</a></li>
+          <li><a href="photos.html">Photos</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Who it's for</h4>
+        <ul>
+          <li><a href="divers.html">Divers &amp; snorkelers</a></li>
+          <li><a href="moments.html">Active travelers</a></li>
+          <li><a href="about.html">About the maker</a></li>
+        </ul>
+      </div>
+      <div>
+        <h4>Open source</h4>
+        <ul>
+          <li><a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a></li>
+          <li><a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">Report a bug</a></li>
+          <li><a href="mailto:hello@actionfootageplayer.ch">Write to us</a></li>
+        </ul>
+      </div>
+    </div>
+    <div class="fine">
+      <p>Open source, GPL-3.0. Built with thanks on Gyroflow's stabilization engine and Adrian Eddy's telemetry-parser, with the D-Log M and GP-Log HDR LUTs derived from Zeb Gardner's shaper LUTs (used with permission), and the log curves published by DJI, GoPro and Insta360. The app bundles mpv and ffmpeg under their own licenses. Not affiliated with DJI, GoPro or Insta360.</p>
+      <p>Dolby, Dolby Vision and the double-D symbol are trademarks of Dolby Laboratories Licensing Corporation. Action Footage Player is not affiliated with or endorsed by Dolby.</p>
+    </div>
+  </div>
+</footer>
+
+<style>
+  .os-win { display: none; }
+  :root[data-os="win"] .os-mac { display: none; }
+  :root[data-os="win"] .os-win { display: inline; }
+</style>
+<script>
+  // The dividing line in the hero: drag it, or move it with the arrow keys
+  (function () {
+    var box = document.getElementById("compare"); if (!box) return;
+    var handle = box.querySelector(".cmp-handle"), vids = box.querySelectorAll("video"), pos = 50;
+    function set(p) { pos = Math.max(0, Math.min(100, p)); box.style.setProperty("--pos", pos + "%"); handle.setAttribute("aria-valuenow", Math.round(pos)); }
+    function at(e) { var r = box.getBoundingClientRect(); set((e.clientX - r.left) / r.width * 100); }
+    box.addEventListener("pointerdown", function (e) { box.setPointerCapture(e.pointerId); box.classList.add("dragging"); at(e); });
+    box.addEventListener("pointermove", function (e) { if (box.hasPointerCapture(e.pointerId)) at(e); });
+    ["pointerup", "pointercancel"].forEach(function (n) { box.addEventListener(n, function () { box.classList.remove("dragging"); }); });
+    handle.addEventListener("keydown", function (e) {
+      var d = { ArrowLeft: -5, ArrowRight: 5, Home: -100, End: 100 }[e.key];
+      if (d) { e.preventDefault(); set(pos + d); }
+    });
+    // Two copies of one file play the two halves: keep them on the same frame
+    (function tick() { var d = vids[0].duration; if (d) box.style.setProperty("--prog", (vids[0].currentTime / d * 100) + "%"); requestAnimationFrame(tick); })();
+    setInterval(function () { if (Math.abs(vids[0].currentTime - vids[1].currentTime) > 0.04) vids[1].currentTime = vids[0].currentTime; }, 500);
+  })();
+</script>
+<dialog id="d360" aria-labelledby="d360-title">
+  <form method="dialog"><button class="x" aria-label="Close">×</button></form>
+  <p class="kicker">360 video</p>
+  <h2 id="d360-title">Look around as it plays.</h2>
+  <p class="big">Clips from 360 cameras open as a view you turn with the mouse, level and steady, and export flat for sharing. Try it here: drag the picture, move the slider.</p>
+  <div class="stage">
+    <div class="window w360">
+              <div class="window-bar"><i></i><i></i><i></i><span>VID_20250416_143628_00_005.insv</span></div>
+              <div class="w360-body">
+                <div class="view360" id="view360" data-src="media/360-sample.mp4" data-yaw="180" role="img" aria-label="A 360 clip from a motorcycle ride, shown in the player: drag it to look around.">
+                  <canvas></canvas>
+                  <span class="cmp-label">Drag to look around</span>
+                  <div class="cmp-bar cmp-after" aria-hidden="true"><div class="cmp-track"><i class="cmp-knob"></i></div></div>
+                </div>
+                <div class="sp">
+                  <h4>360° view</h4>
+                  <div class="sp-row" aria-hidden="true">Look around <i class="sp-switch"></i></div>
+                  <div class="sp-row" aria-hidden="true">Projection <span>Auto</span></div>
+                  <h5>View</h5>
+                  <label class="sp-row" for="fov360">Field of view <span id="fov360-value">100°</span></label>
+                  <input type="range" id="fov360" min="50" max="140" value="100">
+                  <div class="sp-row sp-ends" aria-hidden="true"><span>Closer</span><span>Wider</span></div>
+                  <button type="button" class="sp-btn" id="reset360">Look ahead again</button>
+                  <div class="sp-row" aria-hidden="true">Follows <span>Camera</span></div>
+                  <h5 aria-hidden="true">Flat video</h5>
+                  <div class="sp-btn primary" aria-hidden="true">● Record</div>
+                  <div class="sp-two" aria-hidden="true"><div class="sp-btn">Export flat</div><div class="sp-btn">Export 360°</div></div>
+                </div>
+              </div>
+            </div>
+  </div>
+  <a class="more" href="360.html">360 video ›</a>
+</dialog>
+<script src="view360.js"></script>
+<script>
+  // The 360 view opens in a pop-up from the feature list; a click outside it closes it
+  (function () {
+    var d = document.getElementById("d360"), b = document.getElementById("open360"); if (!d || !b || !d.showModal) return;
+    b.addEventListener("click", function () { d.showModal(); });
+    d.addEventListener("click", function (e) { if (e.target === d) d.close(); });
+  })();
+</script>
+</body>
+</html>
