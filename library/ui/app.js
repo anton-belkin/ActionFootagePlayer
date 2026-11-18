@@ -514,7 +514,7 @@ function renderTop() {
 function mosaic(path, filt) {
   const its = under(path).filter((x) => x.thumbPath && (!filt || matches(x))).slice(0, 4);
   let h = '<span class="mosaic">';
-  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
+  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + itemImg(its[i]) + '</i>' : '<i></i>';
   return h + '<span class="fb">' + ICON.fsm + '</span></span>';
 }
 function img(path) {
@@ -608,7 +608,7 @@ function renderMain() {
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   if (list.length) bar += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + shareBar(c) + '</div>'; // albums.js, share.js
-  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
+  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + itemImg(it) + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
   const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   const top = atTop ? albumTopRows(S.layout, filt) : null; // albumviews.js
@@ -632,9 +632,15 @@ function renderMain() {
     h += '</div>';
   } else {
     h += '<div class="grid">' + (top || "");
+    TILE.w = tileWidth(main); // tiles.js: the albums' text fitted to the columns
+    tileWatch(main);
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key];
+      if (it.kind !== "folder" && it.kind !== "mark") {
+        h += itemTile(it, key, { sel, w: TILE.w, renaming: S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : "" });
+        return;
+      }
       h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     });
@@ -1908,7 +1914,7 @@ function marksList(it, probe) {
 }
 function pathsHtml(list) { return list.map((p) => '<span class="mono blk">' + esc(p) + '</span>').join(""); }
 function itemInfo(it) {
-  let h = '<div class="ihead">' + (it.thumbPath ? '<span class="ith">' + img(it.thumbPath) + '</span>' : "") + '<b class="wrap">' + esc(it.name) + '</b><span class="sub">' + esc(it.sub || "") + '</span></div>';
+  let h = '<div class="ihead">' + (it.thumbPath ? '<span class="ith">' + itemImg(it) + '</span>' : "") + '<b class="wrap">' + esc(it.name) + '</b><span class="sub">' + esc(it.sub || "") + '</span></div>';
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
