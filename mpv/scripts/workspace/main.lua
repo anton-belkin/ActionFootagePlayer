@@ -1050,7 +1050,8 @@ end
 
 -- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
 -- nothing on screen unless it fails (the moment that comes with an export)
--- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own)
+-- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own),
+-- picture (k's: the preview from the frame shown as it was pressed, export.lua's moment-picture)
 local function save(name, update, typed, quiet, opts)
     opts = opts or {}
     local a, b
@@ -1150,6 +1151,8 @@ local function save(name, update, typed, quiet, opts)
         force = update ~= nil, reply = mp.get_script_name(),
         -- Its own project, or none (the preset: false); nil: the clip's, as it plays (a moment from before)
         project = preview_project, alone = l.alone == true and preview_project == false,
+        -- k's: the frame on screen as it was pressed, when the gyroflow plugin took it
+        picture = opts.picture,
     }))
 end
 
@@ -1213,22 +1216,26 @@ local function save_key(given)
     -- Asked before the name: there's nowhere to save it yet
     if not need_project("Saving a moment") then return end
     local m = state.moment or state.editing
-    if given and given ~= "" then return save(given, nil, given) end
     local off = state.offset or 0
+    -- Its picture: the frame on screen now, as it's decided, taken by the gyroflow plugin where that's the moment as it
+    -- plays (else its preview is rendered: export.lua's moment-picture). A second to save, not up to 30 s
+    mp.commandv("script-message-to", "gyroflow", "moment-picture", utils.format_json({ a = a + off, b = b + off }))
+    local pic = { picture = true }
+    if given and given ~= "" then return save(given, nil, given, nil, pic) end
     if m then
         if math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
             return mp.osd_message(m.name .. " is saved as it is: move its start or end with l, then k", 4)
         end
         return ask({ prompt = "Update " .. m.name .. " to " .. clock(a + off) .. "–" .. clock(b + off) .. "? Enter, or a new name for a new one: ",
                      id = "workspace-update" }, function(text)
-            if text == "" then save(m.name, m) else last_typed = text; save(text, nil, text) end
+            if text == "" then save(m.name, m, nil, nil, pic) else last_typed = text; save(text, nil, text, nil, pic) end
         end)
     end
     local suggested = suggestion(a)
     ask({ prompt = "Moment " .. clock(a) .. "–" .. clock(b) .. " name (Enter: " .. suggested .. "): ", suggestion = suggested,
           history = history_file(), id = "workspace-moment" }, function(text)
         if text ~= "" then last_typed = text end
-        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil)
+        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil, nil, pic)
     end)
 end
 
