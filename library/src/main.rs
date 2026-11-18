@@ -1922,13 +1922,14 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
+async fn rename_item(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
         let to = rename_in(&root, &view, &kind, &path, &name)?;
+        thumbs_follow(&app, vec![(path.clone().into(), to.clone().into())]);
         // What it is now, and that the old name is gone (changed.rs); its new path is the answer
         Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
@@ -1938,13 +1939,22 @@ async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedP
 /// When one can't be, the ones renamed already get their old name back, and nothing is changed (the window then
 /// shows the album as it was, whole); the folders are read again after it, as for a folder renamed
 #[tauri::command]
-async fn rename_album(shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
+async fn rename_album(app: tauri::AppHandle, shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
         let to = rename_album_in(&root, &paths, &name)?;
+        thumbs_follow(&app, paths.iter().map(PathBuf::from).zip(to.iter().map(PathBuf::from)).collect());
         Ok(changed::Changed { answer: json!(to), ..Default::default() }.reload_all())
     }).await.map_err(|e| e.to_string())?
+}
+
+/// Files or folders renamed or moved (from, to): the pictures the Library keeps of them follow (index::thumbs_follow),
+/// in the background: the command answers meanwhile, and the window has them already (app.js's thumbFollows)
+pub(crate) fn thumbs_follow(app: &tauri::AppHandle, moved: Vec<(PathBuf, PathBuf)>) {
+    let Ok(dir) = app.path().app_cache_dir() else { return };
+    let cache = dir.join("thumbs");
+    std::thread::spawn(move || for (a, b) in moved { index::thumbs_follow(&cache, &a, &b); });
 }
 
 pub(crate) fn rename_album_in(root: &Path, paths: &[String], name: &str) -> Result<Vec<String>, String> {

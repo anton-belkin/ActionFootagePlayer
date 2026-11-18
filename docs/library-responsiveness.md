@@ -116,6 +116,13 @@ export, a folder), deleting, and deleting renders.
 - **The sign that changes are waiting**: Tasks' count, and "Saving changes · N to go" in Tasks, once a change has
   waited over half a second. A quick one shows nothing.
 
+- **Pictures of files renamed or moved** (an album or folder renamed, items moved to another album; 2026-11-18): the
+  new paths show before the disk has them, so the window's pictures are carried to them (`thumbFollows` in app.js,
+  called by the patches), and a picture asked for while a change is waiting that comes back as none isn't kept: it's
+  asked again once the changes are written. The app's own cache of pictures (kept by path, size and time) follows
+  the rename too (`index::thumbs_follow`, in the background after `rename_item`, `rename_album`, `album_move`), so
+  nothing is made again. Before, a renamed album's tile stayed grey for as long as the page stayed open.
+
 What a patch must be: the command's own rule (what it does to the item on disk), and doing it twice must be as doing
 it once, since it's put over fresh readings again and again.
 

@@ -413,6 +413,7 @@ function albumMove(album, files, what) {
     const [stem, ext] = nameParts(f.split("/").pop());
     const id = album + "/" + freeName(names, stem, ext);
     moves.push({ view, from, fromPath: f, id, path: rootOf() + "/" + id, ph: link ? (link.ph || f) : (src.ph || src.thumbPath || f), name: f.split("/").pop() });
+    thumbFollows(f, rootOf() + "/" + id); // the same file in another album: its picture once it's there too
   }
   if (moves.length) Writes.run("albummove", [], { album, files, moves, what }, { made: moves.filter((m) => m.view !== "footage").map((m) => m.view + ":" + m.id) });
   return moves.length;

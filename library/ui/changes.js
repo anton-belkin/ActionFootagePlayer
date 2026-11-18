@@ -387,6 +387,7 @@ Writes.define("rename", {
   patch(d, a) {
     const it = d.item(a.id);
     if (!it) return;
+    thumbFollows(it.path, a.to.path); // (its picture: the same file's)
     Object.assign(it, a.to);
     d.moved(it);
   },
@@ -410,7 +411,7 @@ Writes.define("renamealbum", {
   send: (a) => ["rename_album", { paths: a.folders.map((f) => f.path), name: a.name }],
 });
 // A folder of the project's renamed (`from`, `to`: its paths in the project's folder; `name`: its new name), in a view's
-// draft: what's in it follows
+// draft: what's in it follows, with the pictures the window has of it (app.js's thumbFollows: the files are the same)
 function folderRenamed(d, a) {
   {
     const move = (p) => (p === a.from ? a.to : p.startsWith(a.from + "/") ? a.to + p.slice(a.from.length) : p);
@@ -420,19 +421,27 @@ function folderRenamed(d, a) {
     if (d.view === "footage") {
       d.list("clips_dirs", (l) => l.map(move));
       for (const it of d.where((x) => inFolder(x.pdir, a.from))) {
-        if (it.preview) it.preview = disk(it.preview, it.pdir.length - a.from.length + 1 + it.preview.split(/[\\/]/).pop().length);
+        if (it.preview) { const was = it.preview; it.preview = disk(it.preview, it.pdir.length - a.from.length + 1 + it.preview.split(/[\\/]/).pop().length); thumbFollows(was, it.preview); }
         it.pdir = move(it.pdir);
       }
       // …and the clips' links in it, as Albums show them (albums.js)
       const links = d.data.links || [];
       if (links.some((l) => inFolder(parentDir(l.rel), a.from))) {
-        d.data.links = links.map((l) => { const dir = parentDir(l.rel); return inFolder(dir, a.from) ? Object.assign({}, l, { rel: move(dir) + "/" + l.rel.split("/").pop(), path: disk(l.path, dir.length - a.from.length + 1 + l.rel.split("/").pop().length) }) : l; });
+        d.data.links = links.map((l) => {
+          const dir = parentDir(l.rel);
+          if (!inFolder(dir, a.from)) return l;
+          const path = disk(l.path, dir.length - a.from.length + 1 + l.rel.split("/").pop().length);
+          thumbFollows(l.path, path); // the same file: its picture, as Albums show it
+          return Object.assign({}, l, { rel: move(dir) + "/" + l.rel.split("/").pop(), path });
+        });
         d.hit = true;
       }
     } else {
       d.list("dirs", (l) => l.map(move).sort());
       for (const it of d.where((x) => inFolder(x.dir, a.from))) {
+        const was = it.path;
         it.path = disk(it.path, it.id.length - a.from.length);
+        thumbFollows(was, it.path);
         it.dir = move(it.dir);
         it.id = it.dir + "/" + it.id.split("/").pop();
       }
