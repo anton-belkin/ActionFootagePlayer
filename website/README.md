@@ -19,17 +19,21 @@ comparison in a laptop with the cameras drawn beside it. The other pages became 
 column to move around by, one column of text. They are **built**, not written:
 
 ```
-site-old/        the site as it was before the redesign: the backup, and the source of the articles' text
-build.py         python3 website/build.py: each page of site-old/ → site/, in the article look (header, footer
-                 and side column added, sections dropped or reworded by the rules at its top)
+pages/           the articles' text: each a whole page in the site's earlier markup. Edit these
+build.py         python3 website/build.py: each page of pages/ → site/, in the article look (header, footer and
+                 side column added)
 site/b.css       the home page's styles; article.css: the articles', loaded over styles.css and the page's own
 site/view360.js  the 360 view in the home page's pop-up
-shots/redesign-2026-11/   before and after pictures
+site-old/        the site as it was before the redesign, whole, translations included: the backup. Not built from
+shots/           before and after pictures of the redesign and of what followed
 ```
 
-To change an article's text, change it in `site-old/` (or add a rule in `build.py`) and run the build. The
-translations (`site/fr`, `ru`, `zh`) are still the earlier design; each new page's footer links to them. The tag
-`site-before-redesign-2026-11-18` marks the last commit before it.
+To change an article's text, change it in `pages/` and run the build; `site/*.html` other than `index.html` are
+written by it. The tag `site-before-redesign-2026-11-18` marks the last commit before the redesign.
+
+Since 2026-11-18 the site is in English only: the translations (fr, ru, zh) were taken out of `site/` (they are in
+`site-old/`), and their addresses redirect to the English pages (`site/_redirects`). Action Footage Library isn't
+shown on the site for now: its sections and mentions were taken out of `pages/`.
 
 ## Layout
 

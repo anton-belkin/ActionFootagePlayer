@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """The site's pages other than the home page: articles in the home page's look.
 
-Reads each page of site-old/ (the site as it was before the redesign of 2026-11-18, kept as the pages' source),
-keeps its content (the <main>), and writes it into site/ with the home page's header and footer, a side column to move
-around by (the site's pages, and this page's sections), and article.css over the old styles. site/index.html, the home
-page, is written by hand. Run after changing a page in site-old/ or the rules below:  python3 website/build.py
+Reads each page of pages/ (the article's text: a whole page in the site's earlier markup), keeps its content (the
+<main>), and writes it into site/ with the home page's header and footer, a side column to move around by (the site's
+pages, and this page's sections), and article.css over the earlier styles. site/index.html, the home page, is written
+by hand. Run after changing a page in pages/:  python3 website/build.py
 """
 import html, pathlib, re
 
 HERE = pathlib.Path(__file__).parent
-SRC = HERE / "site-old"
+SRC = HERE / "pages"
 OUT = HERE / "site"
 
 # The side column: (file, name), grouped
@@ -20,23 +20,6 @@ GROUPS = [
     ("More", [("nas", "NAS Helper"), ("download", "Download"), ("about", "About the maker")]),
 ]
 PAGES = [f for _, items in GROUPS for f, _ in items]
-
-# Text set right for this draft: (page or "*", old, new). A rule that no longer matches stops the build.
-FIXES = [
-    ("organizing", "<h1>Your footage as a project of its own, wherever it lives.</h1>", "<h1>Marks and moments: keep what&rsquo;s worth keeping.</h1>"),
-    ("organizing", "Keep a trip's best parts as moments, mark what matters, and find any clip by camera, place or tag, on this computer or your NAS. Action Footage Library, the app that comes with the player, sees the whole of it, and works through it in the background while you watch.",
-     "The highlights you pressed on the camera sit on the bar under the video. Add your own marks, keep a trip's best parts as moments, export them, and cut out what was filmed by mistake."),
-    ("organizing", '<p class="eyebrow">Organizing</p>', '<p class="eyebrow">Marks and moments</p>'),
-    ("moments", "Final Cut Pro, DaVinci Resolve (the free version too) and Premiere Pro get your moments, marks, favorites and folders, on the original files.",
-     "Final Cut Pro, DaVinci Resolve (the free version too) and Premiere Pro will get your moments, marks, favorites and folders, on the original files (coming soon)."),
-]
-
-# Sections left out of a page, by id
-DROP = {
-    # Action Footage Library isn't shown on the site for now: its sections are left out
-    "organizing": ["project", "folder", "library-app", "locations", "links", "info", "clip-previews", "optical", "tags", "project-tab", "limits"],
-}
-
 
 def between(s, a, b, inc=False):
     i = s.index(a); j = s.index(b, i)
@@ -93,11 +76,7 @@ def build(page):
     tail = src[src.index("</main>"):]
     scripts = re.findall(r"<script\b[^>]*>.*?</script>", tail, flags=re.S)
 
-    # Sections: drop some, list the rest for the side column
-    for sid in DROP.get(page, []):
-        m = re.search(r'[ \t]*(?:<!--[^>]*-->\s*)?<section\b[^>]*\bid="%s"[^>]*>.*?</section>\n?' % re.escape(sid), main, flags=re.S)
-        assert m, (page, sid)
-        main = main[:m.start()] + main[m.end():]
+    # The sections, for the side column
     toc = []
     for m in re.finditer(r'<section\b[^>]*\bid="([^"]+)"[^>]*>(.*?)</section>', main, flags=re.S):
         h2 = re.search(r"<h2\b[^>]*>(.*?)</h2>", m.group(2), flags=re.S)
@@ -106,20 +85,15 @@ def build(page):
             toc.append((m.group(1), text(eb.group(1)) if eb and m.group(1) != "intro" else text(h2.group(1)).rstrip(".")))
 
     body = main
-    for where, old, new in FIXES:
-        if where in ("*", page):
-            assert old in body or where == "*", (page, old[:60])
-            body = body.replace(old, new)
 
     def paths(s):
         s = re.sub(r'href="(?:index\.html)?#(?:cameras)"', 'href="index.html#specs"', s)
         s = re.sub(r'href="index\.html#how"', 'href="index.html#features"', s)
         return s
 
-    head_links = "\n".join(re.findall(r'<link rel="(?:alternate|icon|apple-touch-icon)"[^>]*>', src))
-    langs = ('      <p class="langs">Also in <a href="fr/%s.html" hreflang="fr" lang="fr">Français</a>, <a href="ru/%s.html" hreflang="ru" lang="ru">Русский</a> '
-             'and <a href="zh/%s.html" hreflang="zh-Hans" lang="zh-Hans">简体中文</a>, in the earlier design for now.</p>\n' % (page, page, page))
-    footer = re.sub(r'      <p class="langs">.*?</p>\n', lambda m: langs, FOOTER.replace('href="#top"', 'href="index.html"'), flags=re.S)
+    head_links = "\n".join(re.findall(r'<link rel="(?:icon|apple-touch-icon)"[^>]*>', src))
+    footer = FOOTER.replace('href="#top"', 'href="index.html"')
+
     css = "\n".join(f'<link rel="stylesheet" href="{c}">' for c in ["styles.css"] + own_css)
     out = f"""<!doctype html>
 <html lang="en" data-theme="light">
