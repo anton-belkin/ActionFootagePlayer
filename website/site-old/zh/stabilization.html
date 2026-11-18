@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>防抖：Action Footage Player</title>
+<meta name="description" content="Action Footage Player 如何在播放时让片段稳定：先看片段旁边有没有 Gyroflow 项目；没有，就在相机防抖关闭时使用相机自己的陀螺仪数据；再没有，就按录制原样播放，按一个键即可送到 Gyroflow。相机上要怎么设置，每一项设置、快捷键和局限。">
+<link rel="alternate" hreflang="en" href="https://actionfootageplayer.ch/stabilization">
+<link rel="alternate" hreflang="fr" href="https://actionfootageplayer.ch/fr/stabilization">
+<link rel="alternate" hreflang="ru" href="https://actionfootageplayer.ch/ru/stabilization">
+<link rel="alternate" hreflang="zh-Hans" href="https://actionfootageplayer.ch/zh/stabilization">
+<link rel="alternate" hreflang="x-default" href="https://actionfootageplayer.ch/stabilization">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,500..900&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  :root { color-scheme: light dark; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { margin: 0; }
+  img { max-width: 100%; }
+  [hidden] { display: none !important; }
+</style>
+<link rel="stylesheet" href="../styles.css">
+<link rel="stylesheet" href="../stabilization.css">
+</head>
+<body>
+
+<header class="top band">
+  <div class="wrap">
+    <a class="brand" href="index.html" aria-label="Action Footage Player，首页">
+      <img class="brand-mark" src="../icon.svg" alt="">
+      Action Footage Player
+    </a>
+    <nav class="nav" aria-label="网站">
+      <details class="navmenu"><summary>首页</summary>
+        <ul>
+          <li><a href="index.html">首页</a></li>
+          <li><a href="index.html#features">功能简介</a></li>
+          <li><a href="index.html#how">工作原理</a></li>
+          <li><a href="index.html#faq">常见问题</a></li>
+          <li><a href="about.html">关于作者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary>适合谁</summary>
+        <ul>
+          <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+          <li><a href="moments.html">户外旅行爱好者</a></li>
+        </ul>
+      </details>
+      <details class="navmenu"><summary aria-current="true">功能</summary>
+        <ul>
+          <li><a href="log.html">Log 素材</a></li>
+          <li><a href="stabilization.html" aria-current="page">防抖</a></li>
+          <li><a href="organizing.html">整理素材</a></li>
+          <li><a href="photos.html">照片</a></li>
+          <li><a href="360.html">360 视频</a></li>
+          <li><a href="nas.html">NAS Helper</a></li>
+          <li><a href="features.html" class="nm-all">全部功能</a></li>
+        </ul>
+      </details>
+      <a href="download.html" class="nav-dl">下载</a>
+    </nav>
+    <details class="sitemenu">
+      <summary aria-label="菜单"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></summary>
+      <ul>
+        <li class="sm-group">首页</li>
+        <li><a href="index.html">首页</a></li>
+        <li><a href="index.html#features">功能简介</a></li>
+        <li><a href="index.html#how">工作原理</a></li>
+        <li><a href="index.html#faq">常见问题</a></li>
+        <li><a href="about.html">关于作者</a></li>
+        <li class="sm-group">适合谁</li>
+        <li><a href="divers.html">潜水与浮潜爱好者</a></li>
+        <li><a href="moments.html">户外旅行爱好者</a></li>
+        <li class="sm-group">功能</li>
+        <li><a href="log.html">Log 素材</a></li>
+        <li><a href="stabilization.html" aria-current="page">防抖</a></li>
+        <li><a href="organizing.html">整理素材</a></li>
+        <li><a href="photos.html">照片</a></li>
+        <li><a href="360.html">360 视频</a></li>
+        <li><a href="nas.html">NAS Helper</a></li>
+        <li><a href="features.html">全部功能</a></li>
+        <li class="sm-dl"><a href="download.html">下载</a></li>
+      </ul>
+    </details>
+    <details class="lang">
+      <summary aria-label="语言：简体中文"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg>中文</summary>
+      <ul>
+        <li><a href="../stabilization.html" hreflang="en" lang="en">English</a></li>
+        <li><a href="../fr/stabilization.html" hreflang="fr" lang="fr">Français</a></li>
+        <li><a href="../ru/stabilization.html" hreflang="ru" lang="ru">Русский</a></li>
+        <li><a href="../zh/stabilization.html" hreflang="zh-Hans" lang="zh-Hans" aria-current="page">简体中文</a></li>
+      </ul>
+    </details>
+  </div>
+</header>
+<div class="mt-notice band" role="note">
+  <p class="wrap">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../stabilization.html" hreflang="en">阅读英文原文</a></p>
+</div>
+
+<main id="top">
+  <!-- What you get -->
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">防抖</p>
+        <h1>抖动的片段，播放时就是稳的。无需先渲染。</h1>
+        <p class="lede">拍摄时关了相机自身的防抖？双击片段，它就会依据相机记录下的运动，在你观看的同时稳定播放。防抖从不改动原始文件。</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">免费下载 Mac 版</span><span class="os-win">下载 Mac 版</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
+          </a>
+        </div>
+        <div class="status">
+          <span>边播放边稳定</span>
+          <span>无需导入，无需渲染</span>
+          <span>原始文件只读不写</span>
+        </div>
+      </div>
+
+      <figure class="media">
+        <div class="halves"><span>录制原样</span><span>在这里播放的样子</span></div>
+        <video autoplay muted loop playsinline preload="metadata" poster="../media/stab-underwater.jpg" width="1920" height="540" src="../media/stab-underwater.mp4" aria-label="同一段潜水画面并排对比：左边是相机录下的抖动原样，右边是在这里播放时的稳定画面。"></video>
+        <figcaption>Osmo Action 6，关闭 EIS，播放器的默认设置。左：录制原样。右：播放时的样子。</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <!-- How stabilization works at all, and what this player uses for it -->
+  <section class="section band" id="how-it-works">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">原理</p>
+        <h2>让片段稳定，需要什么。</h2>
+        <p class="lede">片段抖动，是相机每秒多次的小幅转动。要让它稳定，就把每一帧按相机转动的量转回去。这需要三样东西：相机怎样运动，镜头怎样成像，以及一个把两者结合起来的程序。</p>
+      </div>
+      <div class="gap-grid st-gf">
+        <div class="gap-item">
+          <h3>相机怎样运动</h3>
+          <p>大多数运动相机都有陀螺仪：一种每秒数百次记录相机如何转动的传感器。这就是片段的<strong>陀螺仪数据</strong>（gyro data），也叫运动数据，写在视频文件里。它很精确，读取几乎不花时间。只有在相机自身的防抖关闭时，你才能得到它：要怎么设置，见<a class="text-link" href="#camera">下文</a>。</p>
+        </div>
+        <div class="gap-item">
+          <h3>没有陀螺仪数据？那就从画面中找</h3>
+          <p>没有陀螺仪数据的片段仍然可以防抖：这时运动是从画面本身找出来的，方法是逐帧跟踪画面中的细节（光流）。这样更慢，所以要提前做一次，并保存下来。</p>
+        </div>
+        <div class="gap-item">
+          <h3>镜头怎样成像</h3>
+          <p>运动相机的广角镜头会让画面弯曲，越靠近边缘越明显。要把一帧正确地转回去，程序需要知道这支镜头的形状：它的镜头配置文件（profile）。这样直线才会保持笔直，而不是在边缘晃动。</p>
+        </div>
+        <div class="gap-item">
+          <h3>程序：Gyroflow</h3>
+          <p>在这里完成这项工作的程序是 <a class="text-link" href="https://gyroflow.xyz" rel="noopener">Gyroflow</a>，免费且开源。它的引擎在片段播放时于播放器内部运行，所以无需先渲染。它认识大多数运动相机的镜头。Gyroflow 本身也是一个独立的 App，用于需要更多处理的片段：播放器用 <kbd>Ctrl</kbd>+<kbd>e</kbd> 在其中打开片段，并播放你在那里保存的结果。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Camera settings -->
+  <section class="section band tight-top" id="camera">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">拍摄之前</p>
+        <h2>相机上要设置什么。</h2>
+        <p class="lede">相机只在某些模式下记录陀螺仪数据，而播放器只在相机表明自身防抖已关闭时才使用它。</p>
+      </div>
+      <ol class="checklist">
+        <li>
+          <h3>关闭相机自身的防抖</h3>
+          <p>DJI 上是 EIS（电子增稳），GoPro 上是 HyperSmooth，Insta360 上是相机内的 FlowState。在 DJI 上，必须是 EIS 本身关闭：地平线模式，或者带裁切的 EIS 关闭，都算作开启。</p>
+        </li>
+        <li>
+          <h3>在 DJI 上，用 Wide FOV 拍摄</h3>
+          <p>DJI 相机在 EIS 关闭且视场为 Wide 时记录陀螺仪数据。在其他 FOV 下可能完全不记录，这些片段就需要 Gyroflow 的光流。</p>
+        </li>
+        <li>
+          <h3>水下保持关闭。水上随你</h3>
+          <p>在空气中，DJI 的 EIS 效果很好，所以在水上没什么理由关掉它。在水下就不行了，至少以目前的固件而言，原因可能是水会折射光线，镜头因而表现得像一支比 EIS 所调校的焦距更长的镜头。播放器自带的预设是为水下制作的。关于潜水的更多内容，见<a class="text-link" href="divers.html">水下拍摄</a>。</p>
+        </li>
+        <li>
+          <h3>然后双击片段</h3>
+          <p>没有别的要设置。是不是 Log 在这里无关紧要：色彩是另外一步，在 <a class="text-link" href="log.html">Log 素材</a>中说明。</p>
+        </li>
+      </ol>
+      <p class="note">已用真实片段验证：关闭 EIS 的 DJI Osmo Action 6 和关闭 HyperSmooth 的 GoPro HERO12 Black，在 Apple Silicon 的 Mac 上。其他 DJI 相机、其他 GoPro 和单镜头 Insta360 相机已在代码中支持，应可用。360 片段见：<a class="text-link" href="360.html">360 视频</a>。</p>
+    </div>
+  </section>
+
+  <!-- Gyroflow projects, and Ctrl+e -->
+  <section class="section band dive" id="gyroflow">
+    <div class="wrap dive-grid">
+      <div class="stack kbd-dark">
+        <p class="eyebrow">Gyroflow 项目</p>
+        <h2>在 Gyroflow 中打开。保存。它回来了，已经防抖。</h2>
+        <p class="lede"><kbd>Ctrl</kbd>+<kbd>e</kbd> 暂停片段，并在 Gyroflow App 中打开它，用来做播放器设置做不到的一切。需要已安装 Gyroflow。</p>
+        <div class="dive-points">
+          <div>
+            <h3>依据陀螺仪数据防抖的片段</h3>
+            <p>播放器先按片段正在播放的样子，在它旁边写入一个项目：同样的预设、防抖、强度、地平线锁定、镜头和画幅，以及运动数据，这样 Gyroflow 无需再读一遍。已经存在的 <code>.gyroflow</code> 会原样打开，绝不会被覆盖。</p>
+          </div>
+          <div>
+            <h3>有项目的片段</h3>
+            <p>它的项目原样在 Gyroflow 中打开。从此由项目决定平滑、地平线、画幅、投影、旋转和水下镜头：面板显示它的值，你在 Gyroflow 中修改它们。</p>
+          </div>
+          <div>
+            <h3>没有陀螺仪数据？没问题</h3>
+            <p>视频本身在 Gyroflow 中打开，由它进行光学防抖：从画面本身找出运动（光流）。面板显示 “Waiting for the project from Gyroflow…”（正在等待 Gyroflow 的项目）。把项目保存在片段旁边，片段就会在原来的位置重新加载，已经防抖。</p>
+            <p>一次处理许多片段：<a class="text-link" href="organizing.html#optical">Action Footage Library</a> 中的 <b>Stabilize optically</b>（光学防抖）会在后台一个接一个地处理它们。</p>
+            <p class="os-win">在 Windows 上，要打开没有项目的视频，需要在 <code>gyroflow.conf</code> 的 <code>gyroflow_app=</code> 中填写 Gyroflow 的路径。</p>
+          </div>
+          <div>
+            <h3>每次保存都会回来</h3>
+            <p>每次在 Gyroflow 中保存（<span class="os-mac"><kbd>Cmd</kbd>+<kbd>S</kbd></span><span class="os-win"><kbd>Ctrl</kbd>+<kbd>S</kbd></span>），播放器都会在片段的同一位置重新加载防抖。此后片段就按它的项目播放。</p>
+          </div>
+        </div>
+        <p>视频文件本身从不被写入：项目始终是它旁边的 <code>.gyroflow</code> 文件。</p>
+      </div>
+      <div class="stack">
+        <figure class="media" id="shot-stabilization-4">
+          <img src="../media/stabilization-4.jpg" alt="有 Gyroflow 项目的片段上，侧边面板的 Transform 标签页：Stabilization 为 On，Lens 为 As in the project，以及 In the Gyroflow project 卡片，列出它的平滑、地平线、画幅和投影，还有 Edit in Gyroflow。" width="584" height="1450" loading="lazy">
+          <figcaption>有自己项目的片段：平滑、地平线、画幅和投影都是项目的，列在 Transform 标签页中。</figcaption>
+        </figure>
+        <figure class="media" id="shot-stabilization-5">
+          <img src="../media/stabilization-5.jpg" alt="没有运动数据的片段上，侧边面板的 Transform 标签页：Stabilization 呈灰色，停在 Off，No motion data in this clip: Gyroflow can find it in the picture (optical flow)，以及 Stabilize in Gyroflow 按钮。" width="584" height="779" loading="lazy">
+          <figcaption>没有陀螺仪数据？一个按钮就能在 Gyroflow 中打开视频，从画面进行防抖。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- The panel's Transform and Source tabs -->
+  <section class="section band" id="panel">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Transform 标签页</p>
+        <h2>设置都在视频旁边的面板里。</h2>
+        <p class="lede">侧边面板打开时显示它的 Project（项目）标签页。片段如何显示、防抖和取景，在它的 <b>Transform</b>（变换）标签页；如何读取文件，比如录制时的旋转和水下镜头，在它的 <b>Source</b>（源）标签页，见<a class="text-link" href="#source">下文</a>。<kbd>Tab</kbd> 隐藏面板，再按一次重新显示。Transform 标签页从上到下：</p>
+      </div>
+      <div class="st-panel">
+        <dl class="st-settings">
+          <div>
+            <dt>Transform defined in（变换定义于）</dt>
+            <dd>顶部的卡片说明正在播放的设置来自哪里：<b>this session</b>（本次会话，没有为它保存任何设置）、<b>the source</b>（源）、<b>the moment</b>（精彩瞬间）或 <b>the clip preview</b>（片段预览）。下面是：<b>Save</b>（保存；按钮上写着 <b>Save to the source</b>、<b>Save to the moment</b> 或 <b>Save to the clip preview</b>）、<b>Revert to saved</b>（恢复为已保存）、<b>Use as default</b>（设为默认）和 <b>Auto save</b>（自动保存）开关（默认关闭）。播放精彩瞬间或片段预览时，还有 <b>Settings of its own</b>（自己的设置）开关。下面每一项设置中，你的选择以填充显示，已保存的那一项在角上有个圆点。它们的作用见：<a class="text-link" href="#how-long">设置能保持多久</a>。</dd>
+          </div>
+          <div>
+            <dt>Stabilization（防抖） <span class="st-def-val">默认 On</span> <kbd>Ctrl</kbd>+<kbd>g</kbd></dt>
+            <dd><b>On</b>：放大到不露出边缘。<b>Wider</b>：不放大，所以你能看到更多画面，边缘有时会露出，并按 <a class="text-link" href="#edges">Edges</a> 的设置填充。<b>Off</b>：不防抖；下面的镜头设置仍然生效。片段没有运动数据？它会呈灰色，停在 Off，并显示 <b>Stabilize in Gyroflow…</b>（<kbd>Ctrl</kbd>+<kbd>e</kbd>，见<a class="text-link" href="#gyroflow">上文</a>），标签页的其余内容保留。有 Gyroflow 项目时，Wider 和 Off 仅用于观看，从不保存：Wider 显示项目的裁切切掉了多少，Off 显示录制时的原始运动。</dd>
+          </div>
+          <div>
+            <dt>Level（强度） <span class="st-def-val">默认 Medium</span> <kbd>Ctrl</kbd>+<kbd>k</kbd></dt>
+            <dd>防抖有多强。<b>Weak</b>：裁切 10 %，平滑度 50 %。<b>Medium</b>：裁切 20 %，平滑度 75 %。<b>Strong</b>：裁切 30 %，平滑度 100 %。当相机转动超出裁切留出的余量时，画面会更早地跟上，所以只有那时才会露出边缘。切换强度在片段播放中立即生效。Stabilization 为 Off 时呈灰色。有项目的片段不显示这一项：它用的是项目的平滑设置。</dd>
+          </div>
+          <div>
+            <dt>Horizon（地平线） <span class="st-def-val">默认 Free</span></dt>
+            <dd><b>Level</b>：保持地平线水平。这需要更多放大，所以边缘露出得更多。<b>Free</b>：不保持水平。默认值来自预设，播放器自带的预设不锁定地平线。有项目的片段不显示这一项。</dd>
+          </div>
+          <div>
+            <dt>Lens（镜头） <span class="st-def-val">默认 Corrected、Linear</span></dt>
+            <dd><b>Corrected</b>（校正）：按镜头配置文件去除镜头的弯曲，再按你的选择绘制：<b>Linear</b>（直线不弯）、<b>Fisheye 1</b>（球极投影）、<b>Fisheye 2</b>（等距投影）、<b>Fisheye 3</b>（等立体角投影）或 <b>Fisheye 4</b>（正交投影）。<b>As recorded</b>（录制原样）：镜头保持相机录下的样子。镜头是一项独立的设置：Stabilization 为 Off、镜头为 Corrected 时，只校正镜头，什么都不平滑。它需要镜头配置文件：未知的镜头停在 As recorded（Source › Lens 会说明原因）。有项目时它是 <b>As in the project</b>（按项目），As recorded 仅用于观看。</dd>
+          </div>
+          <div>
+            <dt>Frame（画幅） <span class="st-def-val">默认 Own、As is</span></dt>
+            <dd>整个片段的形状：<b>Own</b>（视频自己的）、<b>16:9</b>、<b>4:3</b>、<b>5:4</b> 或 <b>1:1</b>，然后是 <b>As is</b>（原样）、<b>Landscape</b>（横向）或 <b>Portrait</b>（竖向）；竖向时比例显示为 9:16、3:4 和 4:5。片段按它播放，导出、精彩瞬间、片段预览和照片也都按它制作。缩放仍由 Gyroflow 决定。片段没有防抖时，由 mpv 自己的裁切完成。有运动数据时，<b>Make a Gyroflow project…</b>（<kbd>Ctrl</kbd>+<kbd>e</kbd>）会把画幅带进一个新项目。有项目时，这里换成 <b>In the Gyroflow project</b>（在 Gyroflow 项目中）卡片，显示它的平滑、地平线、画幅和投影，并附有 <b>Edit in Gyroflow…</b>。</dd>
+          </div>
+          <div>
+            <dt>Water: Reduce color aberration（水下：减少色差） <span class="st-def-val">默认开启</span> <kbd>Ctrl</kbd>+<kbd>a</kbd></dt>
+            <dd>在水下，镜头前的平面玻璃会让颜色越靠近画面边缘分得越开。这一项把它们移回原位，凡是镜头在水下的地方都适用。在 Osmo Action 6 的潜水片段上，画面边缘红色的色边从 3-7 px 缩小到约 1 px。它是变换的一部分，和其余设置一起保存。仅用于播放：导出的文件保留色边。Source › <b>Under water, flat port</b> 为 No 时呈灰色。</dd>
+          </div>
+          <div>
+            <dt>Temporal denoise: Clean the noise（时域降噪：清除噪点） <span class="st-def-val">默认开启</span> <kbd>Ctrl</kbd>+<kbd>p</kbd></dt>
+            <dd>在片段播放时和暂停时去掉昏暗光线下的噪点：每一帧都与它前后的帧平均，每一帧都按它们之间的运动对齐到这一帧上，于是噪点消失，细节保留。画面会晚几帧显示，声音会等它。<b>Stronger, for a very noisy clip</b>（更强，用于噪点很多的片段，默认关闭）：纳入更多帧，不保留颗粒，去掉暗斑，平坦区域更平滑：开阔水域干净了，细微纹理会柔和一些。它是变换的一部分，所以按片段保存。不会往文件里写入任何东西：导出的文件按录制原样播放。这台电脑做多少时域降噪，在 <a class="text-link" href="#quality">Performance &amp; Quality</a> 中设置。</dd>
+          </div>
+          <div>
+            <dt>Sideways jerks（横向抖动） <kbd>Ctrl</kbd>+<kbd>j</kbd></dt>
+            <dd>近距离拍摄时，不管相机的转动去除得多好，手的细小横向抖动都会让画面晃动。<b>Measure for this clip</b>（为此片段测量）根据相机的加速度计和画面，把它测量一次并保存下来；之后播放时，画面会朝相反方向移动来抵消它。在 Osmo Action 6 的片段上，测量大约需要片段时长的一半。适用于已经防抖的片段。</dd>
+          </div>
+        </dl>
+        <figure class="media" id="shot-stabilization-2">
+          <img src="../media/stabilization-2.jpg" alt="潜水片段上，侧边面板的 Transform 标签页：Transform defined in this session，Stabilization On，Level Medium，Horizon Free，Lens Corrected 和 Linear，Frame Own 和 As is，Reduce color aberration 开启。" width="584" height="2019" loading="lazy">
+          <figcaption>默认设置下的潜水片段，依据它的陀螺仪数据防抖。</figcaption>
+        </figure>
+        <figure class="media" id="shot-stabilization-7">
+          <img src="../media/stabilization-7.jpg" alt="Transform 标签页的下半部分：Water，Reduce color aberration 开启；Temporal denoise，Clean the noise 开启，Stronger, for a very noisy clip 关闭，各附说明文字；Sideways jerks，带有 Measure for this clip 按钮。" width="584" height="875" loading="lazy">
+          <figcaption>Transform 标签页再往下：水下、时域降噪和横向抖动。</figcaption>
+        </figure>
+      </div>
+
+      <h3 class="st-sub" id="source">Source 标签页：如何读取片段</h3>
+      <p class="st-p">文件是什么，每个源设置一次。顶部的 <b>Input</b>（输入）卡片显示 “Changed for viewing. The dot marks what's saved”（为观看而改动，圆点标出已保存的值）、“Saved in the source, for all its moments and clips”（保存在源中，用于它的所有精彩瞬间和片段）或 “Nothing saved: as the file says”（未保存：按文件所写）。<b>Save to the source</b>（保存到源）保留你的改动，用于这个片段以及它所有的精彩瞬间和片段预览；<b>Revert to saved</b> 恢复原样。在精彩瞬间或片段预览中也能用。</p>
+      <dl class="st-settings">
+        <div>
+          <dt>Recorded turned（录制时的旋转） <span class="st-def-val">默认 As is</span></dt>
+          <dd><b>As is</b>、<b>90° ↻</b>、<b>180°</b> 或 <b>90° ↺</b>：用于相机转着拍的片段，比如竖着拿的 Osmo Action 6。它会以正向播放、防抖和导出。如果文件本身注明了旋转，它已经以正向显示，这里的选项会在此基础上再转。旋转在防抖之前进行。</dd>
+        </div>
+        <div>
+          <dt>Lens（镜头）</dt>
+          <dd><b>Camera</b>（相机）、<b>Profile</b>（配置文件：来自文件、来自项目，或未知）和 <b>Motion data</b>（运动数据）：依据什么防抖，“Gyroflow project”（Gyroflow 项目）、“Gyro, in-camera stabilization off”（陀螺仪，机内防抖关闭）、“none: the camera stabilized it (EIS)”（无：相机已防抖，EIS）或 “none”（无）。没有镜头配置文件，镜头就无法校正；Gyroflow 可以设置一个（<kbd>Ctrl</kbd>+<kbd>e</kbd>），在这里选择配置文件以后才会提供。</dd>
+        </div>
+        <div>
+          <dt>Under water, flat port（水下，平面镜罩） <span class="st-def-val">默认 Auto</span> <kbd>Ctrl</kbd>+<kbd>u</kbd></dt>
+          <dd>针对水折射光线的校正。<b>Auto</b>：按相机遥测数据所记录的，片段入水或出水时在一帧之内切换。只有 Osmo Action 6 会记录这一信息；其他相机的 Auto 采用预设的设定（自带预设：水下）。<b>Yes</b>：在水下，位于平面镜罩之后，即相机自己的镜片或平面潜水壳。<b>No</b>：在水上，或位于球面镜罩之后。有项目时以及镜头未知时呈灰色。</dd>
+        </div>
+      </dl>
+      <p class="st-p">有 Gyroflow 项目时，旋转和水下镜头都是项目的：标签页上写着 “Turn and lens as defined in the Gyroflow project”（旋转和镜头按 Gyroflow 项目的定义）。<b>Edit in Gyroflow…</b>（<kbd>Ctrl</kbd>+<kbd>e</kbd>）就在它们正下方。Log 曲线也在这里设置：见 <a class="text-link" href="log.html#settings">Log 素材</a>。</p>
+
+      <h3 class="st-sub" id="how-long">设置能保持多久</h3>
+      <p class="st-p">Source 标签页的输入设置属于片段自己：改动仅用于观看，直到按下 <b>Save to the source</b>，而且不会带到下一个片段。Transform 标签页的设置作为一个整体保存，从不单独保存其中一项。正在播放的是下面几种之一，取第一个存在的，从不混用：</p>
+      <ol class="st-p">
+        <li><b>精彩瞬间或片段预览自己的</b>，在 <b>Settings of its own</b> 开启时。</li>
+        <li><b>源的</b>，保存在片段旁边的 <code>&lt;clip&gt;.afp.json</code> 中，和它的标记放在一起。</li>
+        <li><b>会话的</b>：一开始等于默认设置，并跟随你在没有保存任何设置的片段上所做的改动。</li>
+        <li><b>默认设置</b>，即 <b>Use as default</b> 最近一次写入的。</li>
+      </ol>
+      <p class="st-p">在没有保存任何设置的片段上，改动会进入会话的设置，所以后面的片段也沿用。在已保存变换的片段上，改动仅用于观看：圆点标出已保存的值，<b>Revert to saved</b> 可以恢复。<b>Save</b> 把正在播放的设置整体写到卡片所说的地方：Settings of its own 开启时写入精彩瞬间或片段预览，否则写入源。<b>Auto save</b> 在本次会话中，会在打开没有保存任何设置的片段或精彩瞬间时先保存一次，之后每次改动都保存。<b>Use as default</b> 把正在播放的设置留到下次启动，现在起也用于后面的片段。</p>
+      <p class="st-p">Gyroflow 项目拥有自己的设置：平滑、地平线、画幅、投影、旋转和水下镜头。播放器只显示它们，从不写入。对应其中某一项的快捷键会提示它 “as defined in the Gyroflow project”（按 Gyroflow 项目的定义），并说明用 <kbd>Ctrl</kbd>+<kbd>e</kbd> 在 Gyroflow 中编辑。之前为片段保存的设置仍留在它的文件中，项目移除后会再次生效。</p>
+      <div class="compare-wrap">
+        <table class="settings">
+          <thead><tr><th scope="col">设置</th><th scope="col">没有项目的片段</th><th scope="col">有项目的片段</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Stabilization</th><td>变换的一部分：用已保存的，否则用会话的，后者会沿用到后面的片段。</td><td>以 On 开始，与 Gyroflow 中一致。Wider 或 Off：仅用于观看。</td></tr>
+            <tr><th scope="row">Level、Horizon、Frame、投影</th><td>变换的一部分，同上。</td><td>项目的，显示在 <b>In the Gyroflow project</b> 中。</td></tr>
+            <tr><th scope="row">Lens、色差</th><td colspan="2">变换的一部分。有项目时，镜头的 As recorded 仅用于观看。</td></tr>
+            <tr><th scope="row">Recorded turned、Under water</th><td>源的输入设置：由 <b>Save to the source</b> 保存，用于片段及其精彩瞬间。不会带到下一个片段。</td><td>项目的。</td></tr>
+            <tr><th scope="row">时域降噪、横向抖动</th><td colspan="2">变换的一部分，按片段保存；是播放器自己的设置，不是 Gyroflow 的。</td></tr>
+            <tr><th scope="row">边缘</th><td colspan="2">播放器自己的设置，不是 Gyroflow 的：对所有片段都沿用。</td></tr>
+            <tr><th scope="row">Performance &amp; Quality 中的选择</th><td colspan="2">一选定就为这台电脑保存下来。</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3 class="st-sub" id="preset">预设，以及你自己的预设</h3>
+      <p class="st-p">没有项目的片段从 Gyroflow 的默认预设开始，上面叠加播放器自己的预设。后者是为水下制作的：镜头按水校正（折射率 1.33），地平线不锁定。Level 会替换它的平滑和放大设置。在一段测试片段上，水下校正把帧间残余的抖动从 0.16 px 降到了 0.02 px。</p>
+      <p class="st-p">想从你自己的预设开始，就在 Gyroflow 中保存一个预设（Export → Create settings preset），命名为 <code>default.gyroflow</code>，放在 <code class="os-mac">~/Library/Application Support/ActionFootagePlayer/gyroflow/</code><code class="os-win">%LOCALAPPDATA%\ActionFootagePlayer\gyroflow\</code>。面板的设置仍会叠加在它上面。</p>
+
+      <h3 class="st-sub" id="exports">导出时包含什么</h3>
+      <p class="st-p"><kbd>Shift</kbd>+<kbd>E</kbd> 按片段播放的样子导出：同样的项目或预设、源的输入设置（Log 曲线、录制时的旋转、水下镜头）以及变换：Stabilization、Level、Horizon、校正或保持录制原样的镜头及其投影、画幅的比例和方向，还有边缘填充。去除色差仅用于播放。导出本身以及文件存放的位置，见 <a class="text-link" href="log.html#export">Log 素材</a>。</p>
+    </div>
+  </section>
+
+  <!-- Edges -->
+  <section class="section band tight-top" id="edges">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">边缘</p>
+        <h2>当稳定后的画面盖不满窗口时。</h2>
+        <p class="lede">在 Wider 视角下，或当相机转动超出裁切的余量时，窗口的一部分是空的。播放器会填充这些部分，经过模糊并融合进画面。</p>
+      </div>
+      <div class="st-panel">
+        <dl class="st-settings">
+          <div>
+            <dt>Trail by direction（按方向留存） <span class="st-def-val">默认</span></dt>
+            <dd>该方向上最后一次看到的内容，由陀螺仪数据得知，取自相机录下的完整画面，包括放大时裁掉的部分。相机平移时它保持不动。尚未看到过的地方，由周围的颜色向内扩散，稍暗、稍灰一些。</dd>
+          </div>
+          <div>
+            <dt>Frame's edge spread out（画面边缘外扩）</dt>
+            <dd>只用当前这一帧自己的颜色，从它的边缘向外扩散。不用之前的帧，所以不会有任何错位，对电脑的负担也最轻。</dd>
+          </div>
+          <div>
+            <dt>Background color（背景色）</dt>
+            <dd>项目的背景色，与 Gyroflow 渲染的一样。</dd>
+          </div>
+        </dl>
+        <figure class="media" id="shot-stabilization-3">
+          <img src="../media/stabilization-3.jpg" alt="同一个经过防抖的沉船画面在 Wider 视角下出现三次：未覆盖的边缘为背景色、用画面边缘外扩填充、用按方向留存填充。" width="1920" height="360" loading="lazy">
+          <figcaption>Wider 视角下的同一帧，分别使用三种边缘填充。</figcaption>
+        </figure>
+      </div>
+      <p class="st-p"><kbd>Ctrl</kbd>+<kbd>b</kbd> 在片段播放时于它们之间切换。它们在面板的 Performance &amp; Quality 标签页，见下文。Wider 视角选取的视场，让稳定后的画面所覆盖的面积与原画面大致相同，因此能看到更多场景，边缘则一直都有。</p>
+      <p class="honest">留存只知道相机怎样转动，不知道它怎样移动。相机经过的近处物体，以及自己在动的东西，在留存中可能会错位。什么都没看到过的地方，填充的是推测出来的颜色，不是画面。</p>
+    </div>
+  </section>
+
+  <!-- Performance & Quality -->
+  <section class="section band" id="quality">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Performance &amp; Quality</p>
+        <h2>给跟不上的电脑。</h2>
+        <p class="lede">片段在防抖时，面板会显示 Performance &amp; Quality（性能与画质）标签页。你的选择一做出，就为这台电脑保存下来。</p>
+      </div>
+      <dl class="st-settings st-cols">
+        <div>
+          <dt>Frame rate（帧率） <span class="st-def-val">默认 Every frame</span></dt>
+          <dd><b>Every frame</b>（每一帧）、<b>30 fps</b> 或 <b>15 fps</b>：稳定后的画面多久渲染一次。帧率更高的片段就按这个帧率播放。</dd>
+        </div>
+        <div>
+          <dt>Size（尺寸） <span class="st-def-val">默认 Auto</span></dt>
+          <dd><b>Auto</b>：屏幕的尺寸，开启时域降噪时最多 1080p。<b>Screen</b>：不超过它在屏幕上显示的大小。<b>1080p</b> 或 <b>720p</b>：最多这么大。<b>Video</b>：视频本身的尺寸。</dd>
+        </div>
+        <div>
+          <dt>Paused frame（暂停的帧） <span class="st-def-val">默认 As it played</span> <kbd>Ctrl</kbd>+<kbd>f</kbd></dt>
+          <dd><b>Full size</b>：暂停片刻后以视频本身的尺寸重新渲染。<kbd>Ctrl</kbd>+<kbd>f</kbd> 只做一次。详见<a class="text-link" href="photos.html">照片</a>。</dd>
+        </div>
+        <div>
+          <dt>Temporal denoise（时域降噪） <span class="st-def-val">默认 Full</span></dt>
+          <dd><b>Full</b>（完整）：前后各 5 帧。<b>Light</b>（轻度）：3 帧，对显卡的负担轻四分之一，干净程度稍差一点。<b>Off</b>（关闭）：这台电脑上不做，不管 Transform 标签页的开关怎么设。导出的文件和照片都不受影响。详见<a class="text-link" href="photos.html#clean">照片</a>。</dd>
+        </div>
+        <div>
+          <dt>Edges（边缘） <span class="st-def-val">默认 Trail by direction</span> <kbd>Ctrl</kbd>+<kbd>b</kbd></dt>
+          <dd><b>Trail by direction</b>、<b>Frame's edge spread out</b>、<b>Background color</b>：见<a class="text-link" href="#edges">边缘</a>。</dd>
+        </div>
+        <div>
+          <dt>Edge fill rate（边缘填充频率） <span class="st-def-val">默认 Auto</span></dt>
+          <dd>留存从多少帧中写入：<b>Auto</b>，只要图形芯片（GPU）有余力就写入，或者 <b>50 %</b>、<b>25 %</b> 的帧。适用于处理器和 GPU 共享功耗的笔记本电脑。仅用于 Trail by direction。</dd>
+        </div>
+        <div>
+          <dt>More（更多）</dt>
+          <dd><b>Skip color aberration correction</b>（跳过色差校正，默认关闭）：只在这块屏幕上跳过它；片段自己在 Transform 标签页中的设置保持不变。<b>Pause and ask when slow</b>（跟不上时暂停并询问，默认开启）：见下文。</dd>
+        </div>
+      </dl>
+      <div class="st-slow">
+        <div class="stack">
+          <h3>跟不上时，它会询问</h3>
+          <p>如果在超过 2 秒的时间里有一成以上的帧被丢弃，播放就会暂停并询问：“Stabilization can't keep up, frames are dropped. Play lighter:”（防抖跟不上，正在丢帧。换个更轻的方式播放：）。它会列出对这个片段有帮助的选项：30 或 15 fps、更轻的边缘填充、不填充边缘、以 1080p 渲染、在这块屏幕上跳过色差校正，或者照原样继续播放，还有 “Don't ask again”（不再询问）。你的选择会被保存。</p>
+          <p>在 M1 Pro 的 MacBook Pro 上，防抖能轻松跟上 60 fps 的 4K。在一台 15 W 的轻薄 Windows 笔记本上，60 fps 的 4K 加上按方向留存，以 15 fps 能跟上，30 fps 则不行。</p>
+        </div>
+        <figure class="media" id="shot-stabilization-6">
+          <img src="../media/stabilization-6.jpg" alt="暂停的沉船画面，上面是列表 Stabilization can't keep up, frames are dropped. Play lighter 及其选项，其中有 Skip the color aberration correction on this screen。" width="1600" height="900" loading="lazy">
+          <figcaption>电脑跟不上时出现的提示。</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <!-- Moments -->
+  <section class="section band tight-top" id="moments">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">精彩瞬间</p>
+        <h2>精彩瞬间保留保存时的变换。</h2>
+      </div>
+      <div class="st-moments">
+        <p>精彩瞬间是你从片段中留下的一段（<kbd>k</kbd>）。它把正在播放的设置整体带走：防抖、强度、地平线、色差、镜头、投影和画幅。如果片段有 Gyroflow 项目，精彩瞬间还会得到一份自己的、裁短到这一段的副本 <code>_Moments/&lt;name&gt;.gyroflow</code>，此后由它决定地平线、裁切和平滑。精彩瞬间从不自己改变：之后对片段或其项目的改动，都不会影响它。如何读取文件，即 Source 标签页的输入设置，仍属于源，用于它的所有精彩瞬间。</p>
+        <p>精彩瞬间播放时，Transform 标签页的卡片显示 <b>the moment</b>，<b>Settings of its own</b> 处于开启状态。你的改动仅用于观看，直到 <b>Save to the moment</b>（保存到精彩瞬间，或 Auto save）把它写入。关掉 Settings of its own，精彩瞬间就按它的源播放；它自己的设置会被移除，它自己的项目副本会移到<span class="os-mac">废纸篓</span><span class="os-win">回收站</span>。Project 标签页的开关 <b>Stabilized on its own</b>（单独防抖）开启时，只按精彩瞬间自身的运动平滑；关闭时，连同它在片段中前后的运动一起平滑。片段预览也有同样的 Settings of its own 开关，一开始是关闭的。</p>
+        <p><a class="text-link" href="organizing.html#moments">精彩瞬间，见整理素材</a></p>
+      </div>
+    </div>
+  </section>
+
+  <!-- The logic, in order -->
+  <section class="section band" id="decides">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">如何决定</p>
+        <h2>每次打开片段，依次问三个问题。</h2>
+        <p class="lede">播放器从不猜测。只有知道该怎么做时它才防抖，否则就不做平滑。</p>
+      </div>
+      <div class="st-logic">
+        <ol class="checklist st-order">
+          <li>
+            <h3>片段旁边的 Gyroflow 项目优先</h3>
+            <p>Gyroflow 项目是一个小小的 <code>.gyroflow</code> 文件，包含 Gyroflow 稳定一个片段所需的一切。播放器会在视频旁边寻找同名的项目：<code>DJI_0007_D.gyroflow</code> 或 <code>DJI_0007_D.MP4.gyroflow</code>。找到的话，片段就按 Gyroflow 渲染的样子播放：项目的平滑、放大、镜头、投影、输出尺寸、旋转、地平线锁定和水下校正。播放器的 Level 不适用。</p>
+          </li>
+          <li>
+            <h3>否则，使用相机的陀螺仪数据，前提是相机的防抖已关闭</h3>
+            <p>片段播放之前，播放器会读取相机写入文件的信息。只有当文件中有陀螺仪数据，<em>并且</em>相机记录了自身防抖已关闭时，它才会防抖：DJI 关闭 EIS（并使用 Wide FOV，即视场），GoPro 关闭 HyperSmooth，Insta360 关闭 FlowState。GoPro 和 Insta360 的片段还需要它们的镜头收录在 Gyroflow 的镜头数据库中。片段随后以播放器自带的预设和变换播放：为它保存的变换，否则是你在 <a class="text-link" href="#panel">Transform 标签页</a>中的设置。</p>
+          </li>
+          <li>
+            <h3>否则，没有陀螺仪数据？没问题：<kbd>Ctrl</kbd>+<kbd>e</kbd> 在 Gyroflow 中打开它</h3>
+            <p>在那之前，什么都不平滑。镜头配置文件已知的片段会校正镜头；开着 EIS 拍摄的 DJI 片段没有记录配置文件，按录制原样播放。按 <kbd>Ctrl</kbd>+<kbd>e</kbd>，视频就会在 Gyroflow 中打开，由它依据画面本身的运动进行光学防抖（光流）。在那里把项目保存在片段旁边，片段就会在原来的位置重新加载，已经防抖：它现在是有项目的片段，即第 1 种情况。</p>
+          </li>
+        </ol>
+        <figure class="media st-flow" id="shot-stabilization-1">
+          <svg class="flow" viewBox="0 0 480 540" role="img" aria-labelledby="flow-title flow-desc">
+            <title id="flow-title">决定片段如何防抖的流程</title>
+            <desc id="flow-desc">你打开一个片段。它旁边有 Gyroflow 项目吗？有：按项目的设定播放。没有：相机是否在关闭自身防抖的情况下记录了陀螺仪数据（DJI 上为关闭 EIS 并使用 Wide FOV）？是：依据陀螺仪数据稳定播放，使用自带预设和变换。否：没问题，Ctrl+e 在 Gyroflow 中打开它，由它从画面进行防抖。在那里把项目保存在片段旁边，片段就回到第一个问题，并以防抖效果播放。</desc>
+            <defs>
+              <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+                <path d="M0 0 L8 4 L0 8 z" class="flow-head"/>
+              </marker>
+            </defs>
+
+            <rect class="flow-start" x="58" y="6" width="160" height="36" rx="18"/>
+            <text class="flow-t" x="138" y="29" text-anchor="middle">你打开一个片段</text>
+            <line class="flow-line" x1="138" y1="42" x2="138" y2="68" marker-end="url(#flow-arrow)"/>
+
+            <rect class="flow-q" x="36" y="70" width="204" height="84" rx="10"/>
+            <text class="flow-t" x="138" y="98" text-anchor="middle">它旁边有</text>
+            <text class="flow-t" x="138" y="118" text-anchor="middle">Gyroflow 项目吗？</text>
+            <text class="flow-s" x="138" y="140" text-anchor="middle">name.gyroflow</text>
+            <line class="flow-line" x1="240" y1="112" x2="266" y2="112" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="253" y="104" text-anchor="middle">有</text>
+
+            <rect class="flow-ok" x="268" y="70" width="204" height="84" rx="10"/>
+            <text class="flow-t" x="370" y="97" text-anchor="middle">按项目的设定</text>
+            <text class="flow-s" x="370" y="119" text-anchor="middle">它的平滑、放大、</text>
+            <text class="flow-s" x="370" y="137" text-anchor="middle">镜头和地平线</text>
+
+            <line class="flow-line" x1="138" y1="154" x2="138" y2="184" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="146" y="174">没有</text>
+
+            <rect class="flow-q" x="36" y="186" width="204" height="108" rx="10"/>
+            <text class="flow-t" x="138" y="212" text-anchor="middle">相机是否在关闭</text>
+            <text class="flow-t" x="138" y="232" text-anchor="middle">自身防抖时</text>
+            <text class="flow-t" x="138" y="252" text-anchor="middle">记录了陀螺仪数据？</text>
+            <text class="flow-s" x="138" y="276" text-anchor="middle">DJI：关 EIS，Wide FOV</text>
+            <line class="flow-line" x1="240" y1="240" x2="266" y2="240" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="253" y="232" text-anchor="middle">是</text>
+
+            <rect class="flow-ok" x="268" y="186" width="204" height="108" rx="10"/>
+            <text class="flow-t" x="370" y="213" text-anchor="middle">依据陀螺仪数据</text>
+            <text class="flow-s" x="370" y="236" text-anchor="middle">自带预设，加上</text>
+            <text class="flow-s" x="370" y="254" text-anchor="middle">已保存的变换，</text>
+            <text class="flow-s" x="370" y="272" text-anchor="middle">否则用会话的</text>
+
+            <line class="flow-line" x1="138" y1="294" x2="138" y2="324" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" x="146" y="314">否</text>
+
+            <rect class="flow-plain" x="36" y="326" width="204" height="72" rx="10"/>
+            <text class="flow-t" x="138" y="354" text-anchor="middle">没问题</text>
+            <text class="flow-s" x="138" y="378" text-anchor="middle">Ctrl+e 在 Gyroflow 中打开</text>
+
+            <line class="flow-line" x1="138" y1="398" x2="138" y2="428" marker-end="url(#flow-arrow)"/>
+
+            <rect class="flow-step" x="36" y="430" width="204" height="90" rx="10"/>
+            <text class="flow-t" x="138" y="456" text-anchor="middle">在 Gyroflow 中</text>
+            <text class="flow-s" x="138" y="478" text-anchor="middle">从画面中找出运动；</text>
+            <text class="flow-s" x="138" y="496" text-anchor="middle">把项目保存在</text>
+            <text class="flow-s" x="138" y="514" text-anchor="middle">片段旁边</text>
+
+            <path class="flow-line" d="M36 475 H20 V112 H34" fill="none" marker-end="url(#flow-arrow)"/>
+            <text class="flow-l" transform="translate(13 294) rotate(-90)" text-anchor="middle">此后即以防抖效果播放</text>
+          </svg>
+          <figcaption>从上往下决定。在 Gyroflow 中制作的项目，会让片段回到第一个问题。</figcaption>
+        </figure>
+      </div>
+      <p class="honest">为什么这么严格：相机已经防抖过的素材，再防抖一次只会更糟。所以，相机表明防抖已开启、或者没有说明的片段，都不会再做平滑。即使对某台相机判断错了，结果也只是它的片段按原样播放，而不会变得更糟。</p>
+    </div>
+  </section>
+
+  <!-- Keys -->
+  <section class="section band tight-top" id="keys">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">快捷键</p>
+        <h2>快捷键。</h2>
+        <p class="lede">在 Mac 上，<kbd>Ctrl</kbd> 也是 <kbd>Ctrl</kbd>，不是 <kbd>Cmd</kbd>。<kbd>Ctrl</kbd>+<kbd>g</kbd>、<kbd>Ctrl</kbd>+<kbd>k</kbd> 和 <kbd>Ctrl</kbd>+<kbd>a</kbd> 改变变换：只要片段没有保存任何设置，它们就会沿用到后面的片段。<kbd>Ctrl</kbd>+<kbd>u</kbd> 改变源的输入设置，用 <b>Save to the source</b> 保存。</p>
+      </div>
+      <div class="keys">
+        <div class="key"><span>Stabilization：On → Wider → Off</span><span><kbd>Ctrl</kbd>+<kbd>g</kbd></span></div>
+        <div class="key"><span>Level：Weak → Medium → Strong</span><span><kbd>Ctrl</kbd>+<kbd>k</kbd></span></div>
+        <div class="key"><span>水下且用平面镜罩，或在水上、用球面镜罩</span><span><kbd>Ctrl</kbd>+<kbd>u</kbd></span></div>
+        <div class="key"><span>水下色差校正，开或关</span><span><kbd>Ctrl</kbd>+<kbd>a</kbd></span></div>
+        <div class="key"><span>边缘用什么填充</span><span><kbd>Ctrl</kbd>+<kbd>b</kbd></span></div>
+        <div class="key"><span>在 Gyroflow 中打开</span><span><kbd>Ctrl</kbd>+<kbd>e</kbd></span></div>
+        <div class="key"><span>全尺寸显示暂停的帧，一次</span><span><kbd>Ctrl</kbd>+<kbd>f</kbd></span></div>
+        <div class="key"><span>时域降噪，开或关</span><span><kbd>Ctrl</kbd>+<kbd>p</kbd></span></div>
+        <div class="key"><span>横向抖动：测量，然后开或关</span><span><kbd>Ctrl</kbd>+<kbd>j</kbd></span></div>
+        <div class="key"><span>按播放的样子导出</span><span><kbd>Shift</kbd>+<kbd>E</kbd></span></div>
+        <div class="key"><span>隐藏或显示面板</span><span><kbd>Tab</kbd></span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Limits -->
+  <section class="section band tight-top" id="limits">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">局限</p>
+        <h2>它不做的事。</h2>
+      </div>
+      <ul class="st-limits">
+        <li><b>没有陀螺仪数据？Gyroflow 会做光学防抖。</b>开着 EIS 拍摄、或用 Wide 以外的 FOV 拍摄的 DJI 片段，可能没有陀螺仪数据。<kbd>Ctrl</kbd>+<kbd>e</kbd> 在 Gyroflow 中打开它；在那里保存项目，它在这里就能稳定播放。片段很多时，用 Action Footage Library 中的 <a class="text-link" href="organizing.html#optical">Stabilize optically</a>。</li>
+        <li><b>相机防抖开启，就按录制原样播放，</b>包括 GoPro 的 HyperSmooth 和 Insta360 的 FlowState，尽管这些相机无论如何都会记录陀螺仪数据。</li>
+        <li><b>凡是不做防抖的片段，Transform 标签页都显示 “No motion data in this clip”，</b>包括开着 HyperSmooth、带有陀螺仪数据的 GoPro 片段。这时 Gyroflow 可能会使用那些陀螺仪数据，而不是光流。</li>
+        <li><b>已在两台相机上验证：</b>Osmo Action 6 和 GoPro HERO12 Black。GoPro 和 Insta360 的片段需要它们的镜头收录在 Gyroflow 的镜头数据库中。</li>
+        <li><b>用 <kbd>Ctrl</kbd>+<kbd>e</kbd> 制作的项目，在 Gyroflow 中的平滑效果</b>与播放器中的 Level 略有不同。</li>
+        <li><b>跳转到尚未读取的位置之后，</b>没有项目的片段会有片刻不经校正地播放（从网络驱动器约 2 秒），然后校正逐渐淡入。</li>
+        <li><b>去除色差仅用于播放，</b>导出的文件中没有。</li>
+        <li><b>没有镜头配置文件？Gyroflow 会设置一个。</b>没有配置文件，镜头就无法校正；在播放器中选择配置文件以后才会提供。</li>
+        <li><b>片段播放时，导出几乎停止。</b>暂停一下，让它运行。</li>
+        <li><b>只有驱动器上的文件</b>才会防抖，来自网址的流不会。</li>
+        <li><b>Windows App 是 Alpha 版，</b>目前测试不多。</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="section band" id="faq">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">常见问题</p>
+        <h2>关于防抖。</h2>
+      </div>
+      <div class="faq">
+        <details>
+          <summary>为什么我的片段播放时还在抖？</summary>
+          <div class="a"><p>最常见的原因是相机自身的防抖开着，或者在 DJI 上没有用 Wide FOV 拍摄，所以没有陀螺仪数据可用。Transform 标签页会显示 “No motion data in this clip”，Source › Lens › <b>Motion data</b> 会说明原因。按 <kbd>Ctrl</kbd>+<kbd>e</kbd> 在 Gyroflow 中防抖；项目保存到片段旁边后，它在这里就能稳定播放。</p></div>
+        </details>
+        <details>
+          <summary>在水上也要关掉相机的防抖吗？</summary>
+          <div class="a"><p>不一定。在空气中，DJI 的 EIS 效果很好。在水下就不行了，关掉它在水下才划算。如果片段是在空气中、关闭 EIS 拍摄的，相机又不是 Osmo Action 6，就把 Source › <b>Under water, flat port</b> 设为 No（<kbd>Ctrl</kbd>+<kbd>u</kbd>），再按 <b>Save to the source</b>：自带预设假定是在水下。</p></div>
+        </details>
+        <details>
+          <summary>我需要 Gyroflow 吗？</summary>
+          <div class="a"><p>有陀螺仪数据、且相机防抖关闭的片段不需要：播放器自己就能让它们稳定。制作或修改项目，以及处理没有陀螺仪数据的片段，才需要 Gyroflow App。</p></div>
+        </details>
+        <details>
+          <summary>它会修改我的视频文件吗？</summary>
+          <div class="a"><p>不会。播放器只读取它们。项目是片段旁边一个单独的 <code>.gyroflow</code> 文件，已经存在的项目，播放器绝不会覆盖。</p></div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Start -->
+  <section class="section band tight-top" id="start">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">试一试</p>
+        <h2>关掉相机的防抖。双击片段。</h2>
+        <p class="lede">免费，无需账户，你的素材保持原样。</p>
+        <div class="btns" data-os-swap>
+          <a class="btn primary dl-mac" href="download.html#mac">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">免费下载 Mac 版</span><span class="os-win">下载 Mac 版</span> <small>Apple Silicon</small>
+          </a>
+          <a class="btn dl-win" href="download.html#windows">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            <span class="os-mac">下载 Windows 版</span><span class="os-win">免费下载 Windows 版</span> <small>10 / 11 · Alpha 版</small>
+          </a>
+        </div>
+      </div>
+      <div class="help">
+        <div class="help-card">
+          <h3>在潜水？</h3>
+          <p>默认设置就是为水下制作的：水下校正、色边处理、屏幕上的深度。</p>
+          <a href="divers.html">水下拍摄</a>
+        </div>
+        <div class="help-card">
+          <h3>发一段你的相机拍的片段</h3>
+          <p>直接从存储卡拷出的几秒钟素材，能帮一台相机从“应可用”变为已验证。</p>
+          <a href="https://github.com/anton-belkin/ActionFootagePlayer/issues">在 GitHub 上提交 issue</a>
+        </div>
+        <div class="help-card">
+          <h3>它能做的一切</h3>
+          <p>所有按键和选项、各种画面风格，以及逐台相机的说明。</p>
+          <a href="features.html">全部功能</a>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="band">
+  <div class="wrap">
+    <div class="row">
+      <span><strong style="color:var(--ink)">Action Footage Player</strong> · 开源，GPL-3.0 · <a href="about.html">由瑞士日内瓦的一位潜水爱好者开发</a></span>
+      <a href="index.html">首页</a>
+      <a href="about.html">关于</a>
+      <a href="https://github.com/anton-belkin/ActionFootagePlayer">GitHub</a>
+      <a href="features.html">全部功能</a>
+      <a href="download.html">下载</a>
+    </div>
+    <p>本项目基于 Gyroflow 的防抖引擎和 Adrian Eddy 的 telemetry-parser 构建，在此致谢；D-Log M 和 GP-Log 的 HDR LUT 源自 Zeb Gardner 的 shaper LUT（经许可使用）；Log 曲线来自 DJI、GoPro 和 Insta360 公开发布的资料。本项目与 DJI、GoPro 及 Insta360 均无关联。</p>
+    <p class="tm">Dolby、Dolby Vision 和双 D 标志是 Dolby Laboratories Licensing Corporation 的商标。Action Footage Player 与 Dolby 无关联，也未获 Dolby 认可。播放器借助开源库 <code>dolby_vision</code>（MIT）自行写入 Dolby Vision 元数据，其中不包含任何 Dolby 软件。</p>
+    <p class="mt-foot">本页由英文原文机器翻译而成，可能存在不准确之处。 <a href="../stabilization.html" hreflang="en">阅读英文原文</a></p>
+  </div>
+</footer>
+
+<script src="../top.js"></script>
+</body>
+</html>

@@ -12,6 +12,25 @@ Status: **draft, deployed** (see Deployment). Written between 2026-10-25 and 202
 > menu, …). Those facts were **not** brought up to date when the site moved here. Check them against the
 > README before publishing.
 
+## The redesign of 2026-11-18
+
+The home page (`site/index.html`) was written anew, by hand: a light page with dark bands, one accent color, the
+comparison in a laptop with the cameras drawn beside it. The other pages became articles in the same look: a side
+column to move around by, one column of text. They are **built**, not written:
+
+```
+site-old/        the site as it was before the redesign: the backup, and the source of the articles' text
+build.py         python3 website/build.py: each page of site-old/ → site/, in the article look (header, footer
+                 and side column added, sections dropped or reworded by the rules at its top)
+site/b.css       the home page's styles; article.css: the articles', loaded over styles.css and the page's own
+site/view360.js  the 360 view in the home page's pop-up
+shots/redesign-2026-11/   before and after pictures
+```
+
+To change an article's text, change it in `site-old/` (or add a rule in `build.py`) and run the build. The
+translations (`site/fr`, `ru`, `zh`) are still the earlier design; each new page's footer links to them. The tag
+`site-before-redesign-2026-11-18` marks the last commit before it.
+
 ## Layout
 
 ```
