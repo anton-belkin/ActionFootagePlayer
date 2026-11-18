@@ -1016,9 +1016,11 @@ fn default_out_dir(video: &Path) -> PathBuf {
 fn pick_h264() -> Result<Encoder, String> {
     static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     let candidates = ["libx264", "h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"];
+    // VideoToolbox is on every Mac: taken without the test encode, which costs 0.4-0.9 s a preview (a VideoToolbox
+    // session of its own, slower while the player plays), most of a moment saved from its picture
     let picked = PICKED.get_or_init(|| candidates.iter().copied()
         .filter(|n| *n != "h264_videotoolbox" || cfg!(target_os = "macos"))
-        .find(|n| encoder_works(&h264(n))).map(str::to_string));
+        .find(|n| *n == "h264_videotoolbox" || encoder_works(&h264(n))).map(str::to_string));
     picked.as_deref().map(h264).ok_or_else(|| format!("ffmpeg has no H.264 encoder that works here ({})", candidates.join(", ")))
 }
 

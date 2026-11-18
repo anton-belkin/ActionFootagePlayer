@@ -1083,6 +1083,9 @@ local function save(name, update, typed, quiet, opts)
     local info = utils.file_info(state.clip)
     local l = {
         v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
+        -- The original's fingerprint, read as it opened: gyroflow-export doesn't read it again (seconds on the NAS while
+        -- it plays)
+        hash = state.hash,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
     -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
