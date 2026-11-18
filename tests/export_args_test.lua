@@ -34,6 +34,7 @@ local mp = {
     register_script_message = function(name, fn) messages[name] = fn end,
     create_osd_overlay = function() return { update = function() end, remove = function() end } end,
     osd_message = function() end,
+    notify = function() end,
     add_timeout = function() return { kill = function() end } end,
     add_periodic_timer = function() return { kill = function() end, resume = function() end, stop = function() end } end,
     get_script_directory = function() return "/plugins/gyroflow" end,
