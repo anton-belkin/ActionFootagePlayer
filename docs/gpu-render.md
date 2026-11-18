@@ -334,8 +334,8 @@ write shows in the same frame:
 1. `sphere edges` (every 4th output pixel): along the frame's edge, in 32 sectors of the perimeter (about a tenth of a
    16:9 frame's width each), in a band 3 % of the height inside the edge, the frame now and the sphere's memory of the
    same directions (a second texture, the slow layer: rgba16f, what was seen there averaged with a half-life of 0.5 s),
-   weighted by how fresh the memory is; and how fresh the sphere is in a band as wide past the edge. Summed per sector
-   with atomics into a storage buffer.
+   where the sphere has a memory there (v2 also counted how fresh the sphere was past the edge; v3 fills empty texels
+   directly). Summed per sector with atomics into a storage buffer.
 2. `sphere sectors` (one workgroup): per sector the distance between the frame and the memory, in Y'CbCr of the signal
    as decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
    counts as different (writing there only stamps the fill the read shows anyway), no memory inside as no evidence.
@@ -358,12 +358,40 @@ write shows in the same frame:
    layer. `SPHERE_DEBUG 1` writes the continuation red (over traces) or green (where there were none); the marks stay
    in the sphere, so it overstates.
 
-The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels, each weighted by its freshness
-(all weights positive, so empty or stale texels drop out; no ringing), fully the sphere's once two thirds of the taps'
-weight is fresh. Measured offscreen (tools/edgefill): see the PR's table. Gotchas met: with the smooth read, columns
-of texels the stride-2 writer missed (a pixel step about a texel) showed as stripes, hence one writer per texel; Gyroflow's
-world has its y axis anywhere (on the speedboat clip the sphere's pole sat on the horizon), so near a pole a step spans
-many texels across.
+The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels (all weights positive, so empty
+texels drop out; no ringing). Measured offscreen (tools/edgefill): see the PR's table. Gotchas met: with the smooth read,
+columns of texels the stride-2 writer missed (a pixel step about a texel) showed as stripes, hence one writer per texel;
+Gyroflow's world has its y axis anywhere (on the speedboat clip the sphere's pole sat on the horizon), so near a pole a
+step spans many texels across.
+
+**v3, the same evening: Anton's model.** v2 live: the traces went a dark gray no part of the picture had, things
+flickered in the background, and a ring showed around the frame. The causes: (1) a trace faded with time (half-life
+2.5 s, gone after 10) and what showed through was the smooth fill, muted on purpose (35 % less color, 12 % darker) and
+far from the frame the whole frame's average: gray; (2) where a trace had faded, the background was the live smooth fill,
+recomputed every frame from what was at the frame's edge just then: flicker; (3) the frame was written into the sphere
+up to its edge and not past it, a hard border, and the output frame's edge is curved (the lens), so its footprint shows
+as a ring; besides, past the lens's field every ray lands on the same circle (`boundary_uv`), so the distance from the
+frame stopped growing there and the continuation's falloff drew that circle. Now (Anton's words, in substance): the
+sphere holds the frame's trace where the frame has been and the edge's continuation where it hasn't; nothing fades; a
+texel keeps what was written until the frame or a new continuation is written over it; the output past the frame is
+always the sphere.
+- An empty texel (the first frame, after a seek, a turn to where the camera hasn't looked) gets the continuation
+  wholly, at once; from then on it's a trace like any other, compared by the sectors like any other (the slow layer
+  takes the continuation too), so a continuation is rewritten only where the frame shows it to be wrong, instead of
+  following the frame.
+- The frame is written with a soft edge: its share eases from 0 at 0.5 % of the height in (some cameras' outermost rows
+  are off in color, and the interpolation reaches past the edge) to whole at 10 %, over what the texel held. Each texel
+  keeps the share it has had (the slow layer's alpha), and only the share it hasn't had yet is added: written again
+  every frame while the camera holds still, the soft edge would add up to the whole frame and leave a hard border once
+  the camera moves.
+- The continuation isn't muted under the sphere (the plain smooth fill still is).
+- A seek (or the first frame) starts the sphere over: `ge_epoch`, the time of the jump; texels written before it count
+  as empty.
+- Past the lens's field, the distance from the frame keeps growing (`boundary_excess`: how far past the field a ray is,
+  times the focal length).
+What's left on the jump clip (0004): where the first frame's edge was, its trace meets the continuation in a faint
+line, darker where the lens vignettes the frame's edge. That is the model: the trace stays until something is
+written over it.
 
 ### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
 

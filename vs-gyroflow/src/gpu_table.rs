@@ -535,7 +535,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
             "//!BIND GYROFLOW_SPHERE_SLOW", "//!BIND GYROFLOW_EDGES", bind, "//!BIND GYROFLOW_GRID_DONE"][..], more].concat());
         let extra = |which: &str| format!("{fdefs}\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}");
         let h = SPHERE_W / 2;
-        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n//!VAR uint ge_sum[{}]\n//!VAR float ge_d[{SPHERE_SECTORS}]\n//!VAR float ge_s[{SPHERE_SECTORS}]\n//!VAR float ge_pts\n//!VAR float ge_dt\n//!VAR uint ge_magic\n//!STORAGE\n\n{}\n{}\n{}\n",
+        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n//!VAR uint ge_sum[{}]\n//!VAR float ge_d[{SPHERE_SECTORS}]\n//!VAR float ge_s[{SPHERE_SECTORS}]\n//!VAR float ge_pts\n//!VAR float ge_dt\n//!VAR float ge_epoch\n//!VAR uint ge_magic\n//!STORAGE\n\n{}\n{}\n{}\n",
             SPHERE_SECTORS * SPHERE_SUMS,
             hook_pass(clip, &head(&["//!SAVE GYROFLOW_SPHERE_EDGES", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
                 "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere edges"]), &defs, &extra("SPHERE_EDGES"), pass_body("sphere")),
@@ -915,7 +915,7 @@ mod tests {
         // compiles them as they are (tools/edgefill renders them)
         let which = match name { "sphere_edges" => "SPHERE_EDGES", "sphere_sectors" => "SPHERE_SECTORS_PASS", "sphere_write" => "SPHERE_WRITE", _ => "" };
         if !which.is_empty() {
-            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{ uint ge_sum[{}]; float ge_d[{SPHERE_SECTORS}]; float ge_s[{SPHERE_SECTORS}]; float ge_pts; float ge_dt; uint ge_magic; }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img", SPHERE_SECTORS * SPHERE_SUMS);
+            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{ uint ge_sum[{}]; float ge_d[{SPHERE_SECTORS}]; float ge_s[{SPHERE_SECTORS}]; float ge_pts; float ge_dt; float ge_epoch; uint ge_magic; }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img", SPHERE_SECTORS * SPHERE_SUMS);
         }
         let name = if which.is_empty() { name } else { "sphere" };
         // The smooth fill's textures (its passes' own, and the grid they leave), as one more texture
