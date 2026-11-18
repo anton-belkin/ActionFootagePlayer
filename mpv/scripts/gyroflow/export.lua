@@ -64,7 +64,6 @@ local KILL_AFTER = 5
 -- file's last contents), cancelling }
 local running = {}
 local order = {}
-local overlay = mp.create_osd_overlay("ass-events")
 local confirm = nil
 local playing = false
 local timer
@@ -157,29 +156,25 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
-local function line(job)
-    local st = job.state or {}
-    local text = job.name .. job.range .. "  "
-    if job.cancelling then return text .. "cancelling" end
-    if not st.total then return text .. "starting" end
-    -- A flat 360 export measures the hold on what's in the middle first, when it's asked for and not measured yet
-    if st.stage == "measuring" then text = text .. "measuring the hold " end
-    text = text .. string.format("%d%%", math.floor(st.done / st.total * 100))
-    if st.background then return text .. "  slowed while playing" end
-    return text .. string.format("  %.0f fps  %s left", st.fps, clock(st.eta))
-end
-
+-- Each export a card (the side panel's, side-panel/notify.lua): its share done, the speed and the time left
 local function redraw()
-    if #order == 0 then
-        overlay:remove()
-        return
-    end
-    local lines = {}
     for _, path in ipairs(order) do
-        table.insert(lines, (line(running[path]):gsub("\\", "\\\\"):gsub("{", "\\{")))
+        local job = running[path]
+        local st = job.state or {}
+        local detail, share
+        if job.cancelling then
+            detail = "Cancelling"
+        elseif not st.total then
+            detail = "Starting"
+        else
+            share = st.done / math.max(1, st.total)
+            -- A flat 360 export measures the hold on what's in the middle first, when it's asked for and not measured yet
+            detail = (st.stage == "measuring" and "Measuring the hold on the middle · " or "")
+                .. (st.background and "Slowed while the video plays: pause it for full speed"
+                    or string.format("%.0f fps · %s left", st.fps or 0, clock(st.eta or 0)))
+        end
+        mp.notify({ id = "export:" .. path, kind = "working", title = "Exporting " .. job.name .. job.range, detail = detail, share = share })
     end
-    overlay.data = "{\\an9\\fs16\\bord1.2}Exporting\\N" .. table.concat(lines, "\\N")
-    overlay:update()
 end
 
 local function poll()
@@ -440,26 +435,26 @@ function run_export(path, args, range, progress, control)
     local job = { name = name, range = range, progress = progress, control = control }
     running[path] = job
     table.insert(order, path)
-    mp.osd_message("Exporting " .. name .. range .. (playing and " (slowly while the video plays)" or ""), 3)
     mp.msg.info("export: " .. table.concat(args, " "))
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         finish(path)
         local err = r and r.stderr or ""
         -- gyroflow-export's last line for a video it exported: "  -> <output>"
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
+        local card = "export:" .. path
         if job.cancelling then
-            mp.osd_message("Export cancelled: " .. name .. range, 4)
+            mp.notify({ id = card, kind = "info", title = "Export cancelled", detail = name .. range, seconds = 4 })
             notify("Export cancelled", name .. range)
         elseif r and r.status == 0 and out then
             last_export = out
             tell_catalog(out)
             publish()
-            mp.osd_message("Exported " .. name .. range .. "\n" .. out, 5)
+            mp.notify({ id = card, kind = "done", title = "Exported " .. name .. range, detail = platform.file_name(out), seconds = 5 })
             notify("Exported " .. name, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
             mp.msg.warn("export: " .. err)
-            mp.osd_message("Export failed: " .. why, 6)
+            mp.notify({ id = card, kind = "error", title = "Export failed: " .. name .. range, detail = why })
             notify("Export failed: " .. name, why)
         end
     end)
@@ -604,8 +599,14 @@ mp.register_script_message("preview", function(json)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
-    -- Another clip's (req.view: its saved view), or as this one plays
-    if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+    local ok, err = xpcall(function()
+        if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    end, debug.traceback)
+    if not ok then
+        mp.msg.error("preview: " .. tostring(err))
+        return reply(false, tostring(err):match("^[^\n]*"))
+    end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
     -- on its own
     if req.project ~= nil then
@@ -827,7 +828,8 @@ local function photo_full()
     photos = photos + 1
     local name = platform.file_name(path)
     local kind = mode == "live" and "Live Photo" or mode == "motion" and "Motion Photo" or "photo"
-    mp.osd_message("Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…", 60)
+    local card = "photo:" .. photos .. ":" .. tostring(mp.get_time())
+    mp.notify({ id = card, kind = "working", title = "Saving a " .. kind, detail = name .. " at " .. clock(t) })
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         photos = photos - 1
@@ -839,12 +841,12 @@ local function photo_full()
             tell_catalog(out)
             publish()
             local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
-            mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
+            mp.notify({ id = card, kind = "done", title = saved, detail = platform.file_name(out), seconds = 4 })
             notify(saved, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
             mp.msg.warn("photo: " .. err)
-            mp.osd_message("Photo failed: " .. why, 6)
+            mp.notify({ id = card, kind = "error", title = "Photo failed: " .. name, detail = why })
             notify("Photo failed: " .. name, why)
         end
     end)

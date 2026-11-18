@@ -53,6 +53,7 @@ function mp.command_native_async() end
 function mp.get_script_name() return "side_panel" end
 mp.msg = { info = function() end, warn = function() end, error = function() end, debug = function() end, verbose = function() end }
 package.preload.mp = function() return mp end
+package.preload["mp.utils"] = function() return { parse_json = function() return nil end, format_json = function() return "{}" end } end
 package.preload["mp.options"] = function() return { read_options = function(o) o.shown, o.open, o.tab = true, true, "output" end } end
 
 local ui = require 'ui'
