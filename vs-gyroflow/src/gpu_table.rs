@@ -267,6 +267,9 @@ const SPHERE_W: usize = 2048;
 /// width each
 const SPHERE_SECTORS: usize = 32;
 
+/// The sums per sector (warp.glsl's SPHERE_SUMS)
+const SPHERE_SUMS: usize = 10;
+
 /// The largest output the grid texture is made for
 const GRID_MAX: (usize, usize) = (8192, 4608);
 
@@ -529,10 +532,11 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
     let sphere_passes = |bind: &str, fdefs: &str| -> String {
         if !sphere { return String::new(); }
         let head = |more: &[&str]| d(&[&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!BIND GYROFLOW_SPHERE",
-            "//!BIND GYROFLOW_EDGES", bind, "//!BIND GYROFLOW_GRID_DONE"][..], more].concat());
+            "//!BIND GYROFLOW_SPHERE_SLOW", "//!BIND GYROFLOW_EDGES", bind, "//!BIND GYROFLOW_GRID_DONE"][..], more].concat());
         let extra = |which: &str| format!("{fdefs}\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}");
-        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n//!VAR uint ge_sum[{}]\n//!VAR float ge_d[{SPHERE_SECTORS}]\n//!VAR float ge_s[{SPHERE_SECTORS}]\n//!VAR float ge_pts\n//!VAR uint ge_magic\n//!STORAGE\n\n{}\n{}\n{}\n",
-            SPHERE_W / 2, SPHERE_SECTORS * 9,
+        let h = SPHERE_W / 2;
+        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n//!VAR uint ge_sum[{}]\n//!VAR float ge_d[{SPHERE_SECTORS}]\n//!VAR float ge_s[{SPHERE_SECTORS}]\n//!VAR float ge_pts\n//!VAR float ge_dt\n//!VAR uint ge_magic\n//!STORAGE\n\n{}\n{}\n{}\n",
+            SPHERE_SECTORS * SPHERE_SUMS,
             hook_pass(clip, &head(&["//!SAVE GYROFLOW_SPHERE_EDGES", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
                 "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere edges"]), &defs, &extra("SPHERE_EDGES"), pass_body("sphere")),
             hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_EDGES", "//!SAVE GYROFLOW_SPHERE_SECTORS", "//!WIDTH 64", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 64 1",
@@ -911,7 +915,7 @@ mod tests {
         // compiles them as they are (tools/edgefill renders them)
         let which = match name { "sphere_edges" => "SPHERE_EDGES", "sphere_sectors" => "SPHERE_SECTORS_PASS", "sphere_write" => "SPHERE_WRITE", _ => "" };
         if !which.is_empty() {
-            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{ uint ge_sum[{}]; float ge_d[{SPHERE_SECTORS}]; float ge_s[{SPHERE_SECTORS}]; float ge_pts; uint ge_magic; }};", SPHERE_SECTORS * 9);
+            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{ uint ge_sum[{}]; float ge_d[{SPHERE_SECTORS}]; float ge_s[{SPHERE_SECTORS}]; float ge_pts; float ge_dt; uint ge_magic; }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img", SPHERE_SECTORS * SPHERE_SUMS);
         }
         let name = if which.is_empty() { name } else { "sphere" };
         // The smooth fill's textures (its passes' own, and the grid they leave), as one more texture
@@ -1176,7 +1180,8 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         assert!(at("gyroflow sphere edges") < at("gyroflow sphere sectors") && at("gyroflow sphere sectors") < at("gyroflow sphere")
             && at("gyroflow sphere") < at("gyroflow warp"), "the sphere's passes out of order");
         assert!(at("gyroflow fill blur") < at("gyroflow sphere edges"), "the sphere continues the fill: after its passes");
-        assert_eq!((text.matches("//!BUFFER GYROFLOW_EDGES").count(), text.matches("//!TEXTURE GYROFLOW_SPHERE").count()), (1, 1));
+        assert_eq!((text.matches("//!BUFFER GYROFLOW_EDGES").count(), text.matches("//!TEXTURE GYROFLOW_SPHERE\n").count(),
+            text.matches("//!TEXTURE GYROFLOW_SPHERE_SLOW\n").count()), (1, 1, 1));
         let out = (1920usize, 1080usize);
         let n = clip.frame_count;
         let mut frames: Vec<usize> = [0usize, 600, 1049, 1181, n / 2, n - 1].into_iter().filter(|f| *f < n).collect();
