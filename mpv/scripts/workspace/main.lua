@@ -929,9 +929,17 @@ end)
 -- In the side panel's dialog (opts.title, subtitle, suggestion, names, ok, ok_typed, placeholder: side-panel/notify.lua),
 -- else in mpv's console (opts.prompt); Esc: done isn't called
 local function ask(opts, done)
+    -- What follows the name never fails in silence: an error is said on screen (and is in the log)
+    local function after(text)
+        local ok, err = xpcall(function() done(((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))) end, debug.traceback)
+        if not ok then
+            mp.msg.error("after the name typed: " .. tostring(err))
+            mp.notify({ id = "workspace:ask", kind = "error", title = "That didn't work", detail = tostring(err):match("^[^\n]*") })
+        end
+    end
     if opts.title and mp.ask({ title = opts.title, subtitle = opts.subtitle, value = opts.default, suggestion = opts.suggestion,
                                names = opts.names, ok = opts.ok, ok_typed = opts.ok_typed, placeholder = opts.placeholder },
-                             function(text, cancelled) if not cancelled then done(text) end end) then
+                             function(text, cancelled) if not cancelled then after(text) end end) then
         return
     end
     if not input then return done("") end
@@ -945,7 +953,7 @@ local function ask(opts, done)
         complete = opts.suggestion and function() return { opts.suggestion }, 1 end or nil,
         submit = function(text)
             input.terminate()
-            done((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+            after(text)
         end,
     })
 end
@@ -1076,12 +1084,17 @@ end
 -- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own)
 local function save(name, update, typed, quiet, opts)
     opts = opts or {}
+    local PREVIEW_WAIT = 120
     local a, b
     if opts.range then
         a, b = opts.range[1], opts.range[2]
     else
         a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-        if not (a and b and b > a) then return end
+        if not (a and b and b > a) then
+            -- The part was unmarked while the name was typed
+            if not quiet then mp.osd_message("Not saved: the part isn't marked any more (l at its start, l at its end, then k)", 6) end
+            return
+        end
         -- In the clip's time (a moment playing starts at its in)
         a, b = a + (state.offset or 0), b + (state.offset or 0)
     end
@@ -1172,6 +1185,16 @@ local function save(name, update, typed, quiet, opts)
         mp.notify({ id = "moment:" .. id, kind = "working", title = (update and "Updating “" or "Saving moment “") .. final .. "”",
                     detail = "Making its picture" })
     end
+    -- No answer in two minutes (the preview takes seconds): said, and k works again
+    mp.add_timeout(PREVIEW_WAIT, function()
+        if not pending[id] then return end
+        pending[id] = nil
+        state.saving = nil
+        publish()
+        mp.msg.error("moment " .. final .. ": no answer from the gyroflow plugin in " .. PREVIEW_WAIT .. " s")
+        mp.notify({ id = "moment:" .. id, kind = "error", title = "Couldn't save “" .. final .. "”",
+                    detail = "No answer from the gyroflow plugin (see the player's log)" })
+    end)
     mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
         id = id, clip = state.clip, from = a, to = b, at = at, link = utils.format_json(l), dates = dates, output = file,
         force = update ~= nil, reply = mp.get_script_name(),
