@@ -1076,26 +1076,37 @@ vec4 hook()
 // HOOKED is the frame as decoded, in RGB). gpu_table.rs defines SPHERE_EDGES, SPHERE_SECTORS or SPHERE_WRITE for each.
 //
 // The frame's edge, all the way round, in SPHERE_SECTORS sectors (each an equal part of the perimeter: about a tenth of
-// a 16:9 frame's width). Per sector, its color along the edge inside the frame (a band of SPHERE_BAND of the height)
-// against what the sphere holds just past the edge (a band as wide, from what was seen or written there before this
-// frame). Where they differ, the frame's edge is continued over what the sphere held (the smooth fill's colors, with
-// the sector's strength: wholly up to SPHERE_FULL of the height past the edge, easing out to none at SPHERE_FALLOFF, so
-// a cut's stale content is gone across a usual gap and the written part has no hard border); where they don't,
-// the sphere is left as it is, and what was seen there earlier shows. The difference: the distance between the two
-// bands' average colors in Y'CbCr of the signal as decoded (log or gamma, near enough to what the eye takes as even
-// steps), chroma counted SPHERE_CHROMA times; from SPHERE_LO nothing is written, at SPHERE_HI the whole continuation,
-// smoothstep between. Each sector's distance is smoothed over time (half-life SPHERE_RISE going up, so a cut is taken
-// at once, SPHERE_FALL going down), and the strength between sector middles is interpolated along the edge, so a
-// sector near the threshold eases in and out instead of flickering, and sectors don't show as blocks. Writing the
-// continuation makes the sphere past the edge match the edge, so the difference falls and the writing stops by itself
+// a 16:9 frame's width). Per sector, whether what the sphere remembers is still the world: in a band of SPHERE_BAND of
+// the height inside the edge, the frame now against the sphere's memory of the same directions (its slow layer,
+// GYROFLOW_SPHERE_SLOW: what was seen there over the last second or so). Not the frame inside the edge against the
+// sphere past it: those are different parts of the world, and the change of color across the edge (deck and hull, sea
+// and sky) read as stale content and wiped good traces on a shaking boat. Where the memory has changed (a cut,
+// surfacing), what the sphere holds past the edge is likely stale too, and the frame's edge is continued over it (the
+// smooth fill's colors, with the sector's strength: wholly up to SPHERE_FULL of the height past the edge, easing out to
+// none at SPHERE_FALLOFF, so a cut's stale content is gone across a usual gap and the written part has no hard
+// border), a share of the way each frame (half of it in SPHERE_TAKE); where it hasn't, the sphere is left as it is.
+// Where the sphere holds nothing past the edge, the continuation is written too (it's what the read shows there anyway).
+// The difference: the distance between the two averages in Y'CbCr of the signal as decoded (log or gamma, near enough
+// to what the eye takes as even steps), chroma counted SPHERE_CHROMA times; from SPHERE_LO nothing is written, at
+// SPHERE_HI the whole continuation, smoothstep between. Each sector's distance is smoothed over time (half-life
+// SPHERE_RISE going up, so a moment's difference doesn't count, SPHERE_FALL going down), and the strength between
+// sector middles is interpolated along the edge, so a sector near the threshold eases in and out instead of flickering,
+// and sectors don't show as blocks. Once the slow layer has taken the new world in, the difference is gone and the
+// writing stops. SPHERE_DEBUG 1 writes the continuation red over traces, green where the sphere held nothing
 #define SPHERE_BAND 0.03
 #define SPHERE_FULL 0.08
 #define SPHERE_FALLOFF 0.30
 #define SPHERE_CHROMA 2.0
 #define SPHERE_LO 0.04
 #define SPHERE_HI 0.10
-#define SPHERE_RISE 0.03
-#define SPHERE_FALL 0.2
+#define SPHERE_RISE 0.15
+#define SPHERE_FALL 0.3
+#define SPHERE_SLOW 0.5
+#define SPHERE_TAKE 0.08
+#define SPHERE_SUMS 10u
+#ifndef SPHERE_DEBUG
+#define SPHERE_DEBUG 0
+#endif
 #define SPHERE_MAGIC 0x5e3d1a7bu
 
 // Output pixel j's place in the frame, the grid's, else where the lens's field ends (boundary_uv)
@@ -1138,8 +1149,9 @@ float edge_distance(vec3 a, vec3 b)
 }
 
 #ifdef SPHERE_EDGES
-// Every fourth output pixel each way, in the two bands along the edge: the frame's color inside, what the sphere holds
-// outside (each texel weighted by how fresh it is), summed per sector (fixed point, 1/1024)
+// Every fourth output pixel each way, in the two bands along the edge, summed per sector (fixed point, 1/1024). Inside:
+// the frame's color and the sphere's memory of the same directions (its slow layer, as it was before this frame), each
+// weighted by how fresh the memory there is. Outside: how fresh what the sphere holds there is
 void hook()
 {
     vec2 j = vec2(gl_GlobalInvocationID.xy) * 4.0 + 1.5;
@@ -1148,27 +1160,28 @@ void hook()
     if (!sphere_uv(j, uv)) return;
     float band = SPHERE_BAND * float(SRC_H);
     float place = edge_place(uv);
-    uint k = uint(min(floor(place * float(SPHERE_SECTORS)), float(SPHERE_SECTORS - 1))) * 9u;
+    uint k = uint(min(floor(place * float(SPHERE_SECTORS)), float(SPHERE_SECTORS - 1))) * SPHERE_SUMS;
     float out_d = length(uv - clamp(uv, vec2(-0.5), vec2(SRC_W, SRC_H) - 0.5));
+    if (out_d <= 0.0 && in_d > band) return;
+    if (out_d > band) return;
+    ivec2 t = sphere_texel(sphere_coord(sphere_world(j)), imageSize(GYROFLOW_SPHERE));
+    float f = sphere_fresh(imageLoad(GYROFLOW_SPHERE, t).a);
     if (out_d > 0.0) {
-        if (out_d > band) return;
-        vec4 s = imageLoad(GYROFLOW_SPHERE, sphere_texel(sphere_coord(sphere_world(j)), imageSize(GYROFLOW_SPHERE)));
-        float f = sphere_fresh(s.a);
         atomicAdd(ge_sum[k + 8u], 1u);
-        if (f <= 0.0) return;
-        uvec3 c = uvec3(clamp(s.rgb, 0.0, 1.0) * f * 1024.0 + 0.5);
-        atomicAdd(ge_sum[k + 4u], c.r);
-        atomicAdd(ge_sum[k + 5u], c.g);
-        atomicAdd(ge_sum[k + 6u], c.b);
-        atomicAdd(ge_sum[k + 7u], uint(f * 1024.0 + 0.5));
-    } else {
-        if (in_d > band) return;
-        uvec3 c = uvec3(clamp(sphere_src(uv), 0.0, 1.0) * 1024.0 + 0.5);
-        atomicAdd(ge_sum[k], c.r);
-        atomicAdd(ge_sum[k + 1u], c.g);
-        atomicAdd(ge_sum[k + 2u], c.b);
-        atomicAdd(ge_sum[k + 3u], 1u);
+        atomicAdd(ge_sum[k + 9u], uint(f * 1024.0 + 0.5));
+        return;
     }
+    atomicAdd(ge_sum[k + 7u], 1u);
+    if (f <= 0.0) return;
+    uvec3 c = uvec3(clamp(sphere_src(uv), 0.0, 1.0) * f * 1024.0 + 0.5);
+    uvec3 m = uvec3(clamp(imageLoad(GYROFLOW_SPHERE_SLOW, t).rgb, 0.0, 1.0) * f * 1024.0 + 0.5);
+    atomicAdd(ge_sum[k], c.r);
+    atomicAdd(ge_sum[k + 1u], c.g);
+    atomicAdd(ge_sum[k + 2u], c.b);
+    atomicAdd(ge_sum[k + 3u], uint(f * 1024.0 + 0.5));
+    atomicAdd(ge_sum[k + 4u], m.r);
+    atomicAdd(ge_sum[k + 5u], m.g);
+    atomicAdd(ge_sum[k + 6u], m.b);
 }
 #endif
 
@@ -1185,20 +1198,25 @@ void hook()
     memoryBarrierBuffer();
     barrier();
     for (uint s = i; s < uint(SPHERE_SECTORS); s += 64u) {
-        uint k = s * 9u;
+        uint k = s * SPHERE_SUMS;
         float d_now = -1.0;
         if (!first) {
-            float n_in = float(ge_sum[k + 3u]), n_out = float(ge_sum[k + 8u]);
+            float n_in = float(ge_sum[k + 7u]), n_out = float(ge_sum[k + 8u]);
             if (n_in >= 4.0 && n_out >= 4.0) {
-                vec3 e = vec3(ge_sum[k], ge_sum[k + 1u], ge_sum[k + 2u]) / (1024.0 * n_in);
-                float f = float(ge_sum[k + 7u]) / 1024.0;
-                // Nothing fresh past the edge counts as different as can be (writing there only stamps the fill
-                // the sphere would show anyway)
-                d_now = 1.5 * SPHERE_HI;
-                if (f > 1e-3) {
-                    vec3 p = vec3(ge_sum[k + 4u], ge_sum[k + 5u], ge_sum[k + 6u]) / (1024.0 * f);
-                    d_now = mix(d_now, edge_distance(e, p), clamp(2.0 * f / n_out, 0.0, 1.0));
+                // How much of the inside band the sphere remembers, and how much of the band past the edge it holds
+                float f_in = float(ge_sum[k + 3u]) / 1024.0, cover_in = f_in / n_in;
+                float cover_out = float(ge_sum[k + 9u]) / (1024.0 * n_out);
+                // Its memory of the inside band against the frame there now: the same directions, so a change across the
+                // edge (deck and hull, sea and sky) doesn't count, only the world changed since (a cut, surfacing). No
+                // memory there: nothing to say it's wrong, the traces stay
+                float d_mem = 0.0;
+                if (f_in > 1e-3) {
+                    vec3 e = vec3(ge_sum[k], ge_sum[k + 1u], ge_sum[k + 2u]) / (1024.0 * f_in);
+                    vec3 m = vec3(ge_sum[k + 4u], ge_sum[k + 5u], ge_sum[k + 6u]) / (1024.0 * f_in);
+                    d_mem = edge_distance(e, m) * clamp(3.0 * cover_in, 0.0, 1.0);
                 }
+                // Nothing past the edge: the continuation (writing it there only stamps the fill the read shows anyway)
+                d_now = mix(1.5 * SPHERE_HI, d_mem, clamp(2.0 * cover_out, 0.0, 1.0));
             }
         }
         float dm = first ? 0.0 : ge_d[s];
@@ -1207,11 +1225,13 @@ void hook()
         else dm -= dm * (1.0 - exp2(-dt / SPHERE_FALL));
         ge_d[s] = dm;
         ge_s[s] = smoothstep(SPHERE_LO, SPHERE_HI, dm);
-        for (uint q = 0u; q < 9u; q++) ge_sum[k + q] = 0u;
+        for (uint q = 0u; q < SPHERE_SUMS; q++) ge_sum[k + q] = 0u;
     }
     memoryBarrierBuffer();
     barrier();
     if (i == 0u) {
+        // The time since the frame before, for the write pass's shares (none when the same frame is drawn again)
+        ge_dt = jump ? 0.0 : max(dt, 0.0);
         ge_pts = PTS;
         ge_magic = SPHERE_MAGIC;
     }
@@ -1271,6 +1291,7 @@ void hook()
     // A texel's sides in the frame's pixels
     mat2 tuv = juv * inv;
     float now = PTS + 1000.0;
+    float slow_k = 1.0 - exp2(-ge_dt / SPHERE_SLOW), take = 1.0 - exp2(-ge_dt / SPHERE_TAKE);
     vec2 lo = vec2(-0.5), hi = vec2(SRC_W, SRC_H) - 0.5;
     ivec2 t0 = ivec2(floor(tc));
     // As many texels each way as a step of the lattice spans (near the sphere's poles, where Gyroflow's world has its
@@ -1297,15 +1318,26 @@ void hook()
                 } else {
                     c = sphere_src(uc);
                 }
+                // The slow layer: what was seen here over the last second or so (an average, half-life SPHERE_SLOW),
+                // the memory the next frames' frame is checked against; started over where the sphere had nothing
+                bool known = sphere_fresh(imageLoad(GYROFLOW_SPHERE, t).a) > 0.0;
+                vec3 slow = known ? mix(imageLoad(GYROFLOW_SPHERE_SLOW, t).rgb, c, slow_k) : c;
+                imageStore(GYROFLOW_SPHERE_SLOW, t, vec4(slow, 1.0));
                 imageStore(GYROFLOW_SPHERE, t, vec4(c, now));
                 continue;
             }
-            float a = sphere_strength(edge_place(uc)) * (1.0 - smoothstep(SPHERE_FULL * float(SRC_H), SPHERE_FALLOFF * float(SRC_H), out_d));
+            // A share of the way each frame (half of it in SPHERE_TAKE), so a moment's difference barely touches the
+            // traces and a lasting one (a cut) replaces them within a few tenths of a second
+            float a = take * sphere_strength(edge_place(uc)) * (1.0 - smoothstep(SPHERE_FULL * float(SRC_H), SPHERE_FALLOFF * float(SRC_H), out_d));
             if (a < 1.0 / 512.0) continue;
             cur_j = j - 2.0 * k;
             vec3 cont = edge_fill(uc).rgb;
             vec4 old = imageLoad(GYROFLOW_SPHERE, t);
             float f = sphere_fresh(old.a);
+#if SPHERE_DEBUG
+            // Red: written over traces the sphere held; green: where it held nothing
+            cont = f > 0.25 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+#endif
             vec3 was = f > 0.0 ? old.rgb : vec3(0.0);
             float fn = f * (1.0 - a) + a;
             imageStore(GYROFLOW_SPHERE, t, vec4((was * f * (1.0 - a) + cont * a) / fn, now + SPHERE_HALF_LIFE * log2(fn)));

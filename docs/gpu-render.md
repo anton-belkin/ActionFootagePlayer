@@ -332,23 +332,31 @@ showed until it aged out, and the sphere was written after the read, a frame lat
 Now three compute passes at MAIN **before** the warp samples the frame (HOOKED is the decoded frame), so what they
 write shows in the same frame:
 1. `sphere edges` (every 4th output pixel): along the frame's edge, in 32 sectors of the perimeter (about a tenth of a
-   16:9 frame's width each), the frame's own colors in a band 3 % of the height inside the edge, and what the sphere
-   holds in a band as wide past it (weighted by freshness), summed per sector with atomics into a storage buffer.
-2. `sphere sectors` (one workgroup): per sector the distance between the two averages, in Y'CbCr of the signal as
-   decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
-   counts as different. Smoothed in time (half-life 0.03 s rising, so a cut is taken at once, 0.2 s falling; a seek or
-   a redraw of the same frame starts over or changes nothing), then the strength: smoothstep from 0.04 (nothing
-   written) to 0.10 (all of it).
+   16:9 frame's width each), in a band 3 % of the height inside the edge, the frame now and the sphere's memory of the
+   same directions (a second texture, the slow layer: rgba16f, what was seen there averaged with a half-life of 0.5 s),
+   weighted by how fresh the memory is; and how fresh the sphere is in a band as wide past the edge. Summed per sector
+   with atomics into a storage buffer.
+2. `sphere sectors` (one workgroup): per sector the distance between the frame and the memory, in Y'CbCr of the signal
+   as decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
+   counts as different (writing there only stamps the fill the read shows anyway), no memory inside as no evidence.
+   Smoothed in time (half-life 0.15 s rising, 0.3 s falling; a seek or a redraw of the same frame starts over or
+   changes nothing), then the strength: smoothstep from 0.04 (nothing written) to 0.10 (all of it).
+   **First version (v1) compared the frame inside the edge with the sphere past it**: different parts of the world, so
+   the change of colour across the edge (deck and hull, sea and sky) read as stale content, and on a shaking boat, where
+   the sphere's traces are right, it wiped them (Anton, live, 2026-11-18). The memory of the same directions changes
+   only when the world does (a cut, surfacing).
 3. `sphere` (every other output pixel): each texel these pixels reach gets exactly one writer, the pixel nearest the
    texel's middle in steps of the pixels (the pixel lattice mapped onto the sphere by its local derivatives, from the
    neighbours in the workgroup's shared memory; up to 6 texels across near the poles). The texel's middle decides:
    inside the frame, the frame's color there (a 2 x 2 box over the texel's footprint), seen now; past it, with the
    strength interpolated between the two nearest sectors' middles along the edge, times a falloff (whole up to 8 % of
-   the height past the edge, easing to none at 30 %), the continuation (the smooth fill's color there) mixed over what
-   the texel held as a share of its weight, so an empty texel takes it at that weight and the read eases into the
-   smooth fill under it. Where the sectors don't differ, nothing is written and what was seen there earlier stays.
-   Writing the continuation makes the sphere past the edge match the edge, so the difference falls and the writing
-   stops by itself: a sector near the threshold eases, it doesn't flicker.
+   the height past the edge, easing to none at 30 %), times a share a frame (half of the way in 0.08 s, so a moment's
+   difference barely touches the traces), the continuation (the smooth fill's color there) mixed over what the texel
+   held as a share of its weight, so an empty texel takes it at that weight and the read eases into the smooth fill
+   under it. Where the sectors don't differ, nothing is written and what was seen there earlier stays. Once the slow
+   layer has taken the new world in, the difference is gone and the writing stops. Seen texels also update the slow
+   layer. `SPHERE_DEBUG 1` writes the continuation red (over traces) or green (where there were none); the marks stay
+   in the sphere, so it overstates.
 
 The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels, each weighted by its freshness
 (all weights positive, so empty or stale texels drop out; no ringing), fully the sphere's once two thirds of the taps'
