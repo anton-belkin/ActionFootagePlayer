@@ -1,8 +1,8 @@
 /library /organizing 301
 /library.html /organizing 301
-/fr/library /fr/organizing 301
-/fr/library.html /fr/organizing 301
-/ru/library /ru/organizing 301
-/ru/library.html /ru/organizing 301
-/zh/library /zh/organizing 301
-/zh/library.html /zh/organizing 301
+/fr / 301
+/fr/* /:splat 301
+/ru / 301
+/ru/* /:splat 301
+/zh / 301
+/zh/* /:splat 301
