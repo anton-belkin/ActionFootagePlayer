@@ -620,8 +620,16 @@ mp.register_script_message("preview", function(json)
     if req.force then table.insert(args, "--force") end
     if picture then
         table.insert(args, "--picture"); table.insert(args, picture)
-    -- Another clip's (req.view: its saved view), or as this one plays
-    elseif type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    else
+        -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+        local ok, err = xpcall(function()
+            if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+        end, debug.traceback)
+        if not ok then
+            mp.msg.error("preview: " .. tostring(err))
+            return reply(false, tostring(err):match("^[^\n]*"))
+        end
+    end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
     -- on its own (with a picture: it's in the picture already)
     if picture then
