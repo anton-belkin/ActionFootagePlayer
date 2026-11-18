@@ -94,3 +94,7 @@ body.doc-page::before { display: none; }
 .art .media-slot { aspect-ratio: 16 / 5; }
 .doc-page .top .wrap { flex-wrap: nowrap; }
 @media (max-width: 520px) { .doc-page .top .wrap { gap: 12px; padding: 0 16px; } .doc-page .brand { font-size: .9375rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; } .doc { padding: 0 16px; } }
+
+/* What each earlier page set in its own head: an element marked hidden stays hidden, whatever its display says */
+[hidden] { display: none !important; }
+.art img { max-width: 100%; }
