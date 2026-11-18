@@ -592,33 +592,59 @@ mp.register_script_message("reveal-last-export", function()
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end)
 end)
 
+-- A moment's picture, the frame on screen as k is pressed (the workspace plugin's moment-picture { a, b }: the part,
+-- in the clip's time): mpv's screenshot of the video as it's rendered (the stabilization, the look; no OSD, panel or
+-- console) in SDR (screenshot-tag-colorspace no: an HDR look tone-mapped to sRGB, as Alt+s's photo links have it),
+-- for the preview that follows (preview's `picture`). Taken only where it's the moment as it will play: a window that
+-- renders (not --vo=null, not the Library's batches), the frame on screen inside the part, Save frame's crop mode off
+-- (a moment keeps neither its camera nor its frame; paused, its screenshot can be stale: the denoise's ring). Else
+-- none, and the preview is rendered by gyroflow-export as before
+local moment_picture = nil
+
 -- A moment's preview, for the workspace plugin: one frame in SDR, stabilized as the clip plays, held for its part.
--- Short (a second or two), so it runs at once, beside an export if there's one
+-- Short (a second or two), so it runs at once, beside an export if there's one. With `picture` (k's): the frame taken
+-- as k was pressed (moment-picture) made into it, no clip decoded (a second, where rendering one takes up to 30 s on
+-- the NAS); without one taken, rendered
 mp.register_script_message("preview", function(json)
     local req = utils.parse_json(json or "")
     if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
+    local picture = req.picture == true and moment_picture or nil
+    moment_picture = nil
     local function reply(ok, err)
+        if picture then os.remove(picture) end
         mp.commandv("script-message-to", req.reply, req.done or "preview-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err }))
     end
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
-    -- Another clip's (req.view: its saved view), or as this one plays
-    if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    if picture then
+        table.insert(args, "--picture"); table.insert(args, picture)
+    else
+        -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+        local ok, err = xpcall(function()
+            if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+        end, debug.traceback)
+        if not ok then
+            mp.msg.error("preview: " .. tostring(err))
+            return reply(false, tostring(err):match("^[^\n]*"))
+        end
+    end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
-    -- on its own
-    if req.project ~= nil then
+    -- on its own (with a picture: it's in the picture already)
+    if picture then
+    elseif req.project ~= nil then
         for i = #args - 1, 1, -1 do
             if args[i] == "--project" then table.remove(args, i + 1); table.remove(args, i) end
         end
         if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
     end
-    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
+    if picture then
+    elseif req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
     add("--from", req.from and string.format("%.3f", req.from))
     add("--to", req.to and string.format("%.3f", req.to))
-    add("--at", req.at and string.format("%.3f", req.at))
+    if not picture then add("--at", req.at and string.format("%.3f", req.at)) end
     add("--link", req.link)
     add("--dates", req.dates)
     add("--output", req.output)
@@ -753,6 +779,40 @@ local function shown_time()
     local restart = (d.restart and d.restart >= 0) and math.min(d.restart, t) or t
     return math.max(restart, t - d.delay)
 end
+
+-- k's moment picture (moment_picture, above)
+mp.register_script_message("moment-picture", function(json)
+    if moment_picture then os.remove(moment_picture); moment_picture = nil end
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or type(req.a) ~= "number" or type(req.b) ~= "number" then return end
+    local vo = mp.get_property("current-vo")
+    if not vo or vo == "null" or vo == "image" or (os.getenv("AFP_BATCH") or "") ~= "" then return end
+    if not mp.get_property_native("vo-configured") then return end
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    if crop.active then return end
+    local t = shown_time()
+    -- A moment playing as a video of its own: its time plus where it starts in the clip
+    local ws = mp.get_property_native("user-data/workspace")
+    if t and type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then t = t + ws.offset end
+    -- A frame's slack at the ends (B is where the loop turns back)
+    if not t or t < req.a - 0.05 or t > req.b + 0.05 then
+        return mp.msg.info("moment picture: the frame on screen isn't inside the part: the preview is rendered")
+    end
+    local file = utils.join_path(platform.temp_dir(), string.format("afp-moment-%d.jpg", utils.getpid()))
+    local saved = {}
+    for k, v in pairs({ ["screenshot-format"] = "jpg", ["screenshot-jpeg-quality"] = "95", ["screenshot-tag-colorspace"] = "no", ["screenshot-high-bit-depth"] = "no" }) do
+        saved[k] = mp.get_property(k)
+        mp.set_property(k, v)
+    end
+    local t0 = mp.get_time()
+    os.remove(file)
+    mp.command_native({ "screenshot-to-file", file, "video" })
+    for k, v in pairs(saved) do mp.set_property(k, v) end
+    if utils.file_info(file) then
+        moment_picture = file
+        mp.msg.info(string.format("moment picture: the frame at %.3f s, taken in %d ms", t, math.floor((mp.get_time() - t0) * 1000)))
+    end
+end)
 
 -- Where a photo goes: the project's _Stills/Generated/ (docs/library-management.md §8), as the workspace plugin says
 -- the project is; with the project's generated_runs, a folder a day in it (<date>); nil: gyroflow-export's own choice

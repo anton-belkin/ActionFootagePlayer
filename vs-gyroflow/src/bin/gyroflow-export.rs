@@ -154,6 +154,8 @@ shows and plays, the frame also their cover art (the icon)
                    at or before it, so only keyframes are decoded), 2 a second, in SDR as for a still and not
                    stabilized, from the low-resolution copy beside the clip when there is one (DJI's .LRF, GoPro's
                    .LRV); without --at, about 12 frames through the clip, 10 s apart at least, after its first second
+  --picture <image>  a still's frame as given (the player's frame as shown, an SDR picture): nothing is decoded or
+                   stabilized, the video only gives the link's `hash` and the file's dates; needs --output, --from, --to
   --at <time>      the frame's time (default: the middle of --from to --to); a flipbook's: times, comma-separated
   --cover <time>   a flipbook's cover art (its icon): the frame nearest this time (default: the middle)
   --link <json>    the link to the original the player keeps in it (an MP4 key, ch.actionfootageplayer.link), its
@@ -270,6 +272,7 @@ struct Options {
     crop: Option<[f64; 4]>,
     /// --image: the player's own render of the frame (HLG, a 16-bit PNG)
     image: Option<PathBuf>,
+    picture: Option<PathBuf>,
     jpeg: bool,
     quality: u8,
     sdr_image: Option<String>,
@@ -326,7 +329,7 @@ fn main() {
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
-                             translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None,
+                             translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None, picture: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
                              youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None };
     let mut files = Vec::new();
@@ -438,6 +441,7 @@ fn main() {
                 .filter(|c| c.iter().all(|v| (0.0..=1.0).contains(v)) && c[2] > 0.0 && c[3] > 0.0 && c[0] + c[2] <= 1.0 + 1e-6 && c[1] + c[3] <= 1.0 + 1e-6)
                 .unwrap_or_else(|| fail("--crop takes x,y,w,h in 0-1"))),
             "--image" => opts.image = Some(PathBuf::from(value("--image"))),
+            "--picture" => opts.picture = Some(PathBuf::from(value("--picture"))),
             "--sdr-image" => opts.sdr_image = Some(match value("--sdr-image").as_str() {
                 v @ ("maker" | "nbcu" | "macos") => v.to_string(),
                 v => fail(&format!("unknown SDR image {v} (maker, nbcu, macos)")),
@@ -475,6 +479,9 @@ fn main() {
     if opts.project.is_some() && files.len() > 1 { fail("--project is for one video"); }
     if opts.output.is_some() && files.len() > 1 { fail("--output is for one video"); }
     if opts.preview.is_none() && (opts.at.is_some() || opts.dates.is_some() || opts.cover.is_some()) { fail("--at, --cover and --dates are for --preview"); }
+    if opts.picture.is_some() && (opts.preview != Some(Preview::Still) || opts.output.is_none() || opts.from.is_none() || opts.to.is_none()) {
+        fail("--picture is for --preview still, with --output, --from and --to");
+    }
     if opts.cover.is_some() && opts.preview != Some(Preview::Flipbook) { fail("--cover is for a flipbook: a still's cover is its frame"); }
     if opts.preview.is_some() && (opts.prores || opts.dv_rpu.is_some()) { fail("a preview is H.264: not with --prores or --dv-rpu"); }
     if opts.youtube.is_some() && (opts.sdr || opts.nbcu || opts.dv_rpu.is_some() || opts.prores || opts.preview.is_some()
@@ -494,7 +501,8 @@ fn main() {
         let outcome = if let Some(m) = &opts.sphere360 { export_360(file, &opts, m) }
             else if let Some(t) = opts.photo { photo(file, &opts, t) }
             else if opts.translation { translation(file, &opts) }
-            else if opts.preview == Some(Preview::Flipbook) { flipbook(file, &opts) } else { export(file, &opts, None) };
+            else if opts.preview == Some(Preview::Flipbook) { flipbook(file, &opts) }
+            else if let Some(p) = &opts.picture { still_from_picture(file, &opts, p) } else { export(file, &opts, None) };
         match outcome {
             Ok(Outcome::Done(out)) => eprintln!("  -> {}", out.display()),
             Ok(Outcome::Skipped(why)) => eprintln!("{}: skipped, {why}", file_name(file)),
@@ -1008,9 +1016,11 @@ fn default_out_dir(video: &Path) -> PathBuf {
 fn pick_h264() -> Result<Encoder, String> {
     static PICKED: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
     let candidates = ["libx264", "h264_videotoolbox", "h264_nvenc", "h264_qsv", "h264_amf", "h264_mf"];
+    // VideoToolbox is on every Mac: taken without the test encode, which costs 0.4-0.9 s a preview (a VideoToolbox
+    // session of its own, slower while the player plays), most of a moment saved from its picture
     let picked = PICKED.get_or_init(|| candidates.iter().copied()
         .filter(|n| *n != "h264_videotoolbox" || cfg!(target_os = "macos"))
-        .find(|n| encoder_works(&h264(n))).map(str::to_string));
+        .find(|n| *n == "h264_videotoolbox" || encoder_works(&h264(n))).map(str::to_string));
     picked.as_deref().map(h264).ok_or_else(|| format!("ffmpeg has no H.264 encoder that works here ({})", candidates.join(", ")))
 }
 
@@ -1065,6 +1075,46 @@ fn write_preview(files: &PreviewFiles, frames: usize, length: f64, tags: &[Strin
     if let Some(q) = &quicktime { keys.push((vs_gyroflow::mp4meta::CREATION_DATE_KEY, q.as_str())); }
     if !keys.is_empty() { vs_gyroflow::mp4meta::write_keys(out, &keys)?; }
     Ok(())
+}
+
+// --preview still --picture: a still made from a picture already there (the player's frame as it shows it, in SDR),
+// in a second or so: the clip isn't decoded nor its motion read (on a NAS the 30 s of a still rendered here). The
+// video only gives the link's `hash` (main) and, without --dates, the file's dates; the rest is write_preview's, as
+// for a still rendered here: the size, the H.264 held for --from to --to, the cover art, the keys
+fn still_from_picture(file: &str, opts: &Options, picture: &Path) -> Result<Outcome, String> {
+    let out_path = opts.output.clone().ok_or("--picture needs --output")?;
+    let (from, to) = (opts.from.ok_or("--picture needs --from")?, opts.to.ok_or("--picture needs --to")?);
+    if out_path.exists() && !opts.force {
+        return Ok(Outcome::Skipped(format!("{} exists (--force replaces it)", out_path.display())));
+    }
+    let out_dir = out_path.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new(".")).to_path_buf();
+    std::fs::create_dir_all(&out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
+    let stem = out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default();
+    let pic = ffprobe(picture).map_err(|e| format!("the picture {}: {e}", picture.display()))?;
+    let size = preview_size(pic.width, pic.height);
+    let files = PreviewFiles { frame: TempFile(out_dir.join(format!(".{stem}.frame.yuv"))),
+                               cover: TempFile(out_dir.join(format!(".{stem}.cover.jpg"))), size };
+    // As a still rendered here has them: BT.709 for its video, BT.601 full range for the JPEG of its cover
+    let graph = format!("[0:v]scale={}:{}:flags=lanczos,split[a][b];[a]scale=out_color_matrix=bt709:out_range=tv,format=yuv420p[f];\
+                         [b]scale=out_color_matrix=bt601:out_range=pc,format=yuvj420p[c]", size.0, size.1);
+    let result = ffmpeg_command("ffmpeg").args(["-nostdin", "-v", "error", "-y", "-i"]).arg(picture)
+        .args(["-filter_complex", &graph, "-map", "[f]", "-frames:v", "1", "-f", "rawvideo"]).arg(&files.frame.0)
+        .args(["-map", "[c]", "-frames:v", "1", "-q:v", "5", "-update", "1", "-f", "image2"]).arg(&files.cover.0)
+        .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).output().map_err(|e| format!("ffmpeg: {e}"))?;
+    if !result.status.success() { return Err(format!("the picture: {}", String::from_utf8_lossy(&result.stderr).trim())); }
+    let tags = ["bt709", "bt709", "bt709", "tv"].map(str::to_string);
+    let tmp_path = out_dir.join(format!(".{stem}.partial.mp4"));
+    if let Err(e) = write_preview(&files, 1, to - from, &tags, &tmp_path, opts, opts.dates.map(|d| (d, true))) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    let modified = opts.dates.map(|d| d.system_time()).or_else(|| std::fs::metadata(file).and_then(|m| m.modified()).ok());
+    if let (Some(modified), Ok(f)) = (modified, std::fs::File::options().write(true).open(&tmp_path)) {
+        let _ = f.set_modified(modified);
+    }
+    if out_path.exists() { copy_finder_attributes(&out_path, &tmp_path); }
+    std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
+    Ok(Outcome::Done(out_path))
 }
 
 // NBCUniversal's HLG -> SDR conversion (Type III), in the dlogm plugin's luts/

@@ -922,7 +922,12 @@ local function ask(opts, done)
         complete = opts.suggestion and function() return { opts.suggestion }, 1 end or nil,
         submit = function(text)
             input.terminate()
-            done((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+            -- What follows the name never fails in silence: an error is said on screen (and is in the log)
+            local ok, err = xpcall(function() done(((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))) end, debug.traceback)
+            if not ok then
+                mp.msg.error("after the name typed: " .. tostring(err))
+                mp.osd_message("That didn't work: " .. tostring(err):match("^[^\n]*"), 8)
+            end
         end,
     })
 end
@@ -1050,15 +1055,21 @@ end
 
 -- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
 -- nothing on screen unless it fails (the moment that comes with an export)
--- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own)
+-- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own),
+-- picture (k's: the preview from the frame shown as it was pressed, export.lua's moment-picture)
 local function save(name, update, typed, quiet, opts)
     opts = opts or {}
+    local PREVIEW_WAIT = 120
     local a, b
     if opts.range then
         a, b = opts.range[1], opts.range[2]
     else
         a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-        if not (a and b and b > a) then return end
+        if not (a and b and b > a) then
+            -- The part was unmarked while the name was typed
+            if not quiet then mp.osd_message("Not saved: the part isn't marked any more (l at its start, l at its end, then k)", 6) end
+            return
+        end
         -- In the clip's time (a moment playing starts at its in)
         a, b = a + (state.offset or 0), b + (state.offset or 0)
     end
@@ -1082,6 +1093,9 @@ local function save(name, update, typed, quiet, opts)
     local info = utils.file_info(state.clip)
     local l = {
         v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
+        -- The original's fingerprint, read as it opened: gyroflow-export doesn't read it again (seconds on the NAS while
+        -- it plays)
+        hash = state.hash,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
     -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
@@ -1145,11 +1159,22 @@ local function save(name, update, typed, quiet, opts)
     state.saving = final
     publish()
     if not quiet then mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30) end
+    -- No answer in two minutes (the preview takes seconds): said, and k works again
+    mp.add_timeout(PREVIEW_WAIT, function()
+        if not pending[id] then return end
+        pending[id] = nil
+        state.saving = nil
+        publish()
+        mp.msg.error("moment " .. final .. ": no answer from the gyroflow plugin in " .. PREVIEW_WAIT .. " s")
+        mp.osd_message("Couldn't save " .. final .. ": no answer from the gyroflow plugin (see the player's log)", 8)
+    end)
     mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
         id = id, clip = state.clip, from = a, to = b, at = at, link = utils.format_json(l), dates = dates, output = file,
         force = update ~= nil, reply = mp.get_script_name(),
         -- Its own project, or none (the preset: false); nil: the clip's, as it plays (a moment from before)
         project = preview_project, alone = l.alone == true and preview_project == false,
+        -- k's: the frame on screen as it was pressed, when the gyroflow plugin took it
+        picture = opts.picture,
     }))
 end
 
@@ -1213,22 +1238,26 @@ local function save_key(given)
     -- Asked before the name: there's nowhere to save it yet
     if not need_project("Saving a moment") then return end
     local m = state.moment or state.editing
-    if given and given ~= "" then return save(given, nil, given) end
     local off = state.offset or 0
+    -- Its picture: the frame on screen now, as it's decided, taken by the gyroflow plugin where that's the moment as it
+    -- plays (else its preview is rendered: export.lua's moment-picture). A second to save, not up to 30 s
+    mp.commandv("script-message-to", "gyroflow", "moment-picture", utils.format_json({ a = a + off, b = b + off }))
+    local pic = { picture = true }
+    if given and given ~= "" then return save(given, nil, given, nil, pic) end
     if m then
         if math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
             return mp.osd_message(m.name .. " is saved as it is: move its start or end with l, then k", 4)
         end
         return ask({ prompt = "Update " .. m.name .. " to " .. clock(a + off) .. "–" .. clock(b + off) .. "? Enter, or a new name for a new one: ",
                      id = "workspace-update" }, function(text)
-            if text == "" then save(m.name, m) else last_typed = text; save(text, nil, text) end
+            if text == "" then save(m.name, m, nil, nil, pic) else last_typed = text; save(text, nil, text, nil, pic) end
         end)
     end
     local suggested = suggestion(a)
     ask({ prompt = "Moment " .. clock(a) .. "–" .. clock(b) .. " name (Enter: " .. suggested .. "): ", suggestion = suggested,
           history = history_file(), id = "workspace-moment" }, function(text)
         if text ~= "" then last_typed = text end
-        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil)
+        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil, nil, pic)
     end)
 end
 
