@@ -321,6 +321,42 @@ nearest edge's colors, 25 taps) streaked outward from the frame and met it in a 
 Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
 N100.)**
 
+**The sphere, 2026-11-18** (warp.glsl's "pass sphere", `sphere_fill`; gpu_table's `sphere_passes`). Before: one
+compute pass after the warp wrote every other output pixel the frame covered into an equirect (2048 x 1024 rgba32f,
+0.18° a texel: color and time seen) by world direction, last writer wins; the warp read it back past the frame as 3 x 3
+texels two apart, each the nearest texel (`imageLoad`: a storage image isn't filtered), weighted by age (half-life 2.5 s,
+gone after 10), and blended it over the smooth fill by how fresh it was. The texels showed as blocks (a texel is ~3.5
+px of a 1080p window, ~10 at full screen on the XDR), stale content (a scene cut, the boat turning under the camera)
+showed until it aged out, and the sphere was written after the read, a frame late.
+
+Now three compute passes at MAIN **before** the warp samples the frame (HOOKED is the decoded frame), so what they
+write shows in the same frame:
+1. `sphere edges` (every 4th output pixel): along the frame's edge, in 32 sectors of the perimeter (about a tenth of a
+   16:9 frame's width each), the frame's own colors in a band 3 % of the height inside the edge, and what the sphere
+   holds in a band as wide past it (weighted by freshness), summed per sector with atomics into a storage buffer.
+2. `sphere sectors` (one workgroup): per sector the distance between the two averages, in Y'CbCr of the signal as
+   decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
+   counts as different. Smoothed in time (half-life 0.03 s rising, so a cut is taken at once, 0.2 s falling; a seek or
+   a redraw of the same frame starts over or changes nothing), then the strength: smoothstep from 0.04 (nothing
+   written) to 0.10 (all of it).
+3. `sphere` (every other output pixel): each texel these pixels reach gets exactly one writer, the pixel nearest the
+   texel's middle in steps of the pixels (the pixel lattice mapped onto the sphere by its local derivatives, from the
+   neighbours in the workgroup's shared memory; up to 6 texels across near the poles). The texel's middle decides:
+   inside the frame, the frame's color there (a 2 x 2 box over the texel's footprint), seen now; past it, with the
+   strength interpolated between the two nearest sectors' middles along the edge, times a falloff (whole up to 8 % of
+   the height past the edge, easing to none at 30 %), the continuation (the smooth fill's color there) mixed over what
+   the texel held as a share of its weight, so an empty texel takes it at that weight and the read eases into the
+   smooth fill under it. Where the sectors don't differ, nothing is written and what was seen there earlier stays.
+   Writing the continuation makes the sphere past the edge match the edge, so the difference falls and the writing
+   stops by itself: a sector near the threshold eases, it doesn't flicker.
+
+The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels, each weighted by its freshness
+(all weights positive, so empty or stale texels drop out; no ringing), fully the sphere's once two thirds of the taps'
+weight is fresh. Measured offscreen (tools/edgefill): see the PR's table. Gotchas met: with the smooth read, columns
+of texels the stride-2 writer missed (a pixel step about a texel) showed as stripes, hence one writer per texel; Gyroflow's
+world has its y axis anywhere (on the speedboat clip the sphere's pole sat on the horizon), so near a pole a step spans
+many texels across.
+
 ### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
 
 A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:
