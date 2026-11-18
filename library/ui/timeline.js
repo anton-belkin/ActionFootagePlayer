@@ -99,11 +99,8 @@ function tlCols(main) {
   const w = main.clientWidth || 780;
   return Math.max(1, Math.floor((w - 2 * TL.pad + TL.gap) / (TL.tileW + TL.gap)));
 }
-function tlTile(it) {
-  const t = it.when && !isNaN(it.when) ? String(it.when.getHours()).padStart(2, "0") + ":" + String(it.when.getMinutes()).padStart(2, "0") : "";
-  const what = it.kind === "clip" ? (it.cam || "") : it.kind === "moment" ? "Moment" : it.kind === "still" ? (it.form || "Photo") : "";
-  return avCard(it, " tl", [t, what].filter(Boolean).join(" · "));
-}
+// A day's item: the tile of the grid, at Timeline's size (its day is the block's header: no time on the tile)
+function tlTile(it) { return avCard(it, " tl"); }
 function tlBlockHtml(b) {
   const at = 'style="top:' + b.top + 'px;height:' + b.h + 'px"';
   if (b.type === "month") return '<div class="tlb tlmonth" ' + at + ' data-b="' + b.id + '"><h3>' + esc(b.title) + '</h3><span class="sub">' + avCount(b.n, "item", "items") + '</span></div>';
