@@ -1,0 +1,96 @@
+/* Draft: the site's other pages as articles, in the landing page's look. Loaded after ../site/styles.css and the
+   page's own stylesheet: it changes the colors and type to the landing page's, puts the page in one column beside a
+   side column to move around by, and flattens what was laid out as a long scroll of bands. */
+html:root {
+  color-scheme: light;
+  --bg: #ffffff; --surface: #ffffff; --ink: #1c1c1e; --muted: #5b5f66; --line: #e3e5e9;
+  --accent: #ee7d1b; --accent-ink: #c65f08; --on-accent: #ffffff;
+  --deep: #141414; --deep-2: #262626; --deep-fg: #f1f2f4; --deep-muted: #b3b6bd;
+  --f-display: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --f-body: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --f-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 12px; --top-h: 60px; --side: 250px;
+  padding: 0;
+}
+body.doc-page { margin: 0; background: var(--bg); color: var(--ink); font: 400 1.0313rem/1.65 var(--f-body); -webkit-font-smoothing: antialiased; }
+body.doc-page::before { display: none; }
+
+/* Header and footer: the landing page's */
+.doc-page .top { position: sticky; top: 0; z-index: 30; background: #141414; color: #fff; padding: 0; border: 0; }
+.doc-page .top .wrap { display: flex; align-items: center; gap: 28px; height: 60px; max-width: 1240px; margin: 0 auto; padding: 0 24px; }
+.doc-page .brand { display: flex; align-items: center; gap: 10px; margin-right: auto; font: 700 1.0625rem var(--f-body); letter-spacing: 0; text-decoration: none; white-space: nowrap; color: #fff; }
+.doc-page .brand img { width: 30px; height: 30px; border-radius: 7px; }
+.doc-page .top .nav { display: flex; gap: 26px; font-size: .9375rem; font-weight: 600; }
+.doc-page .top .nav a { color: #fff; text-decoration: none; opacity: .9; }
+.doc-page .top .nav a:hover, .doc-page .top .nav a[aria-current] { opacity: 1; color: var(--accent); }
+.doc-page .top .pill { display: inline-flex; align-items: center; height: 34px; padding: 0 18px; border-radius: 999px; background: var(--accent); color: #fff; font: 700 .875rem var(--f-body); text-decoration: none; white-space: nowrap; }
+@media (max-width: 760px) { .doc-page .top .nav { display: none; } }
+.doc-page footer { background: #0e0e0e; color: #b3b6bd; padding: 56px 0 40px; font-size: .875rem; }
+.doc-page footer .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+.doc-page footer .brand { margin-bottom: 10px; }
+.doc-page .foot { display: grid; grid-template-columns: 1.6fr repeat(4, 1fr); gap: 32px; }
+.doc-page .foot h4 { margin: 0 0 12px; color: #fff; font-size: .8125rem; letter-spacing: .06em; text-transform: uppercase; }
+.doc-page .foot ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.doc-page .foot a { text-decoration: none; }
+.doc-page .foot a:hover { color: #fff; }
+.doc-page .fine { margin-top: 40px; padding-top: 24px; border-top: 1px solid #2a2a2a; font-size: .75rem; line-height: 1.6; color: #7d8088; }
+.doc-page .fine p + p { margin-top: 8px; }
+@media (max-width: 820px) { .doc-page .foot { grid-template-columns: 1fr 1fr; } }
+
+/* The page: a side column and the article */
+.doc { display: grid; grid-template-columns: var(--side) minmax(0, 1fr); gap: 56px; max-width: 1240px; margin: 0 auto; padding: 0 24px; align-items: start; }
+.side { position: sticky; top: 60px; max-height: calc(100vh - 60px); overflow-y: auto; padding: 36px 0 48px; font-size: .9063rem; line-height: 1.35; }
+.side ul { list-style: none; margin: 0; padding: 0; }
+.side-h { margin: 0 0 8px; font: 700 .6875rem var(--f-body); letter-spacing: .09em; text-transform: uppercase; color: #8a8e96; }
+.side > ul { margin-bottom: 26px; }
+.side a { display: block; padding: 6px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; }
+.side a:hover { color: var(--ink); background: #f3f4f6; }
+.side .here > a { color: var(--ink); font-weight: 700; background: #f3f4f6; }
+.side .toc { margin: 4px 0 8px 10px; padding-left: 10px; border-left: 2px solid var(--line); }
+.side .toc a { padding: 5px 8px; font-size: .8438rem; }
+.side .toc a.now { color: var(--accent-ink); font-weight: 600; }
+.art { min-width: 0; max-width: 860px; padding: 44px 0 96px; }
+@media (max-width: 900px) {
+  .doc { grid-template-columns: 1fr; gap: 0; }
+  .side { position: static; max-height: none; padding: 20px 0 8px; border-bottom: 1px solid var(--line); }
+  .side > ul { display: flex; flex-wrap: wrap; gap: 2px 4px; margin-bottom: 14px; }
+  .side .toc { display: none; }
+  .art { padding-top: 28px; }
+}
+
+/* The article: flat sections in one column */
+.art .band { padding-left: 0; padding-right: 0; background: none; }
+.art .wrap { max-width: none; margin: 0; padding: 0; }
+.art h1 { font-size: clamp(2.125rem, 1.4rem + 2.6vw, 3rem); font-weight: 700; font-stretch: normal; letter-spacing: -.03em; line-height: 1.08; }
+.art h2 { font-size: clamp(1.5rem, 1.2rem + 1.1vw, 1.9375rem); font-weight: 700; font-stretch: normal; letter-spacing: -.02em; line-height: 1.15; }
+.art h3 { font-size: 1.125rem; font-weight: 700; font-stretch: normal; letter-spacing: -.005em; }
+.art .eyebrow { font: 700 .8125rem var(--f-body); letter-spacing: .09em; color: var(--accent); }
+.art .lede { font-size: 1.1875rem; line-height: 1.55; max-width: 44rem; }
+.art .hero { padding: 0 0 36px; }
+.art .hero .wrap { display: grid; gap: 28px; grid-template-columns: 1fr; }
+.art .hero-text { gap: 16px; }
+.art .hero .btns, .art .hero .status, .art .hero .dl-mobile { display: none; }
+.art .section { padding: 44px 0; border-top: 1px solid var(--line); scroll-margin-top: 60px; }
+.art .section.tight-top { padding-top: 44px; }
+.art .section-head { gap: 10px; margin-bottom: 24px; max-width: 46rem; }
+.art p { max-width: 46rem; }
+.art a:not(.btn):not(.pill) { color: var(--accent-ink); text-underline-offset: 3px; }
+.art .gap-grid { gap: 22px 28px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.art .gap-item { padding-top: 14px; border-top: 2px solid var(--accent); }
+.art .media video, .art .media img { border-radius: 14px; border: 1px solid var(--line); box-shadow: 0 14px 34px rgba(15,20,30,.12); }
+.art .compare-wrap, .art .steps li { border-radius: 14px; }
+.art table { font-size: .9375rem; }
+.art kbd { font: 500 .8125rem/1 var(--f-mono); }
+.art .btn { border-radius: 12px; }
+.art .btn.primary { background: #000; color: #fff; border-color: #000; }
+
+/* The dark band of the old layout: a dark card inside the column */
+.art .dive { margin: 8px 0; padding: 36px clamp(20px, 4vw, 40px); border-radius: 20px; border-top: 0; background: var(--deep); }
+.art .dive + .section { border-top: 0; }
+
+/* Pages that had their own contents list: the side column has it now */
+.art .ref { display: block; }
+.art .ref > .toc { display: none; }
+.art .media-slot { aspect-ratio: 16 / 5; }
+.doc-page .top .wrap { flex-wrap: nowrap; }
+@media (max-width: 520px) { .doc-page .top .wrap { gap: 12px; padding: 0 16px; } .doc-page .brand { font-size: .9375rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; } .doc { padding: 0 16px; } }

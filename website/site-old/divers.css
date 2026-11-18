@@ -1,0 +1,68 @@
+/* Divers page: the real before/after loop in the hero and the proof, the evening after the dive with a screenshot
+   beside it, the camera table as cards on phones, and the closing download band. Loaded after styles.css. */
+
+/* Hero: the text, then the side-by-side loop at the full width (at 32:9 it is too short in half a column) */
+.dv-hero .wrap { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+.dv-hero .hero-text { max-width: 820px; }
+
+/* The loop: on phones it runs edge to edge, every pixel of height counts */
+@media (max-width: 600px) {
+  .dv-loop video {
+    width: calc(100% + var(--gutter-l) + var(--gutter-r)); max-width: none;
+    margin-left: calc(-1 * var(--gutter-l)); border-radius: 0; border-inline: 0;
+  }
+}
+
+/* The evening after the dive: the steps in order, the screenshot beside them on wide screens */
+.dv-evening { display: grid; gap: 32px; }
+.dv-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 24px; }
+.dv-steps li { display: grid; gap: 8px; padding-top: 16px; border-top: 2px solid var(--ink); }
+.dv-steps p { color: var(--muted); }
+@media (min-width: 900px) {
+  .dv-evening { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 48px; align-items: start; }
+  .dv-shot { position: sticky; top: calc(env(safe-area-inset-top, 0px) + var(--top-h) + 24px); }
+}
+
+/* Proof, in the deep band: the heading, the loop as the proof, then the measured figure on a line of its own */
+.dive .stat .eyebrow { color: var(--deep-muted); }
+.dv-proof-head { max-width: 760px; }
+.dv-proof { margin-top: 36px; }
+.dv-stat { margin-top: 28px; max-width: 640px; }
+.dive .media figcaption, .dive .media .halves { color: var(--deep-muted); }
+.dive .media .halves span:last-child { color: #FF9A63; }
+.dive .media video, .dive .media img { border-color: rgba(255, 255, 255, 0.12); }
+
+/* Camera table: on phones each camera is a card, Log and Stabilization side by side, no sideways scroll */
+@media (max-width: 640px) {
+  .dv-cams-wrap { overflow: visible; border: 0; border-radius: 0; background: none; }
+  .cams.dv-cams { min-width: 0; }
+  .dv-cams thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+  .dv-cams, .dv-cams tbody { display: block; }
+  .dv-cams tr {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px 16px;
+    padding: 16px; margin-bottom: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+  }
+  .cams.dv-cams tbody th { grid-column: 1 / -1; width: auto; padding: 0; border: 0; font-size: 1.05rem; }
+  .cams.dv-cams td { display: block; width: auto; padding: 10px 0 0; border: 0; border-top: 1px solid var(--line); }
+  .dv-cams td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 6px;
+    font-family: var(--f-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+  }
+  .dv-cams td:last-child { grid-column: 1 / -1; }
+  .dv-cams td.dv-empty { display: none; }
+}
+
+/* Before your next dive: the white balance line and the download under the checklist */
+.dv-wb { margin-top: 18px; max-width: 820px; color: var(--muted); }
+.dv-wb strong { color: var(--ink); font-weight: 600; }
+.dv-after { margin-top: 24px; }
+
+/* The closing download band, deep like the dive, then the community cards */
+.dv-final {
+  display: grid; gap: 18px; justify-items: start; margin-bottom: 28px; padding: clamp(24px, 4vw, 44px);
+  border-radius: var(--radius); border: 1px solid rgba(255, 255, 255, 0.08); background: var(--deep); color: var(--deep-fg);
+}
+.dv-final h2 { color: #F2F8FA; max-width: 24ch; }
+.dv-final .lede { color: var(--deep-muted); }
+.dv-final .btn:not(.primary) { background: transparent; color: var(--deep-fg); border-color: rgba(255, 255, 255, 0.28); }
+.dv-final .btn:not(.primary):hover { border-color: var(--deep-fg); }
