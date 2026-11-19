@@ -85,6 +85,7 @@ jobs:
           luajit tests/agent_test.lua
           luajit tests/export_args_test.lua
           luajit tests/gpu_ahead_test.lua
+          python3 tests/packaging_test.py
           luajit tests/tags_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
 
