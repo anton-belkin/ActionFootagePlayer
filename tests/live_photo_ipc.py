@@ -47,6 +47,8 @@ class Player:
                                    f"--script={REPO}/mpv/scripts/live-photo",
                                    *( [f"--script={REPO}/mpv/scripts/workspace"] if workspace else [f"--script={lister}"] ),
                                    f"--input-ipc-server={SOCK}", path],
+                                  # (the workspace plugin keeps a cache in the folder it runs in without the app's)
+                                  cwd=tempfile.mkdtemp(),
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             try:
