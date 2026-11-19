@@ -947,10 +947,48 @@ fn data_url(bytes: &[u8]) -> String {
 /// system (sips for photos on macOS; videos: thumbs.rs), kept in `cache`. None: none to show
 pub fn thumb(path: &Path, cache: &Path) -> Option<String> { thumb_bytes(path, cache).map(|b| data_url(&b)) }
 
+// Where a file's picture is kept: by its path, size and time (a file changed in place gets a new one)
+fn thumb_key(path: &Path, size: u64, mtime: i64) -> String { fnv(&format!("{}|{size}|{mtime}", path.display())) }
+
+/// A file or folder renamed or moved from `from` to `to` (done already): the pictures kept for it, and for every file in
+/// it, follow it to the new paths, rather than being made again (a renamed album's links, moments, photos; a photo's
+/// picture is sips' work, an export's Quick Look's). The files are the same, so their size and time are: read at the
+/// new path, they give both keys; a folder's files as the catalog has them (the rename noted them: nothing is asked of a
+/// share), else from the disk. How many followed
+pub fn thumbs_follow(cache: &Path, from: &Path, to: &Path) -> usize {
+    let one = |rest: &str, size: u64, mtime: i64| -> bool {
+        let under = |base: &Path| rest.split('/').filter(|c| !c.is_empty()).fold(base.to_path_buf(), |p, c| p.join(c));
+        let (old, new) = (under(from), under(to));
+        let a = cache.join(format!("{}.img", thumb_key(&old, size, mtime)));
+        let b = cache.join(format!("{}.img", thumb_key(&new, size, mtime)));
+        a.is_file() && !b.exists() && std::fs::rename(&a, &b).is_ok()
+    };
+    let is_dir = match crate::seen::file(to) { Some(f) => f.is_some_and(|f| f.dir), None => to.is_dir() };
+    if !is_dir { return stamp(&to.to_string_lossy()).is_some_and(|(s, m)| one("", s, m)) as usize; }
+    let files: Vec<(String, u64, i64)> = match crate::seen::walk(to, &|_, _| false, usize::MAX) {
+        Some(w) => w.into_iter().filter(|e| !e.1).map(|(rel, _, size, mtime)| (rel, size, mtime)).collect(),
+        None => {
+            let mut out = Vec::new();
+            let mut todo = vec![to.to_path_buf()];
+            while let Some(d) = todo.pop() {
+                for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+                    let p = e.path();
+                    let Ok(m) = e.metadata() else { continue };
+                    if m.is_dir() { todo.push(p); continue; }
+                    let Ok(rest) = p.strip_prefix(to) else { continue };
+                    out.push((rest.to_string_lossy().replace('\\', "/"), m.len(), unix(m.modified())));
+                }
+            }
+            out
+        }
+    };
+    files.iter().filter(|(rel, size, mtime)| one(rel, *size, *mtime)).count()
+}
+
 /// The same picture, as its bytes (a JPEG, or a cover's PNG)
 pub fn thumb_bytes(path: &Path, cache: &Path) -> Option<Vec<u8>> {
     let (size, mtime) = stamp(&path.to_string_lossy())?;
-    let key = fnv(&format!("{}|{size}|{mtime}", path.display()));
+    let key = thumb_key(path, size, mtime);
     let file = cache.join(format!("{key}.img"));
     if let Ok(b) = std::fs::read(&file) { return (!b.is_empty()).then_some(b); }
     let _ = std::fs::create_dir_all(cache);
@@ -995,6 +1033,42 @@ pub fn thumb_bytes(path: &Path, cache: &Path) -> Option<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // A folder renamed (an album, an album in it) or a file moved: the pictures kept for what's in it are found at the
+    // new paths, not made again (Anton, 2026-11-18: a renamed album's previews grey for a long time)
+    #[test]
+    fn pictures_follow_a_rename() {
+        let dir = std::env::temp_dir().join(format!("afl-thumbs-follow-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let (old, cache) = (dir.join("P/_Clips/Day 1"), dir.join("cache"));
+        std::fs::create_dir_all(old.join("Dives")).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        // Files whose picture can't be made (made again, there'd be none): a kept one can only have followed
+        let files = ["A.dat", "B.dat", "Dives/C.dat"];
+        for (i, f) in files.iter().enumerate() {
+            let p = old.join(f);
+            std::fs::write(&p, vec![b'x'; 10 + i]).unwrap();
+            let (s, m) = stamp(&p.to_string_lossy()).unwrap();
+            std::fs::write(cache.join(format!("{}.img", thumb_key(&p, s, m))), format!("picture of {f}")).unwrap();
+            assert_eq!(thumb_bytes(&p, &cache).unwrap(), format!("picture of {f}").into_bytes());
+        }
+        let new = dir.join("P/_Clips/Nile");
+        std::fs::rename(&old, &new).unwrap();
+        assert_eq!(thumbs_follow(&cache, &old, &new), 3);
+        for f in files { assert_eq!(thumb_bytes(&new.join(f), &cache).unwrap(), format!("picture of {f}").into_bytes(), "{f}"); }
+        // A file moved into another album
+        std::fs::create_dir_all(dir.join("P/_Clips/Day 2")).unwrap();
+        let (a, b) = (new.join("A.dat"), dir.join("P/_Clips/Day 2/A.dat"));
+        std::fs::rename(&a, &b).unwrap();
+        assert_eq!(thumbs_follow(&cache, &a, &b), 1);
+        assert_eq!(thumb_bytes(&b, &cache).unwrap(), b"picture of A.dat".to_vec());
+        // Nothing kept for it: nothing to follow
+        let c = dir.join("P/_Clips/Day 2/C.dat");
+        std::fs::rename(new.join("Dives/C.dat"), &c).unwrap();
+        std::fs::write(&c, b"changed").unwrap();
+        assert_eq!(thumbs_follow(&cache, &new.join("Dives/C.dat"), &c), 0, "a file changed meanwhile: its old picture isn't its");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // A lens saved for one camera: its clips asked again, the others kept as they are
     #[test]

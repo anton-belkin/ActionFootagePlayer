@@ -115,6 +115,12 @@ const PROBES = {};        // a clip's path -> gyroflow-probe --library's answer
 let probesVersion = 0, probesPending = 0;
 let MOMENTS_OF = {};      // a clip's path in the project -> how many moments it has
 const THUMBS = new Map(); // a file -> data: URL, or null for none
+// A file renamed or moved (by itself or with its folder): the same file, so the same picture at its new path, shown at
+// once. The window shows the new path before the disk has it (writes.js), so asked for there it would have none yet
+function thumbFollows(from, to) {
+  const t = THUMBS.get(from);
+  if (t && from !== to && !THUMBS.get(to)) THUMBS.set(to, t);
+}
 let VISIBLE = [];
 
 // ---------- talking to the app ----------
@@ -720,6 +726,12 @@ function nextThumb() {
   }
   return thumbsWanted.shift();
 }
+let thumbsWaitWrites = false;
+function thumbsAfterWrites() {
+  if (thumbsWaitWrites) return;
+  thumbsWaitWrites = true;
+  Writes.drained().then(() => { thumbsWaitWrites = false; fillThumbs(); });
+}
 function pumpThumbs() {
   while (thumbsBusy < 6 && thumbsWanted.length) {
     const p = nextThumb();
@@ -727,6 +739,9 @@ function pumpThumbs() {
     thumbsBusy++;
     thumbsAsked.add(p);
     invoke("thumb", { path: p }).then((u) => u || null, () => null).then((u) => {
+      // None while a change is still being written: perhaps a new name the disk hasn't got yet (a renamed folder's
+      // file). Not kept as none: asked again once the changes are written
+      if (!u && typeof Writes === "object" && Writes.pending()) { thumbsAfterWrites(); return; }
       THUMBS.set(p, u);
       for (const el of document.querySelectorAll('img[data-thumb="' + CSS.escape(p) + '"]')) { if (u) { el.src = u; el.hidden = false; } else el.hidden = true; }
     }).finally(() => { thumbsBusy--; thumbsAsked.delete(p); pumpThumbs(); });
