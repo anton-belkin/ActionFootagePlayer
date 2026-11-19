@@ -58,7 +58,7 @@ local needs = { "get_time", "observe_property", "set_property_native", "get_prop
 M.enabled = mp ~= nil and os.getenv("AFP_JOURNAL") ~= "0" and utils ~= nil and utils.format_json ~= nil
 for _, k in ipairs(needs) do if M.enabled and type(mp[k]) ~= "function" then M.enabled = false end end
 
-local api = { "act", "label", "step", "span", "shown", "core", "flush" }
+local api = { "act", "label", "step", "span", "shown", "shown_for", "core", "flush", "owner" }
 if not M.enabled then
     for _, k in ipairs(api) do M[k] = noop end
     M.span = function() return noop end
@@ -339,10 +339,19 @@ function M.span(name, fields)
     end
 end
 
--- Something on screen now for the action going on: only the first of each kind (what) an action gets is recorded
+-- Something on screen now for the action going on: only the first of each kind (what) an action gets is recorded.
+-- shown_for: for a given action (another plugin's, its id handed over: the side panel's cards say whose they are)
+local show
 function M.shown(what, fields)
     local a, by_window = owner()
     if not a then return end
+    return show(a, by_window, what, fields)
+end
+function M.shown_for(a, what, fields)
+    if type(a) ~= "string" or a == "" then return M.shown(what, fields) end
+    return show(a, false, what, fields)
+end
+show = function(a, by_window, what, fields)
     local s = seen[a]
     if not s then
         s = {}
