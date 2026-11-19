@@ -1857,7 +1857,9 @@ gpu_refresh = function()
         if again then gpu_refresh() end
     end)
 end
-mp.register_event("shutdown", function() if gpu and gpu.shader then os.remove(gpu.shader) end end)
+-- (never the hold shader: it is the plugin's own file, not one written for a clip. Quitting while it held removed
+-- it from the app, and the next start had no shader to hold with)
+mp.register_event("shutdown", function() if gpu and gpu.shader and gpu.shader ~= GPU_HOLD_SHADER then os.remove(gpu.shader) end end)
 -- Ctrl+p on the GPU path: the denoise in or out of the shader
 mp.observe_property("user-data/gyroflow/still", "native", function() if gpu then gpu_refresh() end end)
 

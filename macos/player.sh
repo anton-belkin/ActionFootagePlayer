@@ -67,6 +67,21 @@ elif [ ! -f "$DLOGM_DATA/shaders/dlogm_lut3d.glsl" ]; then
 fi
 
 [ -z "${AFP_BATCH:-}" ] && export MPVBUNDLE=true
+# The player's log, a file a run (~/Library/Logs/ActionFootagePlayer/player-<time>-<pid>.log), the last five kept:
+# what to look at when something didn't work. It's what mpv says on the terminal, in detail (with the commands run,
+# the keys among them), not --log-file: that one takes every shader's source too, hundreds of MB in minutes. Not
+# when started from a terminal (it's said there), nor for the Library's batches (their own --log-file)
+log=
+if [ -z "${AFP_BATCH:-}" ] && [ ! -t 1 ]; then
+    logs="$HOME/Library/Logs/ActionFootagePlayer"
+    if mkdir -p "$logs" 2>/dev/null; then
+        ls -t "$logs"/player-*.log 2>/dev/null | tail -n +5 | while IFS= read -r stale; do rm -f "$stale"; done
+        log="$logs/player-$(date +%Y%m%d-%H%M%S)-$$.log"
+        # --terminal=yes last: opened from Finder or the Library the player is in pseudo-gui mode, whose profile turns
+        # the terminal output off, and the log stopped right there, 8 KB in
+        set -- --msg-level=all=v,cplayer=debug --msg-time --quiet "$@" --terminal=yes --input-terminal=no
+    fi
+fi
 contents="$app/Contents"
 if [ -x "$contents/Helpers/mpv" ]; then
     # VapourSynth's Python (and the `vapoursynth` command that tells VSScript where it is), the Vulkan driver
@@ -86,6 +101,7 @@ if [ -x "$contents/Helpers/mpv" ]; then
         || "$res/bin/vapoursynth" config >/dev/null 2>&1 || true
     export VK_DRIVER_FILES="$res/vulkan/icd.d/MoltenVK_icd.json"
     export VK_ICD_FILENAMES="$VK_DRIVER_FILES" GYROFLOW_TOOLS="$contents/Helpers"
+    [ -n "$log" ] && exec "$contents/Helpers/mpv" "$@" >"$log" 2>&1
     exec "$contents/Helpers/mpv" "$@"
 fi
 for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
@@ -95,6 +111,7 @@ for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
     for vs in "${mpv%/bin/mpv}"/opt/vapoursynth/libexec/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
         [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
     done
+    [ -n "$log" ] && exec "$mpv" "$@" >"$log" 2>&1
     exec "$mpv" "$@"
 done
 osascript -e 'display alert "ActionFootagePlayer needs mpv" message "Install it with Homebrew: brew install mpv"' >/dev/null
