@@ -260,15 +260,26 @@ pub enum Mode {
     Planes,
 }
 
-/// The sphere trail's equirect width (its height half of it): 0.18° a texel
-const SPHERE_W: usize = 2048;
+/// The sphere trail's equirect width (its height half of it): 0.7° a texel, coarse on purpose (read back smooth, a
+/// trace's border is soft; tools/edgefill/synth)
+const SPHERE_W: usize = 512;
 
 /// The frame's edge in this many sectors for the sphere (warp.glsl's "pass sphere"): about a tenth of a 16:9 frame's
 /// width each
 const SPHERE_SECTORS: usize = 32;
 
 /// The sums per sector (warp.glsl's SPHERE_SUMS)
-const SPHERE_SUMS: usize = 10;
+const SPHERE_SUMS: usize = 16;
+
+/// The angles around the frame's axis the output's border's continuation is kept for (warp.glsl's SPHERE_WEDGES)
+const SPHERE_WEDGES: usize = 64;
+
+/// The sphere's buffer (warp.glsl's "pass sphere"), its variables as (GLSL type, name, count; 0: not an array)
+fn sphere_buffer_vars() -> Vec<(&'static str, &'static str, usize)> {
+    vec![("uint", "ge_sum", SPHERE_SECTORS * SPHERE_SUMS), ("uint", "ge_wsum", SPHERE_WEDGES * 4), ("float", "ge_d", SPHERE_SECTORS), ("float", "ge_dc", SPHERE_SECTORS),
+         ("float", "ge_s", SPHERE_SECTORS), ("float", "ge_sc", SPHERE_SECTORS), ("float", "ge_w", SPHERE_WEDGES * 3), ("float", "ge_pts", 0), ("float", "ge_dt", 0),
+         ("float", "ge_epoch", 0), ("uint", "ge_magic", 0)]
+}
 
 /// The largest output the grid texture is made for
 const GRID_MAX: (usize, usize) = (8192, 4608);
@@ -527,22 +538,25 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
         (out.join("\n"), format!("//!BIND {done}"), format!("#define FILL_RAW {done}_raw\n#define FILL_MUL {done}_mul"))
     };
     // The sphere's passes at MAIN before the warp samples the frame (warp.glsl's "pass sphere"): each sector's colors
-    // along the frame's edge against the sphere's past it, the sectors' strengths, then the sphere written (what the
-    // frame covers, and the edge continued where the sectors differ), so the warp reads it back in the same frame
+    // along the frame's edge against the sphere's memory of the same directions, the sectors' strengths, then the sphere
+    // written (what the frame covers, and the edge continued where the sectors differ), then what the output doesn't
+    // show of the changed sectors' wedges, so the warp reads it back in the same frame
     let sphere_passes = |bind: &str, fdefs: &str| -> String {
         if !sphere { return String::new(); }
         let head = |more: &[&str]| d(&[&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!BIND GYROFLOW_SPHERE",
             "//!BIND GYROFLOW_SPHERE_SLOW", "//!BIND GYROFLOW_EDGES", bind, "//!BIND GYROFLOW_GRID_DONE"][..], more].concat());
         let extra = |which: &str| format!("{fdefs}\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}");
         let h = SPHERE_W / 2;
-        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n//!VAR uint ge_sum[{}]\n//!VAR float ge_d[{SPHERE_SECTORS}]\n//!VAR float ge_s[{SPHERE_SECTORS}]\n//!VAR float ge_pts\n//!VAR float ge_dt\n//!VAR float ge_epoch\n//!VAR uint ge_magic\n//!STORAGE\n\n{}\n{}\n{}\n",
-            SPHERE_SECTORS * SPHERE_SUMS,
+        let vars: String = sphere_buffer_vars().iter().map(|(t, n, c)| if *c > 0 { format!("//!VAR {t} {n}[{c}]\n") } else { format!("//!VAR {t} {n}\n") }).collect();
+        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n{vars}//!STORAGE\n\n{}\n{}\n{}\n{}\n",
             hook_pass(clip, &head(&["//!SAVE GYROFLOW_SPHERE_EDGES", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
                 "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere edges"]), &defs, &extra("SPHERE_EDGES"), pass_body("sphere")),
-            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_EDGES", "//!SAVE GYROFLOW_SPHERE_SECTORS", "//!WIDTH 64", "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 64 1",
-                "//!DESC gyroflow sphere sectors"]), &defs, &extra("SPHERE_SECTORS_PASS"), pass_body("sphere")),
-            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_SECTORS", "//!SAVE GYROFLOW_SPHERE_DONE", "//!WIDTH OUTPUT.w gyroflow_render_scale * 2 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 2 /",
-                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, &extra("SPHERE_WRITE"), pass_body("sphere")))
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_EDGES", "//!SAVE GYROFLOW_SPHERE_SECTORS", &format!("//!WIDTH {SPHERE_WEDGES}"), "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
+                &format!("//!COMPUTE {SPHERE_WEDGES} 1"), "//!DESC gyroflow sphere sectors"]), &defs, &extra("SPHERE_SECTORS_PASS"), pass_body("sphere")),
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_SECTORS", "//!SAVE GYROFLOW_SPHERE_WRITTEN", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
+                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, &extra("SPHERE_WRITE"), pass_body("sphere")),
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_WRITTEN", "//!SAVE GYROFLOW_SPHERE_DONE", &format!("//!WIDTH {SPHERE_W}"), &format!("//!HEIGHT {h}"),
+                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere beyond"]), &defs, &extra("SPHERE_BEYOND"), pass_body("sphere")))
     };
     let sample = |hook: &str, desc: &str, extra: &str, tag: &str| {
         let (passes, bind, fdefs) = fill(hook, tag, extra, true);
@@ -909,13 +923,14 @@ mod tests {
         let compute = name == "grid" || name.starts_with("sphere_");
         let mut defs = defines(clip, opts, table);
         if name == "grid" { defs += "\n#define GRID_PASS"; }
-        // The sphere's three passes, one body (as sphere_passes puts them), with its buffer. naga's GLSL front end has no
+        // The sphere's four passes, one body (as sphere_passes puts them), with its buffer. naga's GLSL front end has no
         // atomicAdd nor memoryBarrierBuffer, and takes barrier() for a subgroup barrier wgpu won't validate here (the
         // denoise's passes aren't checked here for them): a plain add and nothing stand in, the rest is checked. libplacebo
         // compiles them as they are (tools/edgefill renders them)
-        let which = match name { "sphere_edges" => "SPHERE_EDGES", "sphere_sectors" => "SPHERE_SECTORS_PASS", "sphere_write" => "SPHERE_WRITE", _ => "" };
+        let which = match name { "sphere_edges" => "SPHERE_EDGES", "sphere_sectors" => "SPHERE_SECTORS_PASS", "sphere_write" => "SPHERE_WRITE", "sphere_beyond" => "SPHERE_BEYOND", _ => "" };
         if !which.is_empty() {
-            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{ uint ge_sum[{}]; float ge_d[{SPHERE_SECTORS}]; float ge_s[{SPHERE_SECTORS}]; float ge_pts; float ge_dt; float ge_epoch; uint ge_magic; }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img", SPHERE_SECTORS * SPHERE_SUMS);
+            let vars: String = sphere_buffer_vars().iter().map(|(t, n, c)| if *c > 0 { format!(" {t} {n}[{c}];") } else { format!(" {t} {n};") }).collect();
+            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{{vars} }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img");
         }
         let name = if which.is_empty() { name } else { "sphere" };
         // The smooth fill's textures (its passes' own, and the grid they leave), as one more texture
@@ -1173,12 +1188,12 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let clip = Clip::load(project, Some(10.0)).unwrap();
         eprintln!("{project}: lens {}{}", clip.params.distortion_model.id(), clip.params.digital_lens.as_ref().map(|d| format!(" + {}", d.id())).unwrap_or_default());
         assert_eq!(unsupported(&clip), None);
-        // The player's shader with the sphere: its three passes ahead of the warp's, in order, the buffer declared once
+        // The player's shader with the sphere: its four passes ahead of the warp's, in order, the buffer declared once
         let po = Options::player(2, false, Some(0.02), true, false, 0.0);
         let text = passes(&clip, &po, &Table::build(&clip, &Options { range: Some((0, 0)), ..po }).unwrap(), None);
         let at = |d: &str| text.find(&format!("//!DESC {d}\n")).unwrap_or_else(|| panic!("no pass {d}"));
         assert!(at("gyroflow sphere edges") < at("gyroflow sphere sectors") && at("gyroflow sphere sectors") < at("gyroflow sphere")
-            && at("gyroflow sphere") < at("gyroflow warp"), "the sphere's passes out of order");
+            && at("gyroflow sphere") < at("gyroflow sphere beyond") && at("gyroflow sphere beyond") < at("gyroflow warp"), "the sphere's passes out of order");
         assert!(at("gyroflow fill blur") < at("gyroflow sphere edges"), "the sphere continues the fill: after its passes");
         assert_eq!((text.matches("//!BUFFER GYROFLOW_EDGES").count(), text.matches("//!TEXTURE GYROFLOW_SPHERE\n").count(),
             text.matches("//!TEXTURE GYROFLOW_SPHERE_SLOW\n").count()), (1, 1, 1));
@@ -1254,7 +1269,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                     (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_LUMA\n"),
                     (Mode::Grid, "sample", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_edges", true, Some(0.019), "SPHERE"),
                     (Mode::Grid, "sphere_sectors", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_write", true, Some(0.019), "SPHERE"),
-                    (Mode::Grid, "sphere_write", false, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
+                    (Mode::Grid, "sphere_write", false, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_beyond", true, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
                     (Mode::Grid, "fill_lo", true, Some(0.02), ""), (Mode::Planes, "fill_lo", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
                     (Mode::Exact, "fill_lo", false, Some(0.02), ""), (Mode::Grid, "fill_pull", false, Some(0.02), ""), (Mode::Grid, "fill_push", false, Some(0.02), ""),
                     (Mode::Grid, "fill_blur", false, Some(0.02), "")] {
