@@ -3274,10 +3274,14 @@ local function remember_tags(used)
     os.rename(recent_file() .. ".tmp", recent_file())
 end
 
--- What plays, to tag: { kind, file (the original or the moment's file) }; nil for an export, a stream
+-- What plays, to tag: { kind, file (the original, the moment's file or the photo) }; nil for an export, a stream. A
+-- photo (its link, or one the player made, with its link) is tagged itself, as a moment is: its pick and rating in its
+-- link, its tags in its XMP (afp-meta, as the Library writes them); a photo without a link isn't tagged here
 local function tag_target()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return nil end
     if state.moment and state.moment.file then return { kind = "moment", file = state.moment.file } end
+    if state.photo and state.photo.file then return { kind = "photo", file = state.photo.file } end
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return nil end
     return { kind = "original", file = state.clip }
 end
 
@@ -3286,6 +3290,12 @@ local function tags_read(t)
     if t.kind == "original" then
         local doc = sidecar.read(t.file)
         return type(doc) == "table" and doc or {}, sidecar.path(t.file)
+    end
+    if t.kind == "photo" then
+        local l = utils.parse_json(fs.read_photo_link(t.file) or "")
+        l = type(l) == "table" and l or {}
+        l.tags = link.photo_tags(t.file)
+        return l, t.file
     end
     local l = utils.parse_json(fs.read_link(t.file) or "")
     return type(l) == "table" and l or {}, t.file
@@ -3298,6 +3308,18 @@ local function tags_write(t, fn)
     end
     local doc = tags_read(t)
     if not fn(doc) then return true end
+    if t.kind == "photo" then
+        -- Its pick and rating in its link, its tags in its XMP: afp-meta writes both (a HEIC's through afp-photo)
+        local meta = plugin_tool("afp-meta")
+        if not meta then return false, "afp-meta isn't installed" end
+        local tags = doc.tags or {}
+        doc.tags = nil
+        local w = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                      args = { meta, t.file, "--link", utils.format_json(doc), "--tags", utils.format_json(tags) } })
+        if not (w and w.status == 0) then return false, "couldn't write its link and tags (afp-meta: " .. tostring(w and w.stderr) .. ")" end
+        catalog.note(state.project, { t.file })
+        return true
+    end
     local ok = rewrite_link(t.file, function(l) fn(l) end)
     return ok, not ok and "couldn't write its link (afp-cut)" or nil
 end
@@ -3402,7 +3424,7 @@ local function tags_change(op)
     for _, a in ipairs(after.tags) do if not tags_lib.find(before.tags, a) then added[#added + 1] = a; parts[#parts + 1] = "+" .. a end end
     for _, b in ipairs(before.tags) do if not tags_lib.find(after.tags, b) then parts[#parts + 1] = "−" .. b end end
     remember_tags(added)
-    if #parts > 0 then mp.osd_message((t.kind == "moment" and "Moment: " or "Original: ") .. table.concat(parts, "  "), 2) end
+    if #parts > 0 then mp.osd_message((t.kind == "moment" and "Moment: " or t.kind == "photo" and "Photo: " or "Original: ") .. table.concat(parts, "  "), 2) end
     tags_reload(false)
 end
 

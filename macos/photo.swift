@@ -6,6 +6,7 @@
 //             [--link <json>] [--gps <lat,lon[,alt]>]
 //   afp-photo --live-video <in.mov> --live-out <out.mov> --content-id <UUID> --still-time <seconds> [--gps <lat,lon[,alt]>]
 //   afp-photo --set-meta <file.heic> [--link <json>] [--tags <json list>]
+//   afp-photo --hdr-still <photo> --out <file.heic>
 //
 // The renditions are 16-bit RGB, little-endian, row by row (vs-gyroflow's photo::write_rgb16): --sdr the SDR look as
 // an sRGB screen shows it (the image every app shows), --hdr the HDR look in HLG (BT.2100). Core Image (macOS 15)
@@ -31,6 +32,15 @@
 // Library (vs-gyroflow's geotag::photo_place): the HEIC's GPS dictionary (Exif GPS), and a Live Photo's MOV's
 // com.apple.quicktime.location.ISO6709, as an iPhone writes them; Photos puts the pair on its map by them.
 
+// --hdr-still: a photo with a gain map (an iPhone's HEIC, Apple's or ISO 21496-1's; an Ultra HDR JPEG; the player's
+// own), as macOS shows it in HDR, for the player's live-photo plugin to show (mpv decodes only the photo's SDR image):
+// Core Image applies the gain map as Preview and Photos do (CIImage's expandToHDR, the system's decoder: the same
+// pixels as ImageIO's kCGImageSourceDecodeToHDR), turned as the photo says, written as a 10-bit HEIF in PQ BT.2100
+// (its nclx says so: mpv reads it as HDR), the SDR image's white at 203 nits as Core Image puts it. The gain map's
+// whole headroom (an iPhone's: up to 4x, the player's: up to 4.9x); the player's renderer fits it to the screen.
+// Exit 3: no gain map (nothing to write: the photo's own image is all there is). Written beside --out, then put in its
+// place (a reader never sees half of it).
+//
 import Foundation
 import ImageIO
 import CoreGraphics
@@ -55,6 +65,28 @@ let gps: (lat: Double, lon: Double, alt: Double?)? = args["gps"].flatMap { s in
     guard v.count >= 2, abs(v[0]) <= 90, abs(v[1]) <= 180 else { return nil }
     return (v[0], v[1], v.count > 2 ? v[2] : nil)
 }
+if let input = args["hdr-still"] {
+    guard let outPath = args["out"] else { fail("--hdr-still needs --out") }
+    guard #available(macOS 14, *) else { exit(3) }
+    let url = URL(fileURLWithPath: input)
+    guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { fail("\(input): not an image") }
+    var gainMap = CGImageSourceCopyAuxiliaryDataInfoAtIndex(src, 0, kCGImageAuxiliaryDataTypeHDRGainMap) != nil
+    if #available(macOS 15, *) { gainMap = gainMap || CGImageSourceCopyAuxiliaryDataInfoAtIndex(src, 0, kCGImageAuxiliaryDataTypeISOGainMap) != nil }
+    if !gainMap { exit(3) }
+    guard let image = CIImage(contentsOf: url, options: [.expandToHDR: true, .applyOrientationProperty: true]) else { fail("\(input): not read") }
+    let out = URL(fileURLWithPath: outPath)
+    let tmp = out.deletingLastPathComponent().appendingPathComponent("." + out.lastPathComponent + ".part")
+    let context = CIContext(options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!])
+    do {
+        try context.writeHEIF10Representation(of: image, to: tmp, colorSpace: CGColorSpace(name: CGColorSpace.itur_2100_PQ)!, options: [:])
+        _ = try FileManager.default.replaceItemAt(out, withItemAt: tmp)
+    } catch {
+        try? FileManager.default.removeItem(at: tmp)
+        fail("\(outPath): \(error.localizedDescription)")
+    }
+    exit(0)
+}
+
 // --set-meta <file.heic> [--link <json>] [--tags <json list>]: a photo's link and tags (vs-gyroflow's afp-meta asks),
 // written into its XMP (afp:link, dc:subject), its image data copied as it is: the gain map and the Live Photo's
 // identifier kept. An empty list takes the tags out
