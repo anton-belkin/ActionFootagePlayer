@@ -17,7 +17,12 @@ const CULL = {
   pending: 0, chain: Promise.resolve(),
   // The project whose other views were asked for (the tags in use are counted over all of them), Rename… shown
   askedFor: null, rename: false,
+  // The comment being typed: for which selection (`sig`), its items, the text, whether it's not saved yet, whether the
+  // selection's comments differ (then it's saved only on Set for all), the timer that saves it
+  note: null,
 };
+// A typed comment is saved this long after the last key (and at once when the field is left or the selection changes)
+const NOTE_IDLE_MS = 700;
 function cullRemembered(k) { try { return localStorage.getItem(k) || ""; } catch (_) { return ""; } }
 function cullRemember(k, v) { try { localStorage.setItem(k, v); } catch (_) { /* */ } }
 const CULL_KINDS = { clip: true, moment: true, still: true };
@@ -137,6 +142,7 @@ function cullBody(c) {
   }).join("") +
     '<button type="button" class="nostar' + (st.n && st.max === 0 ? " on" : "") + '" data-c="rate" data-v="0" aria-pressed="' + (st.n > 0 && st.max === 0) + '" title="No stars (0)"' + dis + '>None</button>' +
     '<span class="sub">' + (mixed ? "mixed: " + st.min + "–" + st.max : "") + '</span></div>';
+  h += cullNoteHtml(c, list);
   // The tags in use, the most used first; the app's own only when the selection has it
   const used = cullTagsInUse().filter((t) => t.name !== SYS_TAG || list.some((it) => hasTag(it, t.name)));
   h += '<div class="lab">Tags</div><div class="chips culltags' + (used.length > CULL_FEW_TAGS ? " many" : "") + '" role="group" aria-label="Tags in use">' + (used.length ? used.map((t) => {
@@ -161,6 +167,110 @@ function cullBody(c) {
   return h;
 }
 
+// ---------- the comment ----------
+//
+// A few lines of free text on an original, a moment or a photo (what happens in it), kept with each where its tags are
+// (src/tags.rs set_comment) and found by the search (app.js's textMatch). Typed, it's saved by itself: a moment after
+// the last key, and at once when the field is left (another item clicked, another tab) or ⌘↩ (which also selects the
+// next one, to go through a folder quickly). Several selected with the same comment (or none): what's typed goes to
+// all of them, as for one. Several with different comments: the field starts empty and nothing is saved until Set for
+// all is pressed (or ⌘↩); leaving the selection drops what was typed.
+
+// A comment as the app keeps it (src/tags.rs comment_clean): lines' ends as \n, spaces at both ends off
+function cullNoteClean(t) { return String(t == null ? "" : t).replace(/\r\n?/g, "\n").trim(); }
+const cullNoteOf = (it) => it.comment || "";
+// The selection's own: which items, in a word
+function cullNoteSig(list) { return list.map((it) => it.kind + ":" + it.id).sort().join("\n"); }
+// The comment of the items, when all of them have the same (none: ""); null when they differ
+function cullNoteShared(list) {
+  if (!list.length) return "";
+  const first = cullNoteOf(list[0]);
+  return list.every((it) => cullNoteOf(it) === first) ? first : null;
+}
+// An item as the page shows it now (the draft's copy may be older than a change written since)
+function cullNoteNow(it) {
+  const v = DATA[Writes.VIEW_OF[it.kind]];
+  return (v && v.items && v.items.find((x) => x.id === it.id)) || it;
+}
+// The draft for this selection (made when typing starts), the one of another selection saved and let go first
+function cullNoteFor(list) {
+  const sig = cullNoteSig(list);
+  if (CULL.note && CULL.note.sig !== sig) { cullNoteSave(); CULL.note = null; }
+  if (!CULL.note && list.length) CULL.note = { sig, list: list.slice(), text: null, dirty: false, mixed: cullNoteShared(list) == null, timer: null };
+  return CULL.note;
+}
+// The draft written (on all of its items that don't have it already): what's shown changes at once, the disk after.
+// A draft over different comments only when `all` (Set for all, ⌘↩)
+function cullNoteSave(all) {
+  const n = CULL.note;
+  if (!n) return;
+  clearTimeout(n.timer); n.timer = null;
+  if (!n.dirty || (n.mixed && !all)) return;
+  n.dirty = false;
+  const text = cullNoteClean(n.text);
+  const targets = n.list.filter((it) => cullNoteOf(cullNoteNow(it)) !== text);
+  // Saved over different ones: from now on they're the same
+  n.mixed = false;
+  if (targets.length) CULL.chain = Writes.run("comment", targets, { items: targets.map((it) => ({ kind: it.kind, id: it.id, path: it.path })), comment: text || null });
+  cullNoteTell();
+  return CULL.chain;
+}
+// The app told how many changes wait to be written, a comment being typed counted as one: closing the window (⌘Q
+// too, which leaves the field without its focus going) then waits, and the draft is saved first (Writes.drained)
+function cullNoteTell() {
+  const n = CULL.note, typed = n && n.dirty && !n.mixed ? 1 : 0;
+  invoke("writes_pending", { n: Writes.pending() + typed }).catch(() => {});
+}
+// (changes.js tells the app the writes alone as they end: told again after it while a comment is being typed)
+Writes.onChange(() => { if (CULL.note && CULL.note.dirty && !CULL.note.mixed) setTimeout(cullNoteTell, 0); });
+function cullNoteHtml(c, list) {
+  // Not a draft of another selection: saved now, before this one's is shown
+  if (CULL.note && CULL.note.sig !== cullNoteSig(list)) { cullNoteSave(); CULL.note = null; }
+  const n = CULL.note, shared = cullNoteShared(list), mixed = n ? n.mixed : shared == null;
+  const text = n && n.text != null ? n.text : shared || "";
+  const one = list.length === 1, noun = one ? (KIND_NOUN[list[0].kind] || ["item"])[0] : "";
+  const have = list.filter((it) => cullNoteOf(it)).length;
+  const ph = !list.length ? "Select clips, moments or photos" : one ? "What happens in this " + noun + "…"
+    : mixed ? "Different comments (" + have + " of " + list.length + " have one). Type one for all of them…" : "A comment for all " + list.length + "…";
+  let h = '<div class="lab"><label for="cullnote">Comment</label></div>' +
+    '<textarea id="cullnote" class="cullnote" rows="3" spellcheck="true" placeholder="' + esc(ph) + '" aria-describedby="cullnotehint"' + (list.length ? "" : " disabled") + '>' + esc(text) + '</textarea>';
+  if (mixed && list.length) {
+    h += '<div class="btns"><button type="button" class="btn sm" data-c="noteall"' + (n && n.dirty ? "" : " disabled") + '>Set for all ' + list.length + '</button></div>' +
+      '<span id="cullnotehint" class="sub wrap">Replaces each one’s comment (empty: takes them off). Selecting something else drops what’s typed.</span>';
+  } else if (list.length) {
+    h += '<span id="cullnotehint" class="sub wrap">' + (one ? "Saved as you type. " : "Goes to all " + list.length + " selected, saved as you type. ") + (one ? "⌘↩ selects the next one, Esc goes back to the list." : "Esc goes back to the list.") + '</span>';
+  }
+  return h;
+}
+// ⌘↩ (Ctrl+Enter): saved (over different ones too), and with one item selected the next one selected, the field kept
+// in front for its comment. Esc: saved (not over different ones: dropped), back to the list. true: taken
+function cullNoteKeys(e) {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+    e.preventDefault();
+    const c = ctx();
+    cullNoteSave(true);
+    const single = c.direct.length === 1 && !c.selFolders.length ? keyOf(c.direct[0]) : null;
+    const at = single ? VISIBLE.indexOf(single) : -1;
+    if (at >= 0 && at + 1 < VISIBLE.length) {
+      moveTo(at + 1, false);
+      const f = $("cullnote");
+      if (f && !f.disabled) { f.focus(); f.setSelectionRange(f.value.length, f.value.length); }
+    } else renderSide();
+    return true;
+  }
+  if (e.key === "Escape") {
+    e.preventDefault();
+    if (!(CULL.note && CULL.note.mixed)) cullNoteSave();
+    CULL.note = null;
+    // (the field as it is now: a save may have drawn the panel again)
+    const f = $("cullnote");
+    if (f) f.blur();
+    renderSide();
+    return true;
+  }
+  return false;
+}
+
 // ---------- changes ----------
 
 // Accept / Reject and the stars as changes writes.js makes (shown at once, written after, taken back with a message
@@ -177,6 +287,14 @@ Writes.define("rating", {
   send: (a) => ["set_rating", { items: a.items, rating: a.rating }],
   problems: (r) => r,
 });
+Writes.define("comment", {
+  what: (a, op) => (a.comment ? "the comment of " : "taking the comment off ") + namesText(op.targets.map((t) => t.name)),
+  item(it, a) { if (a.comment) it.comment = a.comment; else delete it.comment; if ((it.kind === "moment" || it.kind === "still") && it.link) { if (a.comment) it.link.comment = a.comment; else delete it.link.comment; } },
+  send: (a) => ["set_comment", { items: a.items, comment: a.comment }],
+  problems: (r) => r,
+});
+// A comment as a tile's tooltip (the tile itself stays as it is): the rest of a title attribute, after its quote
+function cullNoteTip(it) { return it.comment ? '" title="' + esc(it.comment) : ""; }
 // A change on `list`, shown at once and written behind: { pick: "accept" | "reject" | null }, { rating: 1–5 | null },
 // { add: [tags], remove: [tags] }. No view is read again: the command answers with the items as they are now
 function cullApply(list, change) {
@@ -277,6 +395,7 @@ document.addEventListener("click", (e) => {
     case "tag": cullTag(v); return;
     case "add": cullAddDraft(); return;
     case "sugg": cullAddDraft(v); return;
+    case "noteall": cullNoteSave(true); renderSide(); return;
     case "rename": CULL.rename = !CULL.rename; renderSide(); return;
     case "hide": CULL.hide = !CULL.hide; cullRemember("afl.hideRejected", CULL.hide ? "1" : ""); renderAll(); return;
     case "starsort": CULL.starSort = !CULL.starSort; cullRemember("afl.starSort", CULL.starSort ? "1" : ""); renderAll(); return;
@@ -285,6 +404,35 @@ document.addEventListener("click", (e) => {
 // A suggestion pressed: the field keeps the focus (the click then adds it)
 document.addEventListener("mousedown", (e) => { if (e.target.closest && e.target.closest("#tagsugg")) e.preventDefault(); });
 // Typing in the field: the suggestions follow (app.js's own listener keeps what's typed, before this one or after)
+// The comment typed: kept as a draft at once, saved a moment after the last key (over different ones: only on Set for all)
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "cullnote") return;
+  const n = cullNoteFor(cullItems(ctx()));
+  if (!n) return;
+  const was = n.dirty;
+  n.text = e.target.value; n.dirty = true;
+  clearTimeout(n.timer);
+  if (!was && !n.mixed) cullNoteTell();
+  if (n.mixed) { const b = document.querySelector('#side [data-c="noteall"]'); if (b) b.disabled = false; return; }
+  n.timer = setTimeout(() => { if (CULL.note === n) cullNoteSave(); }, NOTE_IDLE_MS);
+});
+// Left (another item clicked, another tab, the window): saved at once, and the draft let go (what's shown is then the
+// items' own again); a draft over different comments stays until the selection changes
+document.addEventListener("focusout", (e) => {
+  if (e.target.id !== "cullnote") return;
+  cullNoteSave();
+  // Not a re-drawing of the panel (which puts the focus back at once): the draft let go
+  setTimeout(() => {
+    const a = document.activeElement;
+    if ((!a || a.id !== "cullnote") && CULL.note && !CULL.note.dirty) CULL.note = null;
+  }, 0);
+});
+document.addEventListener("keydown", (e) => { if (e.target.id === "cullnote" && cullNoteKeys(e)) e.stopImmediatePropagation(); });
+// The window closed, another project opened: a comment still being typed is written first
+{
+  const drained = Writes.drained;
+  Writes.drained = () => { cullNoteSave(); return drained(); };
+}
 document.addEventListener("input", (e) => {
   if (e.target.id !== "tagdraft") return;
   S.tagDraft = e.target.value;

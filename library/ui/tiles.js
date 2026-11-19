@@ -203,7 +203,7 @@ function tileCaption(it, w) {
 function itemTile(it, key, o) {
   o = o || {};
   const label = [TILE_KIND_NAME[tileKind(it)] || (it.kind === "clip" ? "Clip" : ""), it.name].filter(Boolean).join(" ");
-  return '<button type="button" class="card tile' + (o.cls || "") + (o.sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + '"' + (it.pending ? ' title="Being written…"' : "") +
+  return '<button type="button" class="card tile' + (o.cls || "") + (o.sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + '"' + (it.pending ? ' title="Being written…"' : it.comment ? ' title="' + esc(it.comment) + '"' : "") +
     ' data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + !!o.sel + '" aria-label="' + esc(label) + '">' + tilePicture(it) +
     (o.renaming || tileCaption(it, o.w || tileWidth(null))) + '</button>';
 }

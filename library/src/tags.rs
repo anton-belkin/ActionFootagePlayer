@@ -34,7 +34,7 @@ pub(crate) fn write_json(file: &Path, doc: &Value) -> Result<(), String> {
 
 /// A clip's own file with nothing of the clip's left in it (as the player's sidecar.lua has it): removed rather than written
 pub(crate) fn holds_nothing(doc: &Value) -> bool {
-    ["marks", "view", "source", "view360", "location", "tags", "rating", "pick"].iter().all(|k| doc.get(*k).is_none())
+    ["marks", "view", "source", "view360", "location", "tags", "rating", "pick", "comment"].iter().all(|k| doc.get(*k).is_none())
 }
 
 /// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
@@ -410,6 +410,64 @@ pub fn every_item(root: &Path) -> Vec<Value> {
     out
 }
 
+// ---------- the comment ----------
+
+/// The longest comment kept, in characters (a few lines about what happens in the clip; a paste of a whole text is cut)
+pub const COMMENT_MAX: usize = 4000;
+
+/// A comment as kept: its lines' ends as "\n", the spaces at its start and end taken off, at most COMMENT_MAX
+/// characters; None when nothing is left
+pub fn comment_clean(s: &str) -> Option<String> {
+    let s = s.replace("\r\n", "\n").replace('\r', "\n");
+    let s: String = s.trim().chars().take(COMMENT_MAX).collect();
+    let s = s.trim_end().to_string();
+    (!s.is_empty()).then_some(s)
+}
+/// An item's comment from its record (a sidecar, a link): None when it has none
+pub fn comment_of(v: &Value) -> Option<String> { v.as_str().and_then(comment_clean) }
+
+/// A record's comment set (None: taken out); true when that changed it
+fn put_comment(doc: &mut Value, comment: Option<&str>) -> bool {
+    let Some(o) = doc.as_object_mut() else { return false };
+    match comment {
+        Some(c) if o.get("comment").and_then(Value::as_str) == Some(c) => false,
+        Some(c) => { o.insert("comment".into(), json!(c)); true }
+        None => o.remove("comment").is_some(),
+    }
+}
+
+/// The free-text comment of `items` ({ kind, id, path }: originals, moments, stills; the others aren't commented, as
+/// they aren't tagged) set to `comment` (cleaned; nothing left: taken out), kept with each where its tags are: an
+/// original's own file (one holding nothing else goes), a moment's link, a still's link (`afp:link` in its XMP; one
+/// older than the links gets one). A record that has it already isn't written. What couldn't be done
+pub fn set_comment(root: &Path, items: &[Value], comment: Option<&str>, relink: &dyn Fn(&Path, &str) -> Result<(), String>) -> Vec<String> {
+    let comment = comment.and_then(comment_clean);
+    let comment = comment.as_deref();
+    let mut problems = Vec::new();
+    let mut written: Vec<PathBuf> = Vec::new();
+    let locs = locations::locations(root, &locations::mounts());
+    for it in items {
+        if let Some(rec) = rec_of(&locs, it) {
+            let rec = match rec { Ok(r) => r, Err(e) => { problems.push(e); continue } };
+            // An original with no own file and no comment to give it: nothing to write
+            if comment.is_none() { if let Rec::Own { own, .. } = &rec { if !own.is_file() { continue; } } }
+            let mut doc = match rec.read() { Ok(d) => d, Err(e) => { problems.push(e); continue } };
+            if !put_comment(&mut doc, comment) { continue; }
+            match rec.write(doc, relink) { Ok(f) => written.push(f), Err(e) => problems.push(e) }
+            continue;
+        }
+        if it["kind"].as_str() != Some("still") { continue; }
+        let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
+        let had = crate::index::link(&path).filter(Value::is_object);
+        if had.is_none() && comment.is_none() { continue; }
+        let mut doc = had.unwrap_or(json!({ "v": 1, "kind": "still" }));
+        if !put_comment(&mut doc, comment) { continue; }
+        match relink(&path, &doc.to_string()) { Ok(()) => written.push(path), Err(e) => problems.push(format!("{}: {e}", path.display())) }
+    }
+    crate::seen::note_now(&written);
+    problems
+}
+
 /// The tags used last on this computer (the player's too: its K offers them), `used` put first
 pub fn remember(used: &[String]) {
     let Some(file) = locations::recent_tags_file() else { return };
@@ -550,6 +608,19 @@ mod tests {
         assert!(set_source(&p, &out).is_empty());
         assert!(!a.join("Day 1/B.afp.json").exists() && !a.join("Day 1/C.afp.json").exists());
         let _ = std::fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn a_comment_as_kept() {
+        assert_eq!(comment_clean("  Черепаха\r\n\r\nthen a ray \t"), Some("Черепаха\n\nthen a ray".into()));
+        assert_eq!(comment_clean(" \n\t "), None);
+        assert_eq!(comment_clean(&"ё".repeat(COMMENT_MAX + 10)).map(|c| c.chars().count()), Some(COMMENT_MAX));
+        assert_eq!(comment_of(&json!(3)), None);
+        let mut d = json!({ "tags": ["a"] });
+        assert!(put_comment(&mut d, Some("x")) && !put_comment(&mut d, Some("x")));
+        assert!(put_comment(&mut d, None) && !put_comment(&mut d, None));
+        assert_eq!(d, json!({ "tags": ["a"] }));
+        assert!(!holds_nothing(&json!({ "comment": "x", "synced": {} })));
     }
 
     #[test]

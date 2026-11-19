@@ -231,6 +231,15 @@ function M.next_name(last, taken)
 end
 
 -- Seconds to the millisecond, as the link keeps them
+-- What a moment's link saved again (its in and out changed: the player's k over it) carries from the link it had: the
+-- Library's and the culling's, not what's about its part. A new field the Library keeps with a moment goes here too
+M.CARRIED = { "tags", "rating", "pick", "comment" }
+function M.carry(old, l)
+    if type(old) ~= "table" then return l end
+    for _, k in ipairs(M.CARRIED) do l[k] = old[k] end
+    return l
+end
+
 function M.ms(t)
     return math.floor(t * 1000 + 0.5) / 1000
 end

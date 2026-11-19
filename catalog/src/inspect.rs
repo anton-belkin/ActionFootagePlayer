@@ -98,7 +98,23 @@ pub fn mp4_keys(path: &Path) -> io::Result<Vec<(String, String)>> {
 }
 
 fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#34;", "\"").replace("&apos;", "'").replace("&amp;", "&")
+    // Numeric ones too (&#10;, &#x41F;: what a writer of XMP may use for any character), each once, left to right
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(i) = rest.find('&') {
+        out.push_str(&rest[..i]);
+        rest = &rest[i..];
+        let Some(end) = rest.bytes().take(12).position(|b| b == b';') else { out.push('&'); rest = &rest[1..]; continue };
+        let name = &rest[1..end];
+        let ch = match name {
+            "lt" => Some('<'), "gt" => Some('>'), "quot" => Some('"'), "apos" => Some('\''), "amp" => Some('&'),
+            _ => name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")).map(|h| u32::from_str_radix(h, 16).ok())
+                     .unwrap_or_else(|| name.strip_prefix('#').and_then(|d| d.parse::<u32>().ok())).and_then(char::from_u32),
+        };
+        match ch { Some(c) => { out.push(c); rest = &rest[end + 1..]; } None => { out.push('&'); rest = &rest[1..]; } }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A photo's link and tags, from the XMP in its first 64 KiB
@@ -252,6 +268,22 @@ mod tests {
     fn an_unknown_field_is_kept() {
         let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "clip": { "file": "A.MP4" }, "synced": {}, "pick": "reject", "later": { "x": 1 } });
         assert_eq!(own_kept(&own), json!({ "marks": null, "view": null, "source": null, "tags": null, "rating": null, "pick": "reject", "location": null, "later": { "x": 1 } }));
+        // The Library's comment (docs/tags-and-culling.md, "The comment") is such a field: not in OWN_KEPT, so a
+        // catalog of this version, or an older one since 2026-11-17 (the NAS Helper's), keeps it as it is
+        let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "rating": 3, "comment": "Черепаха у рифа\nthen the wreck" });
+        assert_eq!(own_kept(&own)["comment"], json!("Черепаха у рифа\nthen the wreck"));
+    }
+
+    /// A photo's link as a writer of XMP may put it: entities by name and by number
+    #[test]
+    fn a_photos_link_with_entities() {
+        assert_eq!(unescape("&quot;a&amp;b&lt;c&gt;&#34;&#x41F;&#1088;&#10;&amp;amp;&bogus;&"), "\"a&b<c>\"Пр\n&amp;&bogus;&");
+        let dir = std::env::temp_dir().join(format!("afp-photo-ent-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let photo = dir.join("B.jpg");
+        std::fs::write(&photo, "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1,&quot;comment&quot;:&quot;&#x427;ерепаха &amp; риф&quot;}</afp:link></x:xmpmeta>").unwrap();
+        assert_eq!(photo_meta(&photo).unwrap().0.unwrap()["comment"], json!("Черепаха & риф"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The player's copy of the version is the same number

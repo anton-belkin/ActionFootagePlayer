@@ -1682,6 +1682,19 @@ async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProb
     }).await.map_err(|e| e.to_string())
 }
 
+// The free-text comment of the selection (docs/tags-and-culling.md, "The comment"): the same text on each of `items`,
+// None or empty: taken out
+#[tauri::command]
+async fn set_comment(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, comment: Option<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_comment(&root, &items, comment.as_deref(), &|f, l| write_link(tool.as_ref(), f, l));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
 // The selection (none: every original and moment) synced with the library's tag stores: what changed in Finder comes in
 #[tauri::command]
 async fn sync_tags(shared: State<'_, Shared>, items: Option<Vec<Value>>) -> Result<Value, String> {
@@ -2768,7 +2781,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, set_comment, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
                                                  rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
