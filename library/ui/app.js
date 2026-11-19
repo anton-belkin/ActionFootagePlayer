@@ -142,10 +142,11 @@ function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; cl
 // The player's playlist when items are opened (Anton, 2026-11-19): what the window shows at that moment, in its order
 // (its search, filters, sort), the item opened playing in it, so the player's Previous and Next walk it. A snapshot:
 // a later change here doesn't follow it; another open replaces it. Several selected and opened: those, in the
-// window's order. What the player can't play is left out: folders, marks (a time in a clip: opened, a mark plays
-// its clip), photos (they open as the system opens them), clips offline and links whose original isn't found.
+// window's order. Photos are in it (the player shows them as a phone does: a Live Photo's or Motion Photo's live part
+// under its Live icon, a photo's link as its clip at the frame). What the player can't play is left out: folders,
+// marks (a time in a clip: opened, a mark plays its clip), clips offline and links whose original isn't found.
 function playable(it) {
-  if (!it || !(it.kind === "clip" || it.kind === "moment" || it.kind === "export") || it.offline || !it.path) return false;
+  if (!it || !(it.kind === "clip" || it.kind === "moment" || it.kind === "export" || it.kind === "still") || it.offline || !it.path) return false;
   if (MISSING.has(it.path)) return false;
   return !(it.kind === "moment" && "original" in it && !it.original && it.link && it.link.clip);
 }
@@ -174,12 +175,12 @@ function playList(opened) {
     list = list.map((it, i) => [it, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map((x) => x[0]);
     if (!list.length) return null;
   }
-  return { paths: list.map((it) => it.path), titles: list.map((it) => (it.name || "").replace(/\.(mp4|mov|insv)$/i, "")), at: opened.length === 1 ? list.indexOf(opened[0]) : 0, label: shownLabel() };
+  return { paths: list.map((it) => it.path), titles: list.map((it) => (it.name || "").replace(/\.(mp4|mov|insv|heic|jpe?g|png)$/i, "")), at: opened.length === 1 ? list.indexOf(opened[0]) : 0, label: shownLabel() };
 }
 
 // What's selected, opened (open_items): until the player plays the first video (seconds for a clip on a NAS, with
 // nothing to see meanwhile on Windows before), a spinner says so; a quick one shows none. With `list` (playList):
-// the videos as that list, photos as before
+// the items as that list (photos too: a photo not in it, e.g. one of several selected outside the rows, by itself)
 let opening = 0;
 async function openItems(paths, list) {
   if (!paths.length) return;
@@ -205,7 +206,7 @@ async function openItems(paths, list) {
   let ok = true;
   try {
     if (list) {
-      // Photos among what's opened: as before; the rest, the list
+      // Photos among what's opened that the list hasn't (none, usually): by themselves; the rest, the list
       const listed = new Set(list.paths), photos = paths.filter((p) => !listed.has(p) && /\.(heic|jpe?g|png)$/i.test(p));
       if (photos.length) await call("open_items", { paths: photos });
       ok = await call("open_list", { paths: list.paths, titles: list.titles, at: list.at, label: list.label });

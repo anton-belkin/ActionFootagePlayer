@@ -220,12 +220,16 @@ local TABS = {
 local TAB_TITLES = { support = "Support" }
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
 
+-- The parts for a clip only: not on the rail while a photo shows (the live-photo plugin's user-data/afp/photo)
+local FOR_CLIPS = { source = true, transform = true, output = true, crop = true, dv = true, view360 = true }
+
 -- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS), the 360 view only for a
--- 360° clip
+-- 360° clip, neither of them nor the clip's own parts for a photo
 local function shown_tabs()
     local list, d, v = {}, state("dlogm"), state("view360")
+    local photo = type(mp.get_property_native("user-data/afp/photo")) == "table"
     for _, t in ipairs(TABS) do
-        if not t[3] and (t[1] ~= "dv" or (d and d.dv))
+        if not t[3] and not (photo and FOR_CLIPS[t[1]]) and (t[1] ~= "dv" or (d and d.dv))
            and (t[1] ~= "view360" or (type(v) == "table" and (v.available or v.note))) then
             table.insert(list, t)
         end
@@ -1626,9 +1630,11 @@ local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
     -- A list opened from Action Footage Library (the workspace plugin's librarylist.lua): all of it, as the Library
-    -- showed it, and what it was
+    -- showed it, and what it was. Photos in any list (the live-photo plugin shows them; a Live Photo's .mov is out of
+    -- the playlist already)
     local lib = tl.library_list(list, mp.get_property_native("user-data/library-list"))
-    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played)
+    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played,
+                                  tl.set_of(mp.get_property_native("image-exts")))
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
     local dir = not lib and tl.common_folder(list)
     if lib then
@@ -1639,7 +1645,7 @@ local function playlist_part(u, x, w, y)
         u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
         y = y + 20 * s
     end
-    y = u:caption(x, w, y, #rows == 1 and "1 video" or (#rows .. " videos")) + 6 * s
+    y = u:caption(x, w, y, tl.rows_label(rows)) + 6 * s
     end
     for _, r in ipairs(rows) do
         if r.current and reveal and u.clip then
@@ -2163,6 +2169,17 @@ for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_
                         "chapter-list" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
+-- A photo shown: a clip's part chosen gives way to the playlist, and comes back with the next clip
+local before_photo = nil
+mp.observe_property("user-data/afp/photo", "native", function(_, p)
+    if type(p) == "table" then
+        if FOR_CLIPS[tab] then before_photo, tab = tab, "playlist" end
+    elseif before_photo then
+        tab, before_photo = before_photo, nil
+    end
+    update()
+end)
+
 -- Crop mode on: its part shows; off again: back to the one there was
 local crop_on, before_crop = false, nil
 mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)

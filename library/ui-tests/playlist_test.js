@@ -1,7 +1,8 @@
 "use strict";
 // The player's playlist from what the window shows (app.js's playList, open_list): an item double-clicked plays in
 // the list as the window shows it then (search, filters, sort), the item at its place; what the player can't play
-// left out; several selected and opened: those, in the window's order; a photo opens by itself as before. What the
+// left out; several selected and opened: those, in the window's order; photos are in the list (the player shows them
+// as a phone does), a photo double-clicked plays at its place in it. What the
 // player makes of it: tests/librarylist_ipc.py.
 //   cd library/ui-tests && npm install && npm test
 
@@ -66,14 +67,17 @@ test("moments: one whose original isn't found is left out; a clip's view: its mo
   assert.equal(s.opened, "Turtle.afplink.mp4");
   assert.equal(s.titles[s.at], "Turtle", "a moment's own name, for the playlist");
 
-  // A clip's marks, moments and photos: the moment plays among its moments; the mark and the photo aren't videos
+  // A clip's marks, moments and photos: the moment plays among its moments and photos; the mark isn't in the list
   page.get("S.view = 'clip'; S.clip = 'Day 1/A.MP4'; S.path = []; buildClip(); renderAll()");
   const kinds = page.get("JSON.stringify(items().map((x) => x.kind))");
   assert.ok(/mark/.test(kinds) && /still/.test(kinds) && /moment/.test(kinds), kinds);
   dbl(page, page.$('#main [data-v^="i:m:"], #main .row[data-v*="Turtle"], #main .card[data-v*="Turtle"]') || page.row("_Moments/Reef/Turtle.afplink.mp4"));
   await page.quiet(40);
   s = sent(page);
-  assert.deepEqual(s.names, ["Turtle.afplink.mp4"]);
+  const want = JSON.parse(page.get("JSON.stringify(VISIBLE.map((k) => items().find((x) => keyOf(x) === k)).filter((x) => x && (x.kind === 'moment' || x.kind === 'still')).map((x) => x.path.split('/').pop()))"));
+  assert.deepEqual(s.names, want);
+  assert.ok(s.names.includes("Turtle.afplink.mp4") && want.some((n) => /\.(jpg|heic)$/i.test(n)), JSON.stringify(s.names));
+  assert.equal(s.opened, "Turtle.afplink.mp4");
   // A mark: its clip, by itself (as before)
   const lists = page.calls("open_list").length;
   dbl(page, page.$('#main [data-v="i:k:0"]'));
@@ -82,7 +86,7 @@ test("moments: one whose original isn't found is left out; a clip's view: its mo
   assert.deepEqual(page.calls("open_items").pop().args.paths, ["/F/Day 1/A.MP4"]);
 });
 
-test("a photo or a mark double-clicked opens by itself, as before; several selected: those, in the window's order", async () => {
+test("a photo double-clicked plays at its place in the list, a mark by itself; several selected: those, in the window's order", async () => {
   const page = await start();
   page.get("S.view = 'sources'; S.path = ['Day 1']; S.q = ''; S.sel = {}; renderAll()");
   // Several selected (C then A, as clicked), opened with Return: A, C as the window lists them, from the first
@@ -92,13 +96,16 @@ test("a photo or a mark double-clicked opens by itself, as before; several selec
   let s = sent(page);
   assert.deepEqual([s.names, s.at], [["A.MP4", "C.MP4"], 0]);
 
-  // A photo: opened as the system opens it, no list
+  // A photo: in the list of the photos shown, at its place (the player shows it as a still, its live part on hover)
   page.get("S.view = 'footage'; S.path = [AV_MARK + ALBUM_VIEWS.find((v) => v[0] === 'photos')[1]]; S.sel = {}; renderAll()");
-  const before = page.calls("open_list").length;
+  const before = page.calls("open_list").length, items_before = page.calls("open_items").length;
   dbl(page, page.$("#main [data-a='pick']"));
   await page.quiet(40);
-  assert.equal(page.calls("open_list").length, before);
-  assert.match(page.calls("open_items").pop().args.paths[0], /\.jpg$/);
+  assert.equal(page.calls("open_list").length, before + 1);
+  assert.equal(page.calls("open_items").length, items_before, "no photo by itself");
+  s = sent(page);
+  assert.ok(s.names.length >= 1 && s.names.every((n) => /\.(jpg|heic)$/i.test(n)), JSON.stringify(s.names));
+  assert.match(s.opened, /\.(jpg|heic)$/i);
 });
 
 test("thousands shown: the list is all of them, the item at its place, made at once", async () => {

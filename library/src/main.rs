@@ -2324,34 +2324,26 @@ fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -
     Ok(if parent.is_empty() { name } else { format!("{parent}/{name}") })
 }
 
-// What's selected, opened: videos and moments in the player (one window, as a playlist), photos as the system opens them.
-// Done once the player plays the first video (Windows: it says so on its pipe; a clip on a NAS takes seconds), for the
-// window to show it's waiting: false when it didn't within a while
+// What's selected, opened in the player (one window, as a playlist): videos and moments, and photos too, as a phone
+// shows them (its live-photo plugin: the picture, its live part under the Live icon; a photo's link opens its clip at
+// the frame). Done once the player plays the first one (Windows: it says so on its pipe; a clip on a NAS takes
+// seconds), for the window to show it's waiting: false when it didn't within a while
 #[tauri::command]
 async fn open_items(paths: Vec<String>, journal: Option<String>) -> Result<bool, String> {
     if paths.is_empty() { return Ok(true); }
-    let (photos, videos): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
-        let l = p.to_lowercase();
-        [".heic", ".jpg", ".jpeg", ".png"].iter().any(|e| l.ends_with(e))
-    });
     let player = player()?;
     // The player's window may come to the front over this one (Windows gives the foreground only to what the app
     // the user clicked in starts, and the player is started by what this starts)
     #[cfg(windows)]
     foreground::allow_any();
-    for p in &photos {
-        let _ = if cfg!(target_os = "macos") { Command::new("open").arg(p).spawn() }
-            else if cfg!(windows) { Command::new("explorer").arg(p).spawn() }
-            else { Command::new("xdg-open").arg(p).spawn() };
-    }
-    let Some(first) = videos.first().cloned() else { return Ok(true) };
+    let Some(first) = paths.first().cloned() else { return Ok(true) };
     // The player told which action this is: its first frame is that action's result (journal.lua takes it)
-    journal::handoff(journal.as_deref(), &videos);
+    journal::handoff(journal.as_deref(), &paths);
     if cfg!(target_os = "macos") {
-        Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+        Command::new("open").arg("-a").arg(&player).args(&paths).spawn().map_err(|e| e.to_string())?;
         return Ok(true);
     }
-    Command::new(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
+    Command::new(&player).args(&paths).spawn().map_err(|e| e.to_string())?;
     #[cfg(windows)]
     return tauri::async_runtime::spawn_blocking(move || player_pipe::wait_playing(&first, std::time::Duration::from_secs(60)))
         .await.map_err(|e| e.to_string());

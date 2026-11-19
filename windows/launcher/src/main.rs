@@ -50,8 +50,9 @@ const PLAYER: &str = r"Local\ActionFootagePlayer-player";
 const PLAYER_WAIT_MS: u32 = 60_000;
 // How long the playing one has to answer the videos sent to it (ipc::send_videos)
 const ANSWER_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
-const PLUGINS: [&str; 10] = [
+const PLUGINS: [&str; 11] = [
     "workspace", "gyroflow", "view360", "dlogm", "dji-telemetry", "highlights", "footage-menu", "side-panel", "agent", "any-layout",
+    "live-photo",
 ];
 // Their settings' files, in script-opts\
 const PLUGIN_OPTS: [&str; 7] = ["gyroflow", "dlogm", "dji_telemetry", "highlights", "footage_menu", "side_panel", "agent"];

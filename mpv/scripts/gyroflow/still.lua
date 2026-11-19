@@ -241,6 +241,7 @@ local function changed()
 end
 
 mp.add_key_binding("Ctrl+p", "still", function()
+    if platform.photo_shown() then return end
     if o.temporal_denoise == "off" then
         return mp.osd_message("Temporal denoise: off on this computer (Performance & Quality)", 2)
     end
@@ -263,6 +264,7 @@ end
 
 -- Ctrl+f: the paused frame at full size now (pausing first), cleaned up in the same re-render when Ctrl+p is on
 mp.add_key_binding("Ctrl+f", "full", function()
+    if platform.photo_shown() then return end
     if not (full and stabilizing()) then return mp.osd_message("Full resolution: only while it's stabilized", 1.5) end
     if full.active() then return mp.osd_message("Full resolution", 1.5) end
     if not full.needed() then return mp.osd_message("Full resolution: it plays at full size already", 1.5) end
