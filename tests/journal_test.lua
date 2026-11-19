@@ -56,10 +56,28 @@ local mp = {
     add_periodic_timer = function(_, cb) return { kill = function() end, cb = cb } end,
     command_native_async = function(cmd, cb) table.insert(timers, function() cb(true, { status = 0 }, nil) end) end,
     command_native = function() return { status = 0 } end,
-    create_osd_overlay = function() return { update = function() end } end,
     osd_message = function() end,
     register_event = function(name, f) events[name] = events[name] or {}; table.insert(events[name], f) end,
 }
+-- mpv's overlays as its defaults.lua makes them: methods in a metatable; update sends every field of the overlay as
+-- the command, and mpv refuses a function among them
+local overlay_mt = {}
+overlay_mt.__index = overlay_mt
+local overlay_sent = {}
+function overlay_mt.update(ov)
+    local cmd = {}
+    for k, v in pairs(ov) do
+        if type(v) == "function" then error("disallowed Lua type found: function") end
+        cmd[k] = v
+    end
+    cmd._name = "osd-overlay"
+    overlay_sent[#overlay_sent + 1] = cmd
+    return { ok = true }, nil
+end
+function overlay_mt.remove(ov) overlay_sent[#overlay_sent + 1] = { _name = "osd-overlay", id = ov.id, format = "none" } end
+mp.create_osd_overlay = function(format)
+    return setmetatable({ format = format, id = 1, data = "", res_x = 0, res_y = 720 }, overlay_mt)
+end
 local utils = {
     getpid = function() return 4242 end,
     format_json = enc,
@@ -130,6 +148,24 @@ timers = {}
 J.shown_for("P1.gyroflow.7", "card:done")
 J.shown_for("P1.gyroflow.7", "card:done")
 
+-- An overlay drawn: mpv gets only the overlay's own fields (a function among them killed the plugin drawing), the
+-- update's results come back, the draw is a show for the action going on; remove still there
+clock = 400
+bindings.still()
+local ov = mp.create_osd_overlay("ass-events")
+ov.data = "{\\an7}hello"
+local draw_ok, draw_res = pcall(function() return ov:update() end)
+expect("overlay drawn", draw_ok, true)
+expect("overlay: its result back", type(draw_res) == "table" and draw_res.ok, true)
+expect("overlay: no field of the journal's", rawget(ov, "update"), nil)
+local sent_fn = false
+for _, c in ipairs(overlay_sent) do for _, v in pairs(c) do if type(v) == "function" then sent_fn = true end end end
+expect("overlay: nothing but data sent", sent_fn, false)
+expect("overlay: its data sent", overlay_sent[1] and overlay_sent[1].data, "{\\an7}hello")
+expect("overlay: remove kept", pcall(function() ov:remove() end), true)
+local ov2 = mp.create_osd_overlay("ass-events")
+expect("overlays share one metatable", getmetatable(ov2), getmetatable(ov))
+
 -- File operations: on the share or not
 props["user-data/afp/journal/net"] = nil
 mp.set_property_native("user-data/afp/journal/net", { "/Volumes/DJI_Inbox", "/Volumes/ssd" })
@@ -158,7 +194,12 @@ expect("via", act and field(act, "via"), "key")
 local id = act and field(act, "a")
 expect("step inside", field(find("step", "inside") or "", "a"), id)
 expect("step from its timer", field(find("step", "later") or "", "a"), id)
-expect("one show of a kind", count("show", "overlay:test"), 1)
+local function count_for(k, n, a)
+    local c = 0
+    for _, l in ipairs(lines) do if field(l, "k") == k and field(l, "n") == n and field(l, "a") == a then c = c + 1 end end
+    return c
+end
+expect("one show of a kind", count_for("show", "overlay:test", id), 1)
 expect("a show after the window: nobody's", count("show", "osd"), 0)
 expect("click named by the panel", find("act", "panel/export") ~= nil, true)
 expect("click: one action (not the up)", count("act", "panel/export"), 1)
@@ -167,6 +208,7 @@ local proc = find("step", "proc:gyroflow-gpu-table")
 expect("subprocess timed (started 4 ms into the handler)", proc and math.floor(field(proc, "d") + 0.5), 246)
 expect("its callback the action's", cb_owner ~= nil and cb_owner == field(proc, "a"), true)
 expect("load record", find("load") ~= nil, true)
+expect("overlay drawn: a show for its action", count("show", "overlay:test"), 2)
 local card = find("show", "card:done")
 expect("card for its action", card and field(card, "a"), "P1.gyroflow.7")
 expect("card: once", count("show", "card:done"), 1)
@@ -174,6 +216,36 @@ expect("card: not weak", card and card:find('"weak"') == nil, true)
 for _, l in ipairs(lines) do
     expect("a line is an object", l:sub(1, 1) == "{" and l:sub(-1) == "}", true)
 end
+
+-- The journal broken (its property refused, as a fault of its own would): the plugins' calls go on as without it,
+-- a plugin's own error still raised as its own
+local set_native, get_native = mp.set_property_native, mp.get_property_native
+local function broken(k) if tostring(k):find("afp/journal") then error("journal property broken") end end
+mp.set_property_native = function(k, v) broken(k) return set_native(k, v) end
+mp.get_property_native = function(k) broken(k) return get_native(k) end
+local troubles0 = J._troubles()
+local ran, timer_ran = false, false
+mp.add_key_binding("x", "works", function(v) ran = v; mp.add_timeout(0, function() timer_ran = true end) return "result" end)
+mp.add_key_binding("y", "fails", function() error("the plugin's own") end)
+expect("broken: a key still runs, its result back", bindings.works("arg"), "result")
+expect("broken: with its arguments", ran, "arg")
+for _, cb in ipairs(timers) do cb() end
+timers = {}
+expect("broken: its timer still runs", timer_ran, true)
+local ok_own, err_own = pcall(bindings.fails)
+expect("broken: a plugin's error still its own", not ok_own and tostring(err_own):find("the plugin's own", 1, true) ~= nil, true)
+expect("broken: step, shown, label, span don't raise", pcall(function()
+    J.step("x"); J.shown("y"); J.label("z"); J.shown_for(nil, "w"); J.span("v")({ more = 1 }); J.owner()
+end), true)
+local ov3 = mp.create_osd_overlay("ass-events")
+expect("broken: an overlay still drawn", pcall(function() ov3:update() end), true)
+local f = io.open(J.file, "rb")
+expect("broken: io.open still opens", f ~= nil, true)
+if f then f:close() end
+local nf, nerr, ncode = io.open(dir .. "/no/such/file", "rb")
+expect("io.open: all three results back", nf == nil and type(nerr) == "string" and type(ncode) == "number", true)
+expect("broken: said, counted", J._troubles() > troubles0, true)
+mp.set_property_native, mp.get_property_native = set_native, get_native
 
 -- Cost: a record (format_json here is this test's Lua one; mpv's is C: the live run's "cost" records say)
 local n = 20000

@@ -72,6 +72,26 @@ local get_time = mp.get_time
 local script = mp.get_script_name and mp.get_script_name() or "?"
 local pid = utils.getpid and utils.getpid() or 0
 
+-- Never in a plugin's way: the journal's own code runs protected. Its own callbacks (timers, events, observers) and
+-- functions (step, shown, ...) swallow what goes wrong in them (said in the log the first times, counted in the cost
+-- record); around a plugin's call (a key's handler, a timer's callback, an overlay drawn) only the journal's part is
+-- protected, and the plugin's own errors pass as they would without the journal
+local troubles = 0
+local log_ok, log = pcall(require, 'mp.msg')
+local function trouble(err)
+    troubles = troubles + 1
+    if troubles <= 3 and log_ok and type(log) == "table" and log.warn then pcall(log.warn, "journal: " .. tostring(err)) end
+end
+-- fn protected: its results, or nothing when it failed
+local function safe(fn)
+    return function(...)
+        local r = pack(pcall(fn, ...))
+        if r[1] then return unpack(r, 2, r.n) end
+        trouble(r[2])
+    end
+end
+M._troubles = function() return troubles end
+
 -- The wall clock now, ms, as precise as this mpv lets Lua read it (LuaJIT's ffi), else to the second
 local ffi_ok, ffi = pcall(require, 'ffi')
 if not ffi_ok then ffi = nil end
@@ -282,31 +302,44 @@ local function publish(a, name, w)
     mp.set_property_native("user-data/afp/journal/act", last)
 end
 
-mp.observe_property("user-data/afp/journal/act", "native", function(_, v)
+mp.observe_property("user-data/afp/journal/act", "native", safe(function(_, v)
     if type(v) == "table" and v.a and (not last or v.a ~= last.a) then last = v end
-end)
+end))
 
--- An action asked at w (now when nil); fn, if given, runs as it (returns what fn returns)
-function M.act(name, fields, w, fn, ...)
+local function act_begin(name, fields, w, alone)
     local a = new_id()
     local asked = w or now()
     local r = { k = "act", a = a, n = name, w = asked }
     if fields then for k, v in pairs(fields) do if r[k] == nil then r[k] = v end end end
     publish(a, name, asked)
-    if not fn then
-        rec(r)
-        return a
-    end
-    local before = cur
-    cur = a
-    M._pending = r
-    local res = pack(pcall(fn, ...))
-    cur = before
-    M._pending = nil
+    if alone then rec(r) end
+    return a, r, asked
+end
+local function act_end(a, r, name, asked)
     -- How long the handler itself took (the plugin's Lua, not what it started)
     r.d = now() - asked
     if r.n ~= name then publish(a, r.n, asked) end
     rec(r)
+end
+
+-- An action asked at w (now when nil); fn, if given, runs as it (returns what fn returns, raises what fn raises: the
+-- journal's own part protected, fn runs even when that part fails)
+function M.act(name, fields, w, fn, ...)
+    local ok, a, r, asked = pcall(act_begin, name, fields, w, not fn)
+    if not ok then
+        trouble(a)
+        if fn then return fn(...) end
+        return nil
+    end
+    if not fn then return a end
+    local before, pending = cur, M._pending
+    cur = a
+    M._pending = r
+    local res = pack(pcall(fn, ...))
+    cur = before
+    M._pending = pending
+    local ok_end, err = pcall(act_end, a, r, name, asked)
+    if not ok_end then trouble(err) end
     if not res[1] then error(res[2], 0) end
     return unpack(res, 2, res.n)
 end
@@ -372,12 +405,12 @@ end
 -- File operations: local or on a network share, counted per action and written with the next flush
 
 local net = nil   -- the network shares' mount points (core() publishes them), longest first
-mp.observe_property("user-data/afp/journal/net", "native", function(_, v)
+mp.observe_property("user-data/afp/journal/net", "native", safe(function(_, v)
     if type(v) == "table" then
         table.sort(v, function(x, y) return #x > #y end)
         net = v
     end
-end)
+end))
 
 local function where(path)
     if type(path) ~= "string" then return "local" end
@@ -391,7 +424,7 @@ end
 M.where = where
 
 local io_by = {}  -- action id or "-" -> totals
-local function io_note(op, path, ms)
+local io_note = safe(function(op, path, ms)
     local a = owner() or "-"
     local t = io_by[a]
     if not t then
@@ -403,7 +436,7 @@ local function io_note(op, path, ms)
     t[w .. "_ms"] = t[w .. "_ms"] + ms
     if ms > t.slow_ms then t.slow_ms, t.slow_op, t.slow_path = ms, op, path end
     if ms >= SLOW_IO_MS then M.step("io-slow", { op = op, path = path, d = ms, where = w }) end
-end
+end)
 
 local function io_flush()
     for a, t in pairs(io_by) do
@@ -420,6 +453,9 @@ end
 ---------------------------------------------------------------------------------------------------------------------
 -- The hooks: what's asked through mpv's API is journaled by default
 
+-- Each hook below hands mpv exactly what the plugin gave it (the same command table, flags, overlay: nothing added to
+-- what mpv sends or reads), returns all mpv returned, and runs the journal's part protected (safe, pcall)
+
 -- Keys: the binding's function runs as an action (its key going down, a press; not up, not held repeats)
 local function wrap_binding(add)
     return function(key, name, fn, flags)
@@ -434,8 +470,7 @@ local function wrap_binding(add)
             if complex and type(info) == "table" and info.event ~= "down" and info.event ~= "press" then
                 return fn(info, ...)
             end
-            local w = now()
-            return M.act(act_name, { via = "key", key = complex and type(info) == "table" and info.key_name or key }, w, fn, info, ...)
+            return M.act(act_name, { via = "key", key = complex and type(info) == "table" and info.key_name or key }, nil, fn, info, ...)
         end
         if label then return add(key, label, wrapped, flags) end
         return add(key, wrapped, flags)
@@ -446,8 +481,10 @@ mp.add_forced_key_binding = wrap_binding(mp.add_forced_key_binding)
 
 -- Timers and async commands keep the action they were started in
 local function keep(fn)
-    local a = cur or owner()
-    if type(fn) ~= "function" or not a then return fn end
+    if type(fn) ~= "function" then return fn end
+    local ok, a = pcall(function() return cur or owner() end)
+    if not ok then trouble(a) return fn end
+    if not a then return fn end
     return function(...)
         local before = cur
         cur = a
@@ -462,94 +499,112 @@ mp.add_timeout = function(seconds, cb, ...) return add_timeout(seconds, keep(cb)
 
 local function proc_name(cmd)
     local exe = type(cmd) == "table" and type(cmd.args) == "table" and cmd.args[1]
-    return exe and tostring(exe):match("([^/\\]+)$") or "?"
+    return type(exe) == "string" and exe:match("([^/\\]+)$") or "?"
 end
 
 local native_async = mp.command_native_async
-mp.command_native_async = function(cmd, cb)
-    if type(cmd) == "table" and cmd.name == "subprocess" then
+mp.command_native_async = function(cmd, cb, ...)
+    if type(cmd) == "table" and (cmd.name or cmd._name) == "subprocess" then
         local done = M.span("proc:" .. proc_name(cmd))
         local inner = keep(cb)
         return native_async(cmd, function(ok, r, err)
             done({ status = type(r) == "table" and r.status or nil, killed = type(r) == "table" and r.killed_by_us or nil })
             if inner then return inner(ok, r, err) end
-        end)
+        end, ...)
     end
-    return native_async(cmd, keep(cb))
+    return native_async(cmd, keep(cb), ...)
 end
 local native = mp.command_native
 mp.command_native = function(cmd, ...)
-    if type(cmd) == "table" and cmd.name == "subprocess" then
+    if type(cmd) == "table" and (cmd.name or cmd._name) == "subprocess" then
         local done = M.span("proc:" .. proc_name(cmd), { sync = true })
-        local r, err = native(cmd, ...)
-        done({ status = type(r) == "table" and r.status or nil })
-        return r, err
+        local res = pack(native(cmd, ...))
+        done({ status = type(res[1]) == "table" and res[1].status or nil })
+        return unpack(res, 1, res.n)
     end
     return native(cmd, ...)
 end
 
 -- File operations, timed
-io.open = function(path, ...)
-    local t0 = get_time()
-    local f, err = raw_open(path, ...)
-    io_note("open", path, (get_time() - t0) * 1000)
-    return f, err
-end
-do
-    local file_info, readdir = utils.file_info, utils.readdir
-    utils.file_info = function(path, ...)
+local function timed_io(op, fn)
+    return function(path, ...)
         local t0 = get_time()
-        local r, err = file_info(path, ...)
-        io_note("stat", path, (get_time() - t0) * 1000)
-        return r, err
-    end
-    utils.readdir = function(path, ...)
-        local t0 = get_time()
-        local r, err = readdir(path, ...)
-        io_note("readdir", path, (get_time() - t0) * 1000)
-        return r, err
+        local res = pack(fn(path, ...))
+        io_note(op, path, (get_time() - t0) * 1000)
+        return unpack(res, 1, res.n)
     end
 end
+io.open = timed_io("open", raw_open)
+utils.file_info = timed_io("stat", utils.file_info)
+utils.readdir = timed_io("readdir", utils.readdir)
 
--- On screen: an overlay drawn, an OSD message
+-- On screen: an overlay drawn, an OSD message.
+-- The overlay's update timed through its metatable, never as a field of the overlay: mpv's update sends every field
+-- of the overlay as the osd-overlay command, and a function among them is refused ("disallowed Lua type found:
+-- function": the plugin died on its first draw). Ours: a copy of mpv's metatable whose __index has the timed update
+-- and falls back to mpv's methods; one for each of mpv's metatables (there is one)
+local timed_mts = setmetatable({}, { __mode = "k" })
+local function timed_mt(mt)
+    local mine = timed_mts[mt]
+    if mine then return mine end
+    local methods = mt.__index
+    local update = methods.update
+    local overlay_shown = safe(function() M.shown("overlay:" .. script) end)
+    local index = setmetatable({
+        update = function(self, ...)
+            local res = pack(update(self, ...))
+            overlay_shown()
+            return unpack(res, 1, res.n)
+        end,
+    }, { __index = methods })
+    mine = {}
+    for k, v in pairs(mt) do mine[k] = v end
+    mine.__index = index
+    timed_mts[mt] = mine
+    return mine
+end
 local create_overlay = mp.create_osd_overlay
 if create_overlay then
-    mp.create_osd_overlay = function(format)
-        local ov = create_overlay(format)
-        local update = ov.update
-        ov.update = function(self, ...)
-            local r = { update(self, ...) }
-            M.shown("overlay:" .. script)
-            return unpack(r)
+    mp.create_osd_overlay = function(...)
+        local ov = create_overlay(...)
+        local mt = type(ov) == "table" and getmetatable(ov)
+        -- (an overlay made otherwise, its methods its own fields: not timed, never touched)
+        if type(mt) == "table" and type(mt.__index) == "table" and type(mt.__index.update) == "function"
+           and rawget(ov, "update") == nil and mt.__metatable == nil then
+            local ok, mine = pcall(timed_mt, mt)
+            if ok then setmetatable(ov, mine) else trouble(mine) end
         end
         return ov
     end
 end
 local osd_message = mp.osd_message
+local osd_shown = safe(function() M.shown("osd") end)
 mp.osd_message = function(...)
-    osd_message(...)
-    M.shown("osd")
+    local res = pack(osd_message(...))
+    osd_shown()
+    return unpack(res, 1, res.n)
 end
 
 -- Written every FLUSH_EVERY seconds, and as the player closes; what the journal cost, every minute
 local last_cost = get_time()
 local function cost_record(final)
     rec({ k = "cost", w = now(), records = cost.records, bytes = cost.bytes, rec_ms = cost.rec_ms, flush_ms = cost.flush_ms,
-          flush_max_ms = cost.flush_max_ms, flushes = cost.flushes, dropped = cost.dropped, final = final or nil })
+          flush_max_ms = cost.flush_max_ms, flushes = cost.flushes, dropped = cost.dropped, troubles = troubles,
+          final = final or nil })
 end
-mp.add_periodic_timer(FLUSH_EVERY, function()
+mp.add_periodic_timer(FLUSH_EVERY, safe(function()
     io_flush()
     if get_time() - last_cost > 60 then
         last_cost = get_time()
         cost_record()
     end
     flush()
-end)
-mp.register_event("shutdown", function()
+end))
+mp.register_event("shutdown", safe(function()
     io_flush()
     cost_record(true)
     flush()
-end)
+end))
 
 rec({ k = "load", w = now(), v = VERSION, precise = precise or nil })
 
@@ -574,14 +629,14 @@ local function find_shares()
         mp.set_property_native("user-data/afp/journal/net", list)
         return
     end
-    native_async({ name = "subprocess", args = { "/sbin/mount" }, capture_stdout = true, playback_only = false }, function(_, r)
+    native_async({ name = "subprocess", args = { "/sbin/mount" }, capture_stdout = true, playback_only = false }, safe(function(_, r)
         local list = {}
         for line in ((r and r.stdout) or ""):gmatch("[^\n]+") do
             local at, fs = line:match(" on (.-) %(([%w]+)")
             if at and (fs == "smbfs" or fs == "nfs" or fs == "afpfs" or fs == "webdav") then list[#list + 1] = at end
         end
         mp.set_property_native("user-data/afp/journal/net", list)
-    end)
+    end))
 end
 
 -- The folder kept: files older than KEEP_DAYS go, then the oldest until it's under DIR_CAP
@@ -644,7 +699,7 @@ function M.core()
           parent = os.getenv("AFP_JOURNAL_PARENT"), version = (prop("script-opts") or {})["footage_menu-version"],
           mpv = prop("mpv-version"), platform = jit and jit.os or nil, precise = precise or nil })
     find_shares()
-    mp.add_timeout(20, prune)
+    mp.add_timeout(20, safe(prune))
     -- The start: from the process starting (or this plugin loading) to the first frame
     local start_a = M.act("player/start", { via = "core", batch = batch or nil }, started or now())
     local files = 0
@@ -658,7 +713,7 @@ function M.core()
         local drops0 = prop("frame-drop-count") or 0
         local vo0 = prop("vo-delayed-frame-count") or 0
         local before = { drops0, vo0 }
-        smooth_timer = mp.add_periodic_timer(1, function()
+        smooth_timer = mp.add_periodic_timer(1, safe(function()
             ticks = ticks + 1
             if prop("pause") then return end
             local d, v = prop("frame-drop-count") or 0, prop("vo-delayed-frame-count") or 0
@@ -671,10 +726,10 @@ function M.core()
                       drops = d - drops0, delayed = v - vo0, fps = prop("estimated-vf-fps"), display_fps = prop("display-fps"),
                       after_ms = now() - t0 })
             end
-        end)
+        end))
     end
 
-    mp.register_event("start-file", function()
+    mp.register_event("start-file", safe(function()
         files = files + 1
         local recent = last and now() - last.w < 250 and last or nil
         local a
@@ -693,20 +748,20 @@ function M.core()
         local again = opened[path or ""]
         opened[path or ""] = true
         rec({ k = "step", n = "start-file", a = a, w = now(), nth = files, where = where(path), again = again or nil })
-    end)
-    mp.register_event("file-loaded", function()
+    end))
+    mp.register_event("file-loaded", safe(function()
         if not file then return end
         local path = prop("path")
         local ws = prop("user-data/workspace")
         rec({ k = "step", n = "file-loaded", a = file.a, w = now(), since_ms = now() - file.w, where = where(path),
               size = prop("file-size"), duration = prop("duration"),
               moment = type(ws) == "table" and ws.redirected or nil, nth = files })
-    end)
-    mp.register_event("video-reconfig", function()
+    end))
+    mp.register_event("video-reconfig", safe(function()
         if file and not file.first then rec({ k = "step", n = "video-reconfig", a = file.a, w = now() }) end
-    end)
+    end))
     local seek_a = nil
-    mp.register_event("seek", function()
+    mp.register_event("seek", safe(function()
         if file and not file.first then return end
         local recent = last and now() - last.w < 300 and last or nil
         if recent then
@@ -715,8 +770,8 @@ function M.core()
         else
             seek_a = M.act("seek", { via = "core", pos = prop("time-pos") })
         end
-    end)
-    mp.register_event("playback-restart", function()
+    end))
+    mp.register_event("playback-restart", safe(function()
         if file and not file.first then
             file.first = true
             local vp = prop("video-params") or {}
@@ -731,9 +786,9 @@ function M.core()
         else
             M.shown("frame")
         end
-    end)
+    end))
     local pause_seen = false
-    mp.observe_property("pause", "bool", function(_, paused)
+    mp.observe_property("pause", "bool", safe(function(_, paused)
         if not pause_seen then pause_seen = true return end
         -- Asked by a key of the plugins (an action just now): its result; else mpv's own (Space, a click, the IPC):
         -- an action of its own, applied as it's asked (what's drawn after isn't seen: the bar, at most a frame)
@@ -743,7 +798,17 @@ function M.core()
             local a = M.act(paused and "pause" or "play", { via = "core" })
             rec({ k = "show", n = "pause", a = a, w = now() })
         end
-    end)
+    end))
+end
+
+-- What plugins call: protected, so a fault of the journal's never reaches them
+for _, k in ipairs({ "label", "step", "shown", "shown_for", "owner", "where", "flush", "core" }) do M[k] = safe(M[k]) end
+do
+    local span = safe(M.span)
+    M.span = function(...)
+        local done = span(...)
+        return type(done) == "function" and safe(done) or noop
+    end
 end
 
 return M

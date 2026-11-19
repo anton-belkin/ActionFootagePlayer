@@ -109,8 +109,12 @@ local utils = require 'mp.utils'
 local longpath = require 'longpath'
 longpath.install(utils)
 -- The responsiveness journal (journal.lua, docs/responsiveness-journal.md): every plugin's keys and steps by default;
--- this one also keeps the player's own (its start, files opened, seeks, the first frame). No local: 200 is the limit
-require('journal').core()
+-- this one also keeps the player's own (its start, files opened, seeks, the first frame). No local: 200 is the limit.
+-- Protected, as in the other plugins: the journal never stops this one
+do
+    local ok, j = pcall(require, 'journal')
+    if ok and type(j) == "table" and j.core then pcall(j.core) end
+end
 local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'
