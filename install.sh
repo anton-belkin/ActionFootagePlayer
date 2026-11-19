@@ -238,6 +238,7 @@ put mpv/scripts/gyroflow/gestures.lua "$GYROFLOW/gestures.lua" 644
 put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/exportsettings.lua "$GYROFLOW/exportsettings.lua" 644
 put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
+put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/sphere360.vpy "$GYROFLOW/sphere360.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
