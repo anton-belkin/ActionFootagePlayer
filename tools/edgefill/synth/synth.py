@@ -193,6 +193,12 @@ def _cut(t):
     return 0.0, 0.0, _shake(t, 3.0), 0.0, int(t >= 1.5), 1.0
 
 
+@scenario("cut_turn_back", 4.0, "The view turns 50 deg right, the world changes there at 1.5 s, the view comes back over the old world's traces")
+def _cut_turn(t):
+    y = 50.0 * (_ease(t / 1.2) - _ease((t - 2.0) / 1.5))
+    return y, 0.0, y + _shake(t, 2.0), 0.0, int(t >= 1.5), 1.0
+
+
 @scenario("exposure", 4.0, "A gentle shake; at 1.5 s the world gets 40 % darker (exposure, a cloud)")
 def _exposure(t):
     return 0.0, 0.0, _shake(t, 3.0), 0.0, 0, 0.6 if t >= 1.5 else 1.0

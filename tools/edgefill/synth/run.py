@@ -40,7 +40,7 @@ def run(name, args):
     proc = None if args.no_shader else subprocess.Popen([args.afpchain, str(W), str(H), str(S.FPS), '0', str(W), str(H), '-', '-',
                              'gyroflow_time_offset=0', '--', shader], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, env=env)
     model = Model(W, H, **args.params)
-    base = Model(W, H) if args.no_shader else None
+    base = Model(W, H, **args.base) if args.no_shader else None
     enc = subprocess.Popen(['ffmpeg', '-v', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', f'{W}x{H}', '-r', str(S.FPS),
                             '-i', '-', '-c:v', 'libx264', '-crf', '18', '-preset', 'fast', '-pix_fmt', 'yuv420p',
                             os.path.join(d, 'compare.mp4')], stdin=subprocess.PIPE)
@@ -103,6 +103,7 @@ def main():
     ap.add_argument('--out', required=True)
     ap.add_argument('--size', default='1280x720')
     ap.add_argument('--set', action='append', default=[], help="a model parameter, KEY=VALUE (model.DEFAULTS)")
+    ap.add_argument('--base', action='append', default=[], help="with --no-shader: a parameter of the model in the shader's place")
     ap.add_argument('--no-shader', action='store_true', help="the default model in the shader's place")
     ap.add_argument('--frames', type=int, default=0)
     ap.add_argument('scenarios', nargs='*')
@@ -114,6 +115,10 @@ def main():
     for kv in args.set:
         k, v = kv.split('=', 1)
         args.params[k] = type(DEFAULTS[k])(v)
+    base, args.base = args.base, {}
+    for kv in base:
+        k, v = kv.split('=', 1)
+        args.base[k] = type(DEFAULTS[k])(v)
     for name in args.scenarios or list(S.SCENARIOS):
         run(name, args)
 
