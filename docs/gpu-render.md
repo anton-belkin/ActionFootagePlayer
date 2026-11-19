@@ -393,6 +393,44 @@ What's left on the jump clip (0004): where the first frame's edge was, its trace
 line, darker where the lens vignettes the frame's edge. That is the model: the trace stays until something is
 written over it.
 
+**v4, 2026-11-19: the rule checked on a synthetic bench first** (tools/edgefill/synth: an analytic world, 18 camera
+paths with turns, shifts, rolls and their mixes, a cut and an exposure change; the real shader through afpchain against
+a plain Python model of the rule on the same frames). v3's shader matched the model everywhere (the fill within
+0.001-0.002 on average), so what Anton saw were faults of the rule, found and fixed in the model, then ported:
+- **The memory kept apart for what the camera saw.** In v3 the slow layer followed every write, continuations too.
+  A frame shaking in a still world keeps writing the continuation past its edge, the memory there moves towards it, the
+  edge comes back, "differs from memory", and the continuation wipes real traces (the sectors fired at 0.3 on average,
+  up to 1, with nothing changed). Now a texel the camera has seen keeps what it saw in the slow layer (its alpha: 0 for
+  a texel holding only a continuation, 1 + the frame's share for a seen one), and the sectors are measured apart: the
+  seen memory's difference (the world changed: rewrites traces and continuations) and the continuations' (only
+  continuations are rewritten). With nothing changed the first stays at 0.
+- **The frame written hard, the sphere coarse.** v3's soft edge (10 % of the height) wrote what only the frame's outer
+  part saw at a fraction, so posts seen only there barely stayed, and a shaking frame that came to rest left a frozen
+  half-transparent band with old details under it. Now the frame is written wholly from 1.2 % of the height in (0.4 %:
+  none), and the sphere is 512 x 256 (0.7° a texel, was 2048: 0.18°), read back as before with the B-spline, which is
+  what makes a trace's border soft (Anton's idea). The frame is averaged over the texel when written (4 x 4 taps, a
+  Gaussian of half a texel), so a coarse texel doesn't alias. The writer goes over every 4th output pixel (was every
+  2nd).
+- **A changed sector's continuation goes all the way round** (Anton: a trace is worth something only while it joins the
+  frame). In v3 it reached 30 % of the height past the edge and what lay further stayed forever after a cut. Now it is
+  written over the sector's whole wedge of the sphere (around the frame's axis, out to the point behind the camera): in
+  the output by `sphere`, the rest by a fourth pass, `sphere beyond` (every texel of the sphere the output didn't
+  reach this frame; 131 072 of them, most only test the wedge's strength). Its color is the continuation where that
+  angle leaves the output (`sphere edges` sums the output's border per 64 angles around the frame's axis,
+  `sphere sectors` fills the angles the border doesn't reach from their neighbours).
+- **The sectors measured per texel.** With the coarse sphere, `sphere edges` comparing a band pixel's own color with
+  its texel's memory read a thin bright post against a 0.7° average as a change, and a shaking frame wiped a post at
+  its edge (the bench: shader and model 0.008-0.012 apart there). Now `sphere` sums each texel in the band as it
+  writes it (the frame averaged over the texel, the memory as it was), for the next frame's `sphere sectors`; the
+  strengths are a frame late, against a 0.15 s smoothing. `sphere edges` only sums the output's border for the wedges.
+  Shader and model are now 0.0012-0.003 apart on every scenario.
+- Tried in the model and dropped: a band around the frame always given the frame's continuation when the frame is
+  written (it turned everything a moving frame leaves behind into continuation, 0.065 -> 0.082 of error on a pan), and
+  the same band as wide as the sector's difference (harmless, but no better).
+On the bench against the world (mean error in the fill, model): a cut 0.074 -> 0.059 (0.034 from 0.3 s after it), the
+light 40 % darker 0.077 -> 0.069, a turn of 50°, a cut there and back over the old world's traces 0.085 -> 0.052; scenes
+where nothing changed as before (to 0.0002), with the posts the frame's outer part saw kept after a shake.
+
 ### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
 
 A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:

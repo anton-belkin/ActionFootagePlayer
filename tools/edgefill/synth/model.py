@@ -1,16 +1,16 @@
-# The sphere's rule (warp.glsl's "pass sphere", v3) done the plain way, for the synthetic bench: every texel of the
+# The sphere's rule (warp.glsl's "pass sphere") done the plain way, for the synthetic bench: every texel of the
 # sphere the output shows, each frame, from its own direction (no pixel lattice, no ownership, no compute passes), and
-# the output read from it. The continuation is a simple stand-in for the smooth fill: the frame's edge nearest a place,
-# blurred, more the further out. Where the shader and this differ, look at the shader; where this looks wrong too, the
-# rule itself is wrong.
+# the output read from it. Where the shader and this differ, look at the shader; where this looks wrong too, the rule
+# itself is wrong. The shader measures the sectors as it writes, so its strengths are a frame later than these.
 import math
 import numpy as np
 from scipy import ndimage
 import synth as S
 
-DEFAULTS = dict(SW=2048, BAND=0.03, FULL=0.08, FALLOFF=0.30, CHROMA=2.0, LO=0.04, HI=0.10, RISE=0.15, FALL=0.3,
-                SLOW=0.5, TAKE=0.08, SOFT=0.10, SOFT_IN=0.005, SECTORS=32, FEATHER=0.03, INSET=0.002, BLUR=0.02,
-                SOFT_RULE='max', SOFT_T=0.25, MEMORY='v3', RING=0.0, RING_FADE=0, RING_GATE=0, REACH='falloff')
+# The shader's rule as warp.glsl has it (v4, 2026-11-19). v3's: SW=2048 SOFT=0.10 SOFT_IN=0.005 MEMORY=v3 REACH=falloff
+DEFAULTS = dict(SW=512, BAND=0.03, FULL=0.08, FALLOFF=0.30, CHROMA=2.0, LO=0.04, HI=0.10, RISE=0.15, FALL=0.3,
+                SLOW=0.5, TAKE=0.08, SOFT=0.012, SOFT_IN=0.004, SECTORS=32, FEATHER=0.03, INSET=0.002, BLUR=0.02,
+                SOFT_RULE='max', SOFT_T=0.25, MEMORY='split', RING=0.0, RING_FADE=0, RING_GATE=0, REACH='antipode')
 # MEMORY: what the sectors compare the frame with. 'v3': the slow layer, which continuation writes also move (so a
 # shaking frame's edge, past which the continuation keeps being written, keeps finding its memory 'different').
 # 'split': texels the camera has seen keep what it saw (continuation writes don't touch their memory), and only a
