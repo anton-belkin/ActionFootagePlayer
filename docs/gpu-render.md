@@ -321,6 +321,116 @@ nearest edge's colors, 25 taps) streaked outward from the frame and met it in a 
 Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
 N100.)**
 
+**The sphere, 2026-11-18** (warp.glsl's "pass sphere", `sphere_fill`; gpu_table's `sphere_passes`). Before: one
+compute pass after the warp wrote every other output pixel the frame covered into an equirect (2048 x 1024 rgba32f,
+0.18° a texel: color and time seen) by world direction, last writer wins; the warp read it back past the frame as 3 x 3
+texels two apart, each the nearest texel (`imageLoad`: a storage image isn't filtered), weighted by age (half-life 2.5 s,
+gone after 10), and blended it over the smooth fill by how fresh it was. The texels showed as blocks (a texel is ~3.5
+px of a 1080p window, ~10 at full screen on the XDR), stale content (a scene cut, the boat turning under the camera)
+showed until it aged out, and the sphere was written after the read, a frame late.
+
+Now three compute passes at MAIN **before** the warp samples the frame (HOOKED is the decoded frame), so what they
+write shows in the same frame:
+1. `sphere edges` (every 4th output pixel): along the frame's edge, in 32 sectors of the perimeter (about a tenth of a
+   16:9 frame's width each), in a band 3 % of the height inside the edge, the frame now and the sphere's memory of the
+   same directions (a second texture, the slow layer: rgba16f, what was seen there averaged with a half-life of 0.5 s),
+   where the sphere has a memory there (v2 also counted how fresh the sphere was past the edge; v3 fills empty texels
+   directly). Summed per sector with atomics into a storage buffer.
+2. `sphere sectors` (one workgroup): per sector the distance between the frame and the memory, in Y'CbCr of the signal
+   as decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
+   counts as different (writing there only stamps the fill the read shows anyway), no memory inside as no evidence.
+   Smoothed in time (half-life 0.15 s rising, 0.3 s falling; a seek or a redraw of the same frame starts over or
+   changes nothing), then the strength: smoothstep from 0.04 (nothing written) to 0.10 (all of it).
+   **First version (v1) compared the frame inside the edge with the sphere past it**: different parts of the world, so
+   the change of colour across the edge (deck and hull, sea and sky) read as stale content, and on a shaking boat, where
+   the sphere's traces are right, it wiped them (Anton, live, 2026-11-18). The memory of the same directions changes
+   only when the world does (a cut, surfacing).
+3. `sphere` (every other output pixel): each texel these pixels reach gets exactly one writer, the pixel nearest the
+   texel's middle in steps of the pixels (the pixel lattice mapped onto the sphere by its local derivatives, from the
+   neighbours in the workgroup's shared memory; up to 6 texels across near the poles). The texel's middle decides:
+   inside the frame, the frame's color there (a 2 x 2 box over the texel's footprint), seen now; past it, with the
+   strength interpolated between the two nearest sectors' middles along the edge, times a falloff (whole up to 8 % of
+   the height past the edge, easing to none at 30 %), times a share a frame (half of the way in 0.08 s, so a moment's
+   difference barely touches the traces), the continuation (the smooth fill's color there) mixed over what the texel
+   held as a share of its weight, so an empty texel takes it at that weight and the read eases into the smooth fill
+   under it. Where the sectors don't differ, nothing is written and what was seen there earlier stays. Once the slow
+   layer has taken the new world in, the difference is gone and the writing stops. Seen texels also update the slow
+   layer. `SPHERE_DEBUG 1` writes the continuation red (over traces) or green (where there were none); the marks stay
+   in the sphere, so it overstates.
+
+The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels (all weights positive, so empty
+texels drop out; no ringing). Measured offscreen (tools/edgefill): see the PR's table. Gotchas met: with the smooth read,
+columns of texels the stride-2 writer missed (a pixel step about a texel) showed as stripes, hence one writer per texel;
+Gyroflow's world has its y axis anywhere (on the speedboat clip the sphere's pole sat on the horizon), so near a pole a
+step spans many texels across.
+
+**v3, the same evening: Anton's model.** v2 live: the traces went a dark gray no part of the picture had, things
+flickered in the background, and a ring showed around the frame. The causes: (1) a trace faded with time (half-life
+2.5 s, gone after 10) and what showed through was the smooth fill, muted on purpose (35 % less color, 12 % darker) and
+far from the frame the whole frame's average: gray; (2) where a trace had faded, the background was the live smooth fill,
+recomputed every frame from what was at the frame's edge just then: flicker; (3) the frame was written into the sphere
+up to its edge and not past it, a hard border, and the output frame's edge is curved (the lens), so its footprint shows
+as a ring; besides, past the lens's field every ray lands on the same circle (`boundary_uv`), so the distance from the
+frame stopped growing there and the continuation's falloff drew that circle. Now (Anton's words, in substance): the
+sphere holds the frame's trace where the frame has been and the edge's continuation where it hasn't; nothing fades; a
+texel keeps what was written until the frame or a new continuation is written over it; the output past the frame is
+always the sphere.
+- An empty texel (the first frame, after a seek, a turn to where the camera hasn't looked) gets the continuation
+  wholly, at once; from then on it's a trace like any other, compared by the sectors like any other (the slow layer
+  takes the continuation too), so a continuation is rewritten only where the frame shows it to be wrong, instead of
+  following the frame.
+- The frame is written with a soft edge: its share eases from 0 at 0.5 % of the height in (some cameras' outermost rows
+  are off in color, and the interpolation reaches past the edge) to whole at 10 %, over what the texel held. Each texel
+  keeps the share it has had (the slow layer's alpha), and only the share it hasn't had yet is added: written again
+  every frame while the camera holds still, the soft edge would add up to the whole frame and leave a hard border once
+  the camera moves.
+- The continuation isn't muted under the sphere (the plain smooth fill still is).
+- A seek (or the first frame) starts the sphere over: `ge_epoch`, the time of the jump; texels written before it count
+  as empty.
+- Past the lens's field, the distance from the frame keeps growing (`boundary_excess`: how far past the field a ray is,
+  times the focal length).
+What's left on the jump clip (0004): where the first frame's edge was, its trace meets the continuation in a faint
+line, darker where the lens vignettes the frame's edge. That is the model: the trace stays until something is
+written over it.
+
+**v4, 2026-11-19: the rule checked on a synthetic bench first** (tools/edgefill/synth: an analytic world, 18 camera
+paths with turns, shifts, rolls and their mixes, a cut and an exposure change; the real shader through afpchain against
+a plain Python model of the rule on the same frames). v3's shader matched the model everywhere (the fill within
+0.001-0.002 on average), so what Anton saw were faults of the rule, found and fixed in the model, then ported:
+- **The memory kept apart for what the camera saw.** In v3 the slow layer followed every write, continuations too.
+  A frame shaking in a still world keeps writing the continuation past its edge, the memory there moves towards it, the
+  edge comes back, "differs from memory", and the continuation wipes real traces (the sectors fired at 0.3 on average,
+  up to 1, with nothing changed). Now a texel the camera has seen keeps what it saw in the slow layer (its alpha: 0 for
+  a texel holding only a continuation, 1 + the frame's share for a seen one), and the sectors are measured apart: the
+  seen memory's difference (the world changed: rewrites traces and continuations) and the continuations' (only
+  continuations are rewritten). With nothing changed the first stays at 0.
+- **The frame written hard, the sphere coarse.** v3's soft edge (10 % of the height) wrote what only the frame's outer
+  part saw at a fraction, so posts seen only there barely stayed, and a shaking frame that came to rest left a frozen
+  half-transparent band with old details under it. Now the frame is written wholly from 1.2 % of the height in (0.4 %:
+  none), and the sphere is 512 x 256 (0.7° a texel, was 2048: 0.18°), read back as before with the B-spline, which is
+  what makes a trace's border soft (Anton's idea). The frame is averaged over the texel when written (4 x 4 taps, a
+  Gaussian of half a texel), so a coarse texel doesn't alias. The writer goes over every 4th output pixel (was every
+  2nd).
+- **A changed sector's continuation goes all the way round** (Anton: a trace is worth something only while it joins the
+  frame). In v3 it reached 30 % of the height past the edge and what lay further stayed forever after a cut. Now it is
+  written over the sector's whole wedge of the sphere (around the frame's axis, out to the point behind the camera): in
+  the output by `sphere`, the rest by a fourth pass, `sphere beyond` (every texel of the sphere the output didn't
+  reach this frame; 131 072 of them, most only test the wedge's strength). Its color is the continuation where that
+  angle leaves the output (`sphere edges` sums the output's border per 64 angles around the frame's axis,
+  `sphere sectors` fills the angles the border doesn't reach from their neighbours).
+- **The sectors measured per texel.** With the coarse sphere, `sphere edges` comparing a band pixel's own color with
+  its texel's memory read a thin bright post against a 0.7° average as a change, and a shaking frame wiped a post at
+  its edge (the bench: shader and model 0.008-0.012 apart there). Now `sphere` sums each texel in the band as it
+  writes it (the frame averaged over the texel, the memory as it was), for the next frame's `sphere sectors`; the
+  strengths are a frame late, against a 0.15 s smoothing. `sphere edges` only sums the output's border for the wedges.
+  Shader and model are now 0.0012-0.003 apart on every scenario.
+- Tried in the model and dropped: a band around the frame always given the frame's continuation when the frame is
+  written (it turned everything a moving frame leaves behind into continuation, 0.065 -> 0.082 of error on a pan), and
+  the same band as wide as the sector's difference (harmless, but no better).
+On the bench against the world (mean error in the fill, model): a cut 0.074 -> 0.059 (0.034 from 0.3 s after it), the
+light 40 % darker 0.077 -> 0.069, a turn of 50°, a cut there and back over the old world's traces 0.085 -> 0.052; scenes
+where nothing changed as before (to 0.0002), with the posts the frame's outer part saw kept after a shake.
+
 ### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
 
 A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:
