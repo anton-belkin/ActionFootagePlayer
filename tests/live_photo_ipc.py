@@ -7,6 +7,11 @@
 #
 #   python3 tests/live_photo_ipc.py <folder of live photos taken in a row> [<a plain photo>]
 #   python3 tests/live_photo_ipc.py --links <folder of a project's photo links (.afplink.jpg) to one clip, in a row>
+#   AFP_PHOTO=<afp-photo built from macos/photo.swift> python3 tests/live_photo_ipc.py --hdr <a photo with a gain map>
+#
+# HDR (macOS): the photo's HDR rendition (afp-photo --hdr-still, into a scratch AFP_HOME) shown in place of its SDR
+# image, labelled PQ BT.2020 for the VO, the target PQ; an SDR screen (user-data/dlogm/screen sdr) gets the photo's own
+# image and the target back; the live part plays its own video, not labelled.
 #
 # Photo links: with the workspace plugin too (it opens a link as its clip's part around the frame): the link opens
 # paused at its frame, the run of the links after it plays as one part and rests on the last at its frame, and Open
@@ -44,7 +49,7 @@ class Player:
         lister = os.path.join(tempfile.mkdtemp(), "librarylist_only.lua")
         open(lister, "w").write(LISTER % REPO)
         self.p = subprocess.Popen([MPV, "--no-config", "--vo=null", "--ao=null", "--idle=yes", "--autocreate-playlist=filter", "--hwdec=auto",
-                                   f"--script={REPO}/mpv/scripts/live-photo",
+                                   f"--script={REPO_SCRIPTS or REPO + '/mpv/scripts/live-photo'}",
                                    *( [f"--script={REPO}/mpv/scripts/workspace"] if workspace else [f"--script={lister}"] ),
                                    f"--input-ipc-server={SOCK}", path],
                                   # (the workspace plugin keeps a cache in the folder it runs in without the app's)
@@ -85,6 +90,33 @@ class Player:
 def live_photos(folder):
     return sorted(os.path.join(folder, n) for n in os.listdir(folder) if n.lower().endswith(PHOTO))
 
+def hdr(photo):
+    # The plugin finds afp-photo in the gyroflow plugin's folder beside it: a scratch scripts folder with both
+    d = tempfile.mkdtemp()
+    os.symlink(f"{REPO}/mpv/scripts/live-photo", os.path.join(d, "live-photo"))
+    os.makedirs(os.path.join(d, "gyroflow"))
+    os.symlink(os.path.abspath(os.environ["AFP_PHOTO"]), os.path.join(d, "gyroflow", "afp-photo"))
+    os.environ["AFP_HOME"] = tempfile.mkdtemp()
+    global REPO_SCRIPTS
+    REPO_SCRIPTS = os.path.join(d, "live-photo")
+    p = Player(photo)
+    track = lambda: next((t for t in p.get("track-list") if t.get("title") == "HDR"), None)
+    expect("HDR: its rendition shown", p.wait(lambda: track() is not None and track().get("selected"), 10), str(track()))
+    out = lambda k: (p.get("video-out-params") or {}).get(k)
+    expect("HDR: PQ BT.2020 to the VO", p.wait(lambda: out("gamma") == "pq" and out("primaries") == "bt.2020", 5), f"{out('gamma')} {out('primaries')}")
+    expect("HDR: target PQ", p.get("target-trc") == "pq" and p.get("target-colorspace-hint") is True, f"{p.get('target-trc')} {p.get('target-colorspace-hint')}")
+    if p.photo().get("live"):
+        p.cmd("script-message", "live-photo-view", "play")
+        expect("HDR: the live part, its own video", p.wait(lambda: not (track() or {}).get("selected") and not any(f.get("label") == "live-photo-hdr" for f in p.get("vf")), 4))
+        p.cmd("script-message", "live-photo-view", "stop")
+        expect("HDR: back to the rendition", p.wait(lambda: (track() or {}).get("selected"), 4))
+    p.cmd("set_property", "user-data/dlogm/screen", "sdr")
+    expect("SDR screen: the photo's own image", p.wait(lambda: not (track() or {}).get("selected") and out("gamma") != "pq", 4), f"{out('gamma')}")
+    expect("SDR screen: the target back", p.get("target-trc") != "pq", str(p.get("target-trc")))
+    p.quit()
+
+REPO_SCRIPTS = None
+
 def links(folder):
     files = sorted(os.path.join(folder, n) for n in os.listdir(folder) if n.lower().endswith(".afplink.jpg"))
     p = Player(files[0], workspace=True)
@@ -120,6 +152,10 @@ def links(folder):
     p.quit()
 
 def main():
+    if sys.argv[1] == "--hdr":
+        hdr(sys.argv[2])
+        print(f"{checks} checks, {failures} failed")
+        sys.exit(1 if failures else 0)
     if sys.argv[1] == "--links":
         links(sys.argv[2])
         print(f"{checks} checks, {failures} failed")

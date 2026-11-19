@@ -49,10 +49,12 @@ test("a tile: no name, no time; its albums under the picture, one tag icon, what
   assert.ok(!/reef|turtle/.test(tagged.querySelector(".cap").textContent), "no tag names");
   assert.equal(tagged.querySelector(".cap .tg").textContent, "", "no count");
   assert.equal(tile(page, "i:a:_Clips/Red Sea dives/DJI_0002.afplink.mp4").querySelector(".tg"), null, "untagged: no icon");
-  // What it is: a moment, a photo, a Live Photo; a clip none (a 360° one says 360°)
+  // What it is: a moment, a photo, a Live Photo (a photo link too: live in the player); a clip none (a 360° one says 360°)
   const kind = (key) => { const k = tile(page, key).querySelector(".th .kd"); return k ? k.getAttribute("aria-label") || k.textContent : null; };
   assert.equal(kind("i:m:_Moments/Red Sea dives/Ray.afplink.mp4"), "Moment");
-  assert.equal(kind("i:p:_Stills/Red Sea dives/DJI_0003_1.5s.afplink.jpg"), "Photo");
+  assert.equal(kind("i:p:_Stills/Red Sea dives/DJI_0003_1.5s.afplink.jpg"), "Live photo link");
+  assert.equal(tile(page, "i:p:_Stills/Red Sea dives/DJI_0003_1.5s.afplink.jpg").querySelector(".th .kd").innerHTML,
+               tile(page, "i:p:_Stills/Red Sea dives/DJI_0001_2s.heic").querySelector(".th .kd").innerHTML, "the Live icon");
   assert.equal(kind("i:p:_Stills/Red Sea dives/DJI_0005_9s.jpg"), "Photo");
   assert.equal(kind("i:p:_Stills/Red Sea dives/DJI_0001_2s.heic"), "Live Photo");
   assert.equal(kind("i:a:_Clips/Red Sea dives/DJI_0002.afplink.mp4"), null);

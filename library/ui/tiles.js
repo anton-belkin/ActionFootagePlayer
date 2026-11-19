@@ -26,6 +26,7 @@ const TILE_ICON = {
   live: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="2.4" fill="currentColor" stroke="none"/>' +
     '<circle cx="12" cy="12" r="5.4" stroke-width="1.6"/><g stroke-width="1.3" stroke-linecap="round">' +
     Array.from({ length: 24 }, (_, i) => { const a = i * Math.PI / 12, c = Math.cos(a), s = Math.sin(a), f = (r) => (12 + r * c).toFixed(2) + " " + (12 + r * s).toFixed(2); return "<path d=\"M" + f(8.6) + "L" + f(10.6) + "\"/>"; }).join("") + '</g></svg>',
+  get livelink() { return this.live; },
   // A photo: a picture of hills and the sun
   photo: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<rect x="3" y="4.5" width="18" height="15" rx="2.2"/><path d="M3.5 17l5-5.2 4.2 4.2 2.8-2.8 4.8 4.8"/><circle cx="15.8" cy="9" r="1.5" fill="currentColor" stroke="none"/></svg>',
@@ -37,12 +38,13 @@ const TILE_ICON = {
   problem: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M12 8.5v4.5M12 16.6v.1"/><path d="M10.3 3.9 2.6 17.6A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-2.9L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>',
 };
-const TILE_KIND_NAME = { moment: "Moment", live: "Live Photo", photo: "Photo", export: "Export" };
+const TILE_KIND_NAME = { moment: "Moment", live: "Live Photo", livelink: "Live photo link", photo: "Photo", export: "Export" };
 
-// What an item is, as its icon says: null for a clip
+// What an item is, as its icon says: null for a clip. Live: what the player plays as a live photo (its icon there, hover
+// or Space): a Live Photo, a Motion Photo, and a photo link (its clip around the frame)
 function tileKind(it) {
   if (it.kind === "moment") return "moment";
-  if (it.kind === "still") return it.form === "Live Photo" ? "live" : "photo";
+  if (it.kind === "still") return it.form === "Live Photo" || it.form === "Motion Photo" ? "live" : it.linked ? "livelink" : "photo";
   if (it.kind === "export") return "export";
   return null;
 }
