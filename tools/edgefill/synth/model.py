@@ -10,12 +10,16 @@ import synth as S
 
 DEFAULTS = dict(SW=2048, BAND=0.03, FULL=0.08, FALLOFF=0.30, CHROMA=2.0, LO=0.04, HI=0.10, RISE=0.15, FALL=0.3,
                 SLOW=0.5, TAKE=0.08, SOFT=0.10, SOFT_IN=0.005, SECTORS=32, FEATHER=0.03, INSET=0.002, BLUR=0.02,
-                SOFT_RULE='max', SOFT_T=0.25, MEMORY='v3')
+                SOFT_RULE='max', SOFT_T=0.25, MEMORY='v3', RING=0.0, RING_FADE=0, RING_GATE=0)
 # MEMORY: what the sectors compare the frame with. 'v3': the slow layer, which continuation writes also move (so a
 # shaking frame's edge, past which the continuation keeps being written, keeps finding its memory 'different').
 # 'split': texels the camera has seen keep what it saw (continuation writes don't touch their memory), and only a
 # change there (the world changed) rewrites traces; texels that only ever held a continuation are compared on their
 # own, and only they are rewritten when the frame shows the continuation was wrong
+# RING (Anton 2026-11-19): a band this share of the height around the frame, past its edge, always takes this frame's
+# continuation when the frame is written (RING_FADE=1: wholly at the edge, fading to nothing at the band's far side);
+# what it covers then holds a continuation, not a trace. RING_GATE=1: the band is as wide as the sector's difference
+# says (RING x strength), so where the frame's edge matches what the sphere held there is no band at all
 # SOFT_RULE: how the frame's soft edge goes into the sphere. 'max' (v3): each texel keeps the largest share it has had
 # and only gets the rest. 'converge': while the frame covers a texel, it moves towards the frame at a rate its share
 # sets (half of the way in SOFT_T / share seconds), so a still frame's edge ends up the frame, and a moving one leaves
@@ -251,11 +255,18 @@ class Model:
         slow_out = np.where(known[..., None], Sl + (cont - Sl) * a_out[..., None], cont)
         if split:
             slow_out = np.where(seen[..., None], Sl, slow_out)
+        ring = np.zeros_like(out_d)
+        if p['RING'] > 0:
+            rb = p['RING'] * Hs * (st if p['RING_GATE'] else 1.0)
+            ring = np.where(out_d <= rb, 1 - out_d / np.maximum(rb, 1e-6) if p['RING_FADE'] else 1.0, 0.0)
+            ring = np.where(inside, 0.0, ring)
+            c_out = c_out + (cont - c_out) * ring[..., None]
+            slow_out = slow_out + (cont - slow_out) * ring[..., None]
         self.C[iy, ix] = np.where(inside[..., None], c_in, c_out)
         self.Sl[iy, ix] = np.where(inside[..., None], slow_in, slow_out)
         self.Wsh[iy, ix] = np.where(inside, np.maximum(w, a_in), w * (1 - a_out))
         self.K[iy, ix] = True
-        self.Sn[iy, ix] = seen | (inside & (a_in > 0))
+        self.Sn[iy, ix] = (seen & (ring < 0.5)) | (inside & (a_in > 0))
         return self.render(frame, qv, qc)
 
     # ---- the output ----
