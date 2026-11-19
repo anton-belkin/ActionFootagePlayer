@@ -18,6 +18,8 @@ mod changed;
 mod checks;
 mod geo;
 mod index;
+// The responsiveness journal (docs/responsiveness-journal.md)
+mod journal;
 mod locations;
 mod renders;
 mod seen;
@@ -587,7 +589,7 @@ fn player() -> Result<PathBuf, String> {
     }
 }
 
-fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
+fn start_player(request: &Path, log: &Path, job: u64) -> Result<Child, String> {
     let player = player()?;
     let mut cmd;
     if cfg!(windows) {
@@ -605,6 +607,8 @@ fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
             .arg(format!("--log-file={}", log.display()));
     }
     cmd.env("AFP_BATCH", request).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Its journal says which job of this run it is
+    if let Some(parent) = journal::parent_env(job) { cmd.env("AFP_JOURNAL_PARENT", parent); }
     cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", player.display()))
 }
 
@@ -657,7 +661,8 @@ fn start_job(inner: &mut Inner) {
     let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
-        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log) });
+        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log, job.id) });
+    journal::step("job-start", json!({ "job": job.id, "kind": job.kind, "ok": started.is_ok(), "waited_ms": None::<f64> }));
     match started {
         Ok(child) => {
             job.state = JobState::Starting;
@@ -892,6 +897,7 @@ async fn project(shared: State<'_, Shared>) -> Result<Option<ProjectInfo>, Strin
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Option<ProjectInfo> {
     let root = shared.lock().unwrap().project.clone()?;
+    let _s = journal::span("project_info", json!({ "where": journal::where_(&root) }));
     Some(project_info(&root))
 }).await.map_err(|e| e.to_string())
 }
@@ -919,6 +925,7 @@ async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: St
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    let _s = journal::span("open_project", json!({ "where": journal::where_(Path::new(&path)) }));
     open_path(&app, &shared, Path::new(&path))
 }).await.map_err(|e| e.to_string())?
 }
@@ -1069,10 +1076,16 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     let cache_file = view_cache(&app, &root, &view);
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let where_ = journal::where_(&root);
         let flat = project_info(&root).clips_layout != "tree";
         // The project's catalog being read (a second or two): waited for, not the disks walked meanwhile (minutes)
+        let t = journal::now();
         seen::wait_ready(&root, std::time::Duration::from_secs(60));
+        journal::step("catalog-wait", json!({ "d": journal::now() - t, "view": view, "where": where_ }));
+        let mut s = journal::span("scan", json!({ "view": view, "where": where_ }));
         let mut out = index::scan(&root, &view, flat);
+        s.add("items", json!(out["items"].as_array().map(Vec::len)));
+        drop(s);
         // Moments whose clip was found away from the path their link names: the path written into the link
         // (docs/library-management.md §8), so the next look, from any computer, finds it at once
         let tool = link_tool();
@@ -1167,7 +1180,14 @@ async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Res
 #[tauri::command]
 async fn thumb(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
-    tauri::async_runtime::spawn_blocking(move || index::thumb(Path::new(&path), &cache)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        // Journal: a picture that took a while (made, or read from a share), not each one
+        let t = journal::now();
+        let r = index::thumb(Path::new(&path), &cache);
+        let d = journal::now() - t;
+        if d >= 20.0 { journal::step("thumb", json!({ "d": d, "where": journal::where_(Path::new(&path)), "made": r.is_some() })); }
+        r
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- the project's settings: its locations, what this computer keeps for it ----------
@@ -2285,7 +2305,7 @@ fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -
 // Done once the player plays the first video (Windows: it says so on its pipe; a clip on a NAS takes seconds), for the
 // window to show it's waiting: false when it didn't within a while
 #[tauri::command]
-async fn open_items(paths: Vec<String>) -> Result<bool, String> {
+async fn open_items(paths: Vec<String>, journal: Option<String>) -> Result<bool, String> {
     if paths.is_empty() { return Ok(true); }
     let (photos, videos): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
         let l = p.to_lowercase();
@@ -2302,6 +2322,8 @@ async fn open_items(paths: Vec<String>) -> Result<bool, String> {
             else { Command::new("xdg-open").arg(p).spawn() };
     }
     let Some(first) = videos.first().cloned() else { return Ok(true) };
+    // The player told which action this is: its first frame is that action's result (journal.lua takes it)
+    journal::handoff(journal.as_deref(), &videos);
     if cfg!(target_os = "macos") {
         Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
         return Ok(true);
@@ -2379,7 +2401,8 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
 const KINDS: [&str; 8] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical"];
 
 #[tauri::command]
-async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>, journal: Option<String>) -> Result<(), String> {
+    journal::step("job-added", json!({ "a": journal, "kind": kind, "items": only.as_ref().map(Vec::len) }));
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -2692,6 +2715,8 @@ fn opened(shared: &Shared, app: &tauri::AppHandle, path: PathBuf) {
 }
 
 fn main() {
+    // The responsiveness journal: first, so the start is measured from here (its header says when the process began)
+    journal::init();
     let shared: Shared = Arc::new(Mutex::new(Inner::default()));
     // A project given on the command line (Explorer's double click)
     for arg in std::env::args_os().skip(1) {
@@ -2760,7 +2785,8 @@ fn main() {
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
-                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
+                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share,
+                                                 journal::journal_write, journal::journal_hello])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {

@@ -100,6 +100,9 @@ local utils = require 'mp.utils'
 -- Windows: paths past 260 characters (a clip deep in a trip's folders) for the file calls here and in the modules
 local longpath = require 'longpath'
 longpath.install(utils)
+-- The responsiveness journal (journal.lua, docs/responsiveness-journal.md): every plugin's keys and steps by default;
+-- this one also keeps the player's own (its start, files opened, seeks, the first frame). No local: 200 is the limit
+require('journal').core()
 local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'

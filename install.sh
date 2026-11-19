@@ -284,6 +284,7 @@ put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
 put mpv/scripts/workspace/projectfile.lua "$WORKSPACE/projectfile.lua" 644
 put mpv/scripts/workspace/longpath.lua  "$WORKSPACE/longpath.lua" 644
 put mpv/scripts/workspace/tags.lua      "$WORKSPACE/tags.lua" 644
+put mpv/scripts/workspace/journal.lua   "$WORKSPACE/journal.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644

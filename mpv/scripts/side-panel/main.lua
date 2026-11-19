@@ -27,6 +27,15 @@
 --                                   without a window)
 
 local mp = require 'mp'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default; J.step / J.label for what's its own. A stand-in that does nothing
+-- where the workspace plugin isn't beside this one
+local J = (function()
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    local ok, j = pcall(require, 'journal')
+    if ok then return j end
+    return setmetatable({}, { __index = function(_, k) return k == "span" and function() return function() end end or function() end end })
+end)()
 local options = require 'mp.options'
 local ui = require 'ui'
 local bar = require 'bar'
@@ -1893,6 +1902,8 @@ local function click(info)
         return update()
     end
     if not h then return end
+    -- Journal: the click is the button's action
+    J.label("panel/" .. tostring(h.id))
     if type(h.cmd) == "table" and h.cmd.drag then
         h.cmd.drag(pos.x, pos.y)
         if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
@@ -1951,6 +1962,7 @@ local function list_enter()
     for _, r in ipairs(l and l.rows or {}) do
         if r.kind == at and not r.disabled then cmd = r.cmd end
     end
+    J.label("panel/list/" .. tostring(at))
     if type(cmd) == "function" then cmd() elseif cmd then mp.command(cmd) end
     set_popover(nil)
     update()

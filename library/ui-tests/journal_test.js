@@ -1,0 +1,111 @@
+"use strict";
+// The responsiveness journal's page part (../ui/journal.js, docs/responsiveness-journal.md): a click, a keystroke in
+// the search box and a double-click each come out as an action with its paint, its commands and its end; the
+// double-click hands its id to open_items; the polls are nobody's step; and what a record costs.
+//   cd library/ui-tests && npm install && node --test journal_test.js
+
+const test = require("node:test");
+const assert = require("node:assert/strict");
+const { open, sleep } = require("./page");
+
+const opened = [];
+test.afterEach(() => { while (opened.length) opened.pop().close(); });
+
+async function start(o) {
+  const lines = [];
+  const page = await open(Object.assign({ delay: { scan: 40 } }, o || {}, {
+    commands: Object.assign({
+      journal_hello: () => ({ pid: 77, start_a: "L77.start", start_w: Date.now() - 500 }),
+      journal_write: (a) => { lines.push(...a.lines); return null; },
+      open_items: () => true,
+    }, (o && o.commands) || {}),
+  }));
+  opened.push(page);
+  const records = async () => {
+    page.window.Journal.flush();
+    await sleep(5);
+    return lines.map((l) => JSON.parse(l));
+  };
+  return { page, records };
+}
+
+// Waits for the actions going on to end (the page's IDLE_MS, 1.2 s, with nothing more for them)
+const ended = (page) => page.until(() => page.window.Journal._open.length === 0, 8000, "the actions to end");
+
+test("a click: its action, the frame after it, its commands, its end", async () => {
+  const { page, records } = await start();
+  await ended(page);
+  page.click('[data-a="view"][data-v="sources"]');
+  await ended(page);
+  const rs = await records();
+  const act = rs.find((r) => r.k === "act" && r.n === "click:view");
+  assert.ok(act, "the click is an action");
+  assert.equal(act.v, "sources");
+  assert.equal(act.s, "page");
+  assert.match(act.a, /^L77\.p\d+$/);
+  const paint = rs.find((r) => r.k === "show" && r.a === act.a && r.n === "paint");
+  assert.ok(paint && paint.w >= act.w, "a frame drawn after it");
+  const done = rs.find((r) => r.k === "done" && r.a === act.a);
+  assert.ok(done, "it ended");
+  assert.ok(done.parts.handlers, "the page's own handlers timed");
+  assert.ok(done.settled >= paint.w, "settled after its first paint");
+  // The start: the app's action, the page's work in it
+  assert.ok(rs.some((r) => r.k === "done" && r.a === "L77.start" && r.parts["invoke:scan"]), "the start's scans are its own");
+  // The polls are nobody's
+  for (const r of rs.filter((r) => r.k === "done")) {
+    assert.ok(!r.parts["invoke:snapshot"] && !r.parts["invoke:probes_since"], "no poll in " + r.n);
+  }
+});
+
+test("a keystroke in the search box: its action, the list drawn in its handler", async () => {
+  const { page, records } = await start();
+  await ended(page);
+  page.type("#q", "reef");
+  await ended(page);
+  const rs = await records();
+  const act = rs.find((r) => r.k === "act" && r.n === "input:#q");
+  assert.ok(act);
+  const done = rs.find((r) => r.k === "done" && r.a === act.a);
+  assert.ok(done.parts["render:renderMain"], "the list drawn, timed as its step");
+});
+
+test("a double-click: open_items carries the action's id (the player's first frame is its result)", async () => {
+  const { page, records } = await start();
+  await ended(page);
+  page.get('S.path = ["Day 1"]; renderAll()');
+  await ended(page);
+  const row = page.row("Day 1/A.MP4");
+  row.dispatchEvent(new page.window.MouseEvent("dblclick", { bubbles: true, cancelable: true }));
+  await page.until(() => page.calls("open_items").length === 1);
+  await ended(page);
+  const rs = await records();
+  const act = rs.find((r) => r.k === "act" && r.n === "dblclick:pick");
+  assert.ok(act);
+  assert.equal(page.calls("open_items")[0].args.journal, act.a);
+  // The other commands don't get it
+  assert.ok(page.calls("scan").every((c) => !c.args || c.args.journal === undefined));
+  const done = rs.find((r) => r.k === "done" && r.a === act.a);
+  assert.ok(done.parts["invoke:open_items"]);
+});
+
+test("a slow command is a record of its own; a failing one is said", async () => {
+  const { page, records } = await start({ delay: { scan: 40, set_focus: 0, recent: 80 }, commands: { recent: () => { throw new Error("no"); } } });
+  await ended(page);
+  page.click('[data-a="menu"]');
+  await ended(page);
+  const rs = await records();
+  const act = rs.find((r) => r.k === "act" && r.n === "click:menu");
+  assert.ok(rs.some((r) => r.k === "step" && r.a === act.a && r.n === "invoke:recent" && r.d >= 50), "slow: its own record");
+  assert.ok(rs.some((r) => r.k === "step" && r.a === act.a && r.n === "invoke-failed:recent"));
+});
+
+test("cost: a record takes microseconds; the page doesn't write, the app does (every 2 s)", async () => {
+  const { page } = await start();
+  const J = page.window.Journal;
+  const n = 20000;
+  const t0 = page.window.performance.now();
+  for (let i = 0; i < n; i++) J._rec({ k: "step", n: "bench", w: J.now(), a: "L77.p1", d: 1.5 });
+  const us = (page.window.performance.now() - t0) * 1000 / n;
+  console.log(`journal.js: ${us.toFixed(2)} µs a record (jsdom, node)`);
+  assert.ok(us < 50, us + " µs a record");
+});

@@ -32,6 +32,12 @@
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 local options = require 'mp.options'
 local markers = require 'markers'
 -- The clip's file (the workspace plugin's sidecar.lua, beside this plugin's folder)

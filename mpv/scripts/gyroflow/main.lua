@@ -188,6 +188,13 @@
 local mp = require 'mp'
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default; its own steps through package.loaded.journal (no local: this file is
+-- at Lua's 200). Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- Windows: paths past 260 characters (a clip deep in a trip's folders), by the workspace plugin's longpath.lua beside
 -- this plugin's folder; without it, as before
@@ -919,6 +926,8 @@ local function rebuild_filter()
         if f.label == LABEL then vf[i] = gyroflow_filter(current_source, f.enabled) end
     end
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
 end
 
 -- A clip played again from where it was (play_again)
@@ -1106,6 +1115,8 @@ local function gpu_set_shader(old, new, extra_mb)
     mp.commandv("script-message-to", "dlogm", "gyroflow-shader", old or "", new or "")
     if old and old ~= new and old ~= GPU_HOLD_SHADER and not gpu_kept[old] then os.remove(old) end
     gpu_resident_add(new, extra_mb)
+    -- Journal: the warp's in mpv's list (stabilization on); the picture changes with the next frame mpv renders
+    if package.loaded.journal and new then package.loaded.journal.step("warp-set") package.loaded.journal.shown("picture") end
 end
 
 -- The player's table server (gyroflow-gpu-table --serve): it keeps the clips it loaded, so a change of the view, the
@@ -1129,6 +1140,8 @@ local gpu_held = false
 local function gpu_unhold()
     if gpu_held then
         gpu_held = false
+        -- Journal: the black hold over, the clip plays stabilized
+        if package.loaded.journal then package.loaded.journal.step("unhold") end
         mp.set_property_native("pause", false)
     end
 end
@@ -1173,6 +1186,7 @@ local function gpu_table(source, done)
         local reply = {}
         for k, v in pairs(hit.reply) do reply[k] = v end
         reply.ms, reply.reused = 0, true
+        if package.loaded.journal then package.loaded.journal.step("gpu-table", { reused = true }) end
         mp.add_timeout(0, function() done(reply) end)
         return
     end
@@ -1820,6 +1834,8 @@ place_filters = function(enabled, full)
     if step then table.insert(vf, at, step) end
     if hwdec and hwdec ~= mp.get_property("file-local-options/hwdec") then mp.set_property("file-local-options/hwdec", hwdec) end
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
 end
 
 -- The GPU path after a change (view, level, horizon, lens, edges, color fringes, the frame): the shader written again
@@ -2488,6 +2504,8 @@ local function reload_project(project, version)
     end
     current_source = source
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
     publish()
     mp.msg.info("reloaded " .. project)
     mp.osd_message("Gyroflow: project reloaded", 3)

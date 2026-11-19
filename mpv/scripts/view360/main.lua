@@ -62,6 +62,12 @@
 -- recording's: locked during a take and while the recording plays, and a take under another is refused.
 
 local mp = require 'mp'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- gestures.lua is the gyroflow plugin's, in the folder beside this one
 do
