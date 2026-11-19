@@ -379,6 +379,64 @@ mod tests {
         index::scan(root, "footage", false)["links"].as_array().unwrap().iter().find(|l| l["path"] == path).cloned()
     }
 
+    // The comment (docs/tags-and-culling.md, "The comment"): on an original (one without its own file, one with), a
+    // moment, a photo, not an export; what the command says is what a reading shows; other writes keep it; taken out
+    #[test]
+    fn a_comment_is_kept_with_each_and_read_back() {
+        let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let base = std::env::temp_dir().join(format!("afl-changed-comment-{}", std::process::id()));
+        let r = build(&base, 60);
+        let p = &r.p;
+        // A photo's link written into its XMP as afp-meta does (its keywords kept), the others as afp-cut does
+        let relink = |f: &Path, l: &str| -> Result<(), String> {
+            if !afp_catalog::inspect::is_photo(&f.to_string_lossy().to_lowercase()) { return relink(f, l); }
+            let (_, tags) = afp_catalog::inspect::photo_meta(f).map_err(|e| e.to_string())?;
+            let li: String = tags.iter().map(|t| format!("<rdf:li>{t}</rdf:li>")).collect();
+            let esc = l.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+            std::fs::write(f, format!("\u{ff}\u{d8}<x:xmpmeta><afp:link>{esc}</afp:link><dc:subject><rdf:Bag>{li}</rdf:Bag></dc:subject></x:xmpmeta>")).map_err(|e| e.to_string())
+        };
+        // Clip 0 has its own file (one in three), clip 1 hasn't
+        let (with_own, bare) = (r.clips[0].clone(), r.clips[1].clone());
+        let own0 = tags::clip_own(p, &with_own).unwrap().0;
+        assert!(own0.is_file(), "the rig gives clip 0 its own file");
+        let had0 = locations::read_json(&own0).unwrap();
+        let (moment, still, export) = (r.moments[2].clone(), r.stills[1].clone(), r.exports[1].clone());
+        let items = vec![r.clip(0), r.clip(1), r.own("moment", &moment), r.own("still", &still), r.own("export", &export)];
+        let text = "  Черепаха у рифа, Ёж\r\nthen the wreck  ";
+        let want = json!("Черепаха у рифа, Ёж\nthen the wreck");
+        let c = of_items(p, &items, tags::set_comment(p, &items, Some(text), &relink));
+        assert!(c.problems.is_empty(), "{:?}", c.problems);
+        for (view, id) in [("footage", &with_own), ("footage", &bare), ("moments", &moment), ("stills", &still)] {
+            assert_eq!(c.items[view].iter().find(|it| it["id"] == id.as_str()).unwrap()["comment"], want, "{view} {id}");
+        }
+        assert!(c.items.get("exports").is_none_or(|l| l.iter().all(|it| it.get("comment").is_none())), "an export isn't commented");
+        same_as_a_reading(p, &c, &[("footage", &with_own), ("footage", &bare), ("moments", &moment), ("stills", &still), ("exports", &export)], "comment");
+        // Clip 0's own file: everything it had kept beside the comment
+        let now0 = locations::read_json(&own0).unwrap();
+        for (k, v) in had0.as_object().unwrap() { assert_eq!(&now0[k], v, "clip 0's {k} kept"); }
+        // Tags written after it (the Library's, as an older one writes them too: the record read, changed, written)
+        // keep it; so does the photo's
+        let c = of_items(p, &items[..4], tags::set(p, &items[..4], &["reef".into()], &[], &relink, &photo_tags));
+        assert!(c.problems.is_empty(), "{:?}", c.problems);
+        for (view, id) in [("footage", &with_own), ("footage", &bare), ("moments", &moment)] {
+            assert_eq!(c.items[view].iter().find(|it| it["id"] == id.as_str()).unwrap()["comment"], want, "{view} {id} after tags");
+        }
+        // The same again: nothing to write, nothing wrong
+        assert!(tags::set_comment(p, &items, Some(text), &relink).is_empty());
+        // Taken out: clip 1's own file, holding its tag only, stays; taken out of a clip with nothing else: the file goes
+        let c = of_items(p, &items[..2], tags::set_comment(p, &items[..2], Some("   "), &relink));
+        assert!(c.items["footage"].iter().all(|it| it.get("comment").is_none()));
+        same_as_a_reading(p, &c, &[("footage", &with_own), ("footage", &bare)], "comment out");
+        let bare3 = r.clips[4].clone();
+        assert!(!tags::clip_own(p, &bare3).unwrap().0.is_file(), "clip 4 has no own file");
+        assert!(tags::set_comment(p, &[r.clip(4)], None, &relink).is_empty());
+        assert!(!tags::clip_own(p, &bare3).unwrap().0.is_file(), "no comment to take out: no file made");
+        assert!(tags::set_comment(p, &[r.clip(4)], Some("x"), &relink).is_empty());
+        assert!(tags::set_comment(p, &[r.clip(4)], None, &relink).is_empty());
+        assert!(!tags::clip_own(p, &bare3).unwrap().0.is_file(), "holding nothing else: removed");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     // The album commands (docs/library-responsiveness.md): what each says it made is what a reading of the views shows
     // after it, its links as the Footage scan lists them; a link moved is said gone from where it was
     #[test]

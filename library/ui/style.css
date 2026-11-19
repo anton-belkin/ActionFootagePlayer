@@ -439,3 +439,9 @@ span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
 .ffind:focus{border-color:var(--accent-line)}
 .fnone{padding:2px 6px 4px 42px;font-size:12px;color:var(--muted)}
 .mbar>.head{padding:6px 23px}
+/* The comment on the Tags part (culling.js): three lines, grows by hand; its label as the others' */
+.lab label{font:inherit;color:inherit}
+.cullnote{box-sizing:border-box;width:100%;min-height:62px;resize:vertical;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:13px;line-height:1.35;background:var(--surface);color:var(--fg);outline:0}
+.cullnote:focus{border-color:var(--accent-line)}
+.cullnote:disabled{opacity:.55}
+.cullnote::placeholder{color:var(--muted)}

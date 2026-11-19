@@ -429,10 +429,14 @@ function allFacets() { const a = []; FACETS.forEach((x) => x.facets.forEach((f) 
 function facetLeaves(f) { const out = []; f.opts.forEach((o) => (o.kids || [o]).forEach((l) => out.push(l))); return out; }
 function findOpt(id) { for (const f of allFacets()) for (const o of f.opts) { if (o.id === id) return o; if (o.kids) for (const k of o.kids) if (k.id === id) return k; } return null; }
 function facetMatch(f, it) { const on = facetLeaves(f).filter((l) => S.filters[l.id]); return !on.length || on.some((l) => l.fn(it)); }
+// The search: each word typed is somewhere in the item's name, camera, colour, folder, date, tags or comment (all of
+// them must be, in any order, as parts of words too), without case, ё as е
+const searchFold = (t) => String(t).toLowerCase().replace(/ё/g, "е");
 function textMatch(it) {
-  const q = S.q.trim().toLowerCase();
-  if (!q) return true;
-  return [it.name, it.cam, it.color, it.sub, it.dir, it.date].concat(it.tags || []).join(" ").toLowerCase().indexOf(q) >= 0;
+  const words = searchFold(S.q).split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = searchFold([it.name, it.cam, it.color, it.sub, it.dir, it.date, it.comment].concat(it.tags || []).join("\n"));
+  return words.every((w) => hay.indexOf(w) >= 0);
 }
 function matches(it, except) { return cullShown(it) && textMatch(it) && allFacets().every((f) => f === except || facetMatch(f, it)); }
 function activeTokens() { const t = []; allFacets().forEach((f) => { const on = facetLeaves(f).filter((l) => S.filters[l.id]); if (on.length) t.push({ f, labels: on.map((l) => l.label) }); }); return t; }
@@ -505,7 +509,7 @@ function renderTop() {
       '</div>' : '') + '</div>' +
     (S.root ? '<div class="seg" role="tablist" aria-label="What to browse">' + VIEWS.map((v) => '<button type="button" role="tab" aria-selected="' + (S.view === v[0]) + '" class="' + (S.view === v[0] ? "on" : "") + '" data-a="view" data-v="' + v[0] + '">' + v[1] + '</button>').join("") + '</div>' +
       '<div class="searchwrap"><div class="search">' + ICON.search + activeTokens().map((t) => '<span class="tok"><span>' + esc(t.f.title + ": " + t.labels.join(", ")) + '</span><button type="button" data-a="tokrm" data-v="' + esc(t.f.id) + '" aria-label="Remove filter ' + esc(t.f.title) + '">' + ICON.x + '</button></span>').join("") +
-      '<input id="q" type="search" value="' + esc(S.q) + '" placeholder="' + (nActive() ? "Add words or another filter" : "Search names, cameras, dates, or type a filter: dji, log, wider…") + '" aria-label="Search" autocomplete="off" spellcheck="false"></div><div id="sugg"></div></div>' +
+      '<input id="q" type="search" value="' + esc(S.q) + '" placeholder="' + (nActive() ? "Add words or another filter" : "Search names, cameras, dates, tags, comments, or type a filter: dji, log…") + '" aria-label="Search" autocomplete="off" spellcheck="false"></div><div id="sugg"></div></div>' +
       '<button type="button" class="btn' + (S.filtersOpen ? " on" : "") + '" data-a="filters" aria-pressed="' + S.filtersOpen + '">' + ICON.filter + 'Filters' + (nActive() ? " · " + nActive() : "") + '</button>' +
       '<div class="seg" aria-label="Layout"><button type="button" class="' + (S.layout === "list" ? "on" : "") + '" data-a="layout" data-v="list" aria-label="List">' + ICON.list + '</button><button type="button" class="' + (S.layout === "grid" ? "on" : "") + '" data-a="layout" data-v="grid" aria-label="Grid">' + ICON.grid + '</button></div>' : "");
   cullTop();
@@ -623,7 +627,7 @@ function renderMain() {
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key], f = it.kind === "folder";
-      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="row' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : cullNoteTip(it)) + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         '<span style="min-width:0">' + (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span></span>' +
         '<span class="cell hide-s">' + (f ? "" : esc(it.date)) + '</span><span class="cell hide-s">' + (f ? "" : esc(it.dur)) + '</span>' +
         '<span class="cell hide-s">' + (it.kind === "clip" ? (it.marks ? it.marks + " · " + (it.moments || 0) : "—") : "") + '</span>' +
@@ -635,7 +639,7 @@ function renderMain() {
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key];
-      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
+      h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : cullNoteTip(it)) + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     });
     h += '</div>';
@@ -995,10 +999,14 @@ function renderSide() {
   const rail = '<nav class="rail" role="tablist" aria-orientation="vertical" aria-label="Side panel">' + TABS_TOP.map(railButton).join("") + '<span class="sp"></span>' + TABS_LOW.map(railButton).join("") + '</nav>';
   const old = side.querySelector(".pane");
   const keep = old && old.dataset.tab === S.tab ? old.scrollTop : 0;
+  // A field of the panel being typed in keeps its focus and caret across the re-drawing (the comment, a new tag)
+  const act = document.activeElement, typed = act && act.id && side.contains(act) && /^(INPUT|TEXTAREA)$/.test(act.tagName)
+    ? { id: act.id, a: act.selectionStart, b: act.selectionEnd, top: act.scrollTop } : null;
   side.innerHTML = (S.sideOpen ? '<div class="pane" role="tabpanel" data-tab="' + S.tab + '">' + sideBody(c) + '</div>' : "") + rail;
   const pane = side.querySelector(".pane");
   if (!pane) return;
   pane.scrollTop = keep;
+  if (typed) { const e = $(typed.id); if (e && !e.disabled) { e.focus(); try { if (typed.a != null) e.setSelectionRange(typed.a, typed.b); e.scrollTop = typed.top; } catch (_) { /* */ } } }
   if (S.tab === "info") { fillThumbs(); fillMaps(); return; }
   // Commands act only on what's selected: greyed out with nothing (their settings can still be set)
   // (a part of the whole project's, Checks' catalog: never waits for a selection)

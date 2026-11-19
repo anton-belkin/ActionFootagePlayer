@@ -501,6 +501,7 @@ fn footage(root: &Path, flat_previews: bool, only: Option<&[String]>) -> Value {
                 it["tags"] = own.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 if let Some(r) = crate::tags::rating_of(&own["rating"]) { it["rating"] = json!(r); }
                 if let Some(p) = crate::tags::pick_of(&own["pick"]) { it["pick"] = json!(p); }
+                if let Some(c) = crate::tags::comment_of(&own["comment"]) { it["comment"] = json!(c); }
             }
         }
     }
@@ -609,6 +610,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 it["tags"] = l.get("tags").cloned().filter(Value::is_array).unwrap_or(json!([]));
                 if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
                 if let Some(p) = crate::tags::pick_of(&l["pick"]) { it["pick"] = json!(p); }
+                if let Some(c) = crate::tags::comment_of(&l["comment"]) { it["comment"] = json!(c); }
                 it["gyroflow"] = json!(has_gyroflow(&path));
                 it["renders"] = renders_of(&renders, crate::renders::Kind::Moment, rel, &path, &l);
                 let (original, moved_to) = original_of(&l);
@@ -631,6 +633,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 it["tags"] = json!(tags);
                 if let Some(r) = crate::tags::rating_of(&l["rating"]) { it["rating"] = json!(r); }
                 if let Some(p) = crate::tags::pick_of(&l["pick"]) { it["pick"] = json!(p); }
+                if let Some(c) = crate::tags::comment_of(&l["comment"]) { it["comment"] = json!(c); }
                 let stem = rel.rsplit_once('.').map(|(s, _)| s).unwrap_or(rel).to_lowercase();
                 // A photo that's a link (albums.rs: a small picture, rendered when shared), or the rendered file
                 it["linked"] = json!(lower.ends_with(crate::albums::PHOTO_EXT));
