@@ -40,8 +40,15 @@ function M.split(text)
     return title, rest
 end
 
+-- The responsiveness journal's action this card is for (docs/responsiveness-journal.md): the panel records it shown
+local function journal_owner()
+    local j = package.loaded.journal
+    return j and j.owner and j.owner() or nil
+end
+
 function mp.notify(t)
     if type(t) ~= "table" then return end
+    if t.journal == nil then t.journal = journal_owner() end
     if there() then
         mp.commandv("script-message-to", "side_panel", "notify", utils.format_json(t))
         return
@@ -83,6 +90,7 @@ function mp.ask(opts, done)
     local req = {}
     for k, v in pairs(opts) do req[k] = v end
     req.id, req.reply = id, mp.get_script_name()
+    req.journal = journal_owner()
     mp.commandv("script-message-to", "side_panel", "ask", utils.format_json(req))
     return true
 end

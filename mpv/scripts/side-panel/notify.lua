@@ -360,6 +360,14 @@ local function bind_esc()
     end
 end
 
+-- How many times the overlay was drawn (the journal records a card shown only when it was)
+local drawn = 0
+-- The responsiveness journal (workspace/journal.lua): a card or the dialog on screen, for the action that asked
+local function journal_shown(a, what)
+    local j = package.loaded.journal
+    if j and j.shown_for and a then j.shown_for(a, what) end
+end
+
 render = function()
     local d = mp.get_property_native("osd-dimensions")
     -- Expired cards go
@@ -381,6 +389,7 @@ render = function()
     overlay.res_x, overlay.res_y = d.w, d.h
     overlay.data = u:render()
     overlay:update()
+    drawn = drawn + 1
     capture(dialog ~= nil or over_card(mp.get_property_native("mouse-pos")) ~= nil)
     if animated() then
         if not timer then timer = mp.add_periodic_timer(1 / 15, function() render() end)
@@ -418,7 +427,9 @@ function M.notify(t)
         end
         cards[#cards + 1] = c
     end
+    local before = drawn
     render()
+    if drawn > before then journal_shown(t.journal, "card:" .. kind) end
 end
 
 function M.hide(id)
@@ -533,7 +544,9 @@ function M.ask(req)
         type_text(dialog, text)
         render()
     end, { complex = true, repeatable = true })
+    local before = drawn
     render()
+    if drawn > before then journal_shown(req.journal, "dialog") end
 end
 
 function M.dialog_open() return dialog ~= nil end
