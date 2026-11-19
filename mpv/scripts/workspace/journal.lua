@@ -516,13 +516,18 @@ local create_overlay = mp.create_osd_overlay
 if create_overlay then
     mp.create_osd_overlay = function(format)
         local ov = create_overlay(format)
+        -- Through its metatable, never as a field of its own: mpv's update sends every field of the overlay as the
+        -- command, and a function among them is refused ("disallowed Lua type found: function": the plugin dies)
+        local mt = getmetatable(ov)
+        local methods = mt and mt.__index
         local update = ov.update
-        ov.update = function(self, ...)
+        if type(methods) ~= "table" or type(update) ~= "function" then return ov end
+        local timed = function(self, ...)
             local r = { update(self, ...) }
             M.shown("overlay:" .. script)
             return unpack(r)
         end
-        return ov
+        return setmetatable(ov, { __index = function(_, k) if k == "update" then return timed end return methods[k] end })
     end
 end
 local osd_message = mp.osd_message
