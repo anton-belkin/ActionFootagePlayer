@@ -10,7 +10,7 @@ import synth as S
 
 DEFAULTS = dict(SW=2048, BAND=0.03, FULL=0.08, FALLOFF=0.30, CHROMA=2.0, LO=0.04, HI=0.10, RISE=0.15, FALL=0.3,
                 SLOW=0.5, TAKE=0.08, SOFT=0.10, SOFT_IN=0.005, SECTORS=32, FEATHER=0.03, INSET=0.002, BLUR=0.02,
-                SOFT_RULE='max', SOFT_T=0.25, MEMORY='v3', RING=0.0, RING_FADE=0, RING_GATE=0)
+                SOFT_RULE='max', SOFT_T=0.25, MEMORY='v3', RING=0.0, RING_FADE=0, RING_GATE=0, REACH='falloff')
 # MEMORY: what the sectors compare the frame with. 'v3': the slow layer, which continuation writes also move (so a
 # shaking frame's edge, past which the continuation keeps being written, keeps finding its memory 'different').
 # 'split': texels the camera has seen keep what it saw (continuation writes don't touch their memory), and only a
@@ -20,6 +20,9 @@ DEFAULTS = dict(SW=2048, BAND=0.03, FULL=0.08, FALLOFF=0.30, CHROMA=2.0, LO=0.04
 # continuation when the frame is written (RING_FADE=1: wholly at the edge, fading to nothing at the band's far side);
 # what it covers then holds a continuation, not a trace. RING_GATE=1: the band is as wide as the sector's difference
 # says (RING x strength), so where the frame's edge matches what the sphere held there is no band at all
+# REACH (Anton 2026-11-19): how far a sector's continuation goes. 'falloff': FULL..FALLOFF of the height past the edge.
+# 'antipode': the whole wedge of the sphere around the frame's axis, out to the point behind it, the parts the output
+# doesn't show too (a trace is worth something only while it is joined to the frame; past a changed edge it isn't)
 # SOFT_RULE: how the frame's soft edge goes into the sphere. 'max' (v3): each texel keeps the largest share it has had
 # and only gets the rest. 'converge': while the frame covers a texel, it moves towards the frame at a rate its share
 # sets (half of the way in SOFT_T / share seconds), so a still frame's edge ends up the frame, and a moving one leaves
@@ -66,6 +69,8 @@ class Model:
         self.dmc = np.zeros(self.p['SECTORS'])
         self.dm = np.zeros(self.p['SECTORS'])
         self.first = True
+        IX, IY = np.meshgrid(np.arange(self.SW), np.arange(self.SH))
+        self.D = S.lonlat_dir((IX + 0.5) / self.SW * 2 * np.pi - np.pi, (IY + 0.5) / self.SH * np.pi - np.pi / 2)
         # the output pixels' rays (output_ray: out_pos = j * OUT / RT, rectilinear)
         jx, jy = np.meshgrid(np.arange(W), np.arange(H))
         n = np.stack([(jx * S.SRC_W / W - S.SRC_W / 2) / S.OUT_F, (jy * S.SRC_H / H - S.SRC_H / 2) / S.OUT_F], -1)
@@ -249,7 +254,8 @@ class Model:
         st = self.strength(place, self.s)
         if split:
             st = np.where(seen, st, np.maximum(st, self.strength(place, self.sc)))
-        a_out = np.where(known, take * st * (1 - smoothstep(p['FULL'] * Hs, p['FALLOFF'] * Hs, out_d)), 1.0)
+        reach = 1.0 if p['REACH'] == 'antipode' else 1 - smoothstep(p['FULL'] * Hs, p['FALLOFF'] * Hs, out_d)
+        a_out = np.where(known, take * st * reach, 1.0)
         a_out = np.where(a_out < 1 / 512, 0.0, a_out)
         c_out = np.where(known[..., None], C + (cont - C) * a_out[..., None], cont)
         slow_out = np.where(known[..., None], Sl + (cont - Sl) * a_out[..., None], cont)
@@ -266,8 +272,55 @@ class Model:
         self.Sl[iy, ix] = np.where(inside[..., None], slow_in, slow_out)
         self.Wsh[iy, ix] = np.where(inside, np.maximum(w, a_in), w * (1 - a_out))
         self.K[iy, ix] = True
+        if p['REACH'] == 'antipode':
+            self._beyond(qc, iy, ix, take, split)
         self.Sn[iy, ix] = (seen & (ring < 0.5)) | (inside & (a_in > 0))
         return self.render(frame, qv, qc)
+
+    def _wedge(self, qc, d_w):
+        """Each direction's angle around the frame's axis, and the place on the frame's edge that angle points to"""
+        d = S.qrot(S.qconj(qc), d_w)
+        phi = np.arctan2(d[..., 1], d[..., 0])
+        c, s_ = np.cos(phi), np.sin(phi)
+        hw, hh = S.SRC_W / 2, S.SRC_H / 2
+        t = np.minimum(hw / np.maximum(np.abs(c), 1e-9), hh / np.maximum(np.abs(s_), 1e-9)) * 0.999
+        place, _ = edge_place(np.stack([hw + t * c, hh + t * s_], -1))
+        return phi, place
+
+    def _beyond(self, qc, iy, ix, take, split):
+        """REACH antipode: the sphere the output doesn't show takes its wedge's continuation at the sector's strength;
+        the colour is the continuation where that wedge leaves the output (its border, averaged per angle)"""
+        W, H = self.W, self.H
+        bx = np.concatenate([np.arange(0, W, 4), np.full(H // 4, W - 1), np.arange(0, W, 4), np.zeros(H // 4)]).astype(float)
+        by = np.concatenate([np.zeros(W // 4 + (W % 4 > 0)), np.arange(0, H, 4), np.full(W // 4 + (W % 4 > 0), H - 1), np.arange(0, H, 4)]).astype(float)
+        bphi, _ = self._wedge(qc, S.qrot(self.qv, self._ray(bx, by)))
+        bc = self.cont(bx, by)
+        nb = 64
+        bin_ = ((bphi + np.pi) / (2 * np.pi) * nb).astype(int) % nb
+        n = np.bincount(bin_, minlength=nb)
+        col = np.stack([np.bincount(bin_, bc[:, c], nb) for c in range(3)], -1)
+        have = n > 0
+        col = np.where(have[:, None], col / np.maximum(n, 1)[:, None], 0)
+        idx = np.arange(nb)
+        for c in range(3):   # bins the border never reaches: around the circle from the nearest that do
+            col[~have, c] = np.interp(idx[~have], idx[have], col[have, c], period=nb)
+        mask = self.K.copy()
+        mask[iy, ix] = False
+        D = self.D[mask]
+        phi, place = self._wedge(qc, D)
+        x = (phi + np.pi) / (2 * np.pi) * nb - 0.5
+        c0 = np.floor(x).astype(int)
+        fr = (x - c0)[:, None]
+        cc = col[c0 % nb] * (1 - fr) + col[(c0 + 1) % nb] * fr
+        st = self.strength(place, self.s)
+        seen = self.Sn[mask]
+        if split:
+            st = np.where(seen, st, np.maximum(st, self.strength(place, self.sc)))
+        a = take * st
+        a = np.where(a < 1 / 512, 0.0, a)[:, None]
+        self.C[mask] = self.C[mask] + (cc - self.C[mask]) * a
+        sl = self.Sl[mask] + (cc - self.Sl[mask]) * a
+        self.Sl[mask] = np.where(seen[:, None], self.Sl[mask], sl) if split else sl
 
     # ---- the output ----
     def feather(self, uv):
