@@ -771,7 +771,7 @@ local function gyroflow_filter(source, enabled)
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
                                                 aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
                                                 projection = lens_projection(source),
-                                                lens = filter_lens(source) or "stabilized" }),
+                                                lens = filter_lens(source) or "stabilized", version = source.version }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -1846,7 +1846,12 @@ gpu_refresh = function()
     gpu_table(source, function(reply)
         local again = gpu_pending == "again"
         gpu_pending = false
-        if current_source ~= source or not gpu then return end
+        if current_source ~= source or not gpu then
+            -- Asked again meanwhile for what plays now (a project saved in Gyroflow while this one was written): that
+            -- one's written, not dropped with this
+            if again and gpu and current_source then gpu_refresh() end
+            return
+        end
         if reply.shader then
             gpu_apply(reply)
         else
@@ -2447,10 +2452,8 @@ end)
 local WATCH_INTERVAL = 0.5
 local watch = nil
 
-local function file_version(path)
-    local info = utils.file_info(path)
-    return info and info.is_file and string.format("%s/%d", tostring(info.mtime), info.size) or nil
-end
+-- The project's version and when a save is taken up (projectwatch.lua)
+local projectwatch = require 'projectwatch'
 
 local function stop_watching()
     if watch then watch.timer:kill() end
@@ -2467,52 +2470,45 @@ local function reload_project(project, version)
         mp.msg.warn("not reloading " .. project .. ": not a Gyroflow project")
         return
     end
-    -- The same video: its camera records the water or not as it did
+    -- The same video: its camera records the water or not as it did. The save's version goes into the filter's and
+    -- the GPU path's settings (gyroflow_filter): mpv keeps a filter whose parameters didn't change, the shader is
+    -- reused by its settings, and the table server keeps the clips it loaded, and the project's path hasn't changed
     local source = { project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh,
-                     water = current_source and current_source.water, sizes = current_source and current_source.sizes }
+                     water = current_source and current_source.water, sizes = current_source and current_source.sizes, version = version }
+    -- Playing from now: the settings below write the GPU path's shader again (write_edge_control) for this source. A
+    -- table asked for the one before is dropped as it comes (gpu_refresh), which left the old shader in place
+    current_source = source
     -- The project as Gyroflow has it: written from the wider view, it has that view's FOV itself, and the horizon lock
     -- and the lens it played with here
     view = "normal"
     clip_settings(source)
+    -- The GPU path: its shader from the project as saved, put in place of the old while the video plays on
     write_edge_control()
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do
-        if f.label == LABEL then
-            local filter = gyroflow_filter(source, f.enabled)
-            -- mpv keeps a filter whose parameters didn't change, and the project's path may not have
-            local data = utils.parse_json(filter.params["user-data"])
-            data.version = version
-            filter.params["user-data"] = utils.format_json(data)
-            vf[i] = filter
-        end
+        if f.label == LABEL then vf[i] = gyroflow_filter(source, f.enabled) end
     end
-    current_source = source
     mp.set_property_native("vf", vf)
     publish()
     mp.msg.info("reloaded " .. project)
     mp.osd_message("Gyroflow: project reloaded", 3)
 end
 
--- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval. For a video that
--- had no project, the first one found next to it, once it stays the same
+-- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval (projectwatch.lua). For
+-- a video that had no project, the first one found next to it, once it stays the same
 local function check_project()
     local project = watch.project or find_project(watch.video)
     if not project then return end
-    local v = file_version(project)
-    if not v or v == watch.version then
-        watch.pending = nil
-    elseif v ~= watch.pending then
-        watch.pending = v
-    elseif not watch.project then
+    local action, version = projectwatch.step(watch, projectwatch.version(utils, project))
+    if action == "found" then
         -- Saved from Gyroflow beside the clip: into the project's catalog (the Library's motion data and badge)
         mp.commandv("script-message-to", "workspace", "catalog-note", project)
         mp.msg.info("found " .. project .. ", loading the video again with it")
         mp.osd_message("Gyroflow: project saved, stabilizing", 3)
         stop_watching()
         play_again()
-    else
-        watch.version, watch.pending = v, nil
-        reload_project(watch.project, v)
+    elseif action == "reload" then
+        reload_project(watch.project, version)
     end
 end
 
@@ -2555,7 +2551,7 @@ local function open_in_gyroflow(file, project, opened_message, preset)
     local video = clip_path()
     if not (watch and watch.project == project and watch.video == video) then
         stop_watching()
-        watch = { project = project, video = video, version = project and file_version(project) or nil }
+        watch = { project = project, video = video, version = project and projectwatch.version(utils, project) or nil }
         watch.timer = mp.add_periodic_timer(WATCH_INTERVAL, check_project)
     end
     waiting = project == nil
