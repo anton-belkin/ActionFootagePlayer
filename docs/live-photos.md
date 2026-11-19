@@ -99,6 +99,12 @@ A photo's link plays like a live photo, the way a moment plays its part of the c
 - **The whole clip is one button away**, as for a moment: *Open the whole clip at 0:12.35* in the side panel's
   Project part (*This photo*) and in the right-click menu. It opens the clip paused at the photo's frame, the live
   part marked as A–B (not looped), so Space plays on from there and the clip's moments, marks and exports are at hand.
+- **Its own frame**: a link keeps Save frame's camera (turned, zoomed) and crop. Playing it, the gyroflow plugin turns
+  the camera to the link's own (crop mode's camera, `crop.view`: the GPU warp's parameters, or the filter's control
+  file) and crops the picture to the link's frame (mpv's `video-crop`, in shares of the picture), so the still and its
+  live part look as Share renders the link (`gyroflow-export --camera --crop`). Checked headless on the CPU filter
+  against Share's render: no shift, edge correlation 0.78 (the same link without its camera: 0.05, off by ~700 px);
+  `tests/photo_link_frame.py`. The whole clip opens as the clip is, without the link's frame.
 - A photo **the player made** (Save frame: a HEIC, Live Photo or Motion Photo with the link in its XMP) has the same
   button when its clip is where the link says.
 - While a photo shows, the panel's Project part shows *This photo* and its button, not the clip's marks, moments or
