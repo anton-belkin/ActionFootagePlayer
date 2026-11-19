@@ -77,6 +77,7 @@ jobs:
           luajit tests/projectfile_test.lua
           luajit tests/longpath_test.lua
           luajit tests/timeline_test.lua
+          luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/gyroflow_lens_test.lua
@@ -84,7 +85,6 @@ jobs:
           luajit tests/agent_test.lua
           luajit tests/export_args_test.lua
           luajit tests/tags_test.lua
-          luajit tests/navkeys_test.lua
           (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
 
       - name: Build
