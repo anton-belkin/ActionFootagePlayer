@@ -232,6 +232,8 @@ end
 
 -- M: a mark here, or the one here removed. The first change copies the camera's into the file
 local function mark()
+    -- A photo shown (the live-photo plugin): marks are a clip's
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     if not found then
         local path = clip_path()
         if not path or path:find("://", 1, true) then return mp.osd_message("Marks are for a clip on this computer or the NAS", 2) end

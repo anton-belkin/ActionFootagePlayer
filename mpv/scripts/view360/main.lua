@@ -816,6 +816,7 @@ end)
 mp.observe_property("osd-dimensions", "native", function() draw_rec() end)
 
 local function toggle_take()
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     if rec:taking() then stop_take() else start_take() end
 end
 

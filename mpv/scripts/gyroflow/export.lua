@@ -251,6 +251,8 @@ end)
 
 -- The clip playing, or nil (and why on screen)
 local function local_path()
+    -- A photo shown: nothing to export or take a frame of (quietly: the key does nothing)
+    if platform.photo_shown() then return nil end
     local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Export: not a local file", 2)

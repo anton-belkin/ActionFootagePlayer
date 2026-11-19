@@ -118,6 +118,16 @@ expect("current name", rows[2].name, "DJI_0069_D")
 expect("title", rows[3].name, "Turtle")
 expect("not current", rows[1].current, false)
 -- The one playing even when it isn't a video by its extension
+-- Photos beside the videos (image-exts): rows of their own, named without a Motion Photo's .MP, counted apart
+local mixed = tl.playlist_rows({ { filename = "/p/IMG_1.HEIC" }, { filename = "/p/PXL_2.MP.jpg", current = true }, { filename = "/p/C.mp4" },
+                                 { filename = "/p/notes.txt" } }, tl.set_of({ "mp4", "mov" }), nil, tl.set_of({ "heic", "jpg" }))
+expect("mixed rows", #mixed, 3)
+expect("photo row", mixed[1].photo, true)
+expect("motion photo's name", mixed[2].name, "PXL_2")
+expect("video row", mixed[3].photo, nil)
+expect("mixed label", tl.rows_label(mixed), "2 photos, 1 video")
+expect("videos label", tl.rows_label({ {}, {} }), "2 videos")
+expect("one photo label", tl.rows_label({ { photo = true } }), "1 photo")
 local odd = tl.playlist_rows({ { filename = "/v/a.mp4" }, { filename = "/v/b.xyz", current = true } }, tl.set_of({ "mp4" }))
 expect("the one playing stays", #odd, 2)
 -- A 360° clip played, then its exports in stabilized/: the clip, not a video by its extension, stays

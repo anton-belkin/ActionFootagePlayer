@@ -125,6 +125,7 @@ PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 WORKSPACE="$MPV_DIR/scripts/workspace"
 ANYLAYOUT="$MPV_DIR/scripts/any-layout"
+LIVEPHOTO="$MPV_DIR/scripts/live-photo"
 VIEW360="$MPV_DIR/scripts/view360"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -287,6 +288,10 @@ put mpv/scripts/workspace/tags.lua      "$WORKSPACE/tags.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
+
+# Photos as a phone shows them: the picture, its live part (Live Photo, Motion Photo) under the Live icon
+put mpv/scripts/live-photo/main.lua "$LIVEPHOTO/main.lua" 644
+put mpv/scripts/live-photo/live.lua "$LIVEPHOTO/live.lua" 644
 
 # 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
 put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644

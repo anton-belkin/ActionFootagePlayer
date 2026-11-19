@@ -1195,6 +1195,8 @@ end)
 
 -- k: the A-B part as a moment; on a moment playing whose part was moved, update it or save a new one
 local function save_key(given)
+    -- A photo shown (the live-photo plugin): no moment of a still
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     if not state.clip or state.clip:find("://", 1, true) then
         return mp.osd_message("A moment is of a clip on this computer or the NAS", 3)
     end
@@ -2292,6 +2294,7 @@ local function cut_out(a, b)
 end
 
 mp.add_key_binding("Ctrl+x", "cut-out", function()
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     if not (a and b and b > a) then
         return mp.osd_message("Mark the spoiled part first (l at its start, l at its end), then Ctrl+x cuts it out", 4)

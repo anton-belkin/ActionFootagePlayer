@@ -1769,6 +1769,7 @@ local function set_edges(mode)
 end
 
 mp.add_key_binding("Ctrl+b", "edges", function()
+    if platform.photo_shown() then return end
     local i = 1
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
@@ -2100,6 +2101,7 @@ end)
 
 -- on -> wider view -> off -> on
 mp.add_key_binding("Ctrl+g", "toggle", function()
+    if platform.photo_shown() then return end
     if stab_off then show("normal") else show(view == "normal" and "wide" or "off") end
 end)
 
@@ -2123,6 +2125,7 @@ end
 
 -- weak -> medium -> strong -> weak
 mp.add_key_binding("Ctrl+k", "level", function()
+    if platform.photo_shown() then return end
     for i, l in ipairs(LEVELS) do
         if l == level then return set_level(LEVELS[i % #LEVELS + 1]) end
     end
@@ -2174,6 +2177,7 @@ end)
 -- Above water <-> what it was (under water, as the camera says, or as the project says). Not named "lens": a key
 -- binding's name is a script message too (mpv's defaults.lua), and it took the Lens drop-down's message over
 mp.add_key_binding("Ctrl+u", "above-water", function()
+    if platform.photo_shown() then return end
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
@@ -2263,6 +2267,7 @@ local function trans_compute()
     publish()
 end
 mp.add_key_binding("Ctrl+j", "translation", function()
+    if platform.photo_shown() then return end
     if not (gpu and gpu.shader) then
         return mp.osd_message("Gyroflow: the sideways jerks are taken out on the GPU path only", 3)
     end
@@ -2275,7 +2280,7 @@ mp.add_key_binding("Ctrl+j", "translation", function()
     mp.osd_message("Gyroflow: sideways jerks " .. (trans.on and "taken out" or "left as recorded"), 2)
 end)
 
-mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)
+mp.add_key_binding("Ctrl+a", "fringes", function() if not platform.photo_shown() then set_chromatic(not chromatic) end end)
 
 -- The temporal denoise's Stronger (the panel's Transform): kept with the clip's transform; the shader takes it at once
 -- (gyroflow_dn_strong, nothing written again)
@@ -2576,6 +2581,7 @@ local function edit_project(project)
 end
 
 mp.add_key_binding("Ctrl+e", "edit", function()
+    if platform.photo_shown() then return end
     local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Gyroflow: not a local file", 1.5)

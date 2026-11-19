@@ -470,6 +470,8 @@ local input = gestures.new({
 
 function M.set(on)
     if on == active then return end
+    -- A photo shown (the live-photo plugin): nothing to save a frame of
+    if on and type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     active = on
     refreshing, dirty, written, renders = nil, false, nil, {}
     if on then

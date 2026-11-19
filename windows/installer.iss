@@ -106,6 +106,16 @@ Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\{#AppNam
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\{#AppName}.export"; ValueType: string; ValueData: "Stabilize + LUT"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\{#AppName}.export"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"
 Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.mov\shell\{#AppName}.export\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" --export ""%1"""
+; Photos: Play Live Photo (the player shows them as a phone does; not their default app)
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.heic\shell\{#AppName}.photo"; ValueType: string; ValueData: "Play Live Photo"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.heic\shell\{#AppName}.photo"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.heic\shell\{#AppName}.photo\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\{#AppName}.photo"; ValueType: string; ValueData: "Play Live Photo"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\{#AppName}.photo"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpg\shell\{#AppName}.photo\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\{#AppName}.photo"; ValueType: string; ValueData: "Play Live Photo"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\{#AppName}.photo"; ValueType: string; ValueName: "Icon"; ValueData: "{app}\{#AppExe},0"
+Root: HKCU; Subkey: "Software\Classes\SystemFileAssociations\.jpeg\shell\{#AppName}.photo\command"; ValueType: string; ValueData: """{app}\{#AppExe}"" ""%1"""
 
 [Run]
 Filename: "{app}\python\python.exe"; Parameters: "-I ""{app}\tools\setup.py"" lut"; StatusMsg: "Downloading DJI's LUT..."; Flags: runhidden; Tasks: lut
