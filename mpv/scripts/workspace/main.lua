@@ -704,8 +704,10 @@ end
 -- A moment's file: its original instead, from its in, looping its part (one after another in a playlist)
 local function open_moment(path)
     -- A photo's link file (<name>.afplink.jpg: a small picture with the link in its XMP, made by the Library): its
-    -- original instead, paused at the photo's frame. A rendered photo (a HEIC, a JPEG without that name) opens as
-    -- the picture it is. (Here, not a function of its own: the file is at Lua's 200 local variables)
+    -- original's part around the photo's frame instead, as a video of its own (as a moment), paused at the frame: the
+    -- live-photo plugin shows it as a live photo, the part its live part (1.5 s on each side, or the run of the links
+    -- after it: its user-data/afp/photo span). A rendered photo (a HEIC, a JPEG without that name) opens as the
+    -- picture it is. (Here, not a function of its own: the file is at Lua's 200 local variables)
     if state.clip:lower():match("%.afplink%.jpg$") then
         local praw = fs.read_photo_link(state.clip)
         local p = praw and utils.parse_json(praw)
@@ -717,13 +719,19 @@ local function open_moment(path)
             mp.osd_message(moments_lib.display_name(file) .. ": the clip isn't at " .. tostring(p.clip), 6)
             return
         end
-        mp.set_property("stream-open-filename", original)
-        mp.set_property("file-local-options/start", string.format("%.3f", p.t))
+        local lp = mp.get_property_native("user-data/afp/photo")
+        local span = type(lp) == "table" and lp.file == file and type(lp.span) == "table" and lp.span or { math.max(0, p.t - 1.5), p.t + 1.5 }
+        mp.set_property("stream-open-filename", string.format("edl://!no_chapters;%%%d%%%s,start=%.3f,length=%.3f", #original, original, span[1], span[2] - span[1]))
+        mp.set_property("file-local-options/start", string.format("%.3f", p.t - span[1]))
         mp.set_property("file-local-options/pause", "yes")
+        mp.set_property("file-local-options/force-media-title", (moments_lib.display_name(file):gsub("%.afplink$", "")))
         state = describe(original)
         state.path = path
         state.redirected = true
-        state.photo = { file = file, t = p.t, crop = p.crop, camera = p.camera }
+        state.offset, state.length = span[1], span[2] - span[1]
+        state.photo = { file = file, t = p.t, crop = p.crop, camera = p.camera, name = (moments_lib.display_name(file):gsub("%.afplink$", "")),
+                        ["in"] = span[1], out = span[2], clip = original }
+        state.created = p.created
         return
     end
     local raw = fs.read_link(state.clip)
@@ -855,6 +863,18 @@ mp.add_hook("on_load", 10, function()
             open_moment(path)
         elseif info and state.clip:lower():match("%.afplink%.jpg$") then
             open_moment(path) -- a photo's link
+        elseif info and (state.clip:lower():match("%.heic$") or state.clip:lower():match("%.jpe?g$")) then
+            -- A photo the player made (gyroflow-export, afp-photo: its link in its XMP): its clip, for Open the whole
+            -- clip (found quietly: a photo copied out of its project just has none)
+            local praw = fs.read_photo_link(state.clip)
+            local p = praw and utils.parse_json(praw)
+            if type(p) == "table" and p.kind == "photo" and type(p.t) == "number" then
+                local original = moments.original(p, moments.project_of(state.clip), { hint_only = true })
+                if original then
+                    state.photo = { file = state.clip, t = p.t, name = moments_lib.display_name(state.clip), clip = original,
+                                    ["in"] = math.max(0, p.t - 1.5), out = p.t + 1.5, made = true }
+                end
+            end
         end
     end
     -- Other own files of this clip (beside its copies in other locations): the main one plays and is saved, they're
@@ -904,7 +924,9 @@ mp.add_hook("on_load", 10, function()
     state.view_from = state.view and state.view_target or "session"
     -- An export's original, at its part
     if wanted and state.clip == wanted.file then
-        if wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted["in"])) end
+        -- (A photo's clip: at its frame, paused, its live part marked)
+        if wanted.at or wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted.at or wanted["in"])) end
+        if wanted.at then mp.set_property("file-local-options/pause", "yes") end
         if wanted["in"] and wanted.out then
             -- The part marked, not looped: the whole clip plays on, before and after it
             mp.set_property("file-local-options/ab-loop-count", "0")
@@ -1546,6 +1568,12 @@ mp.register_script_message("open-original", function()
         -- playlist it makes of its folder
         wanted = { file = e.original, ["in"] = e["in"], out = e.out }
         return mp.commandv("loadfile", e.original, "replace")
+    end
+    -- A photo's link, or a photo the player made (its link in its XMP): its clip, its live part marked
+    local ph = state.photo
+    if ph and ph.clip then
+        wanted = { file = ph.clip, ["in"] = ph["in"], out = ph.out, at = ph.t }
+        return mp.commandv("loadfile", ph.clip, "replace")
     end
     local m = state.moment
     if m and not m.missing and state.clip then

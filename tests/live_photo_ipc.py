@@ -6,6 +6,11 @@
 # place in it, the run's neighbours from the list (not the folder), and it rests on a photo of the list.
 #
 #   python3 tests/live_photo_ipc.py <folder of live photos taken in a row> [<a plain photo>]
+#   python3 tests/live_photo_ipc.py --links <folder of a project's photo links (.afplink.jpg) to one clip, in a row>
+#
+# Photo links: with the workspace plugin too (it opens a link as its clip's part around the frame): the link opens
+# paused at its frame, the run of the links after it plays as one part and rests on the last at its frame, and Open
+# the whole clip (open-original) opens the clip paused at that frame, its live part marked A-B.
 #
 # MPV=<mpv> (default: mpv on the PATH; the app's: …/ActionFootagePlayer.app/Contents/Helpers/mpv). Only this plugin is
 # loaded, from the repository. The folder: Live Photos (HEIC + .mov) or Motion Photos (.MP.jpg), e.g. the player's own
@@ -34,12 +39,14 @@ require('librarylist').install(require('mp'))
 """
 
 class Player:
-    def __init__(self, path):
+    def __init__(self, path, workspace=False):
         if os.path.exists(SOCK): os.remove(SOCK)
         lister = os.path.join(tempfile.mkdtemp(), "librarylist_only.lua")
         open(lister, "w").write(LISTER % REPO)
-        self.p = subprocess.Popen([MPV, "--no-config", "--vo=null", "--ao=null", "--idle=yes", "--autocreate-playlist=filter",
-                                   f"--script={REPO}/mpv/scripts/live-photo", f"--script={lister}", f"--input-ipc-server={SOCK}", path],
+        self.p = subprocess.Popen([MPV, "--no-config", "--vo=null", "--ao=null", "--idle=yes", "--autocreate-playlist=filter", "--hwdec=auto",
+                                   f"--script={REPO}/mpv/scripts/live-photo",
+                                   *( [f"--script={REPO}/mpv/scripts/workspace"] if workspace else [f"--script={lister}"] ),
+                                   f"--input-ipc-server={SOCK}", path],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             try:
@@ -76,7 +83,45 @@ class Player:
 def live_photos(folder):
     return sorted(os.path.join(folder, n) for n in os.listdir(folder) if n.lower().endswith(PHOTO))
 
+def links(folder):
+    files = sorted(os.path.join(folder, n) for n in os.listdir(folder) if n.lower().endswith(".afplink.jpg"))
+    p = Player(files[0], workspace=True)
+    expect("link: a live photo", p.wait(lambda: p.photo().get("kind") == "link" and (p.get("user-data/workspace") or {}).get("photo")), str(p.photo()))
+    span = p.photo().get("span")
+    ws = p.get("user-data/workspace") or {}
+    t = ws["photo"]["t"]
+    expect("link: its clip's part, paused at the frame", p.wait(lambda: p.get("pause") is True and abs((p.get("time-pos") or -9) - (t - span[0])) < 0.05),
+           f"pos {p.get('time-pos')} want {t - span[0]}")
+    expect("link: the part is the clip's (offset)", abs(ws.get("offset", -1) - span[0]) < 1e-6, str(ws.get("offset")))
+    run = [os.path.basename(c["path"]) for c in p.dump().get("chain", [])]
+    print("     link run:", " -> ".join(run), "part", span)
+    seen = []
+    p.cmd("script-message", "live-photo-view", "play")
+    end = time.time() + 3 * (span[1] - span[0]) + 10
+    while time.time() < end:
+        ph = p.photo()
+        at = ph.get("at")
+        if at and (not seen or seen[-1] != at): seen.append(at)
+        if seen and not ph.get("playing"): break
+        time.sleep(0.05)
+    expect("link: the run played through", [os.path.basename(s) for s in seen] == run, str([os.path.basename(s) for s in seen]))
+    expect("link: rests on the last at its frame", p.wait(lambda: os.path.basename(p.get("path") or "") == run[-1] and p.get("pause") is True
+                                                         and (p.get("user-data/workspace") or {}).get("photo") is not None, 6), str(p.get("path")))
+    last = (p.get("user-data/workspace") or {}).get("photo") or {}
+    p.cmd("script-message-to", "workspace", "open-original")
+    expect("whole clip: the clip", p.wait(lambda: (p.get("path") or "").lower().endswith((".mp4", ".mov")), 6), str(p.get("path")))
+    expect("whole clip: at the frame, paused", p.wait(lambda: p.get("pause") is True and abs((p.get("time-pos") or -9) - last.get("t", -1)) < 0.05, 4),
+           f"pos {p.get('time-pos')} want {last.get('t')}")
+    expect("whole clip: the live part marked", abs((p.get("ab-loop-a") or -9) - last.get("in", 0)) < 0.01 and abs((p.get("ab-loop-b") or -9) - last.get("out", 0)) < 0.01,
+           f"{p.get('ab-loop-a')}–{p.get('ab-loop-b')}")
+    expect("whole clip: not a photo", not p.photo())
+    p.quit()
+
 def main():
+    if sys.argv[1] == "--links":
+        links(sys.argv[2])
+        print(f"{checks} checks, {failures} failed")
+        sys.exit(1 if failures else 0)
     folder = sys.argv[1]
     plain = sys.argv[2] if len(sys.argv) > 2 else None
     photos = live_photos(folder)

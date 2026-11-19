@@ -522,7 +522,12 @@ local function build()
             add(item("Open the original" .. (w.export["in"] and (" at " .. clock(w.export["in"])) or ""), "script-message-to workspace open-original",
                      { disabled = not w.export.original }))
         end
-        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export then
+        -- A photo (its link, or one the player made): its clip at its frame; moments are of clips
+        local photo = w and type(w.photo) == "table" and w.photo or nil
+        if photo and photo.clip then
+            add(item(string.format("Open the whole clip at %d:%05.2f", math.floor(photo.t / 60), photo.t % 60), "script-message-to workspace open-original"))
+        end
+        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export and not photo then
             local moment = key["script-binding workspace/moment"]
             if w.saving then
                 add(info("Saving " .. w.saving .. "…"))

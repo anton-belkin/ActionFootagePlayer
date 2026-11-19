@@ -191,6 +191,33 @@ expect("different clocks", live.next_in_chain(a, { shot("z", 100.9, 3, 1.5, fals
 expect("plain photo", live.next_in_chain(a, { { path = "p", live = false } }), nil)
 expect("no time", live.next_in_chain({ live = true, duration = 3 }, { b }), nil)
 
+-- ---------- photo links ----------
+expect("a link's name", live.is_link("/p/_Stills/A_12.35s.afplink.jpg"), true)
+expect("not a link", live.is_link("/p/IMG_1.jpg"), false)
+local function link(t, clip, hash) return live.describe_link({ v = 1, kind = "photo", t = t, clip = clip or "Day 1/A.MP4", hash = hash }) end
+local l1 = link(12.0)
+expect("link is live", l1 and l1.live, true)
+near("link's part starts 1.5 s before", l1.start, 10.5)
+near("link's still in its part", l1.still_t, 1.5)
+near("link's part 3 s", l1.duration, 3)
+local l0 = link(0.4)
+near("a link near the clip's start: from 0", l0.start, 0)
+near("its still", l0.still_t, 0.4)
+expect("not a photo's link", live.describe_link({ v = 1, kind = "moment", ["in"] = 1, out = 2 }), nil)
+-- Links of one clip chain by their times in it; another clip's don't, nor do photos
+local l2, l3, far2 = link(12.9), link(13.8), link(30)
+local other = link(12.5, "Day 1/B.MP4")
+local lrun = live.chain(l1, { far2, l3, other, l2, a })
+expect("link run", #lrun, 3)
+expect("link run 2nd", lrun[2], l2)
+local f, t2 = live.span(lrun)
+near("run's part from", f, 10.5)
+near("run's part to", t2, 15.3)
+expect("at the start: the first", live.at_time(lrun, 10.6), 1)
+expect("past the 2nd's start", live.at_time(lrun, 11.5), 2)
+expect("past the 3rd's", live.at_time(lrun, 15), 3)
+expect("same clip by fingerprint", live.next_in_chain(link(12, "x/A.MP4", "h1"), { link(12.9, "moved/A.MP4", "h1") }) ~= nil, true)
+
 -- ---------- real files ----------
 local function each(dir, pattern, fn)
     local p = io.popen('ls "' .. dir .. '"')

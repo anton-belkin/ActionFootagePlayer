@@ -37,8 +37,7 @@ gain map is not applied yet, so an HDR photo looks as it does on an SDR screen. 
   with a `Container:Directory` whose `MotionPhoto` item gives the video's length (counted from the file's end), or the
   older `GCamera:MicroVideo` with `MicroVideoOffset`. mpv plays the video straight out of the JPEG
   (`slice://<offset>@<file>`): nothing is copied.
-- A photo's link from the Library (`<name>.afplink.jpg`) is not a photo here: the workspace plugin opens its clip at
-  the photo's frame, as before.
+- **A photo's link** from the Library (`<name>.afplink.jpg`, a frame of a clip) is live too: see below.
 
 ## Chains: photos taken in a row
 
@@ -65,6 +64,29 @@ How well it lines up, measured by matching the videos' frames to each other:
 - The player's own exports (a clip at 2.0, 2.9, 3.8 s): exact (0.901 s predicted, 0.901 s measured).
 - An iPhone 14 Pro burst (2023, 9 photos 0.3–2.7 s apart): the frames are the same sensor frames, and the rule
   lands within 0.02–0.29 s of the right moment (median about 0.06 s), so a jump may step a few frames back or forward.
+
+## Photo links: a frame of a clip
+
+A photo's link plays like a live photo, the way a moment plays its part of the clip:
+
+- It opens as its clip's part around the frame, as a video of its own (the workspace plugin's EDL, as for a moment:
+  stabilized and in the clip's look as the clip is), **paused at the frame**: that is the still. The Live icon is on
+  it; hover or Space plays the part, 1.5 s on each side of the frame (as long as an exported Live Photo's), with the
+  clip's sound; let go, and it's back at the frame.
+- **Runs**: links to the same clip (by its fingerprint, else its path) next to it in the playlist whose parts overlap
+  play as one: the part opened is then from the first's start to the last's end, so it plays on without a break or
+  a reload. Let go, or at its end, and the player rests on the link it got to, at its frame. Links of another clip,
+  and real Live Photos, don't join a link's run (their times are on other clocks).
+- **The whole clip is one button away**, as for a moment: *Open the whole clip at 0:12.35* in the side panel's
+  Project part (*This photo*) and in the right-click menu. It opens the clip paused at the photo's frame, the live
+  part marked as A–B (not looped), so Space plays on from there and the clip's moments, marks and exports are at hand.
+- A photo **the player made** (Save frame: a HEIC, Live Photo or Motion Photo with the link in its XMP) has the same
+  button when its clip is where the link says.
+- While a photo shows, the panel's Project part shows *This photo* and its button, not the clip's marks, moments or
+  selected part (those are the clip's: open it). Accept / Reject / stars stay: for a link they are its original's,
+  as before; for a photo the player made, its own.
+
+![A photo link in the player](img/live-photos-link-panel.jpg)
 
 ## Opening photos
 

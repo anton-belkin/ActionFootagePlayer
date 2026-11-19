@@ -12,6 +12,12 @@
 -- is in it. What doesn't apply to a still (stabilization, moments, exports, crop, cuts, marks) asks
 -- user-data/afp/photo and does nothing.
 --
+-- A photo's link from the Library (<name>.afplink.jpg: a frame of a clip) plays the same way: the workspace plugin opens
+-- it as its clip's part around the frame (an EDL, as a moment), paused at the frame; the live part is that part,
+-- 1.5 s on each side. Links to the same clip in the playlist whose parts overlap make one run: the part opened is
+-- then all of theirs, so it plays on without a break; let go, and the player rests on the link it got to. Its whole
+-- clip is a button away (the side panel's, the menu's Open the whole clip: the workspace plugin's open-original).
+--
 -- Script messages (what the hover and Space send; tests drive them over IPC):
 --   live-photo-view play       the live part plays (the chain on)
 --   live-photo-view stop       back to the picture (or to the photo the chain got to)
@@ -22,6 +28,16 @@ local mp = require 'mp'
 local utils = require 'mp.utils'
 package.path = mp.get_script_directory() .. "/?.lua;" .. package.path
 local live = require 'live'
+-- The workspace plugin's reader of a photo's link (afp:link in its XMP), beside this one in the app
+local read_photo_link = nil
+do
+    local plugins = mp.get_script_directory():match("^(.*)[/\\][^/\\]+[/\\]?$")
+    if plugins then
+        package.path = package.path .. ";" .. utils.join_path(utils.join_path(plugins, "workspace"), "?.lua")
+        local ok, l = pcall(require, "link")
+        if ok and type(l) == "table" then read_photo_link = l.photo end
+    end
+end
 
 local AHEAD, BEHIND = 12, 4 -- playlist entries described around a photo, for its chain
 
@@ -35,9 +51,16 @@ overlay.z = 5
 local image_vid = nil     -- the photo's own picture track
 local test_dims = nil     -- live-photo-layout's window, for a player without one (tests: vo=null has no OSD)
 
+local function read(path)
+    if live.is_link(path) then
+        local raw = read_photo_link and read_photo_link(path)
+        return live.describe_link(raw and utils.parse_json(raw))
+    end
+    return live.describe(path)
+end
 local function describe(path)
     if described[path] == nil then
-        local ok, d = pcall(live.describe, path)
+        local ok, d = pcall(read, path)
         described[path] = ok and d or false
         if not ok then mp.msg.warn("couldn't read " .. path .. ": " .. tostring(d)) end
         if type(described[path]) == "table" then described[path].path = path end
@@ -71,7 +94,7 @@ local function around(path)
     local out = {}
     if not at then return out end
     for i = math.max(1, at - BEHIND), math.min(#list, at + AHEAD) do
-        local d = live.is_photo(list[i]) and describe(list[i]) or nil
+        local d = (live.is_photo(list[i]) or live.is_link(list[i])) and describe(list[i]) or nil
         if d then out[#out + 1] = d end
     end
     return out
@@ -91,7 +114,7 @@ local function warm(path)
     warming = mp.add_periodic_timer(0.02, function()
         local p = table.remove(todo, 1)
         if not p then warming:kill() warming = nil return end
-        if live.is_photo(p) then describe(p) end
+        if live.is_photo(p) or live.is_link(p) then describe(p) end
     end)
 end
 
@@ -224,7 +247,7 @@ end
 local function publish()
     local p = nil
     if info then
-        p = { live = info.live == true, kind = info.kind, playing = playing ~= nil,
+        p = { live = info.live == true, kind = info.kind, playing = playing ~= nil, file = info.path, span = info.span,
               step = playing and playing.step or 0, run = playing and #playing.run or 0,
               at = playing and playing.run[playing.step].path or nil }
     end
@@ -243,8 +266,15 @@ local function finish(rest_on)
     if not playing then return end
     mp.msg.verbose("back to the picture, step " .. playing.step)
     local reached = playing.run[playing.step]
+    local link = playing.link
     playing = nil
-    show_still()
+    if link then
+        -- A link: back to its frame in the part (or the link the run got to, below)
+        mp.set_property_bool("pause", true)
+        if reached == info then mp.commandv("seek", string.format("%.4f", info.taken - info.span[1]), "absolute+exact") end
+    else
+        show_still()
+    end
     publish()
     draw()
     -- Let go on another photo of the run: that photo
@@ -280,6 +310,15 @@ end
 
 local function start(by)
     if not (info and info.live) or playing then return end
+    if info.kind == "link" then
+        -- The part opened is the run's (the workspace plugin made it so): from its start, no other file
+        playing = { run = info.run or { info }, step = 1, by = by, link = true, settling = true }
+        mp.commandv("seek", "0", "absolute+exact")
+        mp.set_property_bool("pause", false)
+        publish()
+        draw()
+        return
+    end
     playing = { run = { info }, step = 1, by = by }
     draw()
     add_video(info, function(t)
@@ -314,12 +353,21 @@ end)
 
 mp.observe_property("time-pos", "number", function(_, pos)
     if not playing or playing.settling or not pos then return end
+    if playing.link then
+        -- Which link of the run the clip is at now, and the part's end
+        local at = live.at_time(playing.run, info.span[1] + pos)
+        if at ~= playing.step then playing.step = at publish() end
+        if pos >= info.span[2] - info.span[1] - 0.07 then finish(true) end
+        return
+    end
     local cur = playing.run[playing.step]
     -- Its last frame (a frame or two before the length the container gives)
     if pos >= cur.duration - 0.07 then at_end() end
 end)
 mp.observe_property("eof-reached", "bool", function(_, eof)
-    if playing and not playing.settling and eof then at_end() end
+    if playing and not playing.settling and eof then
+        if playing.link then finish(true) else at_end() end
+    end
 end)
 
 -- ---------- the mouse and the key ----------
@@ -385,9 +433,18 @@ mp.add_hook("on_load", 5, function()
     local path = mp.get_property("path")
     if playing then playing = nil end
     info, image_vid = nil, nil
-    if path and live.is_photo(path) then
+    if path and (live.is_photo(path) or live.is_link(path)) then
         described[path] = nil -- read again: it may have changed since
         info = describe(path)
+    end
+    if info and info.kind == "link" then
+        -- Its run (the links of its clip after it in the playlist, their parts overlapping): the part the workspace
+        -- plugin opens (user-data/afp/photo's span), the clip's time from its first start to its last end
+        info.run = live.chain(info, around(path))
+        info.span = { live.span(info.run) }
+        publish()
+        mp.set_property("file-local-options/keep-open", "always")
+        return
     end
     publish()
     if info then
@@ -431,7 +488,13 @@ end
 
 mp.register_event("file-loaded", function()
     hovered = false
-    if info then
+    -- A link the workspace plugin didn't open as its clip's part (mpv's first load, before the folder's playlist;
+    -- its clip not found): not live here
+    if info and info.kind == "link" then
+        local ws = mp.get_property_native("user-data/workspace")
+        if not (type(ws) == "table" and type(ws.photo) == "table" and ws.photo.file == info.path) then info = nil publish() end
+    end
+    if info and info.kind ~= "link" then
         for _, tr in ipairs(tracks()) do
             if tr.type == "video" and tr.selected then image_vid = tr.id end
         end
@@ -440,7 +503,7 @@ mp.register_event("file-loaded", function()
     draw()
     prune()
     if info and info.live then
-        add_video(info)
+        if info.kind ~= "link" then add_video(info) end
         warm(info.path)
     end
 end)
