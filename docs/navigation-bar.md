@@ -46,6 +46,11 @@ over what's left of the video (`place_osc` in side-panel/main.lua): small, and a
 start, end, clear; blue while set); speed (1×, 1.5×, 2×, 0.5×); loop the clip; sound on/off; fullscreen. Hovered, a
 button says what it does and its key.
 
+**The arrow keys** (Anton, 2026-11-19; `side-panel/navkeys.lua`): ← / → 5 s and Shift+← / → 1 s, as mpv has them;
+**Option (Alt)+← / →** a frame back / on, paused; **Cmd+← / →** (Windows, Linux: **Ctrl+← / →**) the previous / next
+item of the playlist (a list opened from the Library: its items). Bound as input.conf's are, so a key you've bound
+yourself in input.conf stays yours. Their keys are written small under the four buttons (⌘← ⌘→ ⌥← ⌥→ on a Mac).
+
 **Narrow** (a small window with the panel open): what goes first: speed, loop, sound; previous/next clip;
 the frame steps; the mark buttons; A–B. Play, the time and fullscreen always stay.
 
