@@ -52,7 +52,7 @@ function albumTopRows(layout, filt) {
       th = avMosaic(its);
       sub = filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many);
     } else { th = '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>'; sub = AV_SUB[v[0]] || ""; }
-    const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Open ' + esc(v[1]) + '"';
+    const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Double-click to open ' + esc(v[1]) + '"';
     if (layout === "list") return '<button ' + a + ' class="row avrow">' + th + '<span style="min-width:0"><span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span></span>' +
       '<span class="cell hide-s"></span><span class="cell hide-s"></span><span class="cell hide-s"></span><span class="chips hide-s"></span><span class="cell"></span></button>';
     return '<button ' + a + ' class="card avrow">' + th + '<span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span><span class="chips"></span></button>';
@@ -223,9 +223,22 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest && e.target.closest("[data-a]");
   if (!el || el.disabled) return;
   const a = el.dataset.a, v = el.dataset.v;
-  if (a === "aview") { albumViewGo(v); return; }
+  if (a === "aview") {
+    // An album's tile opens by a double click, as a folder's does: one click only marks it. Its breadcrumb, and
+    // Enter or Space on the tile (a click with no mouse behind it), open at once
+    if (el.classList.contains("avrow") && e.detail > 0) {
+      for (const x of document.querySelectorAll(".avrow.sel")) x.classList.remove("sel");
+      el.classList.add("sel");
+      return;
+    }
+    albumViewGo(v); return;
+  }
   if (a === "avmore") { AV.more += 400; renderMain(); return; }
   if (!albumViewOpen()) return;
   if (typeof timelineClick === "function" && timelineClick(a, v)) return;
   if (typeof mapClick === "function") mapClick(a, v);
+});
+document.addEventListener("dblclick", (e) => {
+  const el = e.target.closest && e.target.closest('.avrow[data-a="aview"]');
+  if (el && !el.disabled) albumViewGo(el.dataset.v);
 });

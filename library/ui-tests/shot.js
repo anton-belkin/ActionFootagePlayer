@@ -15,6 +15,8 @@ const { execFileSync } = require("child_process");
 const { smallViews } = require("./page");
 
 const STATES = {
+  // Albums' top with one album's tile clicked once: marked, not opened (a double click opens it)
+  albummarked: { set_tags: { never: true }, does: "S.view = 'footage'; S.path = []; renderAll(); setTimeout(() => { const t = document.querySelector('.avrow[data-a=\"aview\"]'); if (t) t.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 })); }, 300);" },
   // set_tags: how the mock answers it; then what's done once the project shows
   unsaved: { set_tags: { fail: "//nas/footage isn’t connected (No route to host)" }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/A.MP4', 'Day 1/B.MP4']); tag('turtle');" },
   saving: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('queue'); renderAll(); sel(['Day 1/B.MP4', 'Day 1/C.MP4']); S.tagDraft = 'turtle'; setTags(['turtle'], []);" },
