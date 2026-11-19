@@ -330,14 +330,46 @@ fn stretch_to_load(cache: &[(String, std::sync::Arc<gpu_table::PlayerClip>)], ke
 }
 
 /// What a loaded clip is kept by: its settings that change the geometry, and its project's file (and preset's) as
-/// it is now, so a project saved again in Gyroflow loads again
+/// it is now, so a project saved again in Gyroflow loads again. And the player's `version` of the project, a new one
+/// for each save it takes up (main.lua's reload_project): where the file's time is in whole seconds (an SD card, HFS+),
+/// a second save in the same second with the same size has the same stamp
 fn geometry_key(j: &serde_json::Value) -> String {
     let stamp = |k: &str| j.get(k).and_then(|v| v.as_str()).and_then(|p| std::fs::metadata(p).ok())
         .map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
     let mut key: Vec<String> = gpu_table::PLAYER_GEOMETRY_KEYS.iter().map(|k| format!("{k}={}", j.get(*k).map(|v| v.to_string()).unwrap_or_default())).collect();
     key.push(stamp("project"));
     key.push(stamp("preset"));
+    key.push(format!("version={}", j.get("version").map(|v| v.to_string()).unwrap_or_default()));
     key.join("|")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::geometry_key;
+
+    // A project saved again: a new key, so the server loads it again instead of answering from the clip it kept
+    #[test]
+    fn a_saved_project_is_loaded_again() {
+        let dir = std::env::temp_dir().join(format!("gpu-table-key-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let project = dir.join("a.gyroflow");
+        std::fs::write(&project, r#"{"stabilization":{"fov":1.0}}"#).unwrap();
+        let req = |version: Option<&str>| {
+            let mut j = serde_json::json!({ "project": project.to_str().unwrap(), "level": "medium" });
+            if let Some(v) = version { j["version"] = v.into(); }
+            j
+        };
+        // The same request, the file untouched: the same clip
+        assert_eq!(geometry_key(&req(None)), geometry_key(&req(None)));
+        // The player's version of a save it took up, the file's stamp as it was (a whole-second mtime): another key
+        assert_ne!(geometry_key(&req(Some("1795126018/665520#1"))), geometry_key(&req(Some("1795126018/665520#2"))));
+        assert_ne!(geometry_key(&req(None)), geometry_key(&req(Some("1795126018/665520#1"))));
+        // Saved with another size: another key, with no version too
+        let before = geometry_key(&req(None));
+        std::fs::write(&project, r#"{"stabilization":{"fov":1.25}}"#).unwrap();
+        assert_ne!(before, geometry_key(&req(None)));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// `--sphere360 <video> <out.glsl> [<width> [<distance> [<time offset>]]]`: the GPU path's 360 mode (main.lua's
