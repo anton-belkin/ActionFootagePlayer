@@ -124,7 +124,7 @@ impl Rig {
     /// A view as the page's `scan` gets it (main.rs's scan, step for step: the project's settings, the view from the
     /// catalog, what the clips are, the view kept in this computer's cache): the answer, and its size as sent
     pub fn view(&self, view: &str) -> (Value, usize) {
-        let flat = project_info(&self.p).clips_layout != "tree";
+        let flat = crate::changed::flat_previews(&self.p);
         seen::wait_ready(&self.p, Duration::from_secs(1));
         let out = index::scan(&self.p, view, flat);
         let mut want: Vec<String> = Vec::new();
