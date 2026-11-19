@@ -76,7 +76,7 @@ impl Prefetched {
     pub fn open_range(path: impl AsRef<Path>, range: Option<(f64, f64)>) -> Result<(Self, u64)> {
         let file = File::open(path)?;
         let len = file.metadata()?.len();
-        let share = on_share(&file);
+        let share = on_share(&file) || throttle_rate().is_some();
         let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new(), samples: Vec::new(), read: Vec::new(), blank_unread: false, from_file: (0, 0), share };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
         if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len) {
@@ -316,8 +316,28 @@ fn merged(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
     out
 }
 
+/// AFP_READ_MBPS (tests, tests/gpu_ahead_e2e.py): any file read as from a share (in stretches), its reads held to that
+/// many MB a second, all threads together: a slow share
+fn throttle_rate() -> Option<f64> {
+    static RATE: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    *RATE.get_or_init(|| std::env::var("AFP_READ_MBPS").ok().and_then(|v| v.parse::<f64>().ok()).filter(|v| *v > 0.0))
+}
+fn throttle(bytes: usize) {
+    static NEXT: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    let Some(rate) = throttle_rate() else { return };
+    let wait = {
+        let mut next = NEXT.lock().unwrap();
+        let now = std::time::Instant::now();
+        let at = next.map_or(now, |n| n.max(now)) + std::time::Duration::from_secs_f64(bytes as f64 / (rate * 1e6));
+        *next = Some(at);
+        at.saturating_duration_since(now)
+    };
+    std::thread::sleep(wait);
+}
+
 /// As much of `buf` as the file has from `offset`
 fn read_full_at(file: &File, buf: &mut [u8], offset: u64) -> Result<usize> {
+    throttle(buf.len());
     let mut n = 0;
     while n < buf.len() {
         #[cfg(unix)]
