@@ -456,7 +456,44 @@ function M.describe(path, exists)
     return info
 end
 
+-- ---------- a photo's link ----------
+
+-- A photo's link file (<name>.afplink.jpg, the Library's: a small picture whose XMP links it to a frame of a clip).
+-- It plays as that frame of its clip, its live part the clip around it: HALF seconds on each side, as long as an
+-- exported Live Photo's
+M.HALF = 1.5
+function M.is_link(path)
+    return type(path) == "string" and path:lower():match("%.afplink%.jpe?g$") ~= nil and not path:find("://", 1, true)
+end
+
+-- The link's JSON (parsed): { live, kind = "link", taken (the frame's time in the clip), still_t, start, duration,
+-- clock (the clip: links chain with links of the same clip only) }, nil when it isn't a photo's link
+function M.describe_link(link)
+    if type(link) ~= "table" or link.kind ~= "photo" or type(link.t) ~= "number" or type(link.clip) ~= "string" then return nil end
+    local start = math.max(0, link.t - M.HALF)
+    return { live = true, kind = "link", taken = link.t, still_t = link.t - start, start = start, duration = link.t - start + M.HALF,
+             clock = "clip:" .. ((type(link.hash) == "string" and link.hash ~= "") and link.hash or link.clip) }
+end
+
+-- The clip time a run of links plays: from its first's start to its last's end
+function M.span(run)
+    local last = run[#run]
+    return run[1].start, last.start + last.duration
+end
+
+-- The run's photo at a moment of its clip: the last one whose live part has begun
+function M.at_time(run, t)
+    local at = 1
+    for i, d in ipairs(run) do if d.start <= t + 1e-6 then at = i end end
+    return at
+end
+
 -- ---------- chains ----------
+
+-- Which clock a photo's time is on: a clip's (links), the world's (a zone given) or the camera's own
+local function clock_of(d)
+    return d.clock or (d.zoned and "zoned" or "camera")
+end
 
 -- How much further a step must take the picture to be worth it (s): a photo whose live part ends sooner after the
 -- current one's end is passed over
@@ -464,13 +501,13 @@ M.MIN_MORE = 0.1
 
 -- The next photo a live part carries on into: among `others` (described photos), the live one taken next after `cur`
 -- (by the photos' own times) whose live part has begun before `cur`'s ends and goes on past it. Nil when none. Both
--- must say when they were taken on the same kind of clock (both with a zone, or both without)
+-- must say when they were taken on the same clock (both with a zone, or both without; links: the same clip)
 function M.next_in_chain(cur, others)
     if not (cur and cur.live and cur.start) then return nil end
     local stop = cur.start + cur.duration
     local best
     for _, o in ipairs(others) do
-        if o ~= cur and o.live and o.start and o.zoned == cur.zoned and o.taken > cur.taken
+        if o ~= cur and o.live and o.start and clock_of(o) == clock_of(cur) and o.taken > cur.taken
            and o.start < stop and o.start + o.duration > stop + M.MIN_MORE then
             if not best or o.taken < best.taken then best = o end
         end

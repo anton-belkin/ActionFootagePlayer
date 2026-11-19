@@ -12,6 +12,7 @@
 --   link.read(path)        -> the link's JSON text, nil for none
 --   link.read_keys(path)   -> { [key] = value } of all the mdta keys, nil when it can't be read
 --   link.photo(path)       -> a photo's link (afp:link in its XMP), its JSON text, nil for none
+--   link.photo_tags(path)  -> a photo's own tags (dc:subject in its XMP), a list
 --   link.created(path)     -> the file's own creation time (moov/mvhd), unix seconds, nil when it has none: what
 --                             ffmpeg and mpv show as creation_time and links keep as `created`
 
@@ -142,6 +143,22 @@ function M.photo(path)
     local text = head:match("<afp:link>(.-)</afp:link>") or head:match('afp:link="([^"]*)"')
     if not text then return nil end
     return (text:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"'):gsub("&#34;", '"'):gsub("&apos;", "'"):gsub("&amp;", "&"))
+end
+
+-- A photo's own tags: `dc:subject` in its XMP (afp-meta writes them, Photos and Lightroom read them as keywords), within
+-- the file's first 64 KiB; {} for none
+function M.photo_tags(path)
+    local f = io.open(path, "rb")
+    if not f then return {} end
+    local head = f:read(65536) or ""
+    f:close()
+    local subject = head:match("<dc:subject[^>]*>(.-)</dc:subject>")
+    local out = {}
+    for t in (subject or ""):gmatch("<rdf:li[^>]*>(.-)</rdf:li>") do
+        t = t:gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"'):gsub("&apos;", "'"):gsub("&amp;", "&"):match("^%s*(.-)%s*$")
+        if t ~= "" then out[#out + 1] = t end
+    end
+    return out
 end
 
 -- Seconds from 1904-01-01 (QuickTime's epoch) to 1970-01-01

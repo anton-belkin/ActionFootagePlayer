@@ -22,9 +22,28 @@ The player shows a photo the way a phone does (the `live-photo` plugin, `mpv/scr
 
 ### HDR
 
-The still is the photo's main picture as mpv decodes it: the SDR picture. An iPhone HEIC's or an Ultra HDR JPEG's
-gain map is not applied yet, so an HDR photo looks as it does on an SDR screen. The live part plays as the video is
-(HLG or Dolby Vision videos in HDR).
+A photo with a gain map (an iPhone's HEIC, an Ultra HDR JPEG such as a Pixel's, the player's own photos in the HDR
+look) is shown in HDR on an HDR screen, **as macOS shows it** (Preview, Photos):
+
+- mpv itself decodes only a photo's SDR image. The gain map is applied by macOS: Core Image's `expandToHDR` (the
+  system's own decoder; ImageIO's `kCGImageSourceDecodeToHDR` gives the same picture) in the gyroflow plugin's
+  `afp-photo --hdr-still`. It writes the HDR rendition once, as a 10-bit HEIF in PQ BT.2100 (SDR white at 203 nits, the
+  gain map's full headroom), into `~/Library/Caches/ActionFootagePlayer/hdr-stills/`. That takes 0.2–0.5 s the
+  first time; the SDR image shows meanwhile.
+- The plugin adds it as another picture track of the photo and shows it in the SDR image's place. Its frames are
+  labelled PQ, BT.2020 and full range (`vf format`, labelled `live-photo-hdr`), because mpv assembles a HEIF's
+  512-pixel tiles into one picture without those tags. While it shows, the display is switched to HDR (target PQ),
+  as the dlogm plugin does for HDR video.
+- Measured: what mpv decodes from the rendition matches Core Image's own HDR rendering of the photo to 1.3–2.2 PQ
+  codes out of 1023 on average (10-bit compression), on an iPhone 14 Pro HEIC and on the player's own HEIC and Ultra
+  HDR JPEG.
+- On an SDR screen (the dlogm plugin's `user-data/dlogm/screen`), the photo's own SDR image shows, as Preview shows
+  it there. When the window moves between screens, the still follows.
+- The live part plays its own video (SDR, HLG or Dolby Vision as it is) under the same HDR target.
+- **Not the same as Preview in one way:** Preview applies the gain map for the screen's headroom at the moment. Here
+  the whole gain map is applied, and mpv's renderer fits it to the screen. On a screen with at least the photo's
+  headroom (an XDR display) the two match; on a dimmer one, mpv's tone mapping does the fitting.
+- **Not on Windows or Linux yet**: the photo's SDR image there (see the PR for Windows' options).
 
 ## Which photos are live
 
@@ -37,8 +56,7 @@ gain map is not applied yet, so an HDR photo looks as it does on an SDR screen. 
   with a `Container:Directory` whose `MotionPhoto` item gives the video's length (counted from the file's end), or the
   older `GCamera:MicroVideo` with `MicroVideoOffset`. mpv plays the video straight out of the JPEG
   (`slice://<offset>@<file>`): nothing is copied.
-- A photo's link from the Library (`<name>.afplink.jpg`) is not a photo here: the workspace plugin opens its clip at
-  the photo's frame, as before.
+- **A photo's link** from the Library (`<name>.afplink.jpg`, a frame of a clip) is live too: see below.
 
 ## Chains: photos taken in a row
 
@@ -65,6 +83,33 @@ How well it lines up, measured by matching the videos' frames to each other:
 - The player's own exports (a clip at 2.0, 2.9, 3.8 s): exact (0.901 s predicted, 0.901 s measured).
 - An iPhone 14 Pro burst (2023, 9 photos 0.3–2.7 s apart): the frames are the same sensor frames, and the rule
   lands within 0.02–0.29 s of the right moment (median about 0.06 s), so a jump may step a few frames back or forward.
+
+## Photo links: a frame of a clip
+
+A photo's link plays like a live photo, the way a moment plays its part of the clip:
+
+- It opens as its clip's part around the frame, as a video of its own (the workspace plugin's EDL, as for a moment:
+  stabilized and in the clip's look as the clip is), **paused at the frame**: that is the still. The Live icon is on
+  it; hover or Space plays the part, 1.5 s on each side of the frame (as long as an exported Live Photo's), with the
+  clip's sound; let go, and it's back at the frame.
+- **Runs**: links to the same clip (by its fingerprint, else its path) next to it in the playlist whose parts overlap
+  play as one: the part opened is then from the first's start to the last's end, so it plays on without a break or
+  a reload. Let go, or at its end, and the player rests on the link it got to, at its frame. Links of another clip,
+  and real Live Photos, don't join a link's run (their times are on other clocks).
+- **The whole clip is one button away**, as for a moment: *Open the whole clip at 0:12.35* in the side panel's
+  Project part (*This photo*) and in the right-click menu. It opens the clip paused at the photo's frame, the live
+  part marked as A–B (not looped), so Space plays on from there and the clip's moments, marks and exports are at hand.
+- A photo **the player made** (Save frame: a HEIC, Live Photo or Motion Photo with the link in its XMP) has the same
+  button when its clip is where the link says.
+- While a photo shows, the panel's Project part shows *This photo* and its button, not the clip's marks, moments or
+  selected part (those are the clip's: open it).
+- **A photo's Accept / Reject, stars and tags are its own**, as a moment's: its pick and rating in its link, its tags
+  in its XMP (`dc:subject`), written by afp-meta as the Library writes them. The panel says *This photo: keep it?*.
+  A photo without a link (an iPhone's) isn't tagged in the player.
+- **The Library's tiles** show the Live icon on a photo link, a Live Photo and a Motion Photo: everything the player
+  plays as a live photo.
+
+![A photo link in the player](img/live-photos-link-panel.jpg)
 
 ## Opening photos
 

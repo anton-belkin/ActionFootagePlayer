@@ -619,11 +619,17 @@ local function project_part(u, x, w, y)
     y = y + 8 * s
     u:divider(x, w, y)
     local file = ws.clip:match("([^/\\]+)$") or ws.clip
-    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows
+    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows. A photo too (a photo's
+    -- link: its clip's part around the frame; a photo the player made: the picture), with its clip a button away
     local mo = ws.moment and not ws.moment.missing and ws.offset and ws.moment or nil
-    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
+    local ph = not mo and type(ws.photo) == "table" and ws.photo.clip and ws.photo or nil
+    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ph and ("THIS PHOTO · " .. (ph.name or file)) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
     y = y + 28 * s
-    if mo then
+    if ph then
+        -- (to the hundredth: photos of one clip are often a second apart)
+        y = u:caption(x, w, y - 6 * s, "The frame at " .. tl.clock(ph.t) .. " of " .. (ph.clip:match("([^/\\]+)$") or ph.clip))
+        y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. tl.clock(ph.t), "script-message-to workspace open-original")
+    elseif mo then
         y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
         -- How it's stabilized: on its own or with its clip, written into it (its transform is on the Transform tab)
@@ -659,6 +665,8 @@ local function project_part(u, x, w, y)
                           tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
     end
 
+    -- A photo: no marks, moments or part of its own (those are its clip's: Open the whole clip)
+    if ph then return y + 8 * s end
     local pos = mp.get_property_number("time-pos", 0)
     y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
