@@ -67,13 +67,13 @@ def ask(extra):
     except OSError: pass
     return time.time() - t, rep
 stop = threading.Event()
-# ahead.lua's decision for one state: "start until" or "- -", then "wait" or "go"
+# ahead.lua's decision for one state: "start until" or "- -", then "wait" or "go", then "urgent" or "-"
 DECIDE = '''package.path = arg[1] .. "/?.lua;" .. package.path
 local ahead = require 'ahead'
 local s = loadstring("return " .. arg[2])()
 local n = ahead.next(s)
 if n then s.busy = true end
-print(n and string.format("%.3f %.3f", n.start, n.until_) or "- -", ahead.wait(s) and "wait" or "go")'''
+print(n and string.format("%.3f %.3f", n.start, n.until_) or "- -", ahead.wait(s) and "wait" or "go", n and n.urgent and "urgent" or "-")'''
 # The play clock: advances while playing and not held
 clock = {'pos': 0.0, 'held': False, 'playing': False, 'last': None, 'held_s': 0.0, 'unstab_s': 0.0, 'unsettled_s': 0.0, 'played': 0.0}
 lock = threading.Lock()
@@ -109,6 +109,7 @@ t0 = time.time()
 ms, r = ask({"start": 0})
 t_first = time.time() - t0
 state = {'covers': r.get('covers'), 'settled': r.get('settled'), 'busy': False}
+dur = r.get('duration') or dur   # the server's (by frames), as main.lua has it
 if a.old and r.get('partial'): state['covers'], state['settled'] = [0.0, 20.0], 20.0
 print(f'first table {t_first:.1f} s covers {state["covers"]}', flush=True)
 time.sleep(a.play_at)
@@ -134,9 +135,9 @@ def walk():
 if a.walk: threading.Thread(target=walk, daemon=True).start()
 walker = None
 steps = []
-def extend(start, until):
+def extend(start, until, urgent):
     t = time.time()
-    _, rep = ask({"start": start, "until": until})
+    _, rep = ask({"start": start, "until": until, "urgent": urgent})
     with lock:
         if rep.get('shader'):
             state['covers'] = rep.get('covers'); state['settled'] = rep.get('settled')
@@ -171,7 +172,7 @@ while True:
         out = subprocess.run(['luajit', '-e', DECIDE, '/dev/null', AHEAD_DIR, lua], capture_output=True, text=True).stdout.split()
         if out and out[0] != '-' and not busy:
             with lock: state['busy'] = True
-            threading.Thread(target=extend, args=(float(out[0]), float(out[1])), daemon=True).start()
+            threading.Thread(target=extend, args=(float(out[0]), float(out[1]), out[3] == 'urgent'), daemon=True).start()
         with lock: clock['held'] = bool(out) and out[2] == 'wait'
     covered = c[1] if c else dur
     stab = c is None or (pos <= c[1] and pos >= (c[0] + 4 if c[0] > 0 else 0))

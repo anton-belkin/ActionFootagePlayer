@@ -142,6 +142,8 @@ expect("paused: not waiting", r.waited, 0)
 -- The whole clip known: nothing to ask, nothing to wait for
 expect("whole: nothing to ask", ahead.next({ pos = 10, duration = 100, covers = nil }), nil)
 expect("whole: no wait", ahead.wait({ pos = 10, duration = 100, covers = nil, busy = true }), false)
+-- The stretch reaching the clip's end (by frames, a little short of the container's duration): nothing more to ask
+expect("near the end: nothing to ask", ahead.next({ pos = 140, duration = 150.10, covers = { 106, 150.08 }, settled = 150.08, busy = false }), nil)
 -- The stretch reaching the clip's end: playing to the end, no wait
 expect("to the end: no wait", ahead.wait({ pos = 99.9, duration = 100, covers = { 40, 100 }, settled = 100, busy = true }), false)
 

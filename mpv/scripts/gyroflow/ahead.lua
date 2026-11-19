@@ -6,7 +6,8 @@
 -- playback has to wait for it.
 --
 --   local ahead = require 'ahead'
---   ahead.next(s)   -> nil, or { start, until_ } to ask for (s into the clip; the server reads from start - 4 s)
+--   ahead.next(s)   -> nil, or { start, until_, urgent } to ask for (s into the clip; the server reads from start - 4 s;
+--                      urgent: playback waits for it, read at full speed)
 --   ahead.wait(s)   -> true while what plays is past what the table has settled and more is on its way
 --   s = { pos, duration, paused, covers = { a, b } or nil (all of it), settled, busy (a request under way),
 --         loop = { a, b } or nil (an A-B loop) }
@@ -27,10 +28,15 @@ M.STEP_S = 45
 M.PAUSED_STEP_S = 60
 -- The server reads this much before the start it's asked for (gpu_table.rs's BEFORE_S: the smoothing's warm-up)
 M.BEFORE_S = 4
+-- After a seek to where the stretch doesn't reach: as much as a clip opens with (gpu_table.rs's HEAD_S)
+M.SEEK_S = 20
 -- Playing within this of the end of what's settled (s): it waits. Past it the frames are the smoothing's end, which
 -- bends back to the camera where the motion data stops: up to ~110 px from what the next table has there (measured,
 -- vs-gyroflow/tests/table_ahead.rs), so the picture would jump as the next table came in
 M.EDGE_S = 0.3
+
+-- This close to the clip's end counts as its end (its length by frames and by the container's duration differ a little)
+local END_S = 0.25
 
 local function min(a, b) return a < b and a or b end
 local function max(a, b) return a > b and a or b end
@@ -62,11 +68,11 @@ function M.next(s)
     local from, to = needed(s)
     -- Played somewhere the stretch doesn't have (a seek, a loop's start before it): from there
     if not inside(s, from) then
-        return { start = from, until_ = min(duration, max(to, from + M.LEAD_S) + 5) }
+        return { start = from, until_ = min(duration, from + M.SEEK_S), urgent = true }
     end
-    if c[2] >= duration then return nil end
+    if c[2] >= duration - END_S then return nil end
     local settled = s.settled or c[2]
-    if settled < to then
+    if settled < to - END_S then
         local step = min(M.STEP_S, max(10, (c[2] - c[1]) / 2))
         return { start = s.pos, until_ = min(duration, to + step) }
     end
@@ -79,7 +85,7 @@ function M.wait(s)
     local c = s.covers
     if not c or not s.busy or not s.pos or s.paused then return false end
     if not inside(s, s.pos) then return true end
-    return c[2] < (s.duration or math.huge) and s.pos >= (s.settled or c[2]) - M.EDGE_S
+    return c[2] < (s.duration or math.huge) - END_S and s.pos >= (s.settled or c[2]) - M.EDGE_S
 end
 
 return M

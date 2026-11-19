@@ -1327,7 +1327,7 @@ function gpu_ahead.tick()
     if want then
         local req = {}
         for k, v in pairs(g.request) do req[k] = v end
-        req.start, req["until"] = want.start, want.until_
+        req.start, req["until"], req.urgent = want.start, want.until_, want.urgent
         local source, shader = current_source, g.shader
         gpu_ahead.busy, s.busy = shader, true
         gpu_ahead.ask(req, function(reply)

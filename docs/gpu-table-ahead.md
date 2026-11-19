@@ -22,7 +22,7 @@ plays from the same share. Measured cold (the clip out of the Mac's cache):
 |---|---|---|---|
 | alone | 6.2 s | 36 s | 13.6 s |
 | with the video's reads | 5.1 s | 35 s | ~13 s |
-| Anton's run (video, catalog, side panel walk) | 6.7 s | 48 s | ~36 s |
+| Anton's run (video, catalog, side panel walk) | 6.7 s | 48 s | ~10 s (then he paused) |
 
 While it read, everything else on the share waited behind its 8 MB reads (one SMB connection to the NAS): a `stat` went
 from 6 ms to 225 ms (p50, max 553), `afp-catalog footage`/`list` from 0.2 s to 3–7 s, the video's own 1 MB reads to p95
@@ -37,7 +37,9 @@ the policy; `gpu_ahead` in main.lua, the asking; `stretch_to_load` in `gyroflow-
   (`smoothing.rs`'s Predictive) is as it will be with all the motion data up to ~4 s before the end of what's read
   (`SETTLE_S` = 5 s).
 - The player keeps the settled end **`LEAD_S` = 25 s** ahead of where it plays. When less is left it asks for
-  `start` = where it plays, `until` = 25 + 25 s further. The server joins that to the stretch it has (within 60 s:
+  `start` = where it plays, `until` = 25 s plus a step further; a step is half the stretch it has, 10 s at least and
+  `STEP_S` = 45 s at most (10, 17, 30, then 45 s: the first ones come quickly, later ones are few, since each new table
+  is a new ~15 MB shader file for mpv to load). The server joins that to the stretch it has (within 60 s:
   `JOIN_S`) and reads only the new part, gently (2 threads, utility priority), forward from where it plays. Reading
   ahead also puts those parts of the file in the Mac's file cache, where the video's own reads find them.
 - The new table **keeps the old one's frames** wherever the old one had them settled (copied block by block,
@@ -45,23 +47,59 @@ the policy; `gpu_ahead` in main.lua, the asking; `stretch_to_load` in `gyroflow-
   Past the settled end the old table's frames would have moved by under a pixel (the test below measures it).
 - Paused, it reads on to the clip's end, 60 s at a time. Once the stretch reaches both ends the reply is no longer
   partial, and the shader is kept on disk as before (the next open is instant).
-- **Seek**: to a place the stretch doesn't have, it asks from there at once (joined to the stretch when within 60 s,
-  else a stretch of its own) and waits for it. Inside the stretch nothing changes.
+- **Seek**: to a place the stretch doesn't have, it asks from there at once for as much as a clip opens with (20 s,
+  a stretch of its own unless it overlaps the one there is: no gap read meanwhile), read at full speed (`urgent`:
+  playback waits for it), and waits for it. Inside the stretch nothing changes; a stretch read before stays read (seeking back is instant).
 - **A-B loop**: from the loop's start to its end must be there and settled; past the loop's end nothing more is asked
   for while it loops. A loop starting before the stretch is asked for from its start.
 
-### When playback reaches the end of what's known anyway
+### When playback reaches the end of what's settled anyway
 
 A share slower than the video itself (or a step that failed). Playing on would show the fixed correction past the
-stretch, the dropout itself. So it **waits there, paused, with a card** ("Stabilization is catching up", `mp.notify` of
+stretch, the dropout itself; and already the last 5 s before its end are the smoothing's end, which bends back to the
+camera where the motion data stops: up to ~110 px from what the next table has there (vs-gyroflow/tests/table_ahead.rs),
+so the picture would jump as the next table came in. So it **waits at the settled end, paused, with a card** ("Stabilization is catching up", `mp.notify` of
 PR #259; plain OSD text without it), and plays on when the table comes in, like a video that buffers. A viewer who
 presses play meanwhile plays on unstabilized: their choice. Holding the last stretch's smoothing instead is not
 possible: without the motion data there's nothing to smooth.
 
-## Measured with the change (cold, the same clip)
+## Measured (2026-11-19/20, cold: the clip out of the Mac's cache; the same 1.7 GB clip on the NAS)
 
-See the PR (#…) for the table of runs: time to the first stabilized frame, the margin over the first two minutes, with
-and without the catalog's commands; `tests/gpu_ahead_e2e.py` is the rig.
+`tests/gpu_ahead_e2e.py`, the first two minutes of playback; "margin": how far the table's motion data reaches past
+where it plays (min / 10th percentile); the video's own reads 1 MB at a time, 2 s ahead, as mpv; the catalog: `derived`,
+`footage`, `list` every 10 s on the real project (read-only). Anton was using the player on the same NAS in part of
+these runs, so single worst cases are noisy.
+
+| run | first table | after it | played unstabilized | waited | margin | video reads p95 / max | `footage` median / max |
+|---|---|---|---|---|---|---|---|
+| before, video + catalog | 5.8 s | whole clip in 33 s | 13.0 s | 0 | −13.1 s / −1.1 s | 25 / 501 ms | 0.23 / 17.4 s |
+| before, + the side panel's walk | 6.4 s | whole clip in 35 s | 14.5 s | 0 | −14.7 s / −2.7 s | 51 / 631 ms | 0.23 / 18.7 s |
+| after, video | 7.2 s | 6 steps, 4–13 s each | 0 | 0 | +14.4 s / +21.8 s | 59 / 1806 ms | – |
+| after, video + catalog | 6.5 s | 6 steps, 4–10 s | 0 | 0 | +15.0 s / +23.4 s | 20 / 1596 ms | 0.22 / 7.5 s |
+| after, video + catalog (again) | 5.5 s | 6 steps, 4–11 s | 0 | 0 | +15.2 s / +23.9 s | 24 / 427 ms | 0.23 / 2.1 s |
+
+- Time to the first stabilized frame is unchanged (5–7 s cold): the first stretch is the same 24 s of the clip.
+- The 1.6–1.8 s video reads came once each in two runs and not in two others (worst 344 ms, 427 ms): not explained.
+- `afp-catalog` alone takes 0.2–0.3 s (0.9 s cold) on this project; during the whole-clip read 3–7 s (`stat` on the
+  NAS 6 ms → 225 ms p50): it waited behind the motion read's 8 MB reads, the side panel's walk added little. During a
+  step now, up to 2–7 s; between steps 0.2 s. Reading in 2 MB pieces instead of 8 MB made no clear difference (one run
+  each: catalog worst 2.7 s against 2.1 s, video p95 69 ms against 24 ms), so it stays 8 MB.
+- Held to a slower share (`--throttle`, the clip in the Mac's cache): 15 MB/s (1.3× the video's rate): waited 3 s once,
+  nothing unstabilized; 8 MB/s (slower than the video): waited 40 s of 60, nothing unstabilized or unsettled played;
+  a seek from 10 s to 100 s at 15 MB/s waited for its stretch (27 s, before `urgent`), then played stabilized; back to
+  5 s: instant; an A-B loop of 12–30 s: never waited.
+- A seek on the NAS, cold, with the video and the catalog (from 20 s to 110 s): waited 5.4 s for its stretch (as long
+  as opening the clip there), then played stabilized to the end.
+
+### Known limits (not done here)
+
+- A seek that comes while a step is being read waits for that step first (the server reads a clip's motion data one
+  stretch at a time): up to a step's time more, ~4–10 s on the NAS (seen: 8 s more at 30 MB/s). Making a gentle read
+  give way to an urgent one is the follow-up.
+- Each step re-parses all the motion data read so far (~1 s for 2 minutes of 4K60 on an M1 Pro): fine for clips of a
+  few minutes, grows with longer ones.
+- Every new table is a new shader file for mpv (~15 MB of text for this clip). The one swap before cost ~0.3 s of
+  picture (2026-11-10); with steps it happens ~5 times in two minutes. **Not measured in a live window.**
 
 ## The workspace plugin's walks during playback
 

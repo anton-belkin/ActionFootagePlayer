@@ -97,7 +97,7 @@ fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::P
     let mut j = j.clone();
     let obj = j.as_object_mut()?;
     // A clip's whole table serves a request for the seconds it starts with too (one with them alone isn't kept)
-    for k in ["still_control", "edges_control", "workers", "lookahead", "start", "until", "full"] { obj.remove(k); }
+    for k in ["still_control", "edges_control", "workers", "lookahead", "start", "until", "urgent", "full"] { obj.remove(k); }
     let project = obj.get("project")?.as_str()?.to_string();
     let stamp = |p: &str| std::fs::metadata(p).ok().map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
     let preset = obj.get("preset").and_then(|v| v.as_str()).map(stamp).unwrap_or_default();
@@ -254,7 +254,7 @@ fn serve(sock: &str) {
                 Some(Ok(j)) => {
                     let key = geometry_key(&j);
                     let find = || cache.lock().unwrap().iter().rev().find(|(k, c)| *k == key && c.has(&j)).map(|(_, c)| c.clone());
-                    let mut extends = false;
+                    let mut gentle = false;
                     let loaded = match find() {
                         Some(c) => Ok(c),
                         None => {
@@ -264,11 +264,13 @@ fn serve(sock: &str) {
                                 Some(c) => Ok(c),
                                 None => {
                                     let (range, prev) = stretch_to_load(&cache.lock().unwrap(), &key, &j);
-                                    extends = prev.is_some();
+                                    let extends = prev.is_some();
                                     let t = Instant::now();
-                                    // Ahead of where it plays, the clip's video read from the same share meanwhile: gently
+                                    // Ahead of where it plays, the clip's video read from the same share meanwhile: gently;
+                                    // what playback waits for (a seek: "urgent") at full speed
+                                    gentle = extends && !j.get("urgent").and_then(|v| v.as_bool()).unwrap_or(false);
                                     let load = || gpu_table::PlayerClip::load_range(&j, range, prev);
-                                    let r = if extends { vs_gyroflow::motion::gently(load) } else { load() };
+                                    let r = if gentle { vs_gyroflow::motion::gently(load) } else { load() };
                                     if let Ok(c) = &r {
                                         log::info!("gyroflow-gpu-table server: {} {:?} in {:.0} ms", if extends { "extended to" } else { "loaded" }, c.covers, t.elapsed().as_secs_f64() * 1000.0);
                                     }
@@ -288,7 +290,7 @@ fn serve(sock: &str) {
                             if let Some(i) = list.iter().position(|(k, e)| *k == key && Arc::ptr_eq(e, &c)) { let e = list.remove(i); list.push(e); }
                             drop(list);
                             // A stretch extended as it plays: its table built gently
-                            if extends { vs_gyroflow::motion::gently(|| player_shader(&c, &j, &out, t)) } else { player_shader(&c, &j, &out, t) }
+                            if gentle { vs_gyroflow::motion::gently(|| player_shader(&c, &j, &out, t)) } else { player_shader(&c, &j, &out, t) }
                         }
                         Err(e) => serde_json::json!({ "error": e }),
                     }
@@ -303,7 +305,7 @@ fn serve(sock: &str) {
 }
 
 /// Requests this close to the stretch a clip has (s) extend it, the motion data between read too; farther off (a seek
-/// far ahead or back) a stretch of their own
+/// far ahead or back), or apart from it when playback waits for them ("urgent"), a stretch of their own
 const JOIN_S: f64 = 60.0;
 
 /// The stretch to load for a request no loaded clip covers: the one it asks for, taken together with the stretch the
@@ -314,8 +316,10 @@ fn stretch_to_load(cache: &[(String, std::sync::Arc<gpu_table::PlayerClip>)], ke
     let (want, whole) = gpu_table::motion_range(j);
     if is_project || whole || j.get("start").is_none() { return (if is_project { None } else { want }, None); }
     let Some((c, d)) = want else { return (None, None) };
+    // What playback waits for (a seek, "urgent"): joined only where they overlap, no gap read meanwhile
+    let join = if j.get("urgent").and_then(|v| v.as_bool()).unwrap_or(false) { 0.0 } else { JOIN_S };
     let prev = cache.iter().rev().filter(|(k, _)| k == key).map(|(_, p)| p)
-        .find(|p| p.covers.is_some_and(|(a, b)| c <= b + JOIN_S && d >= a - JOIN_S));
+        .find(|p| p.covers.is_some_and(|(a, b)| c <= b + join && d >= a - join));
     match prev {
         Some(p) => {
             let (a, b) = p.covers.unwrap();
