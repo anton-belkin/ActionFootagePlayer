@@ -227,7 +227,7 @@ done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
-cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua "$panel/"
+cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
 cp mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
