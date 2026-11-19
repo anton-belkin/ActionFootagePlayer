@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 # The live-photo plugin in a player without a window (mpv --vo=null, driven over IPC): a live photo opens as its
 # still, the hover over the Live icon and Space held play its live part and give the still back, the run carries on
-# into the photos taken right after it and rests on the one it got to, a plain photo has no icon.
+# into the photos taken right after it and rests on the one it got to, a plain photo has no icon. Opened as a list from
+# the Library (an .afplist.m3u8 as library/src/main.rs writes it, read by workspace/librarylist.lua): the photo at its
+# place in it, the run's neighbours from the list (not the folder), and it rests on a photo of the list.
 #
 #   python3 tests/live_photo_ipc.py <folder of live photos taken in a row> [<a plain photo>]
 #
@@ -26,11 +28,18 @@ def expect(what, ok, detail=""):
     else:
         print(f"ok   {what} {detail}")
 
+# The workspace plugin's list reader alone (the rest of that plugin needs the app's tools)
+LISTER = """package.path = %r .. "/mpv/scripts/workspace/?.lua;" .. package.path
+require('librarylist').install(require('mp'))
+"""
+
 class Player:
     def __init__(self, path):
         if os.path.exists(SOCK): os.remove(SOCK)
+        lister = os.path.join(tempfile.mkdtemp(), "librarylist_only.lua")
+        open(lister, "w").write(LISTER % REPO)
         self.p = subprocess.Popen([MPV, "--no-config", "--vo=null", "--ao=null", "--idle=yes", "--autocreate-playlist=filter",
-                                   f"--script={REPO}/mpv/scripts/live-photo", f"--input-ipc-server={SOCK}", path],
+                                   f"--script={REPO}/mpv/scripts/live-photo", f"--script={lister}", f"--input-ipc-server={SOCK}", path],
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         for _ in range(100):
             try:
@@ -123,6 +132,27 @@ def main():
     expect("rests on the photo it got to", p.wait(lambda: os.path.basename(p.get("path") or "") == os.path.basename(chain[-1])
                                                 and p.photo().get("playing") is False, 5), str(p.get("path")))
     p.quit()
+
+    # A list from the Library: the first photo and the third only (the second left out, as a filter would): the run goes
+    # from the first to the third when their live parts overlap, and stays in the list
+    if len(photos) >= 3:
+        d = tempfile.mkdtemp()
+        lst = os.path.join(d, "1.afplist.m3u8")
+        items = [photos[0], photos[2]]
+        open(lst, "w").write("#EXTM3U\n#PLAYLIST:Test\n#AFP-START:0\n" + "".join(f"#EXTINF:-1,{os.path.basename(x)}\n{x}\n" for x in items))
+        r = Player(lst)
+        expect("list: the photo opened, as a still", r.wait(lambda: r.photo().get("live") is True and os.path.basename(r.get("path") or "") == os.path.basename(items[0])),
+               str(r.get("path")))
+        expect("list: the playlist is the list", r.get("playlist-count") == 2, str(r.get("playlist-count")))
+        run = [os.path.basename(c["path"]) for c in r.dump().get("chain", [])]
+        print("     list run:", " -> ".join(run))
+        expect("list: neighbours from the list", os.path.basename(photos[1]) not in run, str(run))
+        r.cmd("script-message", "live-photo-view", "play")
+        r.wait(lambda: r.photo().get("playing") is True, 3)
+        r.wait(lambda: r.photo().get("playing") is False, 4 * len(run) + 5)
+        expect("list: rests on a photo of the list", r.wait(lambda: os.path.basename(r.get("path") or "") == run[-1], 5)
+               and r.get("playlist-count") == 2, f"{r.get('path')} {r.get('playlist-count')}")
+        r.quit()
 
     if plain:
         q = Player(plain)

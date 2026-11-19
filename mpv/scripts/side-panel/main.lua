@@ -1584,15 +1584,24 @@ end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    -- Photos too (the live-photo plugin shows them); a Live Photo's .mov is out of the playlist already
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played, tl.set_of(mp.get_property_native("image-exts")))
+    -- A list opened from Action Footage Library (the workspace plugin's librarylist.lua): all of it, as the Library
+    -- showed it, and what it was. Photos in any list (the live-photo plugin shows them; a Live Photo's .mov is out of
+    -- the playlist already)
+    local lib = tl.library_list(list, mp.get_property_native("user-data/library-list"))
+    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played,
+                                  tl.set_of(mp.get_property_native("image-exts")))
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
-    local dir = tl.common_folder(list)
+    local dir = not lib and tl.common_folder(list)
+    if lib then
+        u:text(x, y + 9 * s, fit_end(lib.label ~= "" and lib.label or "Action Footage Library", w, 13, s), { size = 13, bold = true })
+        y = u:caption(x, w, y + 20 * s, (#rows == 1 and "1 item" or (#rows .. " items")) .. " as the Library showed them") + 6 * s
+    else
     if dir and local_file(dir) then
         u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
         y = y + 20 * s
     end
     y = u:caption(x, w, y, tl.rows_label(rows)) + 6 * s
+    end
     for _, r in ipairs(rows) do
         if r.current and reveal and u.clip then
             reveal = false

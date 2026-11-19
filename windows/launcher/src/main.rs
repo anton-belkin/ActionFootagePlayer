@@ -322,7 +322,10 @@ mod ipc {
     // opened together). False when no mpv of the app's is running, or it was quitting and didn't play them
     pub fn send_videos(videos: &[&OsString]) -> bool {
         let Some(mut pipe) = connect() else { return false };
-        let together = std::fs::metadata(started_file()).and_then(|m| m.modified()).ok()
+        // A list from Action Footage Library (<its cache>\lists\<time>.afplist.m3u8: what it showed, as the playlist)
+        // always takes the place of what plays: another double-click there right after the first is a new list
+        let library_list = videos.len() == 1 && videos[0].to_string_lossy().to_lowercase().ends_with(".afplist.m3u8");
+        let together = !library_list && std::fs::metadata(started_file()).and_then(|m| m.modified()).ok()
             .and_then(|t| t.elapsed().ok()).is_some_and(|age| age < TOGETHER);
         let mut commands = String::new();
         for (i, video) in videos.iter().enumerate() {

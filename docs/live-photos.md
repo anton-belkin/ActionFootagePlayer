@@ -68,8 +68,9 @@ How well it lines up, measured by matching the videos' frames to each other:
 
 ## Opening photos
 
-- **Library**: a double click (or Open) on any photo opens it in the player, like a clip; several selected open as one
-  playlist.
+- **Library**: a double click (or Open) on a photo opens it in the player like a clip: in the list the window shows
+  (the Library's list as the playlist, `workspace/librarylist.lua`), at its place, photos and videos together. The run
+  of a live photo then goes through that list's photos, not the folder's.
 - **Finder**: the Quick Action **Play Live Photo** (for images; installed with the others by `setup.sh quick-actions`
   into `~/Library/Services`). The player is not made the default app for HEIC or JPEG.
 - **Windows Explorer**: **Play Live Photo** in the menu of `.heic`, `.jpg` and `.jpeg` files (on Windows 11 under
