@@ -1084,11 +1084,11 @@ local function save(name, update, typed, quiet, opts)
         v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
-    -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
+    -- An update keeps the moment's tags, pick, stars and comment (the Library's) from its file's earlier link
     if update then
         local old = utils.parse_json(fs.read_link(update.file) or "")
         -- (not what the stores agreed on: the new file has no Finder tags yet, the next sync puts them on)
-        if type(old) == "table" then l.tags, l.rating, l.pick = old.tags, old.rating, old.pick end
+        moments_lib.carry(old, l)
     end
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
     -- own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the

@@ -1682,6 +1682,19 @@ async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProb
     }).await.map_err(|e| e.to_string())
 }
 
+// The free-text comment of the selection (docs/tags-and-culling.md, "The comment"): the same text on each of `items`,
+// None or empty: taken out
+#[tauri::command]
+async fn set_comment(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, comment: Option<String>) -> Result<changed::Changed, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let tool = link_tool();
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let problems = tags::set_comment(&root, &items, comment.as_deref(), &|f, l| write_link(tool.as_ref(), f, l));
+        changed::of_items(&root, &items, problems).with_probes(&probes)
+    }).await.map_err(|e| e.to_string())
+}
+
 // The selection (none: every original and moment) synced with the library's tag stores: what changed in Finder comes in
 #[tauri::command]
 async fn sync_tags(shared: State<'_, Shared>, items: Option<Vec<Value>>) -> Result<Value, String> {
@@ -1922,13 +1935,14 @@ fn good_name(name: &str) -> Result<String, String> {
 // Photo's video with it), an export, a folder of moments, clip previews, photos or exports (_Renders' with _Moments').
 // Footage isn't renamed here: Finder renames it, and Find moved files then follows
 #[tauri::command]
-async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
+async fn rename_item(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, view: String, kind: String, path: String, name: String) -> Result<changed::Changed, String> {
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
         let to = rename_in(&root, &view, &kind, &path, &name)?;
+        thumbs_follow(&app, vec![(path.clone().into(), to.clone().into())]);
         // What it is now, and that the old name is gone (changed.rs); its new path is the answer
         Ok(changed::of_rename(&root, &view, &kind, Path::new(&path), &to).with_probes(&probes))
     }).await.map_err(|e| e.to_string())?
@@ -1938,13 +1952,22 @@ async fn rename_item(shared: State<'_, Shared>, probes: State<'_, index::SharedP
 /// When one can't be, the ones renamed already get their old name back, and nothing is changed (the window then
 /// shows the album as it was, whole); the folders are read again after it, as for a folder renamed
 #[tauri::command]
-async fn rename_album(shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
+async fn rename_album(app: tauri::AppHandle, shared: State<'_, Shared>, paths: Vec<String>, name: String) -> Result<changed::Changed, String> {
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<changed::Changed, String> {
         let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
         let to = rename_album_in(&root, &paths, &name)?;
+        thumbs_follow(&app, paths.iter().map(PathBuf::from).zip(to.iter().map(PathBuf::from)).collect());
         Ok(changed::Changed { answer: json!(to), ..Default::default() }.reload_all())
     }).await.map_err(|e| e.to_string())?
+}
+
+/// Files or folders renamed or moved (from, to): the pictures the Library keeps of them follow (index::thumbs_follow),
+/// in the background: the command answers meanwhile, and the window has them already (app.js's thumbFollows)
+pub(crate) fn thumbs_follow(app: &tauri::AppHandle, moved: Vec<(PathBuf, PathBuf)>) {
+    let Ok(dir) = app.path().app_cache_dir() else { return };
+    let cache = dir.join("thumbs");
+    std::thread::spawn(move || for (a, b) in moved { index::thumbs_follow(&cache, &a, &b); });
 }
 
 pub(crate) fn rename_album_in(root: &Path, paths: &[String], name: &str) -> Result<Vec<String>, String> {
@@ -2757,7 +2780,7 @@ fn main() {
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
                                                  thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
-                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
+                                                 choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, set_comment, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
                                                  rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])

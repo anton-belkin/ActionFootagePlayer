@@ -111,7 +111,12 @@ button.chip{cursor:pointer}
 .tagb.some{border-color:var(--accent-line);color:var(--accent-deep)}
 .tagb.sys.on{background:var(--sy-bg);border-color:var(--sy-line);color:var(--sy)}
 .tagb:hover:not([disabled]){border-color:var(--accent)}
-.culltags{max-height:156px;overflow:auto}
+.culltags{overflow:auto}
+/* The Tags part fills the panel's height; the tags in use take what's left of it and scroll only when they don't fit
+   in that (a long list keeps about three rows; past that, the panel itself scrolls; a short one never shrinks) */
+.pane[data-tab="tags"] > .secb{flex:1 1 auto;min-height:0}
+.pane[data-tab="tags"] > .secb > *{flex:none}
+.pane[data-tab="tags"] > .secb > .culltags.many{flex:0 1 auto;min-height:84px}
 .tagwrap{position:relative}
 .tagsugg{position:absolute;left:0;right:0;top:calc(100% + 2px);z-index:5;background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.16);padding:4px;display:flex;flex-direction:column}
 .tagsugg button{border:0;background:transparent;text-align:left;padding:5px 8px;border-radius:5px;min-height:26px;color:var(--fg);cursor:pointer}
@@ -278,7 +283,7 @@ button.chip{cursor:pointer}
 .off .th{opacity:.45}
 /* An item still being written (albums.js): its picture is the page's meanwhile, a moment until the app's comes */
 .pending .th{opacity:.6}
-.pending .th::after{content:"";position:absolute;inset:auto 6px 6px auto;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85;animation:pendingPulse 1.2s ease-in-out infinite}
+.pending .th::after{content:"";position:absolute;inset:6px 6px auto auto;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85;animation:pendingPulse 1.2s ease-in-out infinite}
 @keyframes pendingPulse{50%{opacity:.25}}
 @media (prefers-reduced-motion: reduce){.pending .th::after{animation:none}}
 .rlist{display:flex;flex-direction:column;gap:2px;margin-top:8px;width:100%}
@@ -439,3 +444,30 @@ span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
 .ffind:focus{border-color:var(--accent-line)}
 .fnone{padding:2px 6px 4px 42px;font-size:12px;color:var(--muted)}
 .mbar>.head{padding:6px 23px}
+/* The comment on the Tags part (culling.js): three lines, grows by hand; its label as the others' */
+.lab label{font:inherit;color:inherit}
+.cullnote{box-sizing:border-box;width:100%;min-height:62px;resize:vertical;border:1px solid var(--line);border-radius:7px;padding:6px 8px;font:inherit;font-size:13px;line-height:1.35;background:var(--surface);color:var(--fg);outline:0}
+.cullnote:focus{border-color:var(--accent-line)}
+.cullnote:disabled{opacity:.55}
+.cullnote::placeholder{color:var(--muted)}
+/* The tile (tiles.js): the picture with its marks over it, under it only the albums (two lines at most) and the tag icon */
+.card.tile{gap:4px}
+.tile .th{container-type:size}
+.th .kd{position:absolute;left:4px;top:4px;height:20px;min-width:20px;padding:0 3px;box-sizing:border-box;border-radius:5px;background:rgba(0,0,0,.5);color:#FFFFFF;display:flex;align-items:center;justify-content:center}
+.th .kd.tx{font-size:10px;font-weight:650;padding:0 5px;letter-spacing:.02em}
+.th .pb{position:absolute;right:4px;top:4px;height:20px;width:22px;border-radius:5px;background:rgba(0,0,0,.55);color:#FFC24A;display:flex;align-items:center;justify-content:center}
+.tile .cap{display:flex;align-items:flex-start;gap:4px;min-height:15px;font-size:12px;line-height:15px;color:var(--fg2)}
+.tile .alb{flex:1;min-width:0;display:flex;flex-direction:column}
+.tile .al{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tile .tg{flex:none;width:14px;height:15px;display:flex;align-items:center;color:var(--fg2)}
+.tile .renamer{margin-top:1px}
+/* A picture taller than wide, and one turned a quarter (the clip's own turn: tiles.js), shown whole in the tile */
+.tile .th img.tall{object-fit:contain}
+.th,.mosaic i,.ith{container-type:size}
+.mosaic i{position:relative;overflow:hidden}
+img.t180{transform:rotate(180deg)}
+img.t90,img.t270{position:absolute;left:50%;top:50%;width:100cqh !important;height:100cqw !important;max-width:none}
+img.t90{transform:translate(-50%,-50%) rotate(90deg)}
+img.t270{transform:translate(-50%,-50%) rotate(270deg)}
+.tile .th img.t90,.tile .th img.t270,.ith img.t90,.ith img.t270{object-fit:contain}
+.ith{position:relative}

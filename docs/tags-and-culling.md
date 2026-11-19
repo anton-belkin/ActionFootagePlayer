@@ -168,6 +168,38 @@ stays on across the tabs and is remembered on this computer. **★ first** besid
 
 A change shows at once and is written behind it, one after another; the view is read again after the last one.
 
+## The comment
+
+Anton, 2026-11-19: a few lines on what happens in a clip, written in the Library after watching (often for several
+files in a row), found by the search. Not in the player: it shows and sets nothing of it.
+
+- **On the same items as tags** (originals, moments, stills; never clip previews or exports), **kept with each where
+  its tags are**: `"comment": "…"` in an original's own file, a moment's link, a still's link (`afp:link` in its XMP;
+  one older than the links gets one). Absent: none. Lines end as `\n`, spaces at both ends off, at most 4000
+  characters (`src/tags.rs` `set_comment`).
+- **The catalog keeps it without knowing it**: it isn't in `OWN_KEPT`; a clip's own file's other fields go through as
+  they are since #249 (`own_kept`), a link and a photo's link are kept whole. So the project's version stays 4: the
+  NAS Helper and any program since 2026-11-17 keep it; older ones refuse a version-4 project already.
+- **The player keeps it**: a sidecar is read, a part changed, the rest written back; a file holding only a comment is
+  not removed (`sidecar.lua`); a moment saved again with a new in and out carries it (`moments.lua` `carry`).
+- **No other store**: not synced to Finder (Finder's own *Comments* field, `kMDItemFinderComment`, could be one later).
+
+**In the Library**, on the Tags part between Stars and Tags: a three-line field.
+
+- One item: its comment. Typed, it's **saved by itself** 0.7 s after the last key, at once when the field is left
+  (another item clicked, another tab), and before the window closes or another project opens. `⌘↩` saves and selects
+  the next one, the field still in front: type, `⌘↩`, type, `⌘↩` through a folder. `Esc` saves and goes back to the
+  list. Enter alone is a new line.
+- Several with **the same comment** (or none): shown, and what's typed goes to all of them, saved as for one.
+- Several with **different comments**: the field is empty and says how many have one; nothing is written until **Set
+  for all N** (or `⌘↩`), which replaces each one's (empty: takes them off). Selecting something else drops what was
+  typed.
+- Elsewhere it shows only as **the tooltip of the item's tile or row**: the tile is left as it is.
+
+**The search** (the field at the top) finds items by it with what it found before (name, camera, colour, folder, date,
+tags): each word typed must be somewhere, in any order, as part of a word, without case, `ё` as `е`. `черепах риф`
+finds a clip with "Черепаха у рифа" in its comment, or with the comment "черепаха" and the tag *Reef*.
+
 ## Keys (player)
 
 | Key | | Was |

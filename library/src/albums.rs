@@ -696,11 +696,15 @@ pub async fn album_add(app: tauri::AppHandle, shared: tauri::State<'_, crate::Sh
 
 /// "Move to an album…": the selected links' files into another album
 #[tauri::command]
-pub async fn album_move(shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>, album: String, files: Vec<String>) -> Result<crate::changed::Changed, String> {
+pub async fn album_move(app: tauri::AppHandle, shared: tauri::State<'_, crate::Shared>, probes: tauri::State<'_, crate::index::SharedProbes>, album: String, files: Vec<String>) -> Result<crate::changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
     let probes = probes.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || move_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()).map(|v| changed_of(&root, v, &probes)))
-        .await.map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || move_to(&root, &album, &files.iter().map(PathBuf::from).collect::<Vec<_>>()).map(|v| {
+        // The pictures of what moved follow it
+        let moved = v["items"].as_array().into_iter().flatten().filter_map(|x| Some((PathBuf::from(x[1].as_str()?), PathBuf::from(x[2].as_str()?)))).collect();
+        crate::thumbs_follow(&app, moved);
+        changed_of(&root, v, &probes)
+    })).await.map_err(|e| e.to_string())?
 }
 
 /// "Add to another album…" for moments and photos: a copy of each link file there
