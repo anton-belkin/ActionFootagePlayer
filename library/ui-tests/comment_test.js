@@ -138,7 +138,11 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   expect("different, typed, then another selection: dropped", [comments().length, shown(1), shown(2)], [b2, "Риф с черепахой", "Дельфины далеко"]);
 
   // The comment as the tile's tooltip
-  expect("the tile's tooltip is its comment", q('#main [data-v="' + w.CSS.escape(clipKey(2)) + '"]').getAttribute("title"), "Дельфины далеко");
+  expect("the row's tooltip is its comment", q('#main [data-v="' + w.CSS.escape(clipKey(2)) + '"]').getAttribute("title"), "Дельфины далеко");
+  ev("S.layout = 'grid'; renderAll()");
+  const tile = q('#main [data-v="' + w.CSS.escape(clipKey(2)) + '"]');
+  expect("…and the grid tile's (tiles.js), the tile otherwise as it was", [tile.classList.contains("tile"), tile.getAttribute("title"), tile.textContent.includes("Дельфины")], [true, "Дельфины далеко", false]);
+  ev("S.layout = 'list'; renderAll()");
 
   // The search, over the whole of Originals
   const found = (text) => { ev("S.path = []; S.sel = {}; S.q = " + JSON.stringify(text) + "; renderAll()"); return ev("VISIBLE.slice()").map((k) => M.clips.findIndex((c) => "i:s:" + c.id === k)).filter((i) => i >= 0).sort(); };
