@@ -2,7 +2,7 @@
 # Every Lua module the player's plugins require is in the app and the install: starting from each plugin's main.lua
 # (mpv/scripts/<plugin>/main.lua), every `require 'x'`, `require('x')` and `pcall(require, 'x')` is followed to its
 # file (the plugin's own folder first, then another plugin's: some reach a neighbour's through package.path), and that
-# file must be one tools/make_app.sh, tools/make_windows_app.sh and install.sh copy. mpv's own modules (mp, mp.*) aside;
+# file must be one tools/make_app.sh, tools/make_windows_app.sh and install.sh copy. mpv's own modules (mp, mp.*) and LuaJIT's aside;
 # a plugin a packager doesn't ship at all (sdr-check: the macOS app's alone) is that packager's choice.
 # A module missing from them leaves the built app's plugin failing to load (ahead.lua, PR #272).
 # From the repository's folder: python3 tests/packaging_test.py
@@ -12,6 +12,8 @@ import os, re, sys
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')
 SCRIPTS = os.path.join(ROOT, 'mpv', 'scripts')
 PACKAGERS = ['tools/make_app.sh', 'tools/make_windows_app.sh', 'install.sh']
+# LuaJIT's and Lua's own
+BUILTIN = {'ffi', 'bit', 'jit', 'string', 'table', 'math', 'io', 'os', 'coroutine', 'debug', 'package', 'utf8'}
 REQUIRE = re.compile(r"""(?:\brequire\s*\(?\s*|pcall\s*\(\s*require\s*,\s*)['"]([\w.]+)['"]""")
 
 def module_file(plugin, name):
@@ -34,7 +36,7 @@ def needed(text):
             out.add(f)
             code = re.sub(r'--[^\n]*', '', open(f, encoding='utf-8').read())   # not the ones in comments
             for name in REQUIRE.findall(code):
-                if name == 'mp' or name.startswith('mp.'): continue
+                if name == 'mp' or name.startswith('mp.') or name in BUILTIN: continue
                 m = module_file(plugin, name)
                 if m: todo.append(m)
                 else: missing.append(f'{os.path.relpath(f, ROOT)}: require {name!r}: no such file')
