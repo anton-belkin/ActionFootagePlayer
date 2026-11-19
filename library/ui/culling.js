@@ -120,6 +120,8 @@ function cullRenderSugg() {
     if (CULL.sugg >= 0 && !el.hidden) inp.setAttribute("aria-activedescendant", "tagsugg" + CULL.sugg); else inp.removeAttribute("aria-activedescendant");
   }
 }
+// Up to this many tags in use: their list is never made smaller than it is (about three rows of chips at most)
+const CULL_FEW_TAGS = 9;
 function cullBody(c) {
   // Exports alone selected (in Albums → Other folders → _Exports)
   if (c.selItems.length && c.selItems.every((it) => it.kind === "export")) return '<p class="sub wrap">Exports aren’t kept, rejected, rated or tagged: they’re made of moments, which are. Select moments, clips or photos.</p>';
@@ -143,7 +145,7 @@ function cullBody(c) {
   h += cullNoteHtml(c, list);
   // The tags in use, the most used first; the app's own only when the selection has it
   const used = cullTagsInUse().filter((t) => t.name !== SYS_TAG || list.some((it) => hasTag(it, t.name)));
-  h += '<div class="lab">Tags</div><div class="chips culltags" role="group" aria-label="Tags in use">' + (used.length ? used.map((t) => {
+  h += '<div class="lab">Tags</div><div class="chips culltags' + (used.length > CULL_FEW_TAGS ? " many" : "") + '" role="group" aria-label="Tags in use">' + (used.length ? used.map((t) => {
     const k = list.filter((it) => hasTag(it, t.name)).length, p = cullPart(k, st.n);
     return '<button type="button" class="chip tagb' + (t.name === SYS_TAG ? " sys" : "") + (p === "all" ? " on" : p === "some" ? " some" : "") + '" data-c="tag" data-v="' + esc(t.name) + '" aria-pressed="' + cullPressed(p) + '" title="' +
       esc(p === "all" ? "On all of the selection: a click takes it off" : p === "some" ? "On " + k + " of " + st.n + ": a click puts it on all" : "Used on " + t.n + " in the library: a click puts it on the selection") + '"' + dis + '>' + esc(t.name) + '</button>';
