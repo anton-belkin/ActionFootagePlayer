@@ -837,6 +837,32 @@ crop.init({
     focal = function() return gpu and gpu.focal end,
 })
 
+-- A photo link playing (the workspace plugin's photo, the live-photo plugin's still): its own frame, as Share renders
+-- it: Save frame's camera (crop.view) and its crop, in shares of the frame, as mpv's video-crop of the picture shown
+;(function()
+    local function apply()
+        local ws = mp.get_property_native("user-data/workspace")
+        local ph = type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.photo) == "table" and ws.photo or nil
+        crop.view(ph and type(ph.camera) == "table" and ph.camera or nil)
+        local c = ph and type(ph.crop) == "table" and ph.crop
+        local o = mp.get_property_native("video-out-params")
+        if c and type(o) == "table" and o.w and o.h then
+            mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d",
+                math.floor(c.w * o.w + 0.5), math.floor(c.h * o.h + 0.5), math.floor(c.x * o.w + 0.5), math.floor(c.y * o.h + 0.5)))
+        end
+        return c ~= nil and not (type(o) == "table" and o.w)
+    end
+    mp.register_event("file-loaded", function()
+        -- Its crop once the picture's size is known (after the filters)
+        if apply() then
+            local function once(_, o)
+                if type(o) == "table" and o.w then mp.unobserve_property(once); apply() end
+            end
+            mp.observe_property("video-out-params", "native", once)
+        end
+    end)
+end)()
+
 -- The upright source's ratio, W:H reduced
 local function source_aspect()
     local src = current_source

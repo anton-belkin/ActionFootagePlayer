@@ -507,6 +507,23 @@ end
 
 function M.active() return active end
 
+-- A camera of its own for what plays, outside crop mode: a photo link's (Save frame's camera, kept in its link), so
+-- the clip shows as Share renders the link (gyroflow-export --camera). In the warp's parameters (the GPU path: kept
+-- there for the shader when it comes) and in the control file (the filter's: the paused frame rendered again with
+-- it). nil: none again
+function M.view(c)
+    if active then return end
+    if not c and not cam then return end
+    cam = c and { yaw = tonumber(c.yaw) or 0, pitch = tonumber(c.pitch) or 0, roll = tonumber(c.roll) or 0, zoom = tonumber(c.zoom) or 1 } or nil
+    written, shown, refreshing, renders = copy(cam), copy(cam), nil, {}
+    hooks.camera(cam)
+    hooks.write()
+    if mp.get_property_native("pause") and not gpu_mode() and stabilizing() then
+        local t = mp.get_property_number("time-pos")
+        if t then mp.commandv("seek", tostring(t), "absolute+exact") end
+    end
+end
+
 -- For the control file: the camera written last (write_now), while there's one
 function M.control_words()
     if not cam or not written then return "" end
