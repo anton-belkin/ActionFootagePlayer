@@ -51,6 +51,8 @@ options.read_options(o, "side_panel")
 local C = ui.C
 local RAIL, PANEL, HEADER, FOOTER, PAD = 48, 292, 44, 56, 16
 local platform = mp.get_property("platform") or ""
+-- Option/Alt+arrows a frame, Cmd (Ctrl)+arrows the playlist's items (navkeys.lua): before the keys are read below
+require('navkeys').install(mp, platform == "darwin")
 local WEBSITE = "https://actionfootageplayer.ch"
 local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"

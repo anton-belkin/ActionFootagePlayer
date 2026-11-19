@@ -80,6 +80,7 @@ jobs:
           luajit tests/journal_test.lua
           python3 tests/journal_report_test.py
           luajit tests/timeline_test.lua
+          luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/notify_test.lua
