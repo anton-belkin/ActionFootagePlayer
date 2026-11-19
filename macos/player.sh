@@ -77,7 +77,9 @@ if [ -z "${AFP_BATCH:-}" ] && [ ! -t 1 ]; then
     if mkdir -p "$logs" 2>/dev/null; then
         ls -t "$logs"/player-*.log 2>/dev/null | tail -n +5 | while IFS= read -r stale; do rm -f "$stale"; done
         log="$logs/player-$(date +%Y%m%d-%H%M%S)-$$.log"
-        set -- --msg-level=all=v,cplayer=debug --msg-time --quiet "$@"
+        # --terminal=yes last: opened from Finder or the Library the player is in pseudo-gui mode, whose profile turns
+        # the terminal output off, and the log stopped right there, 8 KB in
+        set -- --msg-level=all=v,cplayer=debug --msg-time --quiet "$@" --terminal=yes --input-terminal=no
     fi
 fi
 contents="$app/Contents"
