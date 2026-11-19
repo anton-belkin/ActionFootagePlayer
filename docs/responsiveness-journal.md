@@ -77,8 +77,10 @@ through, so a new key, button or command is covered without a line of its own:
   (mount's list of smbfs/nfs/afpfs shares), a single one ≥ 50 ms as a step of its own with its path.
 - The stabilization applied: `warp-set` (the GPU warp in mpv's shader list), `vf-set` (the VapourSynth filter),
   `gpu-table` reused, `unhold` (the GPU path's black hold over), each with a `picture` show.
-- On screen: any OSD overlay drawn (`overlay:<plugin>`: the panel, the bar, the 360 view, the cards of #259 once
-  merged), any OSD message.
+- On screen: any OSD overlay drawn (`overlay:<plugin>`: the panel, the bar, the 360 view), any OSD message. The side
+  panel's cards and name dialog (`mp.notify`, `mp.ask`, docs/notifications.md) say whose they are: notify_client.lua
+  sends the asking plugin's action id with each, and notify.lua records `card:working`, `card:done`, `card:error`,
+  `card:info` or `dialog` for that action once it's drawn — so a moment saved is "k → dialog", then "Enter → card:done".
 
 **Library**
 - The start: the process starting → the page starting → DOM ready → the first screen settled (`library/start`).
@@ -89,7 +91,9 @@ through, so a new key, button or command is covered without a line of its own:
   record of its own. The page's `render*`/`load*`/`derive*`/`apply*`/`show*` functions the same.
 - Pictures (`<img>` loads) per action: the first, the last, how many. `paint`: the frame after the action's handlers;
   `settled`: the frame after its last command answered and was handled.
-- Double-click → `open_items` → the player's first frame, as one action across both (`dblclick:pick → player`).
+- Double-click → the Library's list as the player's playlist (`open_list`, its `.afplist.m3u8`) or one item
+  (`open_items`) → the player's first frame, as one action across both (`dblclick:pick → player`): the handoff names
+  the list file and the item, the player takes it at whichever it opens first.
 - Batches: `job-added` (with the asking action), `job-start`, and the batch player's own journal.
 - The app's steps: `catalog-wait`, `scan` (items, NAS or local), `open_project`, `project_info`, a picture made or
   read ≥ 20 ms (`thumb`).
@@ -162,7 +166,7 @@ is something only the code knows:
   going on, `J.act("name")` for one started without a key. In a plugin at Lua's 200-locals limit (workspace, gyroflow)
   use `package.loaded.journal` instead of a local.
 - Page: `Journal.act(name)`, `Journal.step(name, { d })`; a command that must tell another process which action it
-  serves goes in `HANDS_ON` (journal.js) and takes `journal: Option<String>`.
+  serves goes in `HANDS_ON` (journal.js: open_items, open_list, add_job) and takes `journal: Option<String>`.
 - App (Rust): `journal::step("name", json!({ "d": ms, "where": journal::where_(path) }))` or
   `let _s = journal::span("name", json!({...}));`.
 

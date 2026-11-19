@@ -69,23 +69,26 @@ test("a keystroke in the search box: its action, the list drawn in its handler",
   assert.ok(done.parts["render:renderMain"], "the list drawn, timed as its step");
 });
 
-test("a double-click: open_items carries the action's id (the player's first frame is its result)", async () => {
-  const { page, records } = await start();
+test("a double-click: the list sent to the player carries the action's id (the player's first frame is its result)", async () => {
+  const { page, records } = await start({ commands: { open_list: () => true } });
   await ended(page);
   page.get('S.path = ["Day 1"]; renderAll()');
   await ended(page);
   const row = page.row("Day 1/A.MP4");
-  row.dispatchEvent(new page.window.MouseEvent("dblclick", { bubbles: true, cancelable: true }));
-  await page.until(() => page.calls("open_items").length === 1);
+  row.dispatchEvent(new page.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+  // (the Library's list as the playlist, open_list; one item by itself, open_items)
+  const opened = () => page.calls("open_list").concat(page.calls("open_items"));
+  await page.until(() => opened().length === 1);
   await ended(page);
   const rs = await records();
   const act = rs.find((r) => r.k === "act" && r.n === "dblclick:pick");
   assert.ok(act);
-  assert.equal(page.calls("open_items")[0].args.journal, act.a);
+  const call = opened()[0];
+  assert.equal(call.args.journal, act.a);
   // The other commands don't get it
   assert.ok(page.calls("scan").every((c) => !c.args || c.args.journal === undefined));
   const done = rs.find((r) => r.k === "done" && r.a === act.a);
-  assert.ok(done.parts["invoke:open_items"]);
+  assert.ok(done.parts["invoke:" + call.cmd]);
 });
 
 test("a slow command is a record of its own; a failing one is said", async () => {
