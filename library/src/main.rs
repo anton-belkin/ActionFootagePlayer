@@ -18,6 +18,8 @@ mod changed;
 mod checks;
 mod geo;
 mod index;
+// The responsiveness journal (docs/responsiveness-journal.md)
+mod journal;
 mod locations;
 mod renders;
 mod seen;
@@ -587,7 +589,7 @@ fn player() -> Result<PathBuf, String> {
     }
 }
 
-fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
+fn start_player(request: &Path, log: &Path, job: u64) -> Result<Child, String> {
     let player = player()?;
     let mut cmd;
     if cfg!(windows) {
@@ -605,6 +607,8 @@ fn start_player(request: &Path, log: &Path) -> Result<Child, String> {
             .arg(format!("--log-file={}", log.display()));
     }
     cmd.env("AFP_BATCH", request).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    // Its journal says which job of this run it is
+    if let Some(parent) = journal::parent_env(job) { cmd.env("AFP_JOURNAL_PARENT", parent); }
     cmd.spawn().map_err(|e| format!("Couldn't start {}: {e}", player.display()))
 }
 
@@ -657,7 +661,8 @@ fn start_job(inner: &mut Inner) {
     let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
-        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log) });
+        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log, job.id) });
+    journal::step("job-start", json!({ "job": job.id, "kind": job.kind, "ok": started.is_ok(), "waited_ms": None::<f64> }));
     match started {
         Ok(child) => {
             job.state = JobState::Starting;
@@ -892,6 +897,7 @@ async fn project(shared: State<'_, Shared>) -> Result<Option<ProjectInfo>, Strin
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Option<ProjectInfo> {
     let root = shared.lock().unwrap().project.clone()?;
+    let _s = journal::span("project_info", json!({ "where": journal::where_(&root) }));
     Some(project_info(&root))
 }).await.map_err(|e| e.to_string())
 }
@@ -919,6 +925,7 @@ async fn open_project(app: tauri::AppHandle, shared: State<'_, Shared>, path: St
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+    let _s = journal::span("open_project", json!({ "where": journal::where_(Path::new(&path)) }));
     open_path(&app, &shared, Path::new(&path))
 }).await.map_err(|e| e.to_string())?
 }
@@ -1069,10 +1076,16 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     let cache_file = view_cache(&app, &root, &view);
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
+        let where_ = journal::where_(&root);
         let flat = project_info(&root).clips_layout != "tree";
         // The project's catalog being read (a second or two): waited for, not the disks walked meanwhile (minutes)
+        let t = journal::now();
         seen::wait_ready(&root, std::time::Duration::from_secs(60));
+        journal::step("catalog-wait", json!({ "d": journal::now() - t, "view": view, "where": where_ }));
+        let mut s = journal::span("scan", json!({ "view": view, "where": where_ }));
         let mut out = index::scan(&root, &view, flat);
+        s.add("items", json!(out["items"].as_array().map(Vec::len)));
+        drop(s);
         // Moments whose clip was found away from the path their link names: the path written into the link
         // (docs/library-management.md §8), so the next look, from any computer, finds it at once
         let tool = link_tool();
@@ -1167,7 +1180,14 @@ async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Res
 #[tauri::command]
 async fn thumb(app: tauri::AppHandle, path: String) -> Result<Option<String>, String> {
     let cache = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("thumbs");
-    tauri::async_runtime::spawn_blocking(move || index::thumb(Path::new(&path), &cache)).await.map_err(|e| e.to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        // Journal: a picture that took a while (made, or read from a share), not each one
+        let t = journal::now();
+        let r = index::thumb(Path::new(&path), &cache);
+        let d = journal::now() - t;
+        if d >= 20.0 { journal::step("thumb", json!({ "d": d, "where": journal::where_(Path::new(&path)), "made": r.is_some() })); }
+        r
+    }).await.map_err(|e| e.to_string())
 }
 
 // ---------- the project's settings: its locations, what this computer keeps for it ----------
@@ -2285,7 +2305,7 @@ fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -
 // Done once the player plays the first video (Windows: it says so on its pipe; a clip on a NAS takes seconds), for the
 // window to show it's waiting: false when it didn't within a while
 #[tauri::command]
-async fn open_items(paths: Vec<String>) -> Result<bool, String> {
+async fn open_items(paths: Vec<String>, journal: Option<String>) -> Result<bool, String> {
     if paths.is_empty() { return Ok(true); }
     let (photos, videos): (Vec<String>, Vec<String>) = paths.into_iter().partition(|p| {
         let l = p.to_lowercase();
@@ -2302,6 +2322,8 @@ async fn open_items(paths: Vec<String>) -> Result<bool, String> {
             else { Command::new("xdg-open").arg(p).spawn() };
     }
     let Some(first) = videos.first().cloned() else { return Ok(true) };
+    // The player told which action this is: its first frame is that action's result (journal.lua takes it)
+    journal::handoff(journal.as_deref(), &videos);
     if cfg!(target_os = "macos") {
         Command::new("open").arg("-a").arg(&player).args(&videos).spawn().map_err(|e| e.to_string())?;
         return Ok(true);
@@ -2312,6 +2334,66 @@ async fn open_items(paths: Vec<String>) -> Result<bool, String> {
         .await.map_err(|e| e.to_string());
     #[cfg(not(windows))]
     { let _ = first; Ok(true) }
+}
+
+// The list the window shows, as the player's playlist (the page's playList): an M3U file the player reads into its
+// playlist, from the item opened (`at`); the player's mpv/scripts/workspace/librarylist.lua says how. Opened as a
+// file is, so a running player takes it in place of what it plays (macOS: an Apple Event; Windows: the launcher sends
+// it down the player's pipe), and thousands of items don't go on a command line. Done as open_items is
+#[tauri::command]
+async fn open_list(app: tauri::AppHandle, paths: Vec<String>, titles: Vec<String>, at: usize, label: String, journal: Option<String>) -> Result<bool, String> {
+    let opened = paths.get(at).cloned().ok_or("Nothing to open")?;
+    let Some(text) = list_m3u(&paths, &titles, at, &label) else { return open_items(vec![opened], journal).await };
+    let dir = app.path().app_cache_dir().map_err(|e| e.to_string())?.join("lists");
+    let file = write_list(&dir, &text, std::time::SystemTime::now())?;
+    // The player told which action this is (journal.lua takes it as it opens the list, or the item)
+    journal::handoff(journal.as_deref(), &[file.display().to_string(), opened.clone()]);
+    let player = player()?;
+    #[cfg(windows)]
+    foreground::allow_any();
+    if cfg!(target_os = "macos") {
+        Command::new("open").arg("-a").arg(&player).arg(&file).spawn().map_err(|e| e.to_string())?;
+        return Ok(true);
+    }
+    Command::new(&player).arg(&file).spawn().map_err(|e| e.to_string())?;
+    #[cfg(windows)]
+    return tauri::async_runtime::spawn_blocking(move || player_pipe::wait_playing(&opened, std::time::Duration::from_secs(60)))
+        .await.map_err(|e| e.to_string());
+    #[cfg(not(windows))]
+    { let _ = opened; Ok(true) }
+}
+
+const LIST_EXT: &str = ".afplist.m3u8";
+
+/// The list as an M3U (mpv reads it into its playlist): the label, the item opened, each item's name and path. A path
+/// an M3U can't hold (a line break in it, spaces at its ends, a # first) is left out; None when that's the one opened
+fn list_m3u(paths: &[String], titles: &[String], at: usize, label: &str) -> Option<String> {
+    let one_line = |s: &str| s.replace(['\r', '\n'], " ");
+    let fits = |p: &str| !p.is_empty() && !p.contains(['\r', '\n']) && p.trim() == p && !p.starts_with('#');
+    if !paths.get(at).is_some_and(|p| fits(p)) { return None; }
+    let start = paths[..at].iter().filter(|p| fits(p)).count();
+    let mut out = format!("#EXTM3U\n#PLAYLIST:{}\n#AFP-START:{start}\n", one_line(label));
+    for (i, p) in paths.iter().enumerate().filter(|(_, p)| fits(p)) {
+        out += &format!("#EXTINF:-1,{}\n{p}\n", one_line(titles.get(i).map(String::as_str).unwrap_or("")));
+    }
+    Some(out)
+}
+
+/// The list written into `dir` under a name of its own (a player may still read the one before); lists older than a
+/// day taken out
+fn write_list(dir: &Path, text: &str, now: std::time::SystemTime) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let old = e.metadata().and_then(|m| m.modified()).ok()
+            .is_some_and(|t| now.duration_since(t).is_ok_and(|d| d > std::time::Duration::from_secs(24 * 3600)));
+        if old && e.file_name().to_string_lossy().ends_with(LIST_EXT) { let _ = std::fs::remove_file(e.path()); }
+    }
+    let ms = now.duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0);
+    let mut file = dir.join(format!("{ms}{LIST_EXT}"));
+    let mut n = 1;
+    while file.exists() { file = dir.join(format!("{ms}-{n}{LIST_EXT}")); n += 1; }
+    std::fs::write(&file, text).map_err(|e| e.to_string())?;
+    Ok(file)
 }
 
 #[cfg(windows)]
@@ -2379,7 +2461,8 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
 const KINDS: [&str; 8] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical"];
 
 #[tauri::command]
-async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>) -> Result<(), String> {
+async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>, journal: Option<String>) -> Result<(), String> {
+    journal::step("job-added", json!({ "a": journal, "kind": kind, "items": only.as_ref().map(Vec::len) }));
     // In the background: the window never waits on it (a share can take seconds)
     let shared = shared.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
@@ -2692,6 +2775,8 @@ fn opened(shared: &Shared, app: &tauri::AppHandle, path: PathBuf) {
 }
 
 fn main() {
+    // The responsiveness journal: first, so the start is measured from here (its header says when the process began)
+    journal::init();
     let shared: Shared = Arc::new(Mutex::new(Inner::default()));
     // A project given on the command line (Explorer's double click)
     for arg in std::env::args_os().skip(1) {
@@ -2755,12 +2840,13 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![snapshot, project, connect_location, forget_recent, set_start_project, open_at_start, close_project, connect_project, engine, open_project, choose_project, add_job, cancel_job, set_focus, writes_pending, changes_since, view_items,
                                                  clear_finished, set_setting, reveal, answer_close, recent, scan, probes_since,
-                                                 thumb, open_items, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
+                                                 thumb, open_items, open_list, reveal_path, cached_view, quick_look, rename_item, open_in_gyroflow, new_folder, project_settings, save_locations, choose_location,
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
                                                  geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
-                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share])
+                                                 rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share,
+                                                 journal::journal_write, journal::journal_hello])
         .on_window_event(move |window, event| {
             // Closed while batches are queued: the page asks first
             if let WindowEvent::CloseRequested { api, .. } = event {
@@ -2805,6 +2891,41 @@ mod perf;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The list for the player: as tests/librarylist_ipc.py and the player's librarylist.lua read it
+    #[test]
+    fn list_for_the_player() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let text = list_m3u(&s(&["/v/C.MP4", "/v/_Moments/Turtle.afplink.mp4", "/v/A.MP4"]), &s(&["C", "Turtle", "A"]), 1, "Originals › Day 1 · filtered").unwrap();
+        assert_eq!(text, "#EXTM3U\n#PLAYLIST:Originals › Day 1 · filtered\n#AFP-START:1\n#EXTINF:-1,C\n/v/C.MP4\n#EXTINF:-1,Turtle\n/v/_Moments/Turtle.afplink.mp4\n#EXTINF:-1,A\n/v/A.MP4\n");
+        // What an M3U can't hold left out, the start still the item opened; names on one line
+        let text = list_m3u(&s(&["/v/a\nb.mp4", " /v/x.mp4", "/v/B.MP4"]), &s(&["a", "x", "B\r\nb"]), 2, "L\nM").unwrap();
+        assert_eq!(text, "#EXTM3U\n#PLAYLIST:L M\n#AFP-START:0\n#EXTINF:-1,B  b\n/v/B.MP4\n");
+        // The item opened one of those: none (it opens by itself)
+        assert!(list_m3u(&s(&["#x.mp4"]), &s(&["x"]), 0, "").is_none());
+        assert!(list_m3u(&s(&["/a.mp4"]), &s(&[]), 3, "").is_none());
+        // Windows paths as they are; a missing name empty
+        assert!(list_m3u(&s(&[r"\\NAS\share\A.MP4"]), &s(&[]), 0, "").unwrap().ends_with("#EXTINF:-1,\n\\\\NAS\\share\\A.MP4\n"));
+    }
+
+    /// Each list in a file of its own; a day's old ones taken out, other files left
+    #[test]
+    fn lists_written_and_old_ones_dropped() {
+        let dir = std::env::temp_dir().join(format!("afl-lists-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("other.txt"), "x").unwrap();
+        let t0 = std::time::SystemTime::now();
+        let a = write_list(&dir, "#EXTM3U\n", t0).unwrap();
+        let b = write_list(&dir, "#EXTM3U\n", t0).unwrap();
+        assert_ne!(a, b);
+        assert!(a.to_string_lossy().ends_with(LIST_EXT));
+        // Two days later: those two go, a new one and the other file stay
+        let c = write_list(&dir, "#EXTM3U\n#AFP-START:0\n", t0 + std::time::Duration::from_secs(2 * 24 * 3600)).unwrap();
+        assert!(!a.exists() && !b.exists() && c.exists() && dir.join("other.txt").exists());
+        assert_eq!(std::fs::read_to_string(&c).unwrap(), "#EXTM3U\n#AFP-START:0\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// "Open at start": one project of the list, kept with it; opening projects keeps it, and never drops it off the list
     #[test]

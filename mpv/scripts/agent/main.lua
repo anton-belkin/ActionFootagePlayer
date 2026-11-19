@@ -39,8 +39,22 @@
 if (os.getenv("AFP_BATCH") or "") ~= "" then return end
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
 -- user-data/workspace/clip, docs/moments-and-workspaces.md)

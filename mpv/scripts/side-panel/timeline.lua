@@ -156,6 +156,18 @@ function M.cut_middle(text, n)
     return table.concat(chars, "", 1, head) .. "…" .. table.concat(chars, "", #chars - tail + 1, #chars)
 end
 
+-- A list opened from Action Footage Library (the workspace plugin's user-data/library-list: {file, label, count}),
+-- when the one playing came from it: that, else nil
+function M.library_list(playlist, info)
+    if type(info) ~= "table" or type(info.file) ~= "string" then return nil end
+    for _, e in ipairs(type(playlist) == "table" and playlist or {}) do
+        if e.current == true or e.playing == true then
+            return e["playlist-path"] == info.file and info or nil
+        end
+    end
+    return nil
+end
+
 -- The folder the playlist's files are in: the one they share, when some are in it and the others in its subfolders
 -- (a clip's folder, when the playlist went on into its stabilized/): its path, else nil
 function M.common_folder(playlist)

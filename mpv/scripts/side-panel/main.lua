@@ -23,16 +23,27 @@
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
 --   popover [<id>]                  open a list over the panel (export: the Output tab's Export kinds), or close it
---   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file (for checking its look
---                                   without a window)
+--   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file, the cards and the
+--                                   dialog (notify.lua) over it (for checking its look without a window)
 
 local mp = require 'mp'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default; J.step / J.label for what's its own. A stand-in that does nothing
+-- where the workspace plugin isn't beside this one
+local J = (function()
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    local ok, j = pcall(require, 'journal')
+    if ok then return j end
+    return setmetatable({}, { __index = function(_, k) return k == "span" and function() return function() end end or function() end end })
+end)()
 local options = require 'mp.options'
 local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
 local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
+-- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
+local notify = require 'notify'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -707,7 +718,8 @@ local function project_part(u, x, w, y)
     -- The part in the clip's time (a moment playing starts at its in)
     local off = ws.offset or 0
     if ws.saving then
-        y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
+        -- Its progress is on the card at the top of the video (notify.lua): here the button waits
+        y = u:button(ix, iw, y, "save", "Saving “" .. fit(ws.saving, iw * 0.6, 12, s, true) .. "”…", nil, { disabled = true })
     elseif a and b and b > a and not ws.project then
         y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
         y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
@@ -1577,14 +1589,22 @@ end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played)
+    -- A list opened from Action Footage Library (the workspace plugin's librarylist.lua): all of it, as the Library
+    -- showed it, and what it was
+    local lib = tl.library_list(list, mp.get_property_native("user-data/library-list"))
+    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played)
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
-    local dir = tl.common_folder(list)
+    local dir = not lib and tl.common_folder(list)
+    if lib then
+        u:text(x, y + 9 * s, fit_end(lib.label ~= "" and lib.label or "Action Footage Library", w, 13, s), { size = 13, bold = true })
+        y = u:caption(x, w, y + 20 * s, (#rows == 1 and "1 item" or (#rows .. " items")) .. " as the Library showed them") + 6 * s
+    else
     if dir and local_file(dir) then
         u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
         y = y + 20 * s
     end
     y = u:caption(x, w, y, #rows == 1 and "1 video" or (#rows .. " videos")) + 6 * s
+    end
     for _, r in ipairs(rows) do
         if r.current and reveal and u.clip then
             reveal = false
@@ -1821,6 +1841,7 @@ local function render()
     -- The video beside it, not under it
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
     render_bar()
+    notify.set_panel_open(shown and open)
 end
 
 local function hit_at(x, y)
@@ -1893,6 +1914,8 @@ local function click(info)
         return update()
     end
     if not h then return end
+    -- Journal: the click is the button's action
+    J.label("panel/" .. tostring(h.id))
     if type(h.cmd) == "table" and h.cmd.drag then
         h.cmd.drag(pos.x, pos.y)
         if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
@@ -1951,6 +1974,7 @@ local function list_enter()
     for _, r in ipairs(l and l.rows or {}) do
         if r.kind == at and not r.disabled then cmd = r.cmd end
     end
+    J.label("panel/list/" .. tostring(at))
     if type(cmd) == "function" then cmd() elseif cmd then mp.command(cmd) end
     set_popover(nil)
     update()
@@ -2048,6 +2072,10 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
         for _, e in ipairs(u.events) do b.events[#b.events + 1] = e end
         u = b
     end
+    -- The cards and the dialog over them (notify.lua), as they are now
+    local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false) and TITLE_BAR * s or 0
+    local area = { x0 = 0, y0 = t0, x1 = w - width(s), y1 = h - (docked() and bar.HEIGHT * s or 0), s = s }
+    for _, e in ipairs(notify.draw(w, h, area).events) do u.events[#u.events + 1] = e end
     local f = io.open(path, "w")
     if not f then return mp.msg.error("can't write " .. path) end
     f:write("[Script Info]\nScriptType: v4.00+\nPlayResX: " .. w .. "\nPlayResY: " .. h .. "\nScaledBorderAndShadow: yes\n\n")

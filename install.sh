@@ -269,6 +269,8 @@ put mpv/scripts/side-panel/bar.lua  "$PANEL/bar.lua" 644
 put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
+put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
+put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
@@ -284,6 +286,8 @@ put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
 put mpv/scripts/workspace/projectfile.lua "$WORKSPACE/projectfile.lua" 644
 put mpv/scripts/workspace/longpath.lua  "$WORKSPACE/longpath.lua" 644
 put mpv/scripts/workspace/tags.lua      "$WORKSPACE/tags.lua" 644
+put mpv/scripts/workspace/journal.lua   "$WORKSPACE/journal.lua" 644
+put mpv/scripts/workspace/librarylist.lua "$WORKSPACE/librarylist.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644

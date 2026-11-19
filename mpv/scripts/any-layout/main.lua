@@ -7,6 +7,12 @@
 -- mode binds for a while (a and A in crop mode). A Cyrillic key bound in input.conf keeps its own binding.
 
 local mp = require 'mp'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- The Cyrillic letter -> the key it is on. ЙЦУКЕН as in Russian (PC and Mac), with Ukrainian і ї є and Belarusian ў
 -- where those layouts put them (Belarusian і, on the b key, goes as Ukrainian і, on the s key)
