@@ -63,7 +63,7 @@ async function open(o) {
   const defaults = {
     snapshot: () => ({ project: root, jobs: state.jobs, close_asked: state.close_asked, macos: true, changes: state.changes, quiet_ms: state.quiet_ms, catalog: "", missing: 0, moving: null,
       close_waits: !!state.close_waits }),
-    project: () => ({ path: root, name: root.split("/").pop(), legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false, clip_previews: 0, moments: 0, stills: 0, exports: 0 }),
+    project: () => ({ path: root, name: root.split("/").pop(), legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
     engine: () => "/Applications/ActionFootagePlayer.app",
     recent: () => [],
     recent_tags: () => [],

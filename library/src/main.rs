@@ -501,23 +501,6 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
     std::fs::rename(&tmp, &file).map_err(|e| format!("{}: {e}", file.display()))
 }
 
-fn count_files(dir: &Path, suffixes: &[&str], depth: u32) -> u64 {
-    afp_catalog::store::nas::read();
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
-    let mut n = 0;
-    for e in entries.flatten() {
-        let name = e.file_name().to_string_lossy().to_lowercase();
-        if name.starts_with('.') { continue; }
-        let path = e.path();
-        if path.is_dir() {
-            if depth > 0 { n += count_files(&path, suffixes, depth - 1); }
-        } else if suffixes.iter().any(|s| name.ends_with(s)) {
-            n += 1;
-        }
-    }
-    n
-}
-
 #[derive(Serialize)]
 struct ProjectInfo {
     path: String,
@@ -528,14 +511,12 @@ struct ProjectInfo {
     // How clip previews are laid out in _Clips: tree, flat or trips (the player's workspace plugin, clips_layout)
     clips_layout: String,
     moments_alone: bool,
-    clip_previews: u64,
-    moments: u64,
-    stills: u64,
-    exports: u64,
     // The library's tag stores (docs/tags-and-culling.md): "finder"
     tag_stores: Vec<String>,
 }
 
+// What the project is and how it's set: its own file read, nothing walked. How many previews, moments, photos and
+// exports it has isn't asked of the disk here (a share took 10 s of every start for it): the catalog's views say
 fn project_info(root: &Path) -> ProjectInfo {
     let doc = read_doc(root);
     let settings = doc.get("settings").cloned().unwrap_or(json!({}));
@@ -548,10 +529,6 @@ fn project_info(root: &Path) -> ProjectInfo {
         clips_layout: settings.get("clips_layout").and_then(Value::as_str).filter(|l| ["tree", "flat", "trips"].contains(l)).map(str::to_string)
             .unwrap_or_else(|| if flag("clips_flat") { "flat".into() } else { "tree".into() }),
         moments_alone: flag("moments_alone"),
-        clip_previews: count_files(&root.join("_Clips"), &[".afplink.mp4"], 8) + count_files(&root.join(index::GENERATED), &[".afplink.mp4"], 3),
-        moments: count_files(&root.join("_Moments"), &[".afplink.mp4"], 8),
-        stills: count_files(&root.join("_Stills"), &[".heic", ".jpg", ".jpeg"], 4) + count_files(&root.join(index::GENERATED), &[".heic", ".jpg", ".jpeg"], 3),
-        exports: count_files(&root.join("_Exports"), &[".mov", ".mp4"], 2),
         tag_stores: locations::tag_stores(root),
     }
 }
@@ -1069,7 +1046,7 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
     let cache_file = view_cache(&app, &root, &view);
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let flat = project_info(&root).clips_layout != "tree";
+        let flat = changed::flat_previews(&root);
         // The project's catalog being read (a second or two): waited for, not the disks walked meanwhile (minutes)
         seen::wait_ready(&root, std::time::Duration::from_secs(60));
         let mut out = index::scan(&root, &view, flat);
