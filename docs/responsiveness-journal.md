@@ -82,6 +82,19 @@ through, so a new key, button or command is covered without a line of its own:
   sends the asking plugin's action id with each, and notify.lua records `card:working`, `card:done`, `card:error`,
   `card:info` or `dialog` for that action once it's drawn — so a moment saved is "k → dialog", then "Enter → card:done".
 
+**The rule for the player's hooks: never in a plugin's way.** In the first trial build the overlay hook put its timed
+`update` on the overlay as a field; mpv's `update` sends every field of the overlay as the `osd-overlay` command and
+refuses a function ("disallowed Lua type found: function"), so every plugin that drew (the side panel, the telemetry)
+died on its first draw — and the headless tests never drew. So:
+- a hook hands mpv exactly what the plugin gave (the same command table, flags, overlay; the overlay's `update` is
+  timed through a copy of mpv's metatable, nothing set on the overlay itself) and returns all mpv returned;
+- the journal's own part runs protected (`pcall`): its callbacks, its functions (`step`, `shown`, …) and its part of
+  each hook swallow their faults (the first three said in mpv's log, all counted as `troubles` in the `cost` record);
+  a plugin's own errors pass as they would without the journal; every plugin requires it through `pcall`;
+- `tests/journal_mpv_test.sh` runs the hooks in a real mpv (`--vo=null`: overlays, commands, subprocesses, a key, the
+  files, what the journal wrote), and `tests/journal_test.lua` with mpv's overlay code stood in for and with the
+  journal broken on purpose.
+
 **Library**
 - The start: the process starting → the page starting → DOM ready → the first screen settled (`library/start`).
 - Every click, double-click, key, keystroke in a box, choice and right-click on the page, named by what it was on
