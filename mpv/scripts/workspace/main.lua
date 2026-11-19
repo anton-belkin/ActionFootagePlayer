@@ -113,6 +113,8 @@ local link = require 'link'
 local moments_lib = require 'moments'
 local sidecar_lib = require 'sidecar'
 local projectfile = require 'projectfile'
+-- A list opened from Action Footage Library: the playlist, from the item opened (no local: the file is at Lua's 200)
+require('librarylist').install(mp)
 local has_input, input = pcall(require, 'mp.input')
 if not has_input then input = nil end
 
