@@ -114,7 +114,17 @@ for (const changed of [true, false]) {
     const { page, views } = await start(changed, { delay: { set_pick: 40, set_rating: 40 } });
     page.click('[data-a="view"][data-v="footage"]');
     await page.quiet(40);
+    // An album's tile: one click marks it and opens nothing, as with a folder; a double click opens it
     page.click('[data-a="aview"][data-v="timeline"]');
+    await page.quiet(40);
+    assert.equal(page.get("S.path.length"), 0);
+    assert.ok(page.get(`document.querySelector('[data-a="aview"][data-v="timeline"]').classList.contains('sel')`));
+    page.dblclick('[data-a="aview"][data-v="timeline"]');
+    await page.quiet(40);
+    assert.equal(page.get("S.path[0].slice(1)"), "Timeline");
+    // Enter on the tile (a click with no mouse behind it) opens it too
+    page.get("S.path = []; renderAll()");
+    page.click('[data-a="aview"][data-v="timeline"]', { detail: 0 });
     await page.quiet(40);
     assert.equal(page.get("S.path[0].slice(1)"), "Timeline");
     page.get("TL.level = 'days'; showTab('tags'); renderAll()");
