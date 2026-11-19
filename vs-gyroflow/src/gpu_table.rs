@@ -97,6 +97,9 @@ pub struct PlayerClip {
     /// opens with the seconds it starts playing at, or a moment's part (motion_range): from a NAS its whole motion
     /// data took 20 s for a 1.5 GB clip, the stretch ~1-2 s
     pub covers: Option<(f64, f64)>,
+    /// The table before this one for the clip as it plays (a stretch that this one extends): the frames both have and
+    /// it had settled are copied from it, so the picture doesn't change where it plays as the new table comes in
+    prev: std::sync::Mutex<Option<std::sync::Arc<PlayerClip>>>,
 }
 
 /// The motion data read for the first table, before where it starts playing (the smoothing's start: motion.rs's
@@ -107,17 +110,24 @@ pub struct PlayerClip {
 pub const BEFORE_S: f64 = 4.0;
 pub const HEAD_S: f64 = 20.0;
 pub const AFTER_S: f64 = 6.0;
+/// How far before the end of a stretch's motion data the smoothing is as it will be with more of it (smoothing.rs's
+/// Predictive: 4 s held p99 under 1 px against the whole clip's), with room: the frames before it are settled
+pub const SETTLE_S: f64 = 5.0;
 
-/// The stretch of a clip without a project whose motion data the player's JSON asks for first: a moment's part
-/// (`time_offset` to `moment_end`), or the seconds from `start` (a clip that streams: the rest read after, "full");
-/// None: all of it (`full`, or neither). And whether that's all it will want (a moment's)
+/// The stretch of a clip without a project whose motion data the player's JSON asks for: a moment's part
+/// (`time_offset` to `moment_end`), or the seconds from `start` to `until` (HEAD_S without it): a clip that streams,
+/// its table extended ahead of where it plays (main.lua); None: all of it (`full`, or neither). And whether that's all
+/// it will want (a moment's)
 pub fn motion_range(j: &serde_json::Value) -> (Option<(f64, f64)>, bool) {
     let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
     if j.get("full").and_then(|v| v.as_bool()).unwrap_or(false) { return (None, true); }
     if let (Some(a), Some(b)) = (f("time_offset"), f("moment_end")) {
         if b > a { return (Some(((a - BEFORE_S).max(0.0), b + AFTER_S)), true); }
     }
-    if let Some(start) = f("start") { return (Some(((start - BEFORE_S).max(0.0), start.max(0.0) + HEAD_S)), false); }
+    if let Some(start) = f("start") {
+        let end = f("until").filter(|u| *u > start).unwrap_or(start.max(0.0) + HEAD_S);
+        return (Some(((start - BEFORE_S).max(0.0), end)), false);
+    }
     (None, true)
 }
 
@@ -128,6 +138,13 @@ pub const PLAYER_GEOMETRY_KEYS: &[&str] = &["project", "preset", "fov", "level",
 
 impl PlayerClip {
     pub fn load(j: &serde_json::Value) -> Result<PlayerClip, String> {
+        let range = if j.get("project").and_then(|v| v.as_str()).is_some_and(crate::is_project_file) { None } else { motion_range(j).0 };
+        Self::load_range(j, range, None)
+    }
+
+    /// The same with the stretch given (s into the clip; None: all of it), whatever the JSON asks for, and the table
+    /// it extends (`prev`, the same clip and settings: see `prev`)
+    pub fn load_range(j: &serde_json::Value, range: Option<(f64, f64)>, prev: Option<std::sync::Arc<PlayerClip>>) -> Result<PlayerClip, String> {
         use crate::{ Fov, Frame, LensMode, Level };
         let s = |k: &str| j.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
         let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
@@ -141,16 +158,28 @@ impl PlayerClip {
         let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
         let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
         let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
-        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch it starts with
-        // (motion_range); a project has its own
-        let range = if crate::is_project_file(project) { None } else { motion_range(j).0 };
+        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch (motion_range); a project
+        // has its own
+        let range = if crate::is_project_file(project) { None } else { range };
         let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens, range)?;
         let sp = p.stab.params.read();
         let video = if crate::is_project_file(project) { gyroflow_core::filesystem::url_to_path(&p.stab.input_file.read().url) } else { project.to_string() };
         // All of the clip after all: a stretch past both its ends
         let duration = sp.frame_count as f64 / sp.fps.max(1.0);
         let covers = range.filter(|(a, b)| *a > 0.0 || *b < duration);
-        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers })
+        // Only one table back: the one before it has been on screen already, its own before it not
+        if let Some(p) = &prev { p.prev.lock().unwrap().take(); }
+        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers,
+                        prev: std::sync::Mutex::new(prev) })
+    }
+
+    /// The clip's length, s
+    pub fn duration(&self) -> f64 { self.frame_count as f64 / self.fps.max(1.0) }
+
+    /// Up to where (s into the clip) the frames are as they'll stay with more of the motion data read: the stretch's
+    /// end less SETTLE_S, or the clip's end
+    pub fn settled(&self) -> f64 {
+        match self.covers { Some((_, b)) if b < self.duration() => (b - SETTLE_S).max(0.0), _ => self.duration() }
     }
 
     /// The index of the view the JSON asks for (wide, level) in `views`
@@ -176,17 +205,35 @@ impl PlayerClip {
         if let Some(t) = self.tables.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()) { return Ok(t); }
         // A stretch's motion data: its frames' blocks alone (~0.06 ms a frame, the whole of a 7-minute clip 1.5 s), the
         // frames before and after it as its first and last (as gyroflow-core holds the nearest correction it has)
-        let t = std::sync::Arc::new(match self.covers {
-            Some((a, b)) => {
-                let last = clip.frame_count.max(1) - 1;
-                let first = ((a * clip.fps).floor().max(0.0) as usize).min(last);
-                let range = (first, ((b * clip.fps).ceil().max(0.0) as usize).clamp(first, last));
-                let mut t = Table::build(clip, &Options { range: Some(range), ..*opts })?;
-                t.hold_outside(range, clip.frame_count.max(1));
-                t
+        // The frames it has motion data for (a stretch's; the frames before and after it hold its first and last, as
+        // gyroflow-core holds the nearest correction it has: a stretch's frames' blocks alone, ~0.06 ms a frame, the
+        // whole of a 7-minute clip 1.5 s)
+        let frames = clip.frame_count.max(1);
+        let known = self.covers.map(|c| self.frames_of(c)).unwrap_or((0, frames - 1));
+        // The frames the table before this one had too and had settled: its own, copied (the picture doesn't change as
+        // the new one comes in; past them this one's are within a pixel of what it had, SETTLE_S), the rest built
+        let prev = self.prev.lock().unwrap().clone();
+        let splice = match prev.filter(|p| p.frame_count == self.frame_count && p.views.params.len() == self.views.params.len()) {
+            Some(prev) => {
+                let (a, _) = prev.covers.unwrap_or((0.0, prev.duration()));
+                let (c, d) = self.covers.unwrap_or((0.0, self.duration()));
+                let (from, to) = (a.max(c), prev.settled().min(d));
+                if to > from {
+                    let (first, last) = self.frames_of((from, to));
+                    let last = last.saturating_sub(1).max(first);
+                    Some((prev.table(view, &prev.clip_at(view), opts)?, (first, last)))
+                } else { None }
             }
-            None => Table::build(clip, opts)?,
-        });
+            None => None,
+        };
+        let build = match &splice {
+            Some((_, (first, last))) if *first <= known.0 && *last < known.1 => (*last + 1, known.1),
+            _ => known,
+        };
+        let mut t = Table::build(clip, &Options { range: (build != (0, frames - 1)).then_some(build), ..*opts })?;
+        if let Some((before, range)) = &splice { t.copy_frames(before, *range); }
+        if known != (0, frames - 1) { t.hold_outside(known, frames); }
+        let t = std::sync::Arc::new(t);
         let mut tables = self.tables.lock().unwrap();
         tables.push((key, t.clone()));
         if tables.len() > 4 { tables.remove(0); }
@@ -208,9 +255,18 @@ impl PlayerClip {
         }
     }
 
+    /// Frames from `a` to `b` s into the clip, both ends in
+    fn frames_of(&self, (a, b): (f64, f64)) -> (usize, usize) {
+        let last = self.frame_count.max(1) - 1;
+        let first = ((a * self.fps).floor().max(0.0) as usize).min(last);
+        (first, ((b * self.fps).ceil().max(0.0) as usize).clamp(first, last))
+    }
+
     /// The clip in the view the JSON asks for (wide, level)
-    pub fn clip(&self, j: &serde_json::Value) -> Clip {
-        let index = self.view(j);
+    pub fn clip(&self, j: &serde_json::Value) -> Clip { self.clip_at(self.view(j)) }
+
+    /// The clip in view `index` (of `views`)
+    pub fn clip_at(&self, index: usize) -> Clip {
         Clip { params: self.views.params[index].clone(), size: self.size, output_size: self.output_size, fps: self.fps, frame_count: self.frame_count, frame_offset_us: self.frame_offset_us }
     }
 }
@@ -401,6 +457,25 @@ impl Table {
         }
         // Frame 0's block says how many frames there are
         self.data[9 * 4 + 3] = frames as f32;
+    }
+
+    /// Frames `range.0` to `range.1` (both in) as `other` has them: a table of the same clip and layout
+    pub fn copy_frames(&mut self, other: &Table, range: (usize, usize)) {
+        if other.width != self.width || other.block != self.block || other.cols != self.cols || other.data.len() != self.data.len() { return; }
+        let at = |frame: usize| ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        let len = self.block * 4;
+        for frame in range.0..=range.1 {
+            let i = at(frame);
+            if i + len > self.data.len() { break; }
+            self.data[i..i + len].copy_from_slice(&other.data[i..i + len]);
+        }
+        // Frame 0's block says how many frames there are (copied too: the same clip)
+    }
+
+    /// Frame `frame`'s block of texels
+    pub fn frame_block(&self, frame: usize) -> &[f32] {
+        let i = ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        &self.data[i..i + self.block * 4]
     }
 
     pub fn hex(&self) -> String {
@@ -881,6 +956,31 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn frames_copied_from_the_table_before() {
+        // Two tables of the same layout: frames 1-3 of the new one become the old one's, the others stay
+        let (cols, block) = (2usize, 10usize);
+        let width = cols * block;
+        let table = |v: f32| super::Table { width, height: 4, data: vec![v; width * 4 * 4], block, cols, per_frame: 0 };
+        let (old, mut new) = (table(1.0), table(2.0));
+        new.copy_frames(&old, (1, 3));
+        for f in 0..7 { assert!(new.frame_block(f).iter().all(|v| *v == if (1..=3).contains(&f) { 1.0 } else { 2.0 }), "frame {f}"); }
+        // Another layout: nothing copied
+        let mut other = super::Table { width: 30, height: 4, data: vec![3.0; 30 * 4 * 4], block: 15, cols: 2, per_frame: 5 };
+        other.copy_frames(&old, (0, 6));
+        assert!(other.data.iter().all(|v| *v == 3.0));
+    }
+
+    #[test]
+    fn a_stretch_asked_until() {
+        let j = |v: serde_json::Value| super::motion_range(&v);
+        assert_eq!(j(serde_json::json!({ "start": 10.0 })), (Some((6.0, 30.0)), false));
+        assert_eq!(j(serde_json::json!({ "start": 10.0, "until": 55.0 })), (Some((6.0, 55.0)), false));
+        // An end before the start: as without it
+        assert_eq!(j(serde_json::json!({ "start": 10.0, "until": 5.0 })), (Some((6.0, 30.0)), false));
+        assert_eq!(j(serde_json::json!({ "start": 1.0, "full": true })), (None, true));
+    }
+
     #[test]
     fn frames_outside_a_stretch_hold_its_ends() {
         // 7 frames, 2 a row, blocks of 10 texels (PARAM_TEXELS + 0 knots past the first): frames 2-4 built

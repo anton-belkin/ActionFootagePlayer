@@ -64,7 +64,8 @@ jobs:
       # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
       # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
       # for mpv, its drop-downs and button rows, the photo button and the export's settings (and their gyroflow-export
-      # options), and the gyroflow plugin's lens over a Gyroflow project; LuaJIT is one of mpv's dependencies
+      # options), and the gyroflow plugin's lens over a Gyroflow project; the GPU table kept ahead of where a clip plays
+      # (ahead.lua) against a model of the table server; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
@@ -90,6 +91,7 @@ jobs:
           luajit tests/agent_test.lua
           luajit tests/export_args_test.lua
           luajit tests/exportsettings_test.lua
+          luajit tests/gpu_ahead_test.lua
           luajit tests/tags_test.lua
           luajit tests/live_photo_test.lua
           luajit tests/librarylist_test.lua

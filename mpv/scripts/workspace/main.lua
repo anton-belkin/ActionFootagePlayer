@@ -664,10 +664,13 @@ local function refresh()
             for _, m in ipairs(list) do if m.link.v == 1 and m.link.kind == "moment" then ms[#ms + 1] = m end end
             found, scanned_project, from_catalog = { list = ms, dirs = {} }, project, true
             show(ms)
-            -- A moment not where it was (moved or removed in Finder) stays shown until the look says which
+            -- A moment not where it was (moved or removed in Finder) stays shown until the look says which. Only
+            -- then: what else changes on the disk the catalog's own care notes (the NAS Helper watches the shares, the
+            -- Library looks after its roots), the player adds no walks of its own (each ran during playback, on the
+            -- share the clip plays from)
             local missing = false
             for _, m in ipairs(list) do if m.missing then missing = true end end
-            catalog.look(project, missing and 0 or 20)
+            if missing then catalog.look(project, 0) end
             -- The project's moments' names and count, once (what the name dialog suggests from)
             if not project_moments or project_moments.project ~= project then
                 project_moments = { project = project, names = {}, total = nil }
@@ -696,10 +699,10 @@ catalog.changed = refresh
 -- folders did (a folder of moments moved in): moments.scan's dirs
 local function watch()
     if not scanned_project or scanned_project ~= state.project then return end
-    -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal)
+    -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal), every 30 s:
+    -- each ask reads the catalog from the project's share
     if from_catalog then
-        if mp.get_time() - last_asked >= 10 then refresh() end
-        catalog.look(state.project, 60)
+        if mp.get_time() - last_asked >= 30 then refresh() end
         return
     end
     for dir, mtime in pairs(found.dirs) do
@@ -2037,20 +2040,49 @@ mp.register_event("shutdown", function()
     if clips_job and clips_job.id then clips_job.stopping = true; mp.abort_async_command(clips_job.id) end
 end)
 
--- The project's clips counted (a walk of its folders, kept a minute), and this clip's preview. A step at a time (turn,
--- with the file calls): the first one now, the rest on mpv's next turns, published when it's through. A count asked
--- for again replaces the one under way; a quit, or another clip, doesn't wait for it
-local stats_cache = {}
+-- The project's clips counted, and this clip's preview: from the project's catalog (afp-catalog footage, in the
+-- background: no walk of the shares; asked again after a minute), else a walk of its folders, once a project in a
+-- run (made or removed previews count it again: recount). The walk went through every location's every file: on a
+-- NAS thousands of stat calls a minute, again each minute, for the whole time a clip played (2026-11-19: the clip's
+-- own reads and its motion data's waited behind them). A step at a time (turn, with the file calls): the first one
+-- now, the rest on mpv's next turns, published when it's through. A count asked for again replaces the one under
+-- way; a quit, or another clip, doesn't wait for it
+-- (One table: the main chunk is at Lua's 200 local variables)
+local stats = { cache = {}, SECONDS = 60 }
+-- afp-catalog asked from the count's coroutine without holding mpv up: it waits a tenth of a second at a time (step);
+-- the parsed JSON's items, nil without a catalog (or outside the coroutine)
+function stats.ask(args_after)
+    local exe = catalog.tool()
+    if not exe or not counting.co or coroutine.running() ~= counting.co then return nil end
+    local args = { exe }
+    for _, a in ipairs(args_after) do args[#args + 1] = a end
+    local done, items = false, nil
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true, args = args }, function(ok, r)
+        local v = ok and r and r.status == 0 and utils.parse_json(r.stdout or "")
+        if type(v) == "table" and v.catalog == true then items = v.items or {} end
+        done = true
+    end)
+    while not done do coroutine.yield("wait") end
+    return items
+end
+function stats.of(list)
+    local total, previews, new = 0, 0, 0
+    for _, c in ipairs(list) do
+        total = total + 1
+        if preview_for(c.relative, c.size) then previews = previews + 1 else new = new + 1 end
+    end
+    return { total = total, previews = previews, new = new }
+end
 local function count(project, force, s)
-    local cached = stats_cache[project]
-    if force or not cached or mp.get_time() - cached.time > 60 then
-        local total, previews, new = 0, 0, 0
-        for _, c in ipairs(moments.footage(project)) do
-            total = total + 1
-            if preview_for(c.relative, c.size) then previews = previews + 1 else new = new + 1 end
+    local cached = stats.cache[project]
+    if force or not cached or (cached.catalog and mp.get_time() - cached.time > stats.SECONDS) then
+        local list = not (cached and cached.catalog == false) and stats.ask({ "footage", project }) or nil
+        if list then
+            cached = { time = mp.get_time(), catalog = true, stats = stats.of(list) }
+        else
+            cached = { time = mp.get_time(), catalog = false, stats = stats.of(moments.footage(project)) }
         end
-        cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
-        stats_cache[project] = cached
+        stats.cache[project] = cached
     end
     -- Another clip by now: its own count tells it
     if s ~= state then return end
@@ -2071,7 +2103,8 @@ local function step(co)
         counting.co = nil
         return true
     end
-    mp.add_timeout(0, function() if step(co) then publish() end end)
+    -- Waiting for afp-catalog (coroutine_ask): looked at again in a tenth of a second
+    mp.add_timeout(err == "wait" and 0.1 or 0, function() if step(co) then publish() end end)
 end
 
 extras = function(force)
