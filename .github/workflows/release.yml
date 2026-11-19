@@ -63,8 +63,7 @@ jobs:
       # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
       # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
       # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
-      # for mpv, its drop-downs, and the gyroflow plugin's lens over a Gyroflow project; what a photo is (Live Photo,
-      # Motion Photo) and how live photos chain; LuaJIT is one of mpv's dependencies
+      # for mpv, its drop-downs, and the gyroflow plugin's lens over a Gyroflow project; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
