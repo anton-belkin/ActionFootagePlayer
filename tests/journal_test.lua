@@ -126,6 +126,10 @@ clock = 300.25
 for _, cb in ipairs(timers) do cb() end
 timers = {}
 
+-- A card for another plugin's action (the side panel's: notify_client hands the id over): recorded for it, not weak
+J.shown_for("P1.gyroflow.7", "card:done")
+J.shown_for("P1.gyroflow.7", "card:done")
+
 -- File operations: on the share or not
 props["user-data/afp/journal/net"] = nil
 mp.set_property_native("user-data/afp/journal/net", { "/Volumes/DJI_Inbox", "/Volumes/ssd" })
@@ -163,6 +167,10 @@ local proc = find("step", "proc:gyroflow-gpu-table")
 expect("subprocess timed (started 4 ms into the handler)", proc and math.floor(field(proc, "d") + 0.5), 246)
 expect("its callback the action's", cb_owner ~= nil and cb_owner == field(proc, "a"), true)
 expect("load record", find("load") ~= nil, true)
+local card = find("show", "card:done")
+expect("card for its action", card and field(card, "a"), "P1.gyroflow.7")
+expect("card: once", count("show", "card:done"), 1)
+expect("card: not weak", card and card:find('"weak"') == nil, true)
 for _, l in ipairs(lines) do
     expect("a line is an object", l:sub(1, 1) == "{" and l:sub(-1) == "}", true)
 end

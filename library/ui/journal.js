@@ -197,9 +197,9 @@
 
   // ---- the app's commands
 
-  // The id of the action going on goes with the commands that hand it on as `journal`: open_items (the player's first
-  // frame is this action's result) and add_job (the batch's run says which action asked for it)
-  const HANDS_ON = new Set(["open_items", "add_job"]);
+  // The id of the action going on goes with the commands that hand it on as `journal`: open_items and open_list (the
+  // player's first frame is this action's result) and add_job (the batch's run says which action asked for it)
+  const HANDS_ON = new Set(["open_items", "open_list", "add_job"]);
   const journaled = function (cmd, args, options) {
     const act = !BACKGROUND.has(cmd) && !inBackground ? owner() : null;
     if (!act) return rawInvoke(cmd, args, options);
