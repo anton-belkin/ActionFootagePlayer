@@ -664,7 +664,11 @@ local function ask_screens(done)
         finish(found, main)
     end)
 end
-ask_screens()
+-- Asked as the player starts; the answer published (follow_screen, further down) for a file that didn't wait for it:
+-- one that isn't log (a photo) is set up at once, and when its window came before the answer the screen stayed
+-- unknown, counted as HDR: a Motion Photo's HDR rendition went to an SDR screen, tone-mapped grey (2026-11-20, Anton)
+local follow_screen
+ask_screens(function() if follow_screen then follow_screen() end end)
 
 -- The log curve the source is read with (the workspace plugin's input, from its own file; docs/moments-and-workspaces.md
 -- "Source and transform"): a curve's id, auto (its metadata's), or nil (nothing set)
@@ -835,7 +839,7 @@ end
 
 -- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
 -- screen macOS hasn't been asked about yet (just connected) is asked about first
-local function follow_screen()
+follow_screen = function()
     if not screens then return end
     local name = window_screen()
     if platform == "darwin" and name and name ~= "" and screens[name] == nil and not asking then
