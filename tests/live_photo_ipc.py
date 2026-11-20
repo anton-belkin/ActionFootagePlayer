@@ -146,8 +146,11 @@ def links(folder):
         if pos > span[1] - span[0] - 0.5: reached_end = True
         if reached_end and pos < 1.0: lowest_after_end = pos; break
         time.sleep(0.05)
-    expect("link: the run played through", [os.path.basename(s) for s in seen[:len(run)]] == run[run.index(os.path.basename(seen[0])):] if seen else False,
-           str([os.path.basename(s) for s in seen]))
+    # From the first link's frame, where the next link's part already overlaps (it may count as at the next one): the
+    # links in the run's order, round and round, from wherever it counts as starting
+    names = [os.path.basename(s) for s in seen]
+    in_order = bool(names) and names[0] in run and all(names[k] == run[(run.index(names[0]) + k) % len(run)] for k in range(len(names)))
+    expect("link: the run played through, in its order", in_order and len(set(names)) >= len(run) - 1, str(names))
     expect("link: round again from the part's start", lowest_after_end is not None and p.photo().get("playing") is True, f"pos {lowest_after_end}")
     got_to = os.path.basename(p.photo().get("at") or "")
     p.cmd("script-message", "live-photo-view", "stop")
