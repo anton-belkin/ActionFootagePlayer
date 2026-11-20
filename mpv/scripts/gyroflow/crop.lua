@@ -524,6 +524,28 @@ function M.view(c)
     end
 end
 
+-- A photo link's camera and crop (Save frame's: the frame in crop mode's middle, in shares of the stabilized frame) as
+-- the camera alone where it can be: zoomed in by the crop's larger side, and the rest of the other side cut (in shares
+-- of what that camera shows; nil where nothing's left to cut). The same picture as the frame rendered with the camera,
+-- then cropped (Share's way): the projection is radial about the middle, so a closer zoom is that crop enlarged. Cut
+-- out of the whole stabilized frame instead (mpv's video-crop), the live part's horizon trembled: the wide frame's
+-- small leftover shake, enlarged with it, which a camera that close doesn't have (2026-11-20, Anton's 0102 at 49 s:
+-- crop 0.8, camera zoom 0.455 trembled; zoom 0.364 without the crop stood still). nil: a crop off the middle (not
+-- crop mode's), left to the caller as it is
+function M.fold(camera, crop)
+    if type(camera) ~= "table" or type(crop) ~= "table" then return nil end
+    local x, y, w, h = tonumber(crop.x), tonumber(crop.y), tonumber(crop.w), tonumber(crop.h)
+    if not (x and y and w and h) or w <= 0 or h <= 0 or w > 1 or h > 1 then return nil end
+    if math.abs(x + w / 2 - 0.5) > 0.002 or math.abs(y + h / 2 - 0.5) > 0.002 then return nil end
+    local s = math.max(w, h)
+    local cam = { yaw = tonumber(camera.yaw) or 0, pitch = tonumber(camera.pitch) or 0, roll = tonumber(camera.roll) or 0,
+                  zoom = (tonumber(camera.zoom) or 1) * s }
+    local rw, rh = w / s, h / s
+    local rest = nil
+    if rw < 0.999 or rh < 0.999 then rest = { x = (1 - rw) / 2, y = (1 - rh) / 2, w = rw, h = rh } end
+    return { camera = cam, rest = rest }
+end
+
 -- For the control file: the camera written last (write_now), while there's one
 function M.control_words()
     if not cam or not written then return "" end
