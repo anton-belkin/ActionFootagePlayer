@@ -838,13 +838,18 @@ crop.init({
 })
 
 -- A photo link playing (the workspace plugin's photo, the live-photo plugin's still): its own frame, as Share renders
--- it: Save frame's camera (crop.view) and its crop, in shares of the frame, as mpv's video-crop of the picture shown
+-- it: Save frame's camera (crop.view) and its crop, in shares of the frame. Crop mode's crop goes into the camera's zoom
+-- (crop.fold: cut out of the whole frame, the picture trembled), what's left of it, and any other, as mpv's video-crop
+-- of the picture shown
 ;(function()
     local function apply()
         local ws = mp.get_property_native("user-data/workspace")
         local ph = type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.photo) == "table" and ws.photo or nil
-        crop.view(ph and type(ph.camera) == "table" and ph.camera or nil)
-        local c = ph and type(ph.crop) == "table" and ph.crop
+        local cam = ph and type(ph.camera) == "table" and ph.camera or nil
+        local c = ph and type(ph.crop) == "table" and ph.crop or nil
+        local folded = crop.fold(cam, c)
+        if folded then cam, c = folded.camera, folded.rest end
+        crop.view(cam)
         local o = mp.get_property_native("video-out-params")
         if c and type(o) == "table" and o.w and o.h then
             mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d",
