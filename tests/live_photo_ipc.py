@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 # The live-photo plugin in a player without a window (mpv --vo=null, driven over IPC): a live photo opens as its
-# still, the hover over the Live icon and Space held play its live part and give the still back, the run carries on
-# into the photos taken right after it and rests on the one it got to, a plain photo has no icon. Opened as a list from
+# still, the hover over the Live icon plays its live part from the photo's own frame and round again while it stays,
+# Space switches the same on and off (Esc off too), the run carries on into the photos taken right after it, round
+# again from its start, and rests on the one it got to when stopped, a plain photo has no icon. Opened as a list from
 # the Library (an .afplist.m3u8 as library/src/main.rs writes it, read by workspace/librarylist.lua): the photo at its
 # place in it, the run's neighbours from the list (not the folder), and it rests on a photo of the list.
 #
 #   python3 tests/live_photo_ipc.py <folder of live photos taken in a row> [<a plain photo>]
 #   python3 tests/live_photo_ipc.py --links <folder of a project's photo links (.afplink.jpg) to one clip, in a row>
 #   AFP_PHOTO=<afp-photo built from macos/photo.swift> python3 tests/live_photo_ipc.py --hdr <a photo with a gain map>
+#   python3 tests/live_photo_ipc.py --space <a clip> [<a moment> …]   Space pauses and plays them as before (it's the
+#                                    live part's switch only while a live photo is shown)
 #
 # HDR (macOS): the photo's HDR rendition (afp-photo --hdr-still, into a scratch AFP_HOME) shown in place of its SDR
 # image, labelled PQ BT.2020 for the VO, the target PQ; an SDR screen (user-data/dlogm/screen sdr) gets the photo's own
@@ -131,16 +134,25 @@ def links(folder):
     print("     link run:", " -> ".join(run), "part", span)
     seen = []
     p.cmd("script-message", "live-photo-view", "play")
+    expect("link: plays from its frame", p.wait(lambda: p.photo().get("playing") is True and p.get("pause") is False, 3)
+           and (p.get("time-pos") or -9) >= t - span[0] - 0.1, f"pos {p.get('time-pos')} frame {t - span[0]}")
     end = time.time() + 3 * (span[1] - span[0]) + 10
+    lowest_after_end, reached_end = None, False
     while time.time() < end:
         ph = p.photo()
         at = ph.get("at")
         if at and (not seen or seen[-1] != at): seen.append(at)
-        if seen and not ph.get("playing"): break
+        pos = p.get("time-pos") or 0
+        if pos > span[1] - span[0] - 0.5: reached_end = True
+        if reached_end and pos < 1.0: lowest_after_end = pos; break
         time.sleep(0.05)
-    expect("link: the run played through", [os.path.basename(s) for s in seen] == run, str([os.path.basename(s) for s in seen]))
-    expect("link: rests on the last at its frame", p.wait(lambda: os.path.basename(p.get("path") or "") == run[-1] and p.get("pause") is True
-                                                         and (p.get("user-data/workspace") or {}).get("photo") is not None, 6), str(p.get("path")))
+    expect("link: the run played through", [os.path.basename(s) for s in seen[:len(run)]] == run[run.index(os.path.basename(seen[0])):] if seen else False,
+           str([os.path.basename(s) for s in seen]))
+    expect("link: round again from the part's start", lowest_after_end is not None and p.photo().get("playing") is True, f"pos {lowest_after_end}")
+    got_to = os.path.basename(p.photo().get("at") or "")
+    p.cmd("script-message", "live-photo-view", "stop")
+    expect("link: stopped, rests on the link it got to at its frame", p.wait(lambda: os.path.basename(p.get("path") or "") == got_to and p.get("pause") is True
+                                                         and (p.get("user-data/workspace") or {}).get("photo") is not None, 6), f"{p.get('path')} want {got_to}")
     last = (p.get("user-data/workspace") or {}).get("photo") or {}
     p.cmd("script-message-to", "workspace", "open-original")
     expect("whole clip: the clip", p.wait(lambda: (p.get("path") or "").lower().endswith((".mp4", ".mov")), 6), str(p.get("path")))
@@ -151,7 +163,26 @@ def links(folder):
     expect("whole clip: not a photo", not p.photo())
     p.quit()
 
+def space(paths):
+    for path in paths:
+        p = Player(path, workspace=True)
+        p.wait(lambda: (p.get("duration") or 0) > 0, 8)
+        p.cmd("set_property", "pause", False); time.sleep(0.6)
+        before = p.get("pause")
+        p.cmd("keypress", "SPACE"); time.sleep(0.5)
+        after = p.get("pause")
+        p.cmd("keypress", "SPACE"); time.sleep(0.5)
+        again = p.get("pause")
+        expect(os.path.basename(path) + ": Space pauses and plays as before", before is False and after is True and again is False,
+               f"{before} -> {after} -> {again}")
+        expect(os.path.basename(path) + ": not a photo", not p.photo())
+        p.quit()
+
 def main():
+    if sys.argv[1] == "--space":
+        space(sys.argv[2:])
+        print(f"{checks} checks, {failures} failed")
+        sys.exit(1 if failures else 0)
     if sys.argv[1] == "--hdr":
         hdr(sys.argv[2])
         print(f"{checks} checks, {failures} failed")
@@ -186,34 +217,50 @@ def main():
     expect("away from the icon: still", p.photo().get("playing") is False)
     p.cmd("mouse", int(icon["x0"]) + 5, int(icon["y0"]) + 5)
     expect("hovered: plays", p.wait(lambda: p.photo().get("playing") is True))
-    expect("hovered: its video", p.wait(lambda: p.get("vid") != image_vid and (p.get("time-pos") or 0) > 0.3), f"vid {p.get('vid')} pos {p.get('time-pos')}")
+    still_t = (p.dump().get("photo") or {}).get("still_t") or 0
+    expect("hovered: its video", p.wait(lambda: p.get("vid") != image_vid and (p.get("time-pos") or 0) > 0.05), f"vid {p.get('vid')} pos {p.get('time-pos')}")
+    pos0 = p.get("time-pos") or -9
+    expect("hovered: from the photo's own frame", still_t - 0.05 <= pos0 <= still_t + 0.6, f"pos {pos0} still {still_t}")
     expect("hovered: its sound", p.get("aid") not in (False, None, "no"), str(p.get("aid")))
     p.cmd("mouse", 700, 450)
     expect("left: the still again", p.wait(lambda: p.photo().get("playing") is False and p.get("vid") == image_vid and p.get("pause") is True))
     expect("left: on the same photo", os.path.basename(p.get("path")) == os.path.basename(first), p.get("path"))
 
-    # Space held
-    p.cmd("keydown", "SPACE")
-    expect("Space held: plays", p.wait(lambda: p.photo().get("playing") is True))
-    p.cmd("keyup", "SPACE")
-    expect("Space let go: the still", p.wait(lambda: p.photo().get("playing") is False and p.get("vid") == image_vid))
+    # Space: a switch (a tap played a frame and jumped back before), Esc off too
+    p.cmd("keypress", "SPACE")
+    expect("Space: plays", p.wait(lambda: p.photo().get("playing") is True))
+    time.sleep(0.8)
+    expect("Space: still playing after the tap", p.photo().get("playing") is True)
+    p.cmd("keypress", "SPACE")
+    expect("Space again: the still", p.wait(lambda: p.photo().get("playing") is False and p.get("vid") == image_vid))
+    p.cmd("keypress", "SPACE")
+    p.wait(lambda: p.photo().get("playing") is True)
+    p.cmd("keypress", "ESC")
+    expect("Esc: the still", p.wait(lambda: p.photo().get("playing") is False and p.get("vid") == image_vid))
 
-    # The run: held to its end, it goes through the photos taken right after and rests on the last one
+    # The run: on, it goes through the photos taken right after, then round again from the first; stopped, it rests on
+    # the photo it got to
     chain = [c["path"] for c in p.dump().get("chain", [])]
     print("     run:", " -> ".join(os.path.basename(c) for c in chain))
     seen = []
     p.cmd("script-message", "live-photo-view", "play")
-    end = time.time() + 4 * len(chain) + 5
+    end = time.time() + 4 * len(chain) + 8
     while time.time() < end:
         ph = p.photo()
         at = ph.get("at")
         if at and (not seen or seen[-1] != at): seen.append(at)
-        if seen and not ph.get("playing"): break
+        if len(seen) > len(chain): break
         time.sleep(0.05)
-    expect("the run played through", [os.path.basename(s) for s in seen] == [os.path.basename(c) for c in chain],
-           str([os.path.basename(s) for s in seen]))
-    expect("rests on the photo it got to", p.wait(lambda: os.path.basename(p.get("path") or "") == os.path.basename(chain[-1])
-                                                and p.photo().get("playing") is False, 5), str(p.get("path")))
+    names = [os.path.basename(c) for c in chain]
+    expect("the run played through", [os.path.basename(s) for s in seen[:len(chain)]] == names, str([os.path.basename(s) for s in seen]))
+    expect("and round again from its start", len(seen) > len(chain) and os.path.basename(seen[len(chain)]) == names[0]
+           and p.photo().get("playing") is True, str([os.path.basename(s) for s in seen]))
+    if len(chain) > 1:
+        p.wait(lambda: os.path.basename(p.photo().get("at") or "") == names[1], 6)
+    got_to = os.path.basename(p.photo().get("at") or "")
+    p.cmd("script-message", "live-photo-view", "stop")
+    expect("stopped: rests on the photo it got to", p.wait(lambda: os.path.basename(p.get("path") or "") == got_to
+                                                         and p.photo().get("playing") is False, 5), f"{p.get('path')} want {got_to}")
     p.quit()
 
     # A list from the Library: the first photo and the third only (the second left out, as a filter would): the run goes
@@ -232,7 +279,8 @@ def main():
         expect("list: neighbours from the list", os.path.basename(photos[1]) not in run, str(run))
         r.cmd("script-message", "live-photo-view", "play")
         r.wait(lambda: r.photo().get("playing") is True, 3)
-        r.wait(lambda: r.photo().get("playing") is False, 4 * len(run) + 5)
+        r.wait(lambda: os.path.basename(r.photo().get("at") or "") == run[-1], 4 * len(run) + 5)
+        r.cmd("script-message", "live-photo-view", "stop")
         expect("list: rests on a photo of the list", r.wait(lambda: os.path.basename(r.get("path") or "") == run[-1], 5)
                and r.get("playlist-count") == 2, f"{r.get('path')} {r.get('playlist-count')}")
         r.quit()

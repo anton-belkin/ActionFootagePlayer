@@ -2,10 +2,11 @@
 --
 -- A photo (HEIC, JPEG, PNG…) opens as the picture, on the whole window, and stays (no slideshow). A live one (a Live
 -- Photo: the photo and its .mov; a Motion Photo: the video inside the JPEG) has the Live icon in its top-left corner:
--- the mouse over it, or Space held, plays its live part with its sound; let go, and the picture is back. Photos taken
--- in a row, whose live parts overlap by when they were taken, play on into each other while it's held: at the end of
--- one's video, the next one's goes on from the same moment, until the run ends; let go, and the player rests on the
--- photo it got to.
+-- the mouse over it plays its live part with its sound, as a phone does: from the photo's own frame to the end, then
+-- round again from the start, for as long as the mouse stays; moved off, the picture is back. Space does the same as
+-- a switch: on, round and round, and off again (or Esc). Photos taken in a row, whose live parts overlap by when they
+-- were taken, play on into each other: at the end of one's video, the next one's goes on from the same moment, to the
+-- run's end and round again from its start; stopped, the player rests on the photo it got to.
 --
 -- The video is the photo file's own extra track (video-add), so the playlist entry stays the photo: Previous/Next go
 -- on through photos and clips as through any playlist. A Live Photo's .mov is taken out of the playlist when its photo
@@ -14,8 +15,9 @@
 --
 -- A photo's link from the Library (<name>.afplink.jpg: a frame of a clip) plays the same way: the workspace plugin opens
 -- it as its clip's part around the frame (an EDL, as a moment), paused at the frame; the live part is that part,
--- 1.5 s on each side. Links to the same clip in the playlist whose parts overlap make one run: the part opened is
--- then all of theirs, so it plays on without a break; let go, and the player rests on the link it got to. Its whole
+-- 1.5 s on each side, from the frame, round from the part's start. Links to the same clip in the playlist whose parts
+-- overlap make one run: the part opened is then all of theirs, so it plays on without a break; stopped, the player
+-- rests on the link it got to. Its whole
 -- clip is a button away (the side panel's, the menu's Open the whole clip: the workspace plugin's open-original).
 --
 -- HDR (macOS): a photo with a gain map (an iPhone's HEIC, an Ultra HDR JPEG, the player's own) is shown as macOS
@@ -387,7 +389,21 @@ mp.observe_property("user-data/dlogm/screen", "native", function()
     show_still()
 end)
 
-local function finish(rest_on)
+local esc_bound = false
+local finish
+local function bind_esc(on)
+    if on == esc_bound then return end
+    esc_bound = on
+    if on then
+        -- Esc while it plays: back to the photo (only then: elsewhere Esc is the window's)
+        mp.add_forced_key_binding("ESC", "live-photo-stop", function() if playing then finish(true) end end)
+    else
+        mp.remove_key_binding("live-photo-stop")
+    end
+end
+
+finish = function(rest_on)
+    bind_esc(false)
     if not playing then return end
     mp.msg.verbose("back to the picture, step " .. playing.step)
     local reached = playing.run[playing.step]
@@ -436,10 +452,11 @@ end
 
 local function start(by)
     if not (info and info.live) or playing then return end
+    bind_esc(true)
     if info.kind == "link" then
         -- The part opened is the run's (the workspace plugin made it so): from its start, no other file
         playing = { run = info.run or { info }, step = 1, by = by, link = true, settling = true }
-        mp.commandv("seek", "0", "absolute+exact")
+        mp.commandv("seek", string.format("%.4f", math.max(0, info.taken - info.span[1])), "absolute+exact")
         mp.set_property_bool("pause", false)
         publish()
         draw()
@@ -449,8 +466,8 @@ local function start(by)
     draw()
     add_video(info, function(t)
         if not playing or playing.run[1] ~= info then return end
-        if not t then playing = nil draw() return end
-        play_step(1, 0)
+        if not t then playing = nil bind_esc(false) draw() return end
+        play_step(1, info.still_t or 0)
     end)
 end
 
@@ -469,8 +486,16 @@ local function at_end()
         play_step(i + 1, live.carry_on_at(cur, nxt))
         return
     end
-    -- The run's end while still held: the photo it got to
-    finish(true)
+    -- The run's end while still held: round again from the start of the first one's video
+    play_step(1, 0)
+end
+
+-- A link's part at its end while still held: round again from the part's start
+local function link_again()
+    playing.step, playing.settling = 1, true
+    mp.commandv("seek", "0", "absolute+exact")
+    mp.set_property_bool("pause", false)
+    publish()
 end
 
 mp.register_event("playback-restart", function()
@@ -483,7 +508,7 @@ mp.observe_property("time-pos", "number", function(_, pos)
         -- Which link of the run the clip is at now, and the part's end
         local at = live.at_time(playing.run, info.span[1] + pos)
         if at ~= playing.step then playing.step = at publish() end
-        if pos >= info.span[2] - info.span[1] - 0.07 then finish(true) end
+        if pos >= info.span[2] - info.span[1] - 0.07 then link_again() end
         return
     end
     local cur = playing.run[playing.step]
@@ -492,7 +517,7 @@ mp.observe_property("time-pos", "number", function(_, pos)
 end)
 mp.observe_property("eof-reached", "bool", function(_, eof)
     if playing and not playing.settling and eof then
-        if playing.link then finish(true) else at_end() end
+        if playing.link then link_again() else at_end() end
     end
 end)
 
@@ -513,11 +538,12 @@ local function bind_key(on)
     if on == key_bound then return end
     key_bound = on
     if on then
-        -- Space held: the live part; on a photo Space has nothing else to do (there's no playing to pause)
+        -- Space: the live part on, round and round, and off again (back to the photo); on a photo Space has nothing
+        -- else to do (there's no playing to pause). Held, it played only while held: a tap played a frame and jumped
+        -- back (2026-11-20, Anton)
         mp.add_forced_key_binding("SPACE", "live-photo-hold", function(e)
-            if e.event == "down" then start("key")
-            elseif e.event == "up" then stop("key")
-            elseif e.event == "press" then start("key") mp.add_timeout(0.15, function() stop("key") end) end
+            if e.event ~= "down" and e.event ~= "press" then return end
+            if playing then stop("message") else start("key") end
         end, { complex = true })
     else
         mp.remove_key_binding("live-photo-hold")
