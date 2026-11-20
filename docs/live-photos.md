@@ -8,10 +8,11 @@ The player shows a photo the way a phone does (the `live-photo` plugin, `mpv/scr
   plays.
 - A **live** photo has the Live icon in the picture's top-left corner: macOS's circle of rays (the Library's tiles
   draw the same shape) and the word LIVE, in a dark pill.
-- **The mouse over the icon** plays the live part, with its sound (at the player's volume; muted stays muted). The
-  pill turns white while it plays. The mouse off the icon: the picture again.
-- **Space held** does the same from the keyboard (only while a live photo is shown; on a clip Space pauses as
-  before). A short tap plays a moment of it.
+- **The mouse over the icon** plays the live part, with its sound (at the player's volume; muted stays muted), as an
+  iPhone or a Mac does: from the photo's own frame to the end of the video, then round again from its start, for as
+  long as the mouse stays. The pill turns white while it plays. The mouse off the icon: the picture again.
+- **Space** does the same from the keyboard as a switch: on, round and round, and Space again (or Esc) back to the
+  picture (only while a live photo is shown; on a clip Space pauses as before).
 - A plain photo has no icon. Previous / Next (and the side panel's Playlist, which now lists photos too) go through
   photos and clips as through any playlist.
 - What is for clips only does nothing on a photo: stabilization keys (Ctrl+g, Ctrl+k, Ctrl+b, Ctrl+u, Ctrl+j,
@@ -61,7 +62,7 @@ look) is shown in HDR on an HDR screen, **as macOS shows it** (Preview, Photos):
 ## Chains: photos taken in a row
 
 When photos are taken quickly one after another, their live parts overlap in time. While the mouse stays on the icon
-(or Space is held), the player carries on:
+(or Space has it on), the player carries on, and at the run's end goes round again from its start:
 
 1. **When each live part happened.** A photo's capture time is its Exif `DateTimeOriginal` +
    `SubSecTimeOriginal` (+ `OffsetTimeOriginal`). The still is the video's frame at the *still time*: a Live Photo's
