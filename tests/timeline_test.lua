@@ -118,6 +118,16 @@ expect("current name", rows[2].name, "DJI_0069_D")
 expect("title", rows[3].name, "Turtle")
 expect("not current", rows[1].current, false)
 -- The one playing even when it isn't a video by its extension
+-- Photos beside the videos (image-exts): rows of their own, named without a Motion Photo's .MP, counted apart
+local mixed = tl.playlist_rows({ { filename = "/p/IMG_1.HEIC" }, { filename = "/p/PXL_2.MP.jpg", current = true }, { filename = "/p/C.mp4" },
+                                 { filename = "/p/notes.txt" } }, tl.set_of({ "mp4", "mov" }), nil, tl.set_of({ "heic", "jpg" }))
+expect("mixed rows", #mixed, 3)
+expect("photo row", mixed[1].photo, true)
+expect("motion photo's name", mixed[2].name, "PXL_2")
+expect("video row", mixed[3].photo, nil)
+expect("mixed label", tl.rows_label(mixed), "2 photos, 1 video")
+expect("videos label", tl.rows_label({ {}, {} }), "2 videos")
+expect("one photo label", tl.rows_label({ { photo = true } }), "1 photo")
 local odd = tl.playlist_rows({ { filename = "/v/a.mp4" }, { filename = "/v/b.xyz", current = true } }, tl.set_of({ "mp4" }))
 expect("the one playing stays", #odd, 2)
 -- A 360° clip played, then its exports in stabilized/: the clip, not a video by its extension, stays
@@ -146,8 +156,19 @@ expect("only subfolders", tl.common_folder({ { filename = "/v/s/a.mp4" }, { file
 expect("two disks", tl.common_folder({ { filename = "/Volumes/A/a.mp4" }, { filename = "/Volumes/B/b.mp4" } }), nil)
 expect("windows subfolder", tl.common_folder({ { filename = "C:\\T\\a.mp4" }, { filename = "C:\\T\\s\\b.mp4" } }), "C:\\T")
 
+-- A list from Action Footage Library: when the one playing came from it
+local lst = "/c/lists/1.afplist.m3u8"
+local info = { file = lst, label = "Moments", count = 2 }
+local from = { { filename = "/v/a.mp4", ["playlist-path"] = lst }, { filename = "/v/_Moments/t.afplink.mp4", ["playlist-path"] = lst, current = true } }
+expect("library list", tl.library_list(from, info), info)
+expect("another list", tl.library_list(from, { file = "/c/lists/0.afplist.m3u8" }), nil)
+expect("finder's file after it", tl.library_list({ { filename = "/v/x.mp4", current = true } }, info), nil)
+expect("no info", tl.library_list(from, nil), nil)
+-- All of it listed (not only videos by their extension)
+expect("all listed", #tl.playlist_rows({ { filename = "/v/a.insv" }, { filename = "/v/b.mp4", current = true } }, nil), 2)
+
 -- A name cut in its middle
-expect("short stays", tl.cut_middle("DJI_0068_D", 20), "DJI_0068_D")
+expect("short stays",tl.cut_middle("DJI_0068_D", 20), "DJI_0068_D")
 expect("cut", tl.cut_middle("DJI_20261021161350_0023_D", 15), "DJI_202…_0023_D")
 expect("cut utf-8", tl.cut_middle("Тюлень у рифа, утро", 9), "Тюле…утро")
 

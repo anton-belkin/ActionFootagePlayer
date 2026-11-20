@@ -23,8 +23,8 @@
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
 --   popover [<id>]                  open a list over the panel (export: the Output tab's Export kinds), or close it
---   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file (for checking its look
---                                   without a window)
+--   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file, the cards and the
+--                                   dialog (notify.lua) over it (for checking its look without a window)
 
 local mp = require 'mp'
 local options = require 'mp.options'
@@ -33,6 +33,8 @@ local bar = require 'bar'
 local tl = require 'timeline'
 local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
+-- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
+local notify = require 'notify'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -209,12 +211,16 @@ local TABS = {
 local TAB_TITLES = { support = "Support" }
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
 
+-- The parts for a clip only: not on the rail while a photo shows (the live-photo plugin's user-data/afp/photo)
+local FOR_CLIPS = { source = true, transform = true, output = true, crop = true, dv = true, view360 = true }
+
 -- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS), the 360 view only for a
--- 360° clip
+-- 360° clip, neither of them nor the clip's own parts for a photo
 local function shown_tabs()
     local list, d, v = {}, state("dlogm"), state("view360")
+    local photo = type(mp.get_property_native("user-data/afp/photo")) == "table"
     for _, t in ipairs(TABS) do
-        if not t[3] and (t[1] ~= "dv" or (d and d.dv))
+        if not t[3] and not (photo and FOR_CLIPS[t[1]]) and (t[1] ~= "dv" or (d and d.dv))
            and (t[1] ~= "view360" or (type(v) == "table" and (v.available or v.note))) then
             table.insert(list, t)
         end
@@ -604,11 +610,17 @@ local function project_part(u, x, w, y)
     y = y + 8 * s
     u:divider(x, w, y)
     local file = ws.clip:match("([^/\\]+)$") or ws.clip
-    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows
+    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows. A photo too (a photo's
+    -- link: its clip's part around the frame; a photo the player made: the picture), with its clip a button away
     local mo = ws.moment and not ws.moment.missing and ws.offset and ws.moment or nil
-    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
+    local ph = not mo and type(ws.photo) == "table" and ws.photo.clip and ws.photo or nil
+    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ph and ("THIS PHOTO · " .. (ph.name or file)) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
     y = y + 28 * s
-    if mo then
+    if ph then
+        -- (to the hundredth: photos of one clip are often a second apart)
+        y = u:caption(x, w, y - 6 * s, "The frame at " .. tl.clock(ph.t) .. " of " .. (ph.clip:match("([^/\\]+)$") or ph.clip))
+        y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. tl.clock(ph.t), "script-message-to workspace open-original")
+    elseif mo then
         y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
         -- How it's stabilized: on its own or with its clip, written into it (its transform is on the Transform tab)
@@ -644,6 +656,8 @@ local function project_part(u, x, w, y)
                           tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
     end
 
+    -- A photo: no marks, moments or part of its own (those are its clip's: Open the whole clip)
+    if ph then return y + 8 * s end
     local pos = mp.get_property_number("time-pos", 0)
     y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
@@ -707,7 +721,8 @@ local function project_part(u, x, w, y)
     -- The part in the clip's time (a moment playing starts at its in)
     local off = ws.offset or 0
     if ws.saving then
-        y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
+        -- Its progress is on the card at the top of the video (notify.lua): here the button waits
+        y = u:button(ix, iw, y, "save", "Saving “" .. fit(ws.saving, iw * 0.6, 12, s, true) .. "”…", nil, { disabled = true })
     elseif a and b and b > a and not ws.project then
         y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
         y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
@@ -1577,14 +1592,24 @@ end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played)
+    -- A list opened from Action Footage Library (the workspace plugin's librarylist.lua): all of it, as the Library
+    -- showed it, and what it was. Photos in any list (the live-photo plugin shows them; a Live Photo's .mov is out of
+    -- the playlist already)
+    local lib = tl.library_list(list, mp.get_property_native("user-data/library-list"))
+    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played,
+                                  tl.set_of(mp.get_property_native("image-exts")))
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
-    local dir = tl.common_folder(list)
+    local dir = not lib and tl.common_folder(list)
+    if lib then
+        u:text(x, y + 9 * s, fit_end(lib.label ~= "" and lib.label or "Action Footage Library", w, 13, s), { size = 13, bold = true })
+        y = u:caption(x, w, y + 20 * s, (#rows == 1 and "1 item" or (#rows .. " items")) .. " as the Library showed them") + 6 * s
+    else
     if dir and local_file(dir) then
         u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
         y = y + 20 * s
     end
-    y = u:caption(x, w, y, #rows == 1 and "1 video" or (#rows .. " videos")) + 6 * s
+    y = u:caption(x, w, y, tl.rows_label(rows)) + 6 * s
+    end
     for _, r in ipairs(rows) do
         if r.current and reveal and u.clip then
             reveal = false
@@ -1821,6 +1846,7 @@ local function render()
     -- The video beside it, not under it
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
     render_bar()
+    notify.set_panel_open(shown and open)
 end
 
 local function hit_at(x, y)
@@ -2048,6 +2074,10 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
         for _, e in ipairs(u.events) do b.events[#b.events + 1] = e end
         u = b
     end
+    -- The cards and the dialog over them (notify.lua), as they are now
+    local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false) and TITLE_BAR * s or 0
+    local area = { x0 = 0, y0 = t0, x1 = w - width(s), y1 = h - (docked() and bar.HEIGHT * s or 0), s = s }
+    for _, e in ipairs(notify.draw(w, h, area).events) do u.events[#u.events + 1] = e end
     local f = io.open(path, "w")
     if not f then return mp.msg.error("can't write " .. path) end
     f:write("[Script Info]\nScriptType: v4.00+\nPlayResX: " .. w .. "\nPlayResY: " .. h .. "\nScaledBorderAndShadow: yes\n\n")
@@ -2070,6 +2100,17 @@ for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_
                         "chapter-list" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
+-- A photo shown: a clip's part chosen gives way to the playlist, and comes back with the next clip
+local before_photo = nil
+mp.observe_property("user-data/afp/photo", "native", function(_, p)
+    if type(p) == "table" then
+        if FOR_CLIPS[tab] then before_photo, tab = tab, "playlist" end
+    elseif before_photo then
+        tab, before_photo = before_photo, nil
+    end
+    update()
+end)
+
 -- Crop mode on: its part shows; off again: back to the one there was
 local crop_on, before_crop = false, nil
 mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)

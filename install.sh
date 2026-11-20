@@ -125,6 +125,7 @@ PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 WORKSPACE="$MPV_DIR/scripts/workspace"
 ANYLAYOUT="$MPV_DIR/scripts/any-layout"
+LIVEPHOTO="$MPV_DIR/scripts/live-photo"
 VIEW360="$MPV_DIR/scripts/view360"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -269,6 +270,8 @@ put mpv/scripts/side-panel/bar.lua  "$PANEL/bar.lua" 644
 put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
+put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
+put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
@@ -284,9 +287,14 @@ put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
 put mpv/scripts/workspace/projectfile.lua "$WORKSPACE/projectfile.lua" 644
 put mpv/scripts/workspace/longpath.lua  "$WORKSPACE/longpath.lua" 644
 put mpv/scripts/workspace/tags.lua      "$WORKSPACE/tags.lua" 644
+put mpv/scripts/workspace/librarylist.lua "$WORKSPACE/librarylist.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
+
+# Photos as a phone shows them: the picture, its live part (Live Photo, Motion Photo) under the Live icon
+put mpv/scripts/live-photo/main.lua "$LIVEPHOTO/main.lua" 644
+put mpv/scripts/live-photo/live.lua "$LIVEPHOTO/live.lua" 644
 
 # 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
 put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644

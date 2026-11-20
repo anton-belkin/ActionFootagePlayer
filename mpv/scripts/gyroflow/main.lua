@@ -186,6 +186,14 @@
 -- VapourSynth anyway
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
@@ -828,6 +836,37 @@ crop.init({
     camera = function(c) gpu_camera(c) end,
     focal = function() return gpu and gpu.focal end,
 })
+
+-- A photo link playing (the workspace plugin's photo, the live-photo plugin's still): its own frame, as Share renders
+-- it: Save frame's camera (crop.view) and its crop, in shares of the frame. Crop mode's crop goes into the camera's zoom
+-- (crop.fold: cut out of the whole frame, the picture trembled), what's left of it, and any other, as mpv's video-crop
+-- of the picture shown
+;(function()
+    local function apply()
+        local ws = mp.get_property_native("user-data/workspace")
+        local ph = type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.photo) == "table" and ws.photo or nil
+        local cam = ph and type(ph.camera) == "table" and ph.camera or nil
+        local c = ph and type(ph.crop) == "table" and ph.crop or nil
+        local folded = crop.fold(cam, c)
+        if folded then cam, c = folded.camera, folded.rest end
+        crop.view(cam)
+        local o = mp.get_property_native("video-out-params")
+        if c and type(o) == "table" and o.w and o.h then
+            mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d",
+                math.floor(c.w * o.w + 0.5), math.floor(c.h * o.h + 0.5), math.floor(c.x * o.w + 0.5), math.floor(c.y * o.h + 0.5)))
+        end
+        return c ~= nil and not (type(o) == "table" and o.w)
+    end
+    mp.register_event("file-loaded", function()
+        -- Its crop once the picture's size is known (after the filters)
+        if apply() then
+            local function once(_, o)
+                if type(o) == "table" and o.w then mp.unobserve_property(once); apply() end
+            end
+            mp.observe_property("video-out-params", "native", once)
+        end
+    end)
+end)()
 
 -- The upright source's ratio, W:H reduced
 local function source_aspect()
@@ -1675,9 +1714,11 @@ end
 -- Loading waits for the probe, with the script free meanwhile: quitting doesn't wait for it
 mp.add_hook("on_load", 50, function(hook)
     hook:defer()
-    local slow = mp.add_timeout(0.7, function() mp.osd_message("Gyroflow: reading the clip…", 30) end)
+    local slow = mp.add_timeout(0.7, function()
+        mp.notify({ id = "gyroflow:reading", kind = "working", title = "Reading the clip's motion", detail = "For the stabilization" })
+    end)
     setup(function()
-        if not slow:is_enabled() then mp.osd_message("", 0) end
+        if not slow:is_enabled() then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
         slow:kill()
         -- Held for a clip before this one that didn't get to play on the GPU path
         if not (gpu and gpu.hold) then gpu_unhold() end
@@ -1693,8 +1734,9 @@ play_again = function()
 end
 
 -- What it does until the first frame shows: the filter reads the clip's motion and is set up (seconds from a NAS),
--- and the window, there at once (the Windows app's force-window=immediate), stays black meanwhile. The label as
--- before, and past a second without a frame, that the first one is being prepared, until it shows
+-- and the window, there at once (the Windows app's force-window=immediate), stays black meanwhile. Past a second
+-- without a frame, a card says the first one is being prepared, until it shows. (What it plays with isn't said: the
+-- panel shows it)
 local first_frame = { timer = nil, observer = nil, waiting = false }
 local function first_frame_done()
     if first_frame.timer then first_frame.timer:kill() end
@@ -1705,13 +1747,12 @@ local function first_frame_done()
 end
 local function first_frame_message(label)
     first_frame_done()
-    mp.osd_message(label, 1.5)
     if mp.get_property_native("video-frame-info") ~= nil then return end
     first_frame.observer = function(_, info)
         if info == nil then return end
         if first_frame_done() then
             mp.msg.verbose("the first frame shows")
-            mp.osd_message(label, 1.5)
+            mp.notify({ id = "gyroflow:first-frame", kind = "hide" })
         end
     end
     mp.observe_property("video-frame-info", "native", first_frame.observer)
@@ -1719,11 +1760,16 @@ local function first_frame_message(label)
         first_frame.timer = nil
         first_frame.waiting = true
         mp.msg.verbose("no frame yet: the first one is being prepared")
-        mp.osd_message(label .. "\nPreparing the first frame…", 120)
+        mp.notify({ id = "gyroflow:first-frame", kind = "working", title = "Preparing the first frame", detail = "The stabilization is being set up" })
+        -- Never for good (as mpv's text was: two minutes)
+        first_frame.timer = mp.add_timeout(120, function()
+            first_frame.timer = nil
+            mp.notify({ id = "gyroflow:first-frame", kind = "hide" })
+        end)
     end)
 end
 mp.register_event("end-file", function()
-    if first_frame_done() then mp.osd_message("", 0) end
+    if first_frame_done() then mp.notify({ id = "gyroflow:first-frame", kind = "hide" }) end
 end)
 
 mp.register_event("file-loaded", function()
@@ -1769,6 +1815,7 @@ local function set_edges(mode)
 end
 
 mp.add_key_binding("Ctrl+b", "edges", function()
+    if platform.photo_shown() then return end
     local i = 1
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
@@ -1869,16 +1916,21 @@ local function with_pause(message, change)
     if gpu then return change() end
     local paused = mp.get_property_native("pause")
     if not paused then mp.set_property_native("pause", true) end
-    mp.osd_message(message, 10)
+    -- A card while it's set up again ("Gyroflow: the lens corrected…" says what changes)
+    local title = (message or ""):gsub("^Gyroflow: ", ""):gsub("…$", "")
+    if title ~= "" then
+        title = title:sub(1, 1):upper() .. title:sub(2)
+        mp.notify({ id = "gyroflow:setup", kind = "working", title = title, detail = "Setting the stabilization up again" })
+    end
     change()
-    if paused then return mp.osd_message("", 0) end
+    if paused then return mp.notify({ id = "gyroflow:setup", kind = "hide" }) end
     local timer = nil
     local function resume()
         mp.unregister_event(resume)
         timer:kill()
         mp.add_timeout(0.3, function()
             mp.set_property_native("pause", false)
-            mp.osd_message("", 0)
+            mp.notify({ id = "gyroflow:setup", kind = "hide" })
         end)
     end
     mp.register_event("playback-restart", resume)
@@ -2100,6 +2152,7 @@ end)
 
 -- on -> wider view -> off -> on
 mp.add_key_binding("Ctrl+g", "toggle", function()
+    if platform.photo_shown() then return end
     if stab_off then show("normal") else show(view == "normal" and "wide" or "off") end
 end)
 
@@ -2123,6 +2176,7 @@ end
 
 -- weak -> medium -> strong -> weak
 mp.add_key_binding("Ctrl+k", "level", function()
+    if platform.photo_shown() then return end
     for i, l in ipairs(LEVELS) do
         if l == level then return set_level(LEVELS[i % #LEVELS + 1]) end
     end
@@ -2174,6 +2228,7 @@ end)
 -- Above water <-> what it was (under water, as the camera says, or as the project says). Not named "lens": a key
 -- binding's name is a script message too (mpv's defaults.lua), and it took the Lens drop-down's message over
 mp.add_key_binding("Ctrl+u", "above-water", function()
+    if platform.photo_shown() then return end
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
@@ -2239,10 +2294,11 @@ local function trans_compute()
         local p = f and utils.parse_json(f:read("*a") or "") or nil
         if f then f:close() end
         trans.progress = tonumber(p and p.translation) or trans.progress
-        mp.osd_message(string.format("Gyroflow: measuring the sideways jerks… %d %%", trans.progress), 1)
+        mp.notify({ id = "gyroflow:translation", kind = "working", title = "Measuring the sideways jerks", detail = "In the picture, for this clip (kept for next time)",
+                    share = (tonumber(trans.progress) or 0) / 100 })
         publish()
     end)
-    mp.osd_message("Gyroflow: measuring the sideways jerks…", 2)
+    mp.notify({ id = "gyroflow:translation", kind = "working", title = "Measuring the sideways jerks", detail = "In the picture, for this clip (kept for next time)" })
     trans.job = mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
         poll:kill()
         trans.job = nil
@@ -2251,18 +2307,20 @@ local function trans_compute()
         local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
         if not (reply and reply.translation) then
             local why = r and (r.stderr or ""):match("failed, ([^\n]*)") or r and (r.stderr or ""):match("skipped, ([^\n]*)")
-            return mp.osd_message("Gyroflow: the sideways jerks couldn't be measured" .. (why and (": " .. why) or ""), 4)
+            return mp.notify({ id = "gyroflow:translation", kind = "error", title = "The sideways jerks couldn't be measured", detail = why })
         end
         trans_rev, trans.on = trans_rev + 1, true
         trans_apply()
         if current_source == source then gpu_refresh() end
         local share = tonumber(reply.share) or 0
-        mp.osd_message(share < 0.25 and "Gyroflow: little to take out of this clip's sideways jerks (no close subject to measure them on)"
-            or string.format("Gyroflow: sideways jerks taken out, %.1f → %.1f px (Ctrl+j off and on)", tonumber(reply.before) or 0, tonumber(reply.after) or 0), 4)
+        mp.notify({ id = "gyroflow:translation", kind = "done", seconds = 4, title = share < 0.25 and "Little to take out of the sideways jerks" or "Sideways jerks taken out",
+                    detail = share < 0.25 and "No close subject to measure them on"
+                        or string.format("%.1f → %.1f px (Ctrl+j off and on)", tonumber(reply.before) or 0, tonumber(reply.after) or 0) })
     end)
     publish()
 end
 mp.add_key_binding("Ctrl+j", "translation", function()
+    if platform.photo_shown() then return end
     if not (gpu and gpu.shader) then
         return mp.osd_message("Gyroflow: the sideways jerks are taken out on the GPU path only", 3)
     end
@@ -2275,7 +2333,7 @@ mp.add_key_binding("Ctrl+j", "translation", function()
     mp.osd_message("Gyroflow: sideways jerks " .. (trans.on and "taken out" or "left as recorded"), 2)
 end)
 
-mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)
+mp.add_key_binding("Ctrl+a", "fringes", function() if not platform.photo_shown() then set_chromatic(not chromatic) end end)
 
 -- The temporal denoise's Stronger (the panel's Transform): kept with the clip's transform; the shader takes it at once
 -- (gyroflow_dn_strong, nothing written again)
@@ -2576,6 +2634,7 @@ local function edit_project(project)
 end
 
 mp.add_key_binding("Ctrl+e", "edit", function()
+    if platform.photo_shown() then return end
     local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Gyroflow: not a local file", 1.5)
@@ -2619,16 +2678,17 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         table.insert(args, "--alone"); table.insert(args, ws.alone and "yes" or "no")
     end
     table.insert(args, path); table.insert(args, project)
-    mp.osd_message("Gyroflow: writing the project...", 2)
+    mp.notify({ id = "gyroflow:project", kind = "working", title = "Writing the Gyroflow project", detail = platform.file_name(project) })
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             mp.msg.info("wrote " .. project)
+            mp.notify({ id = "gyroflow:project", kind = "hide" })
             mp.commandv("script-message-to", "workspace", "catalog-note", project)
             edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")
             mp.msg.warn("gyroflow-project: " .. err)
-            mp.osd_message("Gyroflow: couldn't write the project: " .. (err:match("([^\n]+)$") or "failed"), 4)
+            mp.notify({ id = "gyroflow:project", kind = "error", title = "Couldn't write the Gyroflow project", detail = err:match("([^\n]+)$") or "gyroflow-project failed" })
         end
     end)
 end)

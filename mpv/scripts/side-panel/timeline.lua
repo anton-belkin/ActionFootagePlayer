@@ -123,19 +123,32 @@ end
 -- current }, from mpv's playlist property. exts (a set, lowercase: mpv's video-exts): only the videos, not the folders
 -- and other files mpv put in it beside them. played (a set of file names): what has played, which stays whatever its
 -- extension, as the one playing does: a 360° clip (.insv) opened, then its exports in stabilized/ after it
-function M.playlist_rows(playlist, exts, played)
+function M.playlist_rows(playlist, exts, played, photo_exts)
     local rows = {}
     for i, e in ipairs(type(playlist) == "table" and playlist or {}) do
         local file = e.filename or ""
         local base = file:match("([^/\\]+)[/\\]*$") or file
         local stem, ext = base:match("^(.+)%.([^.]+)$")
         local current = e.current == true or e.playing == true
-        if current or not exts or (ext and exts[ext:lower()]) or (played and played[file]) then
+        local photo = photo_exts ~= nil and ext ~= nil and photo_exts[ext:lower()] == true
+        if current or not exts or photo or (ext and exts[ext:lower()]) or (played and played[file]) then
             local name = (e.title and e.title ~= "") and e.title or stem or base
-            rows[#rows + 1] = { index = i - 1, name = name, current = current }
+            -- A Motion Photo's name without its .MP (IMG_1234.MP.jpg)
+            if photo then name = name:gsub("%.[Mm][Pp]$", "") end
+            rows[#rows + 1] = { index = i - 1, name = name, current = current, photo = photo or nil }
         end
     end
     return rows
+end
+
+-- What the rows are: "3 videos", "1 photo", "2 photos, 1 video"
+function M.rows_label(rows)
+    local photos, videos = 0, 0
+    for _, r in ipairs(rows) do if r.photo then photos = photos + 1 else videos = videos + 1 end end
+    local function n(k, one, many) return k == 1 and ("1 " .. one) or (k .. " " .. many) end
+    if photos == 0 then return n(videos, "video", "videos") end
+    if videos == 0 then return n(photos, "photo", "photos") end
+    return n(photos, "photo", "photos") .. ", " .. n(videos, "video", "videos")
 end
 
 -- A set of the extensions in a list ("mp4", ...), lowercase
@@ -154,6 +167,18 @@ function M.cut_middle(text, n)
     local tail = math.floor((n - 1) / 2)
     local head = n - 1 - tail
     return table.concat(chars, "", 1, head) .. "…" .. table.concat(chars, "", #chars - tail + 1, #chars)
+end
+
+-- A list opened from Action Footage Library (the workspace plugin's user-data/library-list: {file, label, count}),
+-- when the one playing came from it: that, else nil
+function M.library_list(playlist, info)
+    if type(info) ~= "table" or type(info.file) ~= "string" then return nil end
+    for _, e in ipairs(type(playlist) == "table" and playlist or {}) do
+        if e.current == true or e.playing == true then
+            return e["playlist-path"] == info.file and info or nil
+        end
+    end
+    return nil
 end
 
 -- The folder the playlist's files are in: the one they share, when some are in it and the others in its subfolders

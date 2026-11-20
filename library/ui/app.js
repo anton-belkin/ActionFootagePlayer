@@ -133,10 +133,50 @@ async function call(cmd, args) {
 let toastTimer = null;
 function toast(t) { $("toastMsg").textContent = t; $("toast").hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { $("toast").hidden = true; }, 4200); }
 
+// The player's playlist when items are opened (Anton, 2026-11-19): what the window shows at that moment, in its order
+// (its search, filters, sort), the item opened playing in it, so the player's Previous and Next walk it. A snapshot:
+// a later change here doesn't follow it; another open replaces it. Several selected and opened: those, in the
+// window's order. Photos are in it (the player shows them as a phone does: a Live Photo's or Motion Photo's live part
+// under its Live icon, a photo's link as its clip at the frame). What the player can't play is left out: folders,
+// marks (a time in a clip: opened, a mark plays its clip), clips offline and links whose original isn't found.
+function playable(it) {
+  if (!it || !(it.kind === "clip" || it.kind === "moment" || it.kind === "export" || it.kind === "still") || it.offline || !it.path) return false;
+  if (MISSING.has(it.path)) return false;
+  return !(it.kind === "moment" && "original" in it && !it.original && it.link && it.link.clip);
+}
+// What the window shows, as words: the player's playlist says it ("Originals › Day 1 · “turtle” · filtered")
+function shownLabel() {
+  const parts = [ctx().viewName].concat(S.view === "clip" ? [] : S.path.map((p) => p.replace(AV_MARK, "")));
+  let t = parts.filter(Boolean).join(" › ");
+  if (S.q.trim()) t += " · “" + S.q.trim() + "”";
+  if (filtering()) t += " · filtered";
+  return t;
+}
+// The list for the player: {paths, titles, at, label}, or null when the item opened isn't one it plays (it opens by
+// itself then, as before)
+function playList(opened) {
+  const byKey = new Map(items().map((it) => [keyOf(it), it]));
+  const order = new Map(VISIBLE.map((k, i) => [k, i]));
+  let list;
+  if (opened.length === 1) {
+    if (!playable(opened[0])) return null;
+    list = VISIBLE.map((k) => byKey.get(k)).filter(playable);
+    // Not among the rows (a view drawn otherwise): it alone
+    if (!list.includes(opened[0])) list = [opened[0]];
+  } else {
+    list = opened.filter(playable);
+    const at = (it) => (order.has(keyOf(it)) ? order.get(keyOf(it)) : Infinity);
+    list = list.map((it, i) => [it, i]).sort((a, b) => at(a[0]) - at(b[0]) || a[1] - b[1]).map((x) => x[0]);
+    if (!list.length) return null;
+  }
+  return { paths: list.map((it) => it.path), titles: list.map((it) => (it.name || "").replace(/\.(mp4|mov|insv|heic|jpe?g|png)$/i, "")), at: opened.length === 1 ? list.indexOf(opened[0]) : 0, label: shownLabel() };
+}
+
 // What's selected, opened (open_items): until the player plays the first video (seconds for a clip on a NAS, with
-// nothing to see meanwhile on Windows before), a spinner says so; a quick one shows none
+// nothing to see meanwhile on Windows before), a spinner says so; a quick one shows none. With `list` (playList):
+// the items as that list (photos too: a photo not in it, e.g. one of several selected outside the rows, by itself)
 let opening = 0;
-async function openItems(paths) {
+async function openItems(paths, list) {
   if (!paths.length) return;
   // Clips whose location is offline: their share connected instead (opened again once they show)
   const off = (RAW_FOOTAGE.items || []).filter((it) => it.offline && paths.includes(it.path));
@@ -148,7 +188,7 @@ async function openItems(paths) {
     return;
   }
   const id = ++opening;
-  const name = (paths[0].split(/[\\/]/).pop() || "").replace(/\.afplink\.mp4$/i, "");
+  const name = ((list ? list.paths[list.at] : paths[0]).split(/[\\/]/).pop() || "").replace(/\.afplink\.mp4$/i, "");
   const busy = setTimeout(() => {
     if (opening !== id) return;
     clearTimeout(toastTimer);
@@ -158,7 +198,14 @@ async function openItems(paths) {
     document.body.classList.add("waiting");
   }, 300);
   let ok = true;
-  try { ok = await call("open_items", { paths }); } catch (e) { ok = null; }
+  try {
+    if (list) {
+      // Photos among what's opened that the list hasn't (none, usually): by themselves; the rest, the list
+      const listed = new Set(list.paths), photos = paths.filter((p) => !listed.has(p) && /\.(heic|jpe?g|png)$/i.test(p));
+      if (photos.length) await call("open_items", { paths: photos });
+      ok = await call("open_list", { paths: list.paths, titles: list.titles, at: list.at, label: list.label });
+    } else ok = await call("open_items", { paths });
+  } catch (e) { ok = null; }
   clearTimeout(busy);
   if (opening !== id) return;
   document.body.classList.remove("waiting");
@@ -514,7 +561,7 @@ function renderTop() {
 function mosaic(path, filt) {
   const its = under(path).filter((x) => x.thumbPath && (!filt || matches(x))).slice(0, 4);
   let h = '<span class="mosaic">';
-  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
+  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + itemImg(its[i]) + '</i>' : '<i></i>';
   return h + '<span class="fb">' + ICON.fsm + '</span></span>';
 }
 function img(path) {
@@ -608,7 +655,7 @@ function renderMain() {
   VISIBLE = list.map(keyOf);
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   if (list.length) bar += '<div class="selbar"><span class="sub" style="display:inline">' + (nSel ? nSel + " of " + list.length + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === list.length ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + shareBar(c) + '</div>'; // albums.js, share.js
-  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
+  const thumb = (it) => it.kind === "folder" ? mosaic(it.path, filt) : it.kind === "mark" ? '<span class="th mk" aria-hidden="true">' + ICON_MARK + '</span>' : '<span class="th">' + itemImg(it) + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + '</span>';
   const folderSub = (it) => { const all = under(it.path); const m = filt ? all.filter((x) => matches(x)).length : all.length; return filt && !srch ? m + " of " + all.length + " match" : plural(all.length); };
   const subOf = (it) => it.kind === "folder" ? folderSub(it) : it.sub + (srch ? " · in " + (it.dir || "the top folder") : "");
   const top = atTop ? albumTopRows(S.layout, filt) : null; // albumviews.js
@@ -632,9 +679,15 @@ function renderMain() {
     h += '</div>';
   } else {
     h += '<div class="grid">' + (top || "");
+    TILE.w = tileWidth(main); // tiles.js: the albums' text fitted to the columns
+    tileWatch(main);
     list.forEach((it, i) => {
       if (top) h += albumTopHead(list, i);
       const key = keyOf(it), sel = !!S.sel[key];
+      if (it.kind !== "folder" && it.kind !== "mark") {
+        h += itemTile(it, key, { sel, w: TILE.w, renaming: S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : "" });
+        return;
+      }
       h += '<button type="button" class="card' + (sel ? " sel" : "") + (it.offline ? " off" : "") + (it.pending ? " pending" : "") + (it.pending ? '" title="Being written…' : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' + thumb(it) +
         (S.renaming === key ? '<input id="rename" class="renamer" type="text" value="' + esc(renameStem(it)) + '" aria-label="New name">' : '<span class="nm">' + esc(it.name) + '</span>') + '<span class="sub">' + esc(subOf(it)) + '</span><span class="chips">' + chips(it) + '</span></button>';
     });
@@ -1908,7 +1961,7 @@ function marksList(it, probe) {
 }
 function pathsHtml(list) { return list.map((p) => '<span class="mono blk">' + esc(p) + '</span>').join(""); }
 function itemInfo(it) {
-  let h = '<div class="ihead">' + (it.thumbPath ? '<span class="ith">' + img(it.thumbPath) + '</span>' : "") + '<b class="wrap">' + esc(it.name) + '</b><span class="sub">' + esc(it.sub || "") + '</span></div>';
+  let h = '<div class="ihead">' + (it.thumbPath ? '<span class="ith">' + itemImg(it) + '</span>' : "") + '<b class="wrap">' + esc(it.name) + '</b><span class="sub">' + esc(it.sub || "") + '</span></div>';
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
@@ -2422,8 +2475,12 @@ function quickLook() {
 function openSelection() {
   const keys = Object.keys(S.sel);
   if (keys.length === 1 && keys[0].startsWith("f:")) { S.path = keys[0].slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
-  const p = selectedPaths();
-  openItems(p);
+  openChosen();
+}
+// What's selected, opened: as the player's list (playList)
+function openChosen() {
+  const sel = ctx().selItems;
+  openItems(sel.map((it) => it.path), playList(sel));
 }
 function goUp() {
   if (S.view === "clip" && !searching()) { goFootage(S.clip); return; }
@@ -2780,7 +2837,7 @@ document.addEventListener("click", async (e) => {
     case "srcclear": S.srcDraft = {}; renderSide(); return;
     case "job": return addJob(v);
     case "connectloc": S.via = null; connectLocation(v, el.dataset.h); return;
-    case "openit": { const p = selectedPaths(); openItems(p); return; }
+    case "openit": openChosen(); return;
     case "revealit": { const c = ctx(); const first = c.selFolders.length ? (S.view === "sources" ? treeOnDisk(c.selFolders[0]) : folderOnDisk(c.selFolders[0])) : c.direct[0] && c.direct[0].path; if (first) call("reveal_path", { path: first }).catch(() => {}); return; }
     case "cancel": await call("cancel_job", { id: Number(v) }).catch(() => {}); return poll();
     case "clearjobs": await call("clear_finished").catch(() => {}); return poll();
@@ -2900,7 +2957,7 @@ document.addEventListener("dblclick", (e) => {
   if (v.startsWith("f:")) { S.q = ""; S.flat = false; S.path = v.slice(2).split("/"); S.sel = {}; S.anchor = null; renderAll(); $("main").scrollTop = 0; return; }
   if (S.renaming) return;
   const it = items().find((x) => keyOf(x) === v);
-  if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); openItems([it.path]); }
+  if (it) { S.sel = {}; S.sel[v] = true; S.anchor = v; renderMain(); renderSide(); openItems([it.path], playList([it])); }
 });
 document.addEventListener("input", (e) => {
   const t = e.target;

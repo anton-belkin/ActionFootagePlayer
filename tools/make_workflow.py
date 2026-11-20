@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-# make_workflow.py <out.workflow> <menu title> <icon> <shell command>
+# make_workflow.py <out.workflow> <menu title> <icon> <shell command> [movie|image]
 #
-# Writes a Finder Quick Action (an Automator service for movie files) that runs a shell command with the
-# selected files as arguments ("$@"), like one saved from Automator with a single Run Shell Script action.
+# Writes a Finder Quick Action (an Automator service for movie files, or image files) that runs a shell command with
+# the selected files as arguments ("$@"), like one saved from Automator with a single Run Shell Script action.
 
 import plistlib, sys, uuid, os, shutil
 
 out, title, icon, command = sys.argv[1:5]
+kind = sys.argv[5] if len(sys.argv) > 5 else "movie"
+if kind not in ("movie", "image"):
+    sys.exit("make_workflow.py: the kind is movie or image")
 
 action = {
     "AMAccepts": { "Container": "List", "Optional": True, "Types": ["com.apple.cocoa.string"] },
@@ -56,13 +59,13 @@ document = {
     "workflowMetaData": {
         "applicationBundleIDsByPath": { "/System/Library/CoreServices/Finder.app": "com.apple.finder" },
         "applicationPaths": ["/System/Library/CoreServices/Finder.app"],
-        "inputTypeIdentifier": "com.apple.Automator.fileSystemObject.movie",
+        "inputTypeIdentifier": "com.apple.Automator.fileSystemObject." + kind,
         "outputTypeIdentifier": "com.apple.Automator.nothing",
         "presentationMode": 15,
         "processesInput": False,
         "serviceApplicationBundleID": "com.apple.finder",
         "serviceApplicationPath": "/System/Library/CoreServices/Finder.app",
-        "serviceInputTypeIdentifier": "com.apple.Automator.fileSystemObject.movie",
+        "serviceInputTypeIdentifier": "com.apple.Automator.fileSystemObject." + kind,
         "serviceOutputTypeIdentifier": "com.apple.Automator.nothing",
         "serviceProcessesInput": False,
         "systemImageName": icon,
@@ -77,7 +80,7 @@ info = {
         "NSMenuItem": { "default": title },
         "NSMessage": "runWorkflowAsService",
         "NSRequiredContext": { "NSApplicationIdentifier": "com.apple.finder" },
-        "NSSendFileTypes": ["public.movie"],
+        "NSSendFileTypes": ["public." + kind],
     }]
 }
 

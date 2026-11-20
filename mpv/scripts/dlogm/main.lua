@@ -97,6 +97,14 @@
 -- file ends. Source files are never modified.
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
@@ -656,7 +664,11 @@ local function ask_screens(done)
         finish(found, main)
     end)
 end
-ask_screens()
+-- Asked as the player starts; the answer published (follow_screen, further down) for a file that didn't wait for it:
+-- one that isn't log (a photo) is set up at once, and when its window came before the answer the screen stayed
+-- unknown, counted as HDR: a Motion Photo's HDR rendition went to an SDR screen, tone-mapped grey (2026-11-20, Anton)
+local follow_screen
+ask_screens(function() if follow_screen then follow_screen() end end)
 
 -- The log curve the source is read with (the workspace plugin's input, from its own file; docs/moments-and-workspaces.md
 -- "Source and transform"): a curve's id, auto (its metadata's), or nil (nothing set)
@@ -753,14 +765,12 @@ mp.observe_property("video-dec-params", "native", function(_, p)
     hdr = { trc = p.gamma, prim = p.primaries or "bt.2020", dovi = p.colormatrix == "dolbyvision" }
     if curve then mp.msg.info(curve.name .. " in the metadata, but the video is tagged " .. HDR_NAMES[hdr.trc] .. ": not log") end
     recorded, curve = nil, nil
-    if apply(resolve(chosen[screen()])) then
-        mp.msg.info(label(current))
-        mp.osd_message(label(current), 1.5)
-    end
+    -- (not said on screen: the panel shows the look)
+    if apply(resolve(chosen[screen()])) then mp.msg.info(label(current)) end
 end)
 
 mp.register_event("file-loaded", function()
-    if announce then mp.osd_message(label(current), 1.5) end
+    -- What it plays with is the panel's to show, not said over the clip as it opens
     announce = false
 end)
 
@@ -829,7 +839,7 @@ end
 
 -- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
 -- screen macOS hasn't been asked about yet (just connected) is asked about first
-local function follow_screen()
+follow_screen = function()
     if not screens then return end
     local name = window_screen()
     if platform == "darwin" and name and name ~= "" and screens[name] == nil and not asking then

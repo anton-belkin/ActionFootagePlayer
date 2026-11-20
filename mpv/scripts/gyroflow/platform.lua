@@ -20,6 +20,12 @@ end
 M.windows = name == "windows"
 M.macos = name == "darwin"
 
+-- A photo shown (the live-photo plugin says so): what's for clips (stabilization, exports, crop, a clean frame)
+-- does nothing on it
+function M.photo_shown()
+    return type(mp.get_property_native("user-data/afp/photo")) == "table"
+end
+
 -- The VapourSynth plugin as cargo names it: libvs_gyroflow.dylib, libvs_gyroflow.so, vs_gyroflow.dll
 function M.library(base)
     if M.windows then return base .. ".dll" end

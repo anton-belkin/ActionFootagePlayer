@@ -18,6 +18,14 @@
 --   version= the app's version, for the menu to show beside its name (ActionFootagePlayer sets its own)
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 
@@ -514,7 +522,12 @@ local function build()
             add(item("Open the original" .. (w.export["in"] and (" at " .. clock(w.export["in"])) or ""), "script-message-to workspace open-original",
                      { disabled = not w.export.original }))
         end
-        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export then
+        -- A photo (its link, or one the player made): its clip at its frame; moments are of clips
+        local photo = w and type(w.photo) == "table" and w.photo or nil
+        if photo and photo.clip then
+            add(item(string.format("Open the whole clip at %d:%05.2f", math.floor(photo.t / 60), photo.t % 60), "script-message-to workspace open-original"))
+        end
+        if w and w.clip and local_file(w.clip) and not (w.moment and w.moment.missing) and not w.export and not photo then
             local moment = key["script-binding workspace/moment"]
             if w.saving then
                 add(info("Saving " .. w.saving .. "…"))

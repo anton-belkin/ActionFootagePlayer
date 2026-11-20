@@ -86,6 +86,7 @@ local function finish()
     if pending.framedrop then mp.set_property("hr-seek-framedrop", pending.framedrop) end
     pending = nil
     os.remove(M.CONTROL)
+    mp.notify({ id = "still", kind = "hide" })
 end
 
 local function write_control(control)
@@ -128,7 +129,8 @@ local function start(full_now)
         mp.set_property("hr-seek-framedrop", "no")
         mp.msg.verbose(string.format("cleaning up the frame at %.3f s", t))
     end
-    mp.osd_message(clean and (bigger and "Cleaning up the frame at full resolution…" or "Cleaning up the frame…") or "Full resolution…", 10)
+    mp.notify({ id = "still", kind = "working", title = clean and "Cleaning up the frame" or "Full resolution",
+                detail = clean and (bigger and "At full resolution, from the frames around it" or "From the frames around it") or "The frame at its full size" })
     if bigger then
         -- mpv seeks to the frame again with the chain set up anew
         full.set(true)
@@ -181,7 +183,6 @@ mp.register_event("playback-restart", function()
     if done then
         mp.msg.verbose(pending.framedrop and "frame cleaned up" or "frame shown again, the chain set up anew")
         finish()
-        mp.osd_message("", 0)
     end
     if full_next then
         full_next = false
@@ -240,6 +241,7 @@ local function changed()
 end
 
 mp.add_key_binding("Ctrl+p", "still", function()
+    if platform.photo_shown() then return end
     if o.temporal_denoise == "off" then
         return mp.osd_message("Temporal denoise: off on this computer (Performance & Quality)", 2)
     end
@@ -262,6 +264,7 @@ end
 
 -- Ctrl+f: the paused frame at full size now (pausing first), cleaned up in the same re-render when Ctrl+p is on
 mp.add_key_binding("Ctrl+f", "full", function()
+    if platform.photo_shown() then return end
     if not (full and stabilizing()) then return mp.osd_message("Full resolution: only while it's stabilized", 1.5) end
     if full.active() then return mp.osd_message("Full resolution", 1.5) end
     if not full.needed() then return mp.osd_message("Full resolution: it plays at full size already", 1.5) end
@@ -271,7 +274,7 @@ mp.add_key_binding("Ctrl+f", "full", function()
     if pending or not shown then
         -- Once the frame being cleaned up, or sought to, is on screen
         full_next = true
-        mp.osd_message("Full resolution…", 10)
+        mp.notify({ id = "still", kind = "working", title = "Full resolution", detail = "The frame at its full size" })
     else
         start(true)
     end
