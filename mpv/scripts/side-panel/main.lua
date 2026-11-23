@@ -45,7 +45,7 @@ local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
 local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
-local CURVE_NAMES = {}
+local CURVE_NAMES = { uw = "SDR, underwater colour" }
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 -- The aspects a frame can have (the Clip tab's output, Save frame's photo), in two rows
 local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
@@ -126,6 +126,13 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 10 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:box(cx + 5 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx, cy, 1.8 * s), color)
+    elseif name == "water" then
+        -- A drop, over a wave
+        u:shape("m " .. at(0, -9) .. " b " .. at(3, -5) .. " " .. at(5.5, -2) .. " " .. at(5.5, 0.5) .. " b " .. at(5.5, 3.8) .. " "
+                .. at(3, 5.5) .. " " .. at(0, 5.5) .. " b " .. at(-3, 5.5) .. " " .. at(-5.5, 3.8) .. " " .. at(-5.5, 0.5)
+                .. " b " .. at(-5.5, -2) .. " " .. at(-3, -5) .. " " .. at(0, -9), color, stroke)
+        u:shape("m " .. at(-9, 8.2) .. " b " .. at(-6, 6.4) .. " " .. at(-3, 6.4) .. " " .. at(0, 8.2) .. " b " .. at(3, 10) .. " "
+                .. at(6, 10) .. " " .. at(9, 8.2), color, { fill = false, border = 1.3 * s })
     elseif name == "telemetry" then
         -- A gauge: an arc, and its needle
         local R, r = 8, 6.4
@@ -203,7 +210,8 @@ end
 -- Source, Transform, Output: how it's read (the source's input), how it's shown (its transform), where (this screen,
 -- a file) (docs/moments-and-workspaces.md, "Source and transform")
 local TABS = {
-    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" }, { "crop", "Save frame" },
+    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" },
+    { "water", "Underwater colour" }, { "crop", "Save frame" },
     { "quality", "Performance & Quality" }, { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" }, { "view360", "360° view" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -1208,6 +1216,52 @@ local function telemetry_part(u, x, w, y)
     return y
 end
 
+-- Underwater colour (the dlogm plugin's uwcolor.lua): its switches, its strength, and what it measured in the frame
+local function signed(v, n) return v and ((v < 0 and "−" or "+") .. string.format("%." .. (n or 2) .. "f", math.abs(v))) or "–" end
+local function water_part(u, x, w, y)
+    local s = u.s
+    local c = state("uwcolor")
+    if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
+    y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. For this computer", { color = C.label })
+    y = u:switch(x, w, y + 6 * s, "uw-on", "Correct underwater colour", c.on == true, "script-message-to dlogm uw-set on toggle")
+    if c.on and mp.get_property("path") and not c.active and not c.ok then
+        y = u:caption(x, w, y, "Not this clip: it's log or HDR, or has a curve set by hand")
+    end
+    y = u:switch(x, w, y, "uw-hl", "Brighter highlights", c.highlights == true, "script-message-to dlogm uw-set highlights toggle", nil, not c.on)
+    y = u:caption(x, w, y, "Sunlit water and sand get more of HDR's room. Careful at night: a torch's spot gets brighter still")
+    u:text(x, y + 10 * s, "Strength", { size = 12, color = C.label, alpha = c.on and "00" or "80" })
+    u:text(x + w, y + 10 * s, string.format("%d %%", math.floor((c.strength or 1) * 100 + 0.5)), { size = 12, color = C.label, align = 6 })
+    y = u:slider(x, w, y + 18 * s, "uw-strength", c.strength or 1, function(p)
+        mp.commandv("script-message-to", "dlogm", "uw-set", "strength", string.format("%.2f", p))
+    end, "Camera's colour", "Corrected", not c.on)
+    local t = c.stats
+    if not (c.active and type(t) == "table" and t.under_water) then return y end
+    y = u:heading(x, w, y + 10 * s, "This frame")
+    local function line(label, value)
+        u:text(x, y + 9 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 9 * s, value, { size = 12, align = 6 })
+        y = y + 20 * s
+    end
+    line("Under water", t.under_water >= 0.995 and "yes" or t.under_water <= 0.005 and "no: left as recorded"
+         or string.format("partly, %d %%", math.floor(t.under_water * 100 + 0.5)))
+    line("Smooth water", string.format("%d %% of the frame", math.floor((t.water or 0) * 100 + 0.5)))
+    if t.water_hue then
+        line("Water hue", string.format("%d° → %d°", t.water_hue, t.water_hue_after or t.water_hue))
+        line("Water purple (Oklab a)", signed(t.water_a, 3) .. " → " .. signed(t.water_a_after, 3))
+    end
+    line("Green leaking into red", string.format("%d %% taken out", math.floor((t.leak or 0) * 100 + 0.5)))
+    line("Red (log R/G)", signed(t.red))
+    line("Blue (log B/G)", signed(t.blue) .. ((t.blue_water or 0) > 0 and (" " .. signed(t.blue_water) .. " for green water") or ""))
+    line("Lightness", signed(t.lift) .. " stops")
+    y = u:caption(x, w, y + 2 * s, string.format("Hue under 228° reads green, Oklab a above −0.052 purple. Lightness to Action 6's "
+                  .. "median under water; this frame's is %.2f of SDR white. What plays eases to this over a second "
+                  .. "(now red %s, blue %s, leak %d %%, %s stops). Measured in %d ms", t.median or 0,
+                  signed(t.applied and t.applied.red), signed(t.applied and t.applied.blue),
+                  math.floor(((t.applied and t.applied.leak) or 0) * 100 + 0.5), signed(t.applied and t.applied.lift), t.ms or 0))
+    return y
+end
+
 local SPEEDS = { 0.5, 1, 1.5, 2 }
 
 local function player_part(u, x, w, y)
@@ -1607,7 +1661,7 @@ local function playlist_part(u, x, w, y)
 end
 
 local PARTS = { project = project_part, playlist = playlist_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
-                dv = dv_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
+                dv = dv_part, water = water_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
                 view360 = view360_part }
 -- Each part's "these as the defaults" (Transform has its own, Use as default)
 local REMEMBER = { output = "script-message-to dlogm remember", quality = "script-message-to gyroflow remember-quality",
@@ -2062,7 +2116,7 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/uwcolor", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
                         "user-data/view360",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",

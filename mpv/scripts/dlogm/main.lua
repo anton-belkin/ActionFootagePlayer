@@ -158,6 +158,14 @@ local DV_TRIMS = { "slope", "offset", "power", "midContrast", "clipTrim", "satur
 local DV_L3 = { l3Min = true, l3Avg = true, l3Max = true }
 local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
+-- Underwater colour (uwcolor.lua's switch): a plain SDR clip (GoPro's, not log) corrected and turned into HLG
+-- by its shader, then shown in the looks like a log curve. Not in Ctrl+l's round, never saved as the clip's curve
+local UW = { id = "uw", name = "Underwater colour", hdr = "shaders/underwater_hlg.glsl" }
+CURVE.uw = UW
+local function uw_wanted()
+    local u = mp.get_property_native("user-data/uwcolor")
+    return type(u) == "table" and u.on == true
+end
 -- What the cameras' metadata says, as a curve
 local DJI_CURVES = { dlogm = "dlogm", dlog = "dlog" }
 local GOPRO_CURVES = { GPLOG2 = "gplog2", LOG = "gplog" }
@@ -413,6 +421,8 @@ local function publish()
         dv_own = hdr ~= nil and not curve and hdr.dv_signaled == true,
         -- What the file is, for the Source tab: its primaries, its Dolby Vision ("8.4", "8.1", "5", "" none)
         prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
+        -- A plain SDR clip, which the underwater colour can take (or has)
+        uw_ok = base ~= nil and not hdr and recorded == nil and (curve == nil or curve == UW),
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -668,7 +678,7 @@ end
 
 -- The curve chosen by hand, into the source's own file at once: auto when it's the one the metadata says
 local function keep_curve()
-    local id = (curve == nil or curve == recorded) and "auto" or curve.id
+    local id = (curve == nil or curve == recorded or curve == UW) and "auto" or curve.id
     mp.commandv("script-message-to", "workspace", "input-set", "curve", id)
 end
 
@@ -718,6 +728,7 @@ mp.add_hook("on_preloaded", 50, function(hook)
     if not trc then
         recorded = recorded_curve(path)
         curve = (saved and CURVE[saved]) or recorded
+        if not curve and uw_wanted() then curve = UW end
         if not curve then
             mp.msg.verbose("not log footage it knows")
             if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
@@ -894,6 +905,20 @@ mp.register_script_message("curve", function(id)
     end
 end)
 
+-- The underwater colour on or off for this file (uwcolor.lua, as its switch changes): only a plain SDR clip,
+-- not one given a curve by hand
+mp.register_script_message("uw-color", function(v)
+    if not base or hdr or recorded then return end
+    if v == "yes" and curve == nil then
+        curve = UW
+        if apply(kept_look()) then mp.msg.info(label(current)) else curve = nil end
+    elseif v == "no" and curve == UW then
+        apply("off")
+        curve, current = nil, nil
+    end
+    publish()
+end)
+
 -- This file's look by name, as Ctrl+s would choose it
 mp.register_script_message("look", function(m)
     for _, l in ipairs(looks()) do
@@ -1024,3 +1049,6 @@ mp.register_script_message("remember", function()
                               .. " on SDR screens (dlogm.conf)")
                    or "Couldn't write dlogm.conf", 3)
 end)
+
+-- Underwater colour for plain SDR clips: its switches, and each frame's numbers for its shader (uwcolor.lua)
+require 'uwcolor'
