@@ -94,6 +94,9 @@ fn db() -> &'static LensProfileDatabase {
     })
 }
 
+/// Gyroflow's lens database as the player has it (bundled), for whoever needs it whole (lens_find.rs)
+pub fn database() -> &'static LensProfileDatabase { db() }
+
 /// The votes, by the profile's checksum (Gyroflow's: LensProfileDatabase::load_all)
 fn votes() -> &'static HashMap<String, (u32, u32)> {
     static VOTES: OnceLock<HashMap<String, (u32, u32)>> = OnceLock::new();

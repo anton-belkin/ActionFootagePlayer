@@ -1054,7 +1054,7 @@ function sideBody(c) {
     case "moments":
       if (!clipsView) return partHead(title, c, true) + note(S.view === "clip" ? "Moments and photos of this clip’s marks are made on the clip in Originals." : "Moments and photos are made from the clips: select them in Albums or Originals.");
       return partHead(title, c, true) + part(momentsBody(c));
-    case "stabilize": return partHead(title, c, true) + (clipsView ? part(opticalBody(c)) : note("Stabilize optically is for clips without motion data: select them in Albums or Originals."));
+    case "stabilize": return partHead(title, c, true) + (clipsView ? part(lensFindHtml(c)) + part(opticalBody(c)) : note("Stabilize optically is for clips without motion data: select them in Albums or Originals."));
     // Of anything selected: clips, moments, photos, mixed (share.js)
     case "share": return partHead(title, c, true) + shareBody(c);
     case "checks":
@@ -1351,6 +1351,57 @@ function recordedText(r, label) {
   if (!r || !(r.types || []).length) return "";
   if (r.recorded || r.default) return label(r.recorded || r.default, r.types);
   return r.mode != null ? "unknown (mode " + r.mode + ")" : "unknown";
+}
+// Find lens / Estimate lens (vs-gyroflow's lens_find.rs, run by gyroflow-optical: Gyroflow's lens_from_video): the
+// known lenses of a clip's camera tried on three parts of it, or one estimated from it, the readout measured; what was
+// found, from the latest of these tasks of the project, with a button that keeps one for the clip's whole mode (the
+// player's own lens database: every clip of the same camera, mode, size and frame rate takes it)
+const LENS_KEEPING = {};
+function lensFindHtml(c) {
+  const clips = c.selItems.filter((it) => it.kind === "clip" && !it.is360);
+  const n = clips.length;
+  let h = '<div class="lab">Lens · found in the picture</div>' +
+    '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="lens-find"' + (n ? "" : " disabled") + '>Find lens' + (n ? " for " + n + (n === 1 ? " clip" : " clips") : "") + '</button>' +
+    '<button type="button" class="btn sm" data-a="job" data-v="lens-estimate"' + (n === 1 ? "" : " disabled") + ' title="From one clip: the one with the best view, the camera moving through a still scene">Estimate lens</button></div>' +
+    '<span class="sub wrap">Find tries the known lenses of each clip’s camera on three parts of it, in air and under water, and measures the readout where a lens has none (tens of seconds a clip). Estimate makes one from a clip (under a minute). A lens kept is the lens of every clip of that camera, mode, size and frame rate.</span>';
+  const job = (S.jobs || []).filter((j) => (j.kind === "lens-find" || j.kind === "lens-estimate") && j.results).slice(-1)[0];
+  if (!job) return h;
+  const name = (p) => String(p || "").split("/").pop();
+  const verdictText = { good: "fits", single: "fits (one part could tell)", loose: "fits loosely", poor: "doesn’t fit", unchecked: "not checked on another part" };
+  const keepBtn = (r, t) => {
+    const k = r.path + "#" + t.n;
+    return '<button type="button" class="btn sm" data-a="keepfound" data-v="' + esc(r.path) + '" data-n="' + esc(t.n) + '"' + (LENS_KEEPING[k] ? " disabled" : "") + '>' + (LENS_KEEPING[k] ? "Keeping…" : "Keep for this mode") + '</button>';
+  };
+  const lensLine = (r, t) => '<div class="lensfound"><span class="blk">' + esc(String(t.name).replace(/_/g, " ")) + '</span><span class="sub wrap blk">' +
+    esc([verdictText[t.verdict] || t.verdict, t.refraction > 1 ? "under water" + (t.medium_sure ? "" : "?") : "in air" + (t.medium_sure ? "" : "?"),
+         t.readout_ms ? "readout " + Math.abs(t.readout_ms).toFixed(1) + " ms" + (t.readout_measured ? " (measured)" : "") : ""].filter(Boolean).join(" · ")) + '</span>' + keepBtn(r, t) + '</div>';
+  h += '<div class="lensresults"><span class="sub wrap">' + esc(job.title + (job.state === "done" ? "" : " · " + job.state)) + '</span>';
+  for (const r of job.results) {
+    h += '<div class="isec"><b>' + esc(name(r.path)) + '</b>' + (r.mode ? '<span class="sub wrap blk">' + esc(r.mode) + '</span>' : "");
+    if (r.error) { h += '<span class="sub wrap err">' + esc(r.error) + '</span></div>'; continue; }
+    if (r.estimate && job.kind === "lens-estimate") h += lensLine(r, r.estimate) + (r.doubts && r.doubts.length ? '<span class="sub wrap">' + esc(r.doubts.join(" · ")) + '</span>' : "");
+    else {
+      const fit = (r.tried || []).filter((t) => t.fits);
+      if (!fit.length) h += '<span class="sub wrap">No known lens fits' + (r.fragments_with_scene < 2 ? " (little of the clip could tell)" : "") + ': Estimate lens from a clip of this mode</span>';
+      // The one lens_from_video took first, then the others that fit
+      fit.sort((a, b) => (b.n === r.accepted) - (a.n === r.accepted));
+      for (const t of fit) h += lensLine(r, t);
+    }
+    h += '</div>';
+  }
+  return h + '</div>';
+}
+async function keepFoundLens(path, n) {
+  const k = path + "#" + n;
+  if (LENS_KEEPING[k]) return;
+  LENS_KEEPING[k] = true; renderSide();
+  try {
+    const r = await invoke("keep_found_lens", { path, n });
+    for (const x of Object.keys(LENS_INFO)) delete LENS_INFO[x];
+    for (const x of Object.keys(LENS_OF)) delete LENS_OF[x];
+    toast(String(r.lens || "The lens").replace(/_/g, " ") + " kept for " + (r.mode || "the mode") + (r.again ? ": " + r.again + (r.again === 1 ? " clip" : " clips") + " of the camera read again" : ""));
+  } catch (e) { showError("The lens couldn’t be kept: " + e); }
+  finally { delete LENS_KEEPING[k]; renderSide(); }
 }
 function opticalBody(c) {
   const op = opticalPlan(c);
@@ -2796,6 +2847,13 @@ async function addJob(kind) {
     options.redo = S.opticalRedo || S.opticalLens !== "keep";
     label = op.go.length + (op.go.length === 1 ? " clip" : " clips") + (S.opticalLens !== "keep" ? ", lens " + (S.opticalLens === "recorded" ? "as recorded" : S.opticalLens) : "");
   }
+  if (kind === "lens-find" || kind === "lens-estimate") {
+    const clips = c.selItems.filter((it) => it.kind === "clip" && !it.is360);
+    if (!clips.length) return showError("Select clips to find their lens");
+    if (kind === "lens-estimate" && clips.length !== 1) return showError("Estimate lens is for one clip: select the one with the best view (the camera moving through a still scene)");
+    options.clips = clips.map((it) => it.id);
+    label = clips.length === 1 ? clips[0].name : clips.length + " clips";
+  }
   try {
     await invoke("add_job", { kind, options, only: c.only, label });
     toast("In the queue: " + label);
@@ -2825,6 +2883,7 @@ document.addEventListener("click", async (e) => {
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
   if (a.startsWith("geo")) return geoAct(a, v, el);
   if (a === "savelens") return saveProjectLens(v, el.dataset.cam);
+  if (a === "keepfound") return keepFoundLens(v, el.dataset.n);
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;

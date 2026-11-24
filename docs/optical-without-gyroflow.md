@@ -528,7 +528,19 @@ Each step is its own PR, UI ones with before/after screenshots.
      - HERO4 SETT 0/2 are named.
      - DJI's EIS goes into the mode, from its metadata.
      - Library probe answers are asked again (GEOTAG 5).
-4. **Find lens / Estimate lens:** #1296's core on our fork branch, Library commands, result list with Assign / Keep.
+4. **Find lens / Estimate lens:**
+   - **Done (2026-11-24), PR on top of step 3:**
+     - Our gyroflow-core is `afp-v1.7.0` + #1296's three commits (fork branch `afp-v1.7.0-lens-from-video`, 2c15a9cc), and
+       the bundled lens database is now v43.
+     - `vs-gyroflow/src/lens_find.rs` decodes the fragments and runs lens_from_video's candidates, find_known, estimate
+       and check_lens.
+     - What was found is kept in the cache: each lens a profile of the clip's frame, with the readout measured.
+       `gyroflow-optical --find-lens`, `--estimate-lens` and `--keep-lens`, plus batch actions.
+     - Library, Stabilize part: Find lens / Estimate lens, and the results with "Keep for this mode".
+   - On GOPR1585 (HERO4 2.7K Medium 24p):
+     - Find accepts our Medium profiles: readout 30.6 (the profile's own) and 30.2 measured.
+     - Estimate gives f 1763 and readout 31.1 ms, in 20 s.
+     - Find took 14 s a clip. #1296's core on our fork branch, Library commands, result list with Assign / Keep.
 
 **Test sample** (NAS, writes allowed for these clips only), about a dozen clips:
 - HERO4 Black Wide and Medium, in air and in water;

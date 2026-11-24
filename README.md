@@ -449,7 +449,16 @@ made for exactly this mode first. The Library's Info has the same choice. A lens
 clip of that mode** in `lenses/` beside your own lens list (below), with an `"afp"` block naming the mode; **Forget the
 lens assigned to this mode** takes it away. `gyroflow-probe --lens <clip>` shows where the lens came from (`from`),
 the clip's mode (`mode_key`) and the lenses to choose from (`candidates`); `--assign-lens <clip> <id>` and
-`--forget-lens <clip>` do the same as the panel. The stars are a snapshot taken at build time
+`--forget-lens <clip>` do the same as the panel.
+
+**Find lens / Estimate lens** (Library, Stabilize, on the selected clips; Gyroflow's own "lens from the video",
+gyroflow/gyroflow#1296):
+- **Find lens** tries the known lenses of each clip's camera on three parts of it, in air and under water. Where a lens
+  has no readout, it measures one on the clip. About 15 s a clip.
+- **Estimate lens** makes a lens and its readout from one clip, then checks it on the other parts of the clip. Under a
+  minute.
+- What fits is listed with **Keep for this mode**, which makes it the lens of every clip of that mode.
+- From the command line: `gyroflow-optical --find-lens <clip>...`, `--estimate-lens <clip>`, `--keep-lens <clip> <n>`. The stars are a snapshot taken at build time
 (`tools/update_lens_ratings.sh`); the player reads nothing online.
 
 **Lens types, for cameras the database has nothing for.** Gyroflow's database has no Osmo Action 4/5/6 profiles; the

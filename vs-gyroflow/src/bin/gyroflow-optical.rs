@@ -24,9 +24,18 @@
 //                                                                       motion file the clip has already
 //   gyroflow-optical --show <video>...                                  the header of each clip's .afp-motion, one JSON
 //                                                                       line each ({"path", "error"} without one)
+//   gyroflow-optical --find-lens <video>...                             each clip's lens found among the known ones of its
+//                                                                       camera (vs_gyroflow::lens_find::find), one JSON
+//                                                                       line each: lens_find::Kept, or {"path", "error"}
+//   gyroflow-optical --estimate-lens <video>                            a lens and its readout estimated from the clip
+//                                                                       (lens_find::estimate): lens_find::Kept
+//   gyroflow-optical --keep-lens <video> <n>                            one of what was found for it ("0".., "estimate")
+//                                                                       kept for its whole mode in the player's own lens
+//                                                                       database: {"file", "mode", "lens"}
 //
 // The batch's request: {"clips": [paths], "redo": false, "status": <file>, "stop": <file>, "strength": <%, 100>,
-// "tracking": "klt"}.
+// "tracking": "klt", "action": "measure" (the default) | "find-lens" | "estimate-lens"}. Find lens and Estimate lens
+// write what they found for each clip to the status's "results" ([lens_find::Kept with "path"], or {"path", "error"}).
 // It writes how far it is to "status" as the player's batches do (the Library's Tasks tab reads it): {"state":
 // "looking"|"running"|"done"|"stopped"|"failed", "done", "total" (the clips measured, not the ones left out),
 // "failed", "made", "fraction" (of the clip being measured), "current" (its name), "message", "failures": [[name,
@@ -132,6 +141,61 @@ fn run(clips: Vec<PathBuf>, redo: bool, settings: Settings, status_file: Option<
     i32::from(!failures.is_empty())
 }
 
+/// What was found, without the profiles themselves (kept in the cache for --keep-lens): what's said of it
+fn without_profiles(v: &mut Value) {
+    if let Some(t) = v.get_mut("tried").and_then(Value::as_array_mut) { for x in t { if let Some(o) = x.as_object_mut() { o.remove("profile"); } } }
+    if let Some(o) = v.get_mut("estimate").and_then(Value::as_object_mut) { o.remove("profile"); }
+}
+
+/// Find lens / Estimate lens on the Library's selection, how far on the status as Stabilize optically writes it, what
+/// was found in its "results"
+fn lens_batch(clips: Vec<PathBuf>, estimate: bool, status_file: Option<PathBuf>, stop_file: Option<PathBuf>) -> i32 {
+    let clips: Vec<PathBuf> = clips.into_iter().map(|c| std::path::absolute(&c).unwrap_or(c)).collect();
+    let stopped = || stop_file.as_ref().is_some_and(|f| f.exists());
+    let mut st = Status { file: status_file, v: json!({ "state": "running", "done": 0, "total": clips.len(), "failed": 0, "made": 0,
+                                                         "failures": [], "left_out": [], "results": [] }) };
+    st.write();
+    let (mut results, mut failures, mut found) = (Vec::new(), Vec::new(), 0);
+    for (i, c) in clips.iter().enumerate() {
+        if stopped() { st.set("state", json!("stopped")); st.write(); return 0; }
+        st.set("current", json!(name_of(c)));
+        st.set("fraction", json!(0.0));
+        st.write();
+        let last = std::sync::Mutex::new(Instant::now());
+        let status = std::sync::Mutex::new(&mut st);
+        let progress = |p: f64| {
+            let mut l = last.lock().unwrap();
+            if l.elapsed().as_millis() >= 400 { let mut s = status.lock().unwrap(); s.set("fraction", json!(p)); s.write(); *l = Instant::now(); }
+        };
+        let stop = || stopped();
+        let r = if estimate { vs_gyroflow::lens_find::estimate(c, &progress, &stop) } else { vs_gyroflow::lens_find::find(c, &progress, &stop) };
+        drop(status);
+        match r {
+            Ok(k) => {
+                if estimate && k.estimate.is_some() || !estimate && k.accepted.is_some() { found += 1; }
+                let mut v = serde_json::to_value(k).unwrap_or_default();
+                without_profiles(&mut v);
+                v["path"] = json!(c.display().to_string());
+                results.push(v);
+            }
+            Err(e) if e == "cancelled" => { st.set("state", json!("stopped")); st.write(); return 0; }
+            Err(e) => { failures.push(json!([c.display().to_string(), e.clone()])); results.push(json!({ "path": c.display().to_string(), "error": e })); }
+        }
+        st.set("done", json!(i + 1));
+        st.set("made", json!(found));
+        st.set("failed", json!(failures.len()));
+        st.set("failures", json!(failures));
+        st.set("results", json!(results));
+        st.set("fraction", Value::Null);
+        st.write();
+    }
+    st.set("state", json!("done"));
+    st.set("current", Value::Null);
+    st.set("message", json!(if estimate { format!("{found} estimated") } else { format!("a lens fits {found} of {}", clips.len()) }));
+    st.write();
+    i32::from(!failures.is_empty())
+}
+
 /// The motion the Gyroflow project beside `video` measured from the picture, written to its .afp-motion
 fn motion_from_project(video: &Path, force: bool) -> Result<Value, String> {
     use vs_gyroflow::afp_motion;
@@ -152,7 +216,7 @@ fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...\n       gyroflow-optical --find-lens <video>...\n       gyroflow-optical --estimate-lens <video>\n       gyroflow-optical --keep-lens <video> <n>");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
@@ -180,6 +244,30 @@ fn main() {
                 println!("{line}");
             }
             std::process::exit(if failed { 1 } else { 0 });
+        }
+        "--find-lens" | "--estimate-lens" => {
+            let estimate = args[0] == "--estimate-lens";
+            let mut failed = false;
+            for a in &args[1..] {
+                let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+                let r = if estimate { vs_gyroflow::lens_find::estimate(&p, &|_| (), &|| false) } else { vs_gyroflow::lens_find::find(&p, &|_| (), &|| false) };
+                let line = match r {
+                    Ok(k) => { let mut v = serde_json::to_value(k).unwrap_or_default(); without_profiles(&mut v); v["path"] = json!(a); v }
+                    Err(e) => { failed = true; json!({ "path": a, "error": e }) }
+                };
+                println!("{line}");
+            }
+            std::process::exit(i32::from(failed));
+        }
+        "--keep-lens" => {
+            let (Some(a), Some(n)) = (args.get(1), args.get(2)) else { usage() };
+            let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+            let out = match vs_gyroflow::lens_find::keep(&p, n) {
+                Ok((file, mode, lens)) => json!({ "file": file.display().to_string(), "mode": mode, "lens": lens }),
+                Err(e) => json!({ "error": e }),
+            };
+            println!("{out}");
+            std::process::exit(if out["error"].is_null() { 0 } else { 1 });
         }
         "--show" => {
             for a in &args[1..] {
@@ -215,7 +303,11 @@ fn main() {
                 ..Default::default()
             };
             let path = |k: &str| req[k].as_str().map(PathBuf::from);
-            std::process::exit(run(clips, req["redo"].as_bool().unwrap_or(false), settings, path("status"), path("stop")));
+            match req["action"].as_str().unwrap_or("measure") {
+                "find-lens" => std::process::exit(lens_batch(clips, false, path("status"), path("stop"))),
+                "estimate-lens" => std::process::exit(lens_batch(clips, true, path("status"), path("stop"))),
+                _ => std::process::exit(run(clips, req["redo"].as_bool().unwrap_or(false), settings, path("status"), path("stop"))),
+            }
         }
         _ => {
             let mut settings = Settings::default();
