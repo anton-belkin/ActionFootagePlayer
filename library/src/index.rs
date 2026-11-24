@@ -788,9 +788,12 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
-            // An answer from before the probe knew drones' names and places (geotag.rs): asked again
-            if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
-            self.known.insert(k.clone(), (s, m, e["l"].as_str().unwrap_or_default().to_string(), e["v"].clone()));
+            // An answer from an older probe (GEOTAG raised: the probe tells more now) is asked again, and shown until
+            // then: dropping it left every clip "reading…" with no length, camera or mode for as long as the whole
+            // project took to read again (Anton, 2026-11-24)
+            let old = e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG;
+            let lenses = if old { "\u{0}again".to_string() } else { e["l"].as_str().unwrap_or_default().to_string() };
+            self.known.insert(k.clone(), (s, m, lenses, e["v"].clone()));
         }
     }
     pub fn save(&self, file: &Path) {
@@ -1110,6 +1113,25 @@ pub(crate) mod tests {
         assert!(queued.contains(&paths[0]) && queued.contains(&paths[1]) && !queued.contains(&paths[2]));
         assert_eq!(p.known[&paths[2]].2, now);
         assert_eq!(p.known[&paths[3]].2, "older");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // An answer from an older probe: shown at once, and asked again when its clip is wanted
+    #[test]
+    fn older_answers_shown_until_asked_again() {
+        let dir = std::env::temp_dir().join(format!("afl-older-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("A.MP4");
+        std::fs::write(&clip, b"clip").unwrap();
+        let path = clip.display().to_string();
+        let (s, m) = stamp(&path).unwrap();
+        let file = dir.join("probes.json");
+        std::fs::write(&file, json!({ &path: { "s": s, "m": m, "l": "", "v": { "geotag": GEOTAG - 1, "duration": 12.5 } } }).to_string()).unwrap();
+        let mut p = Probes::default();
+        p.load(&file);
+        assert_eq!(p.get(&path).unwrap()["duration"], 12.5, "shown until its new answer comes");
+        p.want(&[path.clone()]);
+        assert_eq!(p.queue.len(), 1, "asked again");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
