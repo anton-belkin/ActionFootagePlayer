@@ -15,4 +15,7 @@ else
         || { echo "afp-scrub: no libav development files (ffmpeg's: libavformat-dev etc., ffmpeg-devel, brew install ffmpeg)" >&2; exit 1; }
     flags="-I$prefix/include -L$prefix/lib -lavformat -lavcodec -lswscale -lavutil"
 fi
-${CC:-cc} -O2 -Wall -o "$out" "$src" $flags -lpthread
+# On macOS, room in its header for tools/bundle_runtime.py to point it at the app's own copies of the libraries
+extra=""
+[ "$(uname -s)" != Darwin ] || extra="-Wl,-headerpad_max_install_names"
+${CC:-cc} -O2 -Wall -o "$out" "$src" $flags -lpthread $extra
