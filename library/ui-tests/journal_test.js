@@ -91,6 +91,27 @@ test("a double-click: the list sent to the player carries the action's id (the p
   assert.ok(done.parts["invoke:" + call.cmd]);
 });
 
+test("the real window's frozen __TAURI__.core: the commands are journaled all the same, open_items gets the id", async () => {
+  const { page, records } = await start({ frozen: true, commands: { open_list: () => true } });
+  assert.ok(Object.isFrozen(page.window.__TAURI__.core));
+  await ended(page);
+  page.get('S.path = ["Day 1"]; renderAll()');
+  await ended(page);
+  page.row("Day 1/A.MP4").dispatchEvent(new page.window.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+  const opened = () => page.calls("open_list").concat(page.calls("open_items"));
+  await page.until(() => opened().length === 1);
+  await ended(page);
+  const rs = await records();
+  const load = rs.find((r) => r.k === "load");
+  assert.equal(load.invokes, true);
+  assert.equal(load.core, false, "the app's object untouched");
+  assert.ok(rs.some((r) => r.k === "done" && r.a === "L77.start" && r.parts["invoke:scan"]), "the start's scans journaled");
+  const act = rs.find((r) => r.k === "act" && r.n === "dblclick:pick");
+  assert.equal(opened()[0].args.journal, act.a, "the player is handed the action's id");
+  const done = rs.find((r) => r.k === "done" && r.a === act.a);
+  assert.ok(done.parts["invoke:" + opened()[0].cmd]);
+});
+
 test("a slow command is a record of its own; a failing one is said", async () => {
   const { page, records } = await start({ delay: { scan: 40, set_focus: 0, recent: 80 }, commands: { recent: () => { throw new Error("no"); } } });
   await ended(page);

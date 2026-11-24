@@ -712,6 +712,11 @@ pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) ->
     let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
     afp_catalog::store::nas::stat();
     let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
+    render_recipe_of(link, input, gyroflow, profile)
+}
+
+/// The same from its parts: the clip's own file's `source`, the moment's own Gyroflow project's fingerprint
+pub fn render_recipe_of(link: &Value, input: Value, gyroflow: Value, profile: &str) -> Value {
     trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
                      "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
 }

@@ -49,8 +49,8 @@ function smallViews(root) {
 // The page opened on a project. `o.views`: what `scan` answers for each view (read each time: a test changes them as
 // the disk would change); `o.commands`: answers of other commands (a function of its arguments, which may throw or
 // return a promise), over the defaults; `o.delay`: milliseconds each command takes ({ scan: 50, set_tags: 200 }, or a
-// function (cmd, args) -> ms); `o.atStart(cmd, args, rec)`: called as a command starts (its answer's function gets
-// `rec` too); `o.scripts`: the page's scripts, when not as index.html names them
+// function (cmd, args) -> ms); `o.atStart(cmd, args, rec, { state, emit })`: called as a command starts (its answer's function
+// gets `rec` too; `emit` an event of the app's); `o.scripts`: the page's scripts, when not as index.html names them
 async function open(o) {
   o = o || {};
   const root = o.root || (o.views && o.views.footage && o.views.footage.root) || "/P";
@@ -90,7 +90,7 @@ async function open(o) {
     inFlight++;
     try {
       // (what a test wants done as a command starts, before it takes its time: a view as it was then)
-      if (o.atStart) o.atStart(cmd, args || {}, rec);
+      if (o.atStart) o.atStart(cmd, args || {}, rec, { state, emit: (name, payload) => { for (const f of listeners[name] || []) f({ payload }); } });
       const ms = delayOf(cmd, args);
       if (ms > 0) await sleep(ms); else await Promise.resolve();
       const f = commands[cmd];
@@ -103,7 +103,8 @@ async function open(o) {
   const dom = new JSDOM(html, { runScripts: "outside-only", pretendToBeVisual: true, url: "http://library.test/" });
   const w = dom.window;
   w.__TAURI__ = {
-    core: { invoke },
+    // (`o.frozen`: as the real window's, which no script can change: Tauri freezes window.__TAURI__.core)
+    core: o.frozen ? Object.freeze({ invoke }) : { invoke },
     event: { listen: (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); return Promise.resolve(() => {}); } },
     webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) },
   };

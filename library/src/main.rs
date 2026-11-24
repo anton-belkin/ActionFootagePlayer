@@ -1059,6 +1059,7 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         let t = journal::now();
         seen::wait_ready(&root, std::time::Duration::from_secs(60));
         journal::step("catalog-wait", json!({ "d": journal::now() - t, "view": view, "where": where_ }));
+        seen::reading_view(&root);
         let mut s = journal::span("scan", json!({ "view": view, "where": where_ }));
         let mut out = index::scan(&root, &view, flat);
         s.add("items", json!(out["items"].as_array().map(Vec::len)));

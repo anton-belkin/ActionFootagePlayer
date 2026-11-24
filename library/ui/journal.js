@@ -17,9 +17,10 @@
 //   Journal.act(name[, fields])   an action asked now from code (not an event): returns its id
 //   Journal.step(name[, fields])  a point in the action going on (fields.d: how long it took, ms)
 //   Journal.current()             the id of the action going on (for a command that hands it on: open_items)
+//   Journal.invoke(cmd, args)     the app's command, journaled (absent when the journal is off: ask the app directly)
 "use strict";
 (function () {
-  const VERSION = 1;
+  const VERSION = 2; // 2: commands through Journal.invoke (the real window's core is frozen)
   const SLOW_MS = 50;        // a command or a render this slow is a record of its own
   const IDLE_MS = 1200;      // an action is over once nothing has happened for it this long (> the 600 ms poll)
   const MAX_LIFE_MS = 60000; // nor does it take what comes later than this
@@ -217,9 +218,12 @@
     p.then(() => finish(true), () => finish(false));
     return p;
   };
-  // Where the app's object can't take it (frozen), the commands aren't journaled: said once
-  try { tauri.invoke = journaled; } catch (e) { /* below */ }
-  const invokesJournaled = tauri.invoke === journaled;
+  // The page's scripts ask for commands through Journal.invoke (app.js's `invoke`): the app's own object is frozen in the
+  // real window (Tauri's window.__TAURI__.core), so swapping its invoke works only in tests. Tried anyway, for a script
+  // that still asks the app's object directly
+  api.invoke = journaled;
+  try { tauri.invoke = journaled; } catch (e) { /* frozen: Journal.invoke only */ }
+  const coreJournaled = tauri.invoke === journaled;
 
   // The page's timers: what an interval (the polls) starts is the page's own, not the action's
   const setTimeoutRaw = window.setTimeout.bind(window);
@@ -278,7 +282,7 @@
     rawInvoke("journal_hello").then((h) => {
       if (!h || h.off) return;
       pid = String(h.pid || "");
-      rec({ k: "load", w: performance.timeOrigin, v: VERSION, page: true, invokes: invokesJournaled });
+      rec({ k: "load", w: performance.timeOrigin, v: VERSION, page: true, invokes: true, core: coreJournaled });
       rec({ k: "step", a: h.start_a, n: "page-start", w: performance.timeOrigin });
       // The start is an action the app opened (its id from journal.rs): the page's work until it settles is its
       startAct = { a: h.start_a, name: "library/start", w: h.start_w, last: now(), pending: 0, parts: {}, images: 0,

@@ -4,7 +4,9 @@
 // what's selected and the commands on it in one side panel, its parts chosen with a column of icons at its edge (the
 // queue one of them). What it shows comes from the app
 // (src/main.rs, src/index.rs): the project's files, and what each clip is (gyroflow-probe --library).
-const invoke = window.__TAURI__.core.invoke;
+// The app's commands, journaled (journal.js, loaded first: the real window's __TAURI__.core is frozen, so the journal
+// can't wrap it there; without the journal, the app's own)
+const invoke = (window.Journal && window.Journal.invoke) || window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t == null ? "" : t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -2626,6 +2628,14 @@ function mergeProbes(p) {
   return n > 0;
 }
 async function loadProject() {
+  // A read of the views asked meanwhile (the catalog's notice) follows this one, never alongside it: refreshSoon
+  S.loading = (S.loading || 0) + 1;
+  try { await loadProjectNow(); } finally {
+    S.loading--;
+    if (!S.loading && S.refreshAgain && !S.refreshing) { S.refreshAgain = false; refreshSoon(); }
+  }
+}
+async function loadProjectNow() {
   S.info = await invoke("project").catch(() => null);
   S.name = S.info ? S.info.name : "";
   S.tagStores = (S.info && S.info.tag_stores) || [];
@@ -2688,6 +2698,8 @@ async function poll() {
   if (s.project !== S.root) {
     S.changes = s.changes;
     S.root = s.project;
+    // The tasks done before it opened are in what it reads now: only those done after read it again (below)
+    S.finished = s.jobs.filter((j) => ["done", "stopped", "failed"].includes(j.state)).length;
     S.recent = await invoke("recent").catch(() => []);
     if (S.root) await loadProject(); else renderAll();
   }
@@ -2723,7 +2735,7 @@ async function poll() {
 function refreshSoon(n) {
   if (!S.root) return;
   if (n !== undefined) { if (n === S.changes) return; S.changes = n; }
-  if (S.refreshing) { S.refreshAgain = true; return; }
+  if (S.refreshing || S.loading) { S.refreshAgain = true; return; }
   S.refreshing = true;
   S.lastRefresh = Date.now();
   refresh().finally(() => {
