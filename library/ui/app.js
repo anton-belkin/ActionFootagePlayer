@@ -1691,31 +1691,7 @@ const NAV = {
   up: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true"><path d="M12 19V6M6 11l6-6 6 6"/></svg>',
   newdir: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/><path d="M12 12v5M9.5 14.5h5"/></svg>',
 };
-// Where one has been: each place (a tab and a folder) once as it's left, as a file manager's Back and Forward have it
-function place() { return S.view + "\u0000" + (S.view === "clip" ? S.clip : S.path.join("/")); }
-function noteHistory() {
-  const here = place();
-  if (S.hist[S.histAt] === here) return;
-  S.hist = S.hist.slice(0, S.histAt + 1);
-  S.hist.push(here);
-  S.histAt = S.hist.length - 1;
-}
-function goHistory(step) {
-  const i = S.histAt + step;
-  if (i < 0 || i >= S.hist.length) return;
-  S.histAt = i;
-  const [view, path] = S.hist[i].split("\u0000");
-  const left = S.path.slice();
-  const fromView = S.view;
-  if (view === "clip") { S.clip = path; S.path = []; } else { S.view = view; S.path = path ? path.split("/") : []; }
-  if (view === "clip") { S.view = view; if (DATA.moments && DATA.stills) buildClip(); else showClip(path); }
-  S.sel = {}; S.anchor = null; S.q = ""; S.flat = false; S.renaming = null;
-  if (view !== fromView) S.filters = {};
-  // Back to a folder above: the one left, selected
-  if (view === fromView && left.length > S.path.length && S.path.every((p, k) => p === left[k])) { const k = "f:" + left.slice(0, S.path.length + 1).join("/"); S.sel[k] = true; S.anchor = k; }
-  if (!DATA[view] && view !== "clip") loadView(view).then(renderAll, () => {});
-  renderAll();
-}
+// Back and Forward: history.js
 function navButtons() {
   const canDir = !!FOLDER_VIEWS[S.view];
   const upOn = S.path.length || S.view === "clip";
@@ -2552,8 +2528,7 @@ function listKeys(e) {
   if (e.key === "ArrowDown" && cmd && mac) { openSelection(); return true; }
   if (e.key === "ArrowUp" && ((cmd && mac) || (e.altKey && !mac))) { goUp(); return true; }
   if (e.key === "Backspace" && !mac) { goUp(); return true; }
-  if ((mac && cmd && e.key === "[") || (!mac && e.altKey && e.key === "ArrowLeft")) { goHistory(-1); return true; }
-  if ((mac && cmd && e.key === "]") || (!mac && e.altKey && e.key === "ArrowRight")) { goHistory(1); return true; }
+  // ⌘[ ⌘], Alt+← Alt+→: history.js
   if (cmd && e.shiftKey && (e.key === "n" || e.key === "N")) { newFolder(); return true; }
   if (e.key === "ArrowDown") { moveTo(cur < 0 ? 0 : cur + cols, e.shiftKey); return true; }
   if (e.key === "ArrowUp") { moveTo(cur < 0 ? 0 : cur - cols, e.shiftKey); return true; }
@@ -2634,6 +2609,7 @@ async function loadProject() {
   Writes.reset();
   RAW_FOOTAGE = null; S.cachedViews = {}; S.scanning = {};
   S.path = []; S.sel = {}; S.anchor = null; S.filters = {}; S.q = ""; S.flat = false;
+  resetHistory();
   renderAll();
   // What was there last time, at once; then the disk
   for (const v of ["moments", "footage", "stills", "exports"]) {
