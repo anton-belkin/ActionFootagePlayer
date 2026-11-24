@@ -129,7 +129,21 @@ Mac's cache; locally the same table took 0.4 s at any size):
   a clip without a project twice. Now every manager made in vs-gyroflow shares one (`lens_pick::manager`; gyroflow-core's
   own clones share theirs the same way), and the server loads it as it starts, while the player opens its first clip.
 
-The table's shader is the same byte for byte. NUMBERS
+Measured 2026-11-24 on the NAS (over Tailscale), each clip out of the Mac's cache, as a new player gets its first table
+(the server started, the request 0.3 s later), the new build first and then the one before on the same clips:
+
+| GoPro HERO7 clip | before | after |
+|---|---|---|
+| with a project, 53–203 MB | 0.58–1.26 s | 0.25–0.58 s |
+| with a project, 299–549 MB | 2.25–3.14 s | 0.67–0.93 s |
+| with a project, 837 MB / 1.56 GB | 5.47 / 8.55 s | 1.13 / 1.91 s |
+| without a project (its first 20 s), 111–403 MB | 1.16–2.83 s | 0.26–0.38 s |
+
+A clip with a project gets the same shader byte for byte. A GoPro clip without one gets what its first stretch asks for:
+before, its GPMF samples were read along with the `fdsc` ones next to them, so the first "20 s" table had the whole
+clip's motion in it (and the whole file read for it); now it has the first 20 s, extended as it plays like any other
+camera's. So that first table differs a little from before: its smoothing and its gyro bias (from the accelerometer)
+see 20 s of motion, not all of it, until the next step comes.
 
 ## Tests
 
