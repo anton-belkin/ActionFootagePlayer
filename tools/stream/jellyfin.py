@@ -29,6 +29,8 @@ NAMES = {
            "clip": "Весь клип {clip}, {d}.", "stab": "Стабилизирован", "nostab": "Без стабилизации", "hdr": "HDR (HLG)", "s": "с"},
 }
 MANIFEST = ".afp-jellyfin.json"
+# Which file each cover was fetched for ({poster: the stamp afp-stream gave}): a cover is asked again only when that changed
+POSTERS = ".afp-jellyfin-posters.json"
 
 
 def log(*a):
@@ -144,6 +146,12 @@ def run(a):
     changed = 0
     wanted = set()
     folders = {}
+    try:
+        with open(os.path.join(a.out, POSTERS)) as f:
+            stamps = json.load(f)
+    except (OSError, ValueError):
+        stamps = {}
+    kept = {}
     for rel, it in tree(items, t, a.scope, pending).items():
         base = os.path.join(a.out, rel[:-5])
         url = f"{stream}/clip/{it['id']}/index.m3u8"
@@ -151,10 +159,18 @@ def run(a):
         changed += write(base + ".nfo", nfo(it, t))
         wanted.update([base + ".strm", base + ".nfo"])
         poster = base + "-poster.jpg"
-        try:
-            changed += write(poster, fetch(f"{a.stream_local.rstrip('/')}/poster/{it['id']}.jpg"))
-        except Exception as e:
-            log("no poster for", rel, e)
+        # The cover asked for only when it's missing or its file changed (afp-stream's stamp): with the whole library in
+        # scope that's a thousand requests every round otherwise, for covers that don't change
+        prel, stamp = os.path.relpath(poster, a.out), it.get("poster_stamp")
+        if stamp and stamps.get(prel) == stamp and os.path.exists(poster):
+            kept[prel] = stamp
+        else:
+            try:
+                changed += write(poster, fetch(f"{a.stream_local.rstrip('/')}/poster/{it['id']}.jpg"))
+                if stamp:
+                    kept[prel] = stamp
+            except Exception as e:
+                log("no poster for", rel, e)
         if os.path.exists(poster):
             wanted.add(poster)
             # A folder's picture: its first item's (the earliest)
@@ -185,6 +201,7 @@ def run(a):
     for d, _, _ in sorted(os.walk(a.out), key=lambda w: -len(w[0])):
         if d != a.out and not os.listdir(d):
             os.rmdir(d)
+    write(os.path.join(a.out, POSTERS), json.dumps(kept, ensure_ascii=False, indent=0, sort_keys=True))
     write(os.path.join(a.out, MANIFEST), json.dumps(sorted(os.path.relpath(p, a.out) for p in wanted), ensure_ascii=False, indent=0))
     log(f"{len(items)} items, {a.scope} in Jellyfin, {changed} files changed")
     if changed and a.jellyfin and a.key_file:

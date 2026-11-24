@@ -63,6 +63,7 @@ class Run(unittest.TestCase):
         if url.endswith("/catalog.json"):
             return json.dumps(self.cat).encode()
         if "/poster/" in url:
+            self.posters = getattr(self, "posters", 0) + 1
             return b"\xff\xd8jpeg " + url.encode()
         raise AssertionError(url)
 
@@ -93,6 +94,30 @@ class Run(unittest.TestCase):
     def test_new_moment_without_trip_waits_for_pending(self):
         self.assertEqual(self.round([moment("Скат", "GX010001")], 5), [])
         self.assertEqual(self.round([moment("Скат", "GX010001")], 0), ["Моменты/Без поездки/Скат.strm"])
+
+    def test_cover_asked_again_only_when_its_file_changed(self):
+        full = [dict(moment("Скат", "GX010001"), poster_stamp="100:1"), preview("GX010001", "Египет 2026"),
+                dict(moment("Риф", "GX010002", folder="Красное море"), poster_stamp="200:1")]
+        self.round(full, 0)
+        self.assertEqual(self.posters, 2)
+        self.round(full, 0)
+        self.assertEqual(self.posters, 2)
+        # The moment made again: its file's stamp changed, its cover is asked for again; the other one isn't
+        full[0]["poster_stamp"] = "120:2"
+        self.round(full, 0)
+        self.assertEqual(self.posters, 3)
+        # A cover gone from the folder is fetched again whatever the stamp says
+        os.remove(os.path.join(self.out, "Моменты/Красное море/Риф-poster.jpg"))
+        self.round(full, 0)
+        self.assertEqual(self.posters, 4)
+        self.assertTrue(os.path.exists(os.path.join(self.out, "Моменты/Красное море/Риф-poster.jpg")))
+
+    def test_cover_without_stamp_asked_every_round(self):
+        # An older afp-stream gives no stamp: as before, asked each time
+        items = [moment("Риф", "GX010002", folder="Красное море")]
+        self.round(items, 0)
+        self.round(items, 0)
+        self.assertEqual(self.posters, 2)
 
 
 if __name__ == "__main__":

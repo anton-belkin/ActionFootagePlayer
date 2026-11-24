@@ -604,7 +604,9 @@ def catalog_entry(c, i, base):
             "in": i["offset"], "duration": round(i["duration"], 3), "start": local_start(i),
             "stabilized": bool((a.get("render") or {}).get("stabilize")), "kind_of_stabilization": (a.get("render") or {}).get("kind"),
             "look": "hdr" if (a.get("dlogm") or {}).get("curve") == "dlogm" else "",
-            "stream": f"{base}/clip/{c['id']}/index.m3u8", "poster": f"{base}/poster/{c['id']}.jpg"}
+            "stream": f"{base}/clip/{c['id']}/index.m3u8", "poster": f"{base}/poster/{c['id']}.jpg",
+            # The cover's file as it is now (poster() makes it again when this changes): asked for again only then
+            "poster_stamp": stamp(c["path"])}
 
 
 def poster(clip):
