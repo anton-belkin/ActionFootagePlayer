@@ -85,7 +85,7 @@ COPY --from=mpv /opt/mpv /opt/mpv
 COPY --from=files /opt/afp /opt/afp
 COPY --from=mpv /opt/afp-render /opt/afp/bin/afp-render
 COPY tools/stream/hlg_gain.glsl tools/stream/hlg_highlights.glsl /opt/afp/bin/
-COPY tools/stream/afp_stream.py tools/stream/jellyfin.py tools/nas-helper/helper.py tools/nas-helper/nas_settings.py /opt/afp/helper/
+COPY tools/stream/afp_stream.py tools/stream/fmp4time.py tools/stream/jellyfin.py tools/nas-helper/helper.py tools/nas-helper/nas_settings.py /opt/afp/helper/
 ENV PATH=/opt/mpv/bin:$PATH LD_LIBRARY_PATH=/opt/pl/lib AFP_BIN=/opt/afp/bin AFP_PLAYER=/opt/afp/player PYTHONDONTWRITEBYTECODE=1
 # Everything links (a library missing at run time would show only when a part starts)
 # No machine id of its own: the NAS's name in the journals (kept in /data/catalog) stays the same from one image to the next

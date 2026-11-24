@@ -31,6 +31,10 @@
 # bicubic, lanczos)
 import hashlib, html, json, math, os, re, shutil, subprocess, threading, time, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import fmp4time  # noqa: E402
 
 LIBRARY = [p for p in os.environ.get("AFP_LIBRARY", "/clips").split(":") if p]
 CACHE = os.environ.get("AFP_CACHE", "/stream/cache")
@@ -318,10 +322,7 @@ def ts_segment(clip, n):
     if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(m4s):
         with open(out, "rb") as f:
             return f.read()
-    with open(os.path.join(CACHE, clip["id"], "init.mp4"), "rb") as f:
-        data = f.read()
-    with open(m4s, "rb") as f:
-        data += f.read()
+    data = init_segment(clip) + m4s_segment(clip, n)
     r = subprocess.run(["ffmpeg", "-v", "error", "-f", "mp4", "-i", "pipe:0", "-map", "0", "-c", "copy", "-copyts", "-muxdelay", "0",
                         "-muxpreload", "0", "-f", "mpegts", "pipe:1"], input=data, capture_output=True)
     if r.returncode != 0 or not r.stdout:
@@ -331,6 +332,23 @@ def ts_segment(clip, n):
         f.write(r.stdout)
     os.replace(out + ".tmp", out)
     return r.stdout
+
+
+def init_segment(clip):
+    """init.mp4 as players get it: without the empty edit that says where its render starts (fmp4time)"""
+    with open(os.path.join(CACHE, clip["id"], "init.mp4"), "rb") as f:
+        return fmp4time.without_empty_edits(f.read())
+
+
+def m4s_segment(clip, n):
+    """Segment n as players get it: on the clip's timeline, whichever render made it (fmp4time)"""
+    with open(segment_path(clip, n), "rb") as f:
+        data = f.read()
+    try:
+        return fmp4time.Timeline(os.path.join(CACHE, clip["id"]), info(clip)["seg"]).segment(n, data)
+    except Exception as e:
+        log("segment time:", clip["name"], n, e)
+        return data
 
 
 def segment_path(clip, n):
@@ -482,8 +500,10 @@ def start_render(clip, n, upto=None, background=False):
     return j
 
 
-def is_probe(headers):
-    """Jellyfin reading a stream to learn what it is (its ffprobe), not a player: it needs the first segments only"""
+def jellyfin_ffmpeg(headers):
+    """Jellyfin's ffmpeg: its probe (what the stream is), then, since Jellyfin 10.11, its remux for the Samsung TV. Both
+    get the TV's look, so the probe's render is the one the TV then plays: it isn't cut short (a render nobody asks for
+    stops by itself, idle_worker)"""
     return (headers.get("User-Agent") or "").startswith("Lavf")
 
 
@@ -564,6 +584,23 @@ def prerender_worker():
 threading.Thread(target=prerender_worker, daemon=True).start()
 
 
+def idle_worker():
+    """A render nobody has asked anything of for IDLE_AFTER s stops (the TV turned off, Jellyfin's remux killed): no
+    reading the original on to the clip's end for no one. The next request starts it again from there"""
+    while True:
+        time.sleep(5)
+        now = time.time()
+        with lock:
+            for k, v in jobs.items():
+                if not v["background"] and v["proc"].poll() is None and now - asked.get(k, v["started"]) > IDLE_AFTER:
+                    log("stopping the render of", k, f": nothing asked of it for {IDLE_AFTER} s")
+                    v["proc"].terminate()
+
+
+IDLE_AFTER = 30
+threading.Thread(target=idle_worker, daemon=True).start()
+
+
 def folder_of(clip):
     return os.path.dirname(clip["name"]) or "."
 
@@ -573,7 +610,8 @@ def wait_for(path, j, timeout=60):
     while time.time() - t < timeout:
         if os.path.exists(path):
             return True
-        if j is None or j["proc"].poll() not in (None, 0):
+        if j is None or j["proc"].poll() is not None:
+            # Ended (done, stopped, or at its limit) without it: no use waiting
             return os.path.exists(path)
         time.sleep(0.1)
     return False
@@ -817,19 +855,20 @@ class Handler(BaseHTTPRequestHandler):
             clip = next((c for c in clips() if c["id"] == cid), None)
             if not clip or info(clip) is None or (look and not LOOK.match(look)):
                 return self.send(404, "no such clip", "text/plain")
-            if not look and wants_ts(self.headers, u.query):
+            if not look and (wants_ts(self.headers, u.query) or jellyfin_ffmpeg(self.headers)):
+                # A TV's look for a TV, and for Jellyfin's own ffmpeg: since Jellyfin 10.11 it remuxes the stream for the
+                # Samsung TV itself (its probe told it the codecs) instead of passing our URL on
                 look = TV_LOOK
             clip = with_look(clip, look)
             name = os.path.basename(parts[2])
             asked[clip["id"]] = time.time()
             if name == "index.m3u8":
                 # The whole clip's segments at once (VOD); the render starts from the first missing of the first few
-                # (Jellyfin's probe: only those it reads)
                 count = info(clip)["count"]
                 relay = (self.headers.get("User-Agent") or "").startswith("Jellyfin-Server")
                 first = next((k for k in range(min(6, count)) if not os.path.exists(segment_path(clip, k))), None)
                 if first is not None and not relay:
-                    ensure(clip, first, 2 if is_probe(self.headers) else None)
+                    ensure(clip, first)
                 # Jellyfin passing the stream on to a device (its /Videos/<id>/stream, for a device that doesn't fetch the
                 # .strm's URL itself: a Samsung TV) sends our playlist as it is, from its own address, where the segments'
                 # relative names lead nowhere. It gets a master playlist instead, pointing here: the device then fetches
@@ -857,23 +896,25 @@ class Handler(BaseHTTPRequestHandler):
                 n = int(m.group(1))
                 if n >= info(clip)["count"]:
                     return self.send(404, "past the end", "text/plain")
-                probe = is_probe(self.headers)
-                j = ensure(clip, n, 2 if probe else None)
+                j = ensure(clip, n)
                 # A cached stretch (a pre-rendered opening, what played before) ends somewhere: the render picks up a
-                # few segments before the player gets there (not for a probe)
-                ahead = None if probe else next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
+                # few segments before the player gets there
+                ahead = next((k for k in range(n + 1, min(n + 6, info(clip)["count"])) if not os.path.exists(segment_path(clip, k))), None)
                 if ahead is not None:
                     ensure(clip, ahead)
                 path = segment_path(clip, n)
-                if not wait_for(path, j) or (m.group(2) == "ts" and not os.path.exists(os.path.join(CACHE, clip["id"], "init.mp4"))):
+                if not wait_for(path, j) and (j is None or j["proc"].poll() is not None):
+                    # Its render ended short of it (stopped, nobody asking for a while): one from here
+                    j = ensure(clip, n)
+                    wait_for(path, j)
+                if not os.path.exists(path) or (m.group(2) == "ts" and not os.path.exists(os.path.join(CACHE, clip["id"], "init.mp4"))):
                     return self.send(503, "not rendered", "text/plain", {"Retry-After": "2"})
                 if m.group(2) == "ts":
                     data = ts_segment(clip, n)
                     if data is None:
                         return self.send(500, "no TS", "text/plain")
                     return self.send(200, data, "video/mp2t")
-                with open(path, "rb") as f:
-                    return self.send(200, f.read(), "video/iso.segment")
+                return self.send(200, m4s_segment(clip, n), "video/iso.segment")
             if name == "init.mp4":
                 # Only once a segment of the render is there: the muxer writes init.mp4 in place (no temporary file),
                 # and a player that reads it half written fails (CoreMedia -16044)
@@ -882,8 +923,7 @@ class Handler(BaseHTTPRequestHandler):
                 first = segment_path(clip, j["from"] if j else 0)
                 if not wait_for(first, j) or not os.path.exists(path):
                     return self.send(503, "not rendered", "text/plain", {"Retry-After": "2"})
-                with open(path, "rb") as f:
-                    return self.send(200, f.read(), "video/mp4")
+                return self.send(200, init_segment(clip), "video/mp4")
         return self.send(404, "not found", "text/plain")
 
     def handle_one_request(self):

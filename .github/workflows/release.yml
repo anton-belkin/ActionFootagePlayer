@@ -81,6 +81,7 @@ jobs:
           luajit tests/journal_test.lua
           python3 tests/journal_report_test.py
           python3 tests/jellyfin_test.py
+          python3 tests/fmp4time_test.py
           sh tests/journal_mpv_test.sh
           luajit tests/timeline_test.lua
           luajit tests/navkeys_test.lua
