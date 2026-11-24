@@ -69,7 +69,8 @@
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
---   input           the source's input saved in its own file: { curve, rotation, underwater } (transform.lua); input_now:
+--   input           the source's input saved in its own file: { curve, rotation, underwater, uw, uw_highlights,
+--                   uw_strength } (transform.lua); input_now:
 --                   as it's shown when changed and not saved; input_status: saved, changed, none (nothing saved)
 --   view            the transform bundle saved for it that plays (a moment's or clip preview's own, else the source's);
 --                   absent: the session's plays (the gyroflow plugin's). saved: what's saved where Save writes
@@ -1116,12 +1117,8 @@ end
 local function current_view()
     local g = mp.get_property_native("user-data/gyroflow")
     if type(g) ~= "table" then return copy(state.saved) end
-    local u = mp.get_property_native("user-data/uwcolor")
-    u = type(u) == "table" and u or {}
     local v = {}
-    for _, k in ipairs(transform.KEYS) do
-        if transform.COLOR_KEYS[k] then v[k] = u[k] else v[k] = g[k] end
-    end
+    for _, k in ipairs(transform.KEYS) do v[k] = g[k] end
     -- The gyroflow plugin's `lens` is the lens profile; the bundle's lens (corrected, as recorded) is its lens_mode
     v.lens = g.lens_mode
     if g.kind == "project" then
@@ -2583,7 +2580,6 @@ end)
 mp.register_script_message("view-revert", function()
     if not state.saved then return end
     mp.commandv("script-message-to", "gyroflow", "apply-view", utils.format_json(state.saved))
-    mp.commandv("script-message-to", "dlogm", "uw-apply-view", utils.format_json(state.saved))
     mp.osd_message("Transform as saved", 1.5)
 end)
 
@@ -2595,15 +2591,19 @@ mp.register_script_message("view-auto", function()
     mp.osd_message(auto_save and "Auto save on: the transform is saved as it's changed, this session" or "Auto save off", 3)
 end)
 
--- The source's input as it's shown (input-set <curve|rotation|underwater> <value>, the dlogm and gyroflow plugins', as
--- they apply a change): for viewing until Save on the Source tab (input-save) writes it into the source's own file,
--- whole, and so for every moment and clip preview of it. Transform's Save doesn't touch it
-local INPUT_DEFAULTS = { curve = "auto", rotation = 0, underwater = "auto" }
-local INPUT_ORDER = { "curve", "rotation", "underwater" }
+-- The source's input as it's shown (input-set <curve|rotation|underwater|uw|uw_highlights|uw_strength> <value>, the
+-- dlogm and gyroflow plugins', as they apply a change): for viewing until Save on the Source tab (input-save) writes
+-- it into the source's own file, whole, and so for every moment and clip preview of it. Transform's Save doesn't touch
+-- it. The underwater colour's keys: where the source has none, uwcolor.conf's (the dlogm plugin's defaults)
+local INPUT_DEFAULTS = { curve = "auto", rotation = 0, underwater = "auto", uw = false, uw_highlights = false, uw_strength = 1 }
+local INPUT_ORDER = { "curve", "rotation", "underwater", "uw", "uw_highlights", "uw_strength" }
 local function input_pack(from)
     local pack = {}
+    local u = mp.get_property_native("user-data/uwcolor")
+    local uw_defaults = type(u) == "table" and type(u.defaults) == "table" and u.defaults or {}
     for k, d in pairs(INPUT_DEFAULTS) do
         pack[k] = (from or {})[k]
+        if pack[k] == nil then pack[k] = uw_defaults[k] end
         if pack[k] == nil then pack[k] = d end
     end
     return pack
@@ -2621,7 +2621,9 @@ local function input_place()
 end
 mp.register_script_message("input-set", function(key, value)
     if INPUT_DEFAULTS[key] == nil or not input_place() then return end
-    if key == "rotation" then value = tonumber(value) or 0 end
+    if key == "rotation" then value = tonumber(value) or 0
+    elseif key == "uw_strength" then value = tonumber(value) or 1
+    elseif key == "uw" or key == "uw_highlights" then value = value == "yes" or value == "true" end
     state.input_now = state.input_now or input_pack(state.input)
     state.input_now[key] = value
     state.input_status = input_status()
@@ -2650,6 +2652,12 @@ mp.register_script_message("input-revert", function()
     if tostring(now.curve) ~= tostring(saved.curve) then mp.commandv("script-message-to", "dlogm", "curve", tostring(saved.curve)) end
     if tostring(now.rotation) ~= tostring(saved.rotation) then mp.commandv("script-message-to", "gyroflow", "rotate", tostring(saved.rotation)) end
     if tostring(now.underwater) ~= tostring(saved.underwater) then mp.commandv("script-message-to", "gyroflow", "underwater", tostring(saved.underwater)) end
+    for _, k in ipairs({ "uw", "uw_highlights", "uw_strength" }) do
+        if tostring(now[k]) ~= tostring(saved[k]) then
+            local v = saved[k]
+            mp.commandv("script-message-to", "dlogm", "uw-set", k, type(v) == "boolean" and (v and "yes" or "no") or string.format("%.2f", tonumber(v) or 1))
+        end
+    end
     mp.osd_message("Input as saved", 1.5)
 end)
 

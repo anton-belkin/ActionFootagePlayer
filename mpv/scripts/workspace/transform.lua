@@ -2,7 +2,8 @@
 -- (tests/transform_test.lua).
 --
 -- Input: how to read the source right, set once, kept only beside the source (its .afp.json's `source`): the log
--- curve, the turn it was recorded with, the lens under water with a flat port. A correction from anywhere (the source,
+-- curve, the turn it was recorded with, the lens under water with a flat port, the underwater colour (on, brighter
+-- highlights, strength: it takes out the colour the camera put in, so it's the source's, Anton 2026-11-24). A correction from anywhere (the source,
 -- a moment, a clip preview) is for viewing until saved (the Source tab's Save), then written there, and every moment
 -- and clip preview of it reads it there.
 --
@@ -22,7 +23,8 @@
 -- saved over a project as for any clip.
 --
 --   local t = require('transform')
---   t.KEYS, t.INPUT_KEYS          the bundle's keys, the input's, in order
+--   t.KEYS, t.INPUT_KEYS          the bundle's keys, the input's, in order (t.UW_KEYS: the underwater colour's, input
+--                                 too, never moved out of an old view by migrate_source: a one-off script does that)
 --   t.PROJECT_KEYS                the bundle's keys a Gyroflow project owns. Not the view: on, wider (the project's
 --                                 zoom left out) or off (the project kept but not used) is saved over it too, and the lens
 --   t.NEUTRAL                     what a key that didn't exist yet played as: a bundle from before it is filled so
@@ -40,12 +42,11 @@
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong",
-           "uw", "uw_highlights", "uw_strength" }
--- The underwater colour's (the dlogm plugin's uwcolor.lua): the clip's or moment's like the rest, but not in what a
--- render is made with yet (render_settings leaves them out: exports don't do it, and renders' recipes keep their hashes)
-M.COLOR_KEYS = { uw = true, uw_highlights = true, uw_strength = true }
+M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong" }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
+-- The underwater colour (the dlogm plugin's uwcolor.lua): the source's, as its input (tools/migrate_uw_to_source.py
+-- moves an old bundle's there once). A bundle from before keeps them unread: not the bundle's any more
+M.UW_KEYS = { "uw", "uw_highlights", "uw_strength" }
 -- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not
 -- used) or Wider (its zoom left out) and saved so (Anton, 2026-11-10). Nor the lens and its projection: the player's
 -- choice over the project's, for viewing and exports (Anton, 2026-11-11, #196)
@@ -81,11 +82,10 @@ local function valid(k, v)
 end
 M.valid = valid
 
--- What a key missing from a bundle plays with: the session's of the plugin it belongs to (the gyroflow plugin's, the
--- dlogm plugin's underwater colour). get: mp.get_property_native
+-- What a key missing from a bundle plays with: the session's of the gyroflow plugin. get: mp.get_property_native
 function M.session(get)
     local out = {}
-    for _, name in ipairs({ "user-data/gyroflow/session", "user-data/uwcolor/session" }) do
+    for _, name in ipairs({ "user-data/gyroflow/session" }) do
         local t = get(name)
         if type(t) == "table" then for k, v in pairs(t) do out[k] = v end end
     end
@@ -210,7 +210,6 @@ end
 -- against the same cases (tests/render_settings.json): the recipe it hashes is what the player renders with
 function M.render_settings(doc, own, defaults)
     local bundle = M.complete(M.pick(own) or M.pick(type(doc) == "table" and doc.view or nil) or defaults, defaults)
-    for k in pairs(M.COLOR_KEYS) do bundle[k] = nil end
     local rendered = {}
     for k, v in pairs(bundle) do rendered[k] = v end
     if type(doc) == "table" then M.migrate_source(doc) end

@@ -298,6 +298,34 @@ local TURNS = { { 0, "As is" }, { 90, "90° ↻" }, { 180, "180°" }, { 270, "90
 local grade_open, grade_for = false, nil
 local WATER = { { "auto", "Auto" }, { "yes", "Yes" }, { "no", "No" } }
 
+-- The source's input (the log curve, the turn, the lens under water, the underwater colour): for viewing as it's
+-- changed, saved into the source's own file with Save (for all its moments and clips). What the saved values are,
+-- while something differs from them (the dots), else nil
+local function input_card(u, x, w, y, ws, path)
+    local s = u.s
+    local own = local_file(path) and ws and ws.clip and not ws.export
+    local saved_in = own and ws.input or nil
+    local status = own and ws.input_status or nil
+    local at = y
+    local ix, iw = x + 10 * s, w - 20 * s
+    y = at + 8 * s
+    y = u:heading(ix, iw, y, "Input")
+    if not own then
+        y = u:caption(ix, iw, y - 4 * s, "Not saved: this file isn't a source")
+    else
+        y = u:caption(ix, iw, y - 4 * s, status == "changed" and "Changed for viewing. The dot marks what's saved"
+            or status == "saved" and "Saved in the source, for all its moments and clips"
+            or "Nothing saved: as the file says", status == "changed" and { color = C.text } or nil)
+        local ihalf = (iw - 8 * s) / 2
+        u:button(ix, ihalf, y, "input-save", "Save to the source", "script-message-to workspace input-save",
+                 { primary = status == "changed", disabled = status ~= "changed" })
+        y = u:button(ix + ihalf + 8 * s, ihalf, y, "input-revert", "Revert to saved", "script-message-to workspace input-revert",
+                     { disabled = status ~= "changed" })
+    end
+    u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
+    return y + 10 * s, status == "changed" and (saved_in or {}) or nil
+end
+
 local function source_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
@@ -317,31 +345,8 @@ local function source_part(u, x, w, y)
     if ws and ws.moment and not ws.moment.missing then
         y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
     end
-    -- The input: for viewing as it's changed, saved into the source's own file with Save (for all its moments and clips)
-    local own = local_file(path) and ws and ws.clip and not ws.export
-    local saved_in = own and ws.input or nil
-    local status = own and ws.input_status or nil
-    local at = y + 6 * s
-    local ix, iw = x + 10 * s, w - 20 * s
-    y = at + 8 * s
-    y = u:heading(ix, iw, y, "Input")
-    if not own then
-        y = u:caption(ix, iw, y - 4 * s, "Not saved: this file isn't a source")
-    else
-        y = u:caption(ix, iw, y - 4 * s, status == "changed" and "Changed for viewing. The dot marks what's saved"
-            or status == "saved" and "Saved in the source, for all its moments and clips"
-            or "Nothing saved: as the file says", status == "changed" and { color = C.text } or nil)
-        local ihalf = (iw - 8 * s) / 2
-        u:button(ix, ihalf, y, "input-save", "Save to the source", "script-message-to workspace input-save",
-                 { primary = status == "changed", disabled = status ~= "changed" })
-        y = u:button(ix + ihalf + 8 * s, ihalf, y, "input-revert", "Revert to saved", "script-message-to workspace input-revert",
-                     { disabled = status ~= "changed" })
-    end
-    u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
-    y = y + 10 * s
-    -- A saved value's dot, only while something differs from it
-    local changed = status == "changed"
-    local saved_input = changed and (saved_in or {}) or nil
+    local saved_input
+    y, saved_input = input_card(u, x, w, y + 6 * s, ws, path)
 
     if d then
         y = u:heading(x, w, y + 4 * s, "Color")
@@ -367,10 +372,24 @@ local function source_part(u, x, w, y)
             for _, c in ipairs(CURVES) do
                 if c[1] ~= d.recorded then rows[#rows + 1] = { kind = c[1], label = c[2], cmd = "script-message-to dlogm curve " .. c[1] } end
             end
-            local chosen = d.curve == d.recorded and "auto" or d.curve
+            local chosen = (d.curve == d.recorded or d.curve == "uw") and "auto" or d.curve
             y = u:select_row(x, w, y + 6 * s, "curve", "Log curve", rows, chosen, {
                 key = keys["script-binding dlogm/curve"], saved = saved_curve,
                 text = chosen == "auto" and (d.recorded ~= "" and (CURVE_NAMES[d.recorded] or d.recorded) or "None, not log") or nil })
+        end
+        -- The underwater colour, the source's too (uwcolor.lua): for a plain SDR clip; its strength and what it measures
+        -- on its own tab
+        local c = state("uwcolor")
+        if type(c) == "table" and (c.ok or c.active) then
+            local now = not c.uw and "off" or c.uw_highlights and "bright" or "on"
+            local was = saved_input and (saved_input.uw ~= true and "off" or saved_input.uw_highlights and "bright" or "on") or nil
+            y = u:select_row(x, w, y + 4 * s, "uw-pick", "Underwater colour", {
+                { kind = "off", label = "Off", cmd = "script-message-to dlogm uw-set uw no" },
+                { kind = "on", label = "On", cmd = "script-message-to dlogm uw-set uw_highlights no; script-message-to dlogm uw-set uw yes" },
+                { kind = "bright", label = "On, brighter highlights", cmd = "script-message-to dlogm uw-set uw_highlights yes; script-message-to dlogm uw-set uw yes" },
+            }, now, { key = keys["script-binding dlogm/uw-toggle"], saved = was })
+            y = u:caption(x, w, y, c.uw and string.format("Strength %d %% (its tab). Plays in HDR: the colour and the light stretched past SDR's",
+                math.floor((c.uw_strength or 1) * 100 + 0.5)) or "Takes out the green and brown the camera put in under water")
         end
     end
 
@@ -1094,7 +1113,7 @@ end
 local function filtering_note(g) return (g.filter or "") ~= "" end
 
 -- Where the transform is defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
--- a moment's or clip preview's own settings: the Transform's, and the underwater colour's (part of the same bundle)
+-- a moment's or clip preview's own settings
 local function view_card(u, x, w, y, ws)
     local s = u.s
     local status = ws and ws.view_status
@@ -1338,11 +1357,11 @@ local function water_part(u, x, w, y)
     local c, ws = state("uwcolor"), state("workspace")
     if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
     if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing plays") end
-    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
-                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. Part of the clip's transform",
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. The source's, as its log curve",
                   { color = C.label })
-    y = view_card(u, x, w, y + 6 * s, ws)
+    local saved
+    y, saved = input_card(u, x, w, y + 6 * s, ws, mp.get_property("path"))
     local on = c.uw == true
     y = u:switch(x, w, y, "uw-on", "Correct underwater colour", on, "script-message-to dlogm uw-set uw toggle", keys["script-binding dlogm/uw-toggle"],
                  nil, saved and saved.uw)
