@@ -1908,6 +1908,10 @@ async fn set_source(shared: State<'_, Shared>, probes: State<'_, index::SharedPr
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let problems = tags::set_source(&root, &list);
+        // A lens type given or taken away changes the clip's lens: what the index knows of it is read again
+        let typed: Vec<String> = list.iter().filter(|(_, s)| s.contains_key("lens_type")).filter_map(|(t, _)| tags::clip_own(&root, t).ok())
+            .map(|(_, c)| c.display().to_string()).collect();
+        if !typed.is_empty() { probes.lock().unwrap().forget(&typed); }
         // The clips as they are now (changed.rs)
         changed::of_clips(&root, &list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
     }).await.map_err(|e| e.to_string())

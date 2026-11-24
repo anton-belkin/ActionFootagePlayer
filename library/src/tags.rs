@@ -508,6 +508,9 @@ pub fn source_value_ok(key: &str, v: &Value) -> bool {
         "rotation" => v.as_i64().is_some_and(|r| [0, 90, 180, 270].contains(&r)),
         "underwater" => v.as_str().is_some_and(|s| ["auto", "yes", "no"].contains(&s)),
         "lens_type" => v.as_str().is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')),
+        // The underwater colour (the dlogm plugin's uwcolor.lua): on, the light end stretched, its strength 0..1
+        "uw" | "uw_highlights" => v.is_boolean(),
+        "uw_strength" => v.as_f64().is_some_and(|x| (0.0..=1.0).contains(&x)),
         _ => false,
     }
 }
@@ -552,6 +555,14 @@ pub fn set_source(root: &Path, entries: &[(String, serde_json::Map<String, Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_underwater_colour_is_the_sources() {
+        assert!(source_value_ok("uw", &json!(true)) && source_value_ok("uw_highlights", &json!(false)));
+        assert!(source_value_ok("uw_strength", &json!(0.7)) && source_value_ok("uw_strength", &json!(1)));
+        assert!(!source_value_ok("uw", &json!("yes")) && !source_value_ok("uw_strength", &json!(1.5)) && !source_value_ok("uw_strength", &json!("0.5")));
+        assert!(source_value_ok("uw", &Value::Null), "taken out");
+    }
 
     #[test]
     fn lens_type_kept_with_the_clip() {

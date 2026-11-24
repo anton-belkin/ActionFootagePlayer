@@ -986,15 +986,19 @@ Project). Then, as buttons:
 - **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
-- **Stabilize optically** (Albums, Originals): for the selected clips whose motion the player can't take from the
+- **Source Settings** (Albums, Originals, the side panel): how each selected original is read, as a list of its
+  attributes, each with what it is now (Mixed for several): the turn, the log curve, the underwater colour, the lens
+  (a lens chosen for the whole mode, Find / Estimate lens), the lens type, the lens under water, the motion data.
+  Change any of them and **Save**: for all the selected clips at once, where it applies. Each is a filter too.
+- **Stabilize optically** (Source Settings' Motion data): for the selected clips whose motion the player can't take from the
   camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), the motion is
   measured from the picture (Gyroflow's own analysis, run by the player: no Gyroflow app needed) and kept beside each
   clip in `<clip>.afp-motion`, where the player plays with it. One clip at a time, about a third as long as the clip
   plays. Left out, and listed with why: clips with motion data the player uses, with a Gyroflow project (the project
-  plays), with their motion measured already (unless **Redo**), 360° clips, and clips whose lens isn't known (no lens
-  profile for that camera and mode). **Lens** chooses the lens type for the selected clips where their camera has
+  plays), with their motion measured already (**Measure again** does those), 360° clips, and clips whose lens isn't known (no lens
+  profile for that camera and mode). **Lens type** (Source Settings) chooses the lens type for the selected clips where their camera has
   types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player
-  uses it too); a lens chosen, or **Redo**, measures the motion again. Lens types of your own: *Your own lens list*.
+  uses it too); **Measure again** measures the motion again. Lens types of your own: *Your own lens list*.
 
   **Motion measured from the picture, without a project:** `<clip>.afp-motion` beside the clip keeps what Gyroflow's
   analysis measured, with the lens, the rolling shutter and the water it was measured with. With one and no Gyroflow

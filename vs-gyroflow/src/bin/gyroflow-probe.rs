@@ -175,7 +175,10 @@ fn main() {
     let build = format!("{build}|{}|{}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default(), vs_gyroflow::lens_pick::user_file_stamp(),
                         vs_gyroflow::afp_motion::stamp(std::path::Path::new(&path)));
     if library {
-        let cache = vs_gyroflow::file_cache("library", &path, &build);
+        // Its answer has the lens of the Gyroflow project beside it too: kept while that project is as it is
+        let project = vs_gyroflow::lens_pick::project_beside(&path).and_then(|f| std::fs::metadata(f).ok())
+            .map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default();
+        let cache = vs_gyroflow::file_cache("library", &path, &format!("{build}|{project}"));
         if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
             println!("{}", text.trim());
             return;
@@ -191,9 +194,14 @@ fn main() {
         out["clock"] = serde_json::to_value(clock).unwrap_or_default();
         out["gps"] = serde_json::to_value(gps).unwrap_or_default();
         // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed, 4 = an older
-        // GoPro (HERO3) named by its firmware, 5 = a lens only when one is made for exactly the clip's mode (lens_pick.rs)
+        // GoPro (HERO3) named by its firmware, 5 = a lens only when one is made for exactly the clip's mode (lens_pick.rs),
+        // 6 = the lens as the player takes it ("lens_info", below)
         // (the Library asks again for older answers: raise it with what's new here)
-        out["geotag"] = 5.into();
+        out["geotag"] = 6.into();
+        // The lens as the player takes it (probe::lens_info: the profile and where it comes from, the mode a lens is kept
+        // for, the camera's lens types, the Gyroflow project's lens), for the Library's Source Settings and its filters
+        // without reading the clip again; the lenses to choose from (candidates) are the mode's, asked when chosen
+        out["lens_info"] = serde_json::to_value(vs_gyroflow::probe::lens_info(&path)).unwrap_or_default();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
         println!("{out}");
