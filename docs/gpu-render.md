@@ -446,7 +446,10 @@ recursive filter is no good under water: it has to follow what moves. The GPU pa
   goes); after a seek the first frame stays until the frames after it are there.
 - **The motion is searched once per frame:** between the new frame and the one before it, per 32 px block (the gyro's
   prediction from both frames' cameras, a search within 8 px on a quarter-size luma, then within 2 px at full size with
-  a sub-pixel fit). Those steps stay in the ring with their frames (`GDN_VEC`). The motion from the shown frame to each
+  a sub-pixel fit). The prediction maps the rays back to the output the way `output_ray` maps pixels to rays: with a
+  lens correction below 100 % the source lens's share too (until 0.14.0 it took the rectilinear map alone, tens of
+  pixels off at 0 %, so the search never found the motion: no denoise on texture, and rectangles of other places'
+  water averaged into open water). Those steps stay in the ring with their frames (`GDN_VEC`). The motion from the shown frame to each
   of its 10 neighbours is the steps chained (backwards as they are, forwards each one inverted by a fixed-point
   iteration), then checked within a pixel at full size (`GDN_NV`, read by the blend through the sampler's filter).
 - **Crop mode** shows no frames after (`gyroflow_dn_after` 0): its camera turns the newest frame as it's dragged, and
