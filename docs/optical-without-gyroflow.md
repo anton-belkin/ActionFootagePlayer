@@ -312,8 +312,7 @@ Cons:
 - **`<clip>.afp.json`:**
   - `source.lens_type` (exists); new `source.lens` for a specific profile (DB key, file, or estimated) chosen by hand or
     by the lens command, with `source.lens_confidence`.
-  - `source.underwater` yes/no/auto (exists: panel Source, Library Info's batch field). It becomes a first-class flag in
-    the Library's grid (§5.4).
+  - `source.underwater` yes/no/auto (exists: the player's Source tab and the Library's Batch set Source settings, §5.4).
   - The "Lens: …" tags from `stabilize_all` stay as tags for review. The motion itself is not in `.afp.json`.
 - **Panel, Source:**
   - Lens block: Type / Profile (picker over curated + saved + DB + estimated, with stars or "estimated from footage"),
