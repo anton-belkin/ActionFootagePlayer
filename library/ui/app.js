@@ -1270,8 +1270,15 @@ function sourceBody(c) {
     const froms = tally(flat.filter((it) => lensFrom(it) != null), lensFrom);
     const modes = new Set(flat.map((it) => (lensOf(it) || {}).mode_key || ""));
     const modeKey = modes.size === 1 && !gf ? Array.from(modes)[0] : "";
+    // The camera's own calibration in the file (a GoPro from the HERO11, a DJI): no lens chosen, found or estimated for
+    // those (Anton, 2026-11-24)
+    const inFile = flat.filter((it) => lensFrom(it) === "file").length;
+    const findable = flat.length - inFile;
     let ctl, prov = "", extra = "";
-    if (modeKey && !reading) {
+    if (inFile && !findable) {
+      ctl = srcVal(names.size === 1 ? esc(names.keys().next().value) : "<i>Mixed</i>");
+      prov = esc(LENS_FROM.file + " · the camera’s own calibration of " + (flat.length === 1 ? "this clip" : "each clip") + ", which " + (flat.length === 1 ? "it plays" : "they play") + " with: no lens is chosen, found or estimated for it");
+    } else if (modeKey && !reading) {
       const cands = lensCandidates(modeKey, flat[0].path);
       const cur = lensName(flat[0]);
       const assigned = flat.some((it) => /, assigned$/.test(String((lensOf(it) || {}).lens || "")));
@@ -1288,9 +1295,11 @@ function sourceBody(c) {
         (reading ? esc(" · " + reading + " not read yet") : modes.size > 1 ? esc(" · a lens is chosen for one mode at a time: select clips of one mode") : gf ? esc(" · its Gyroflow project’s plays") : "");
       if (one && one.gyroflow) extra += projectLensHtml(one);
     }
-    extra += '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="lens-find">Find lens' + (flat.length > 1 ? " for " + flat.length + " clips" : "") + '</button>' +
-      '<button type="button" class="btn sm" data-a="job" data-v="lens-estimate"' + (flat.length === 1 ? "" : " disabled") + ' title="From one clip: the one with the best view, the camera moving through a still scene">Estimate lens</button></div>' +
-      '<div class="prov">Find: the camera’s known lenses tried on the clip, the readout measured; Estimate: a lens made from one clip</div>' + lensFindResults();
+    if (findable) extra += '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="lens-find">Find lens' + (findable > 1 ? " for " + findable + " clips" : "") + '</button>' +
+      '<button type="button" class="btn sm" data-a="job" data-v="lens-estimate"' + (findable === 1 ? "" : " disabled") + ' title="From one clip: the one with the best view, the camera moving through a still scene">Estimate lens</button></div>' +
+      '<div class="prov">Find: the camera’s known lenses tried on the clip, the readout measured; Estimate: a lens made from one clip' +
+      (inFile ? esc(" · left out: " + inFile + (inFile === 1 ? " clip" : " clips") + " with the lens in the file") : "") + '</div>';
+    extra += lensFindResults();
     h += srcRow("Lens", ctl, prov, d.lens ? "chg" : names.size > 1 ? "mixed" : "", extra);
   }
   const typed = flat.filter((it) => lensTypesOf(it).length);
@@ -1322,6 +1331,8 @@ function sourceBody(c) {
     const p = probeOf(one) || {};
     mprov = one.measured ? "In " + esc(one.name.replace(/\.[^.]+$/, "")) + ".afp-motion" + (p.measured && p.measured.in_water ? ", measured in water" : ", measured in air") : "";
     if (one.camStab) mprov += (mprov ? " · " : "") + esc("the camera stabilized it itself (" + one.camStab + ")" + (one.motion === false ? ": its gyro can’t be used" : ""));
+    // Its own motion data plays (a HERO12+ with HyperSmooth on): a motion file measured before is left aside
+    if (p.measured_aside) mprov += (mprov ? " · " : "") + esc(one.name.replace(/\.[^.]+$/, "") + ".afp-motion beside it is left aside: its own motion data plays");
   } else if (motions.size > 1) mprov = esc(tallyText(motions, (x) => lc(MOTION_TEXT[x])));
   else if (motions.size === 1) mprov = "All " + n;
   let mbtn = "";
@@ -1470,8 +1481,10 @@ function lensFindResults() {
   const job = (S.jobs || []).filter((j) => (j.kind === "lens-find" || j.kind === "lens-estimate") && j.results).slice(-1)[0];
   if (!job) return "";
   const name = (p) => String(p || "").split("/").pop();
-  const verdictText = { good: "fits", single: "fits (one part could tell)", loose: "fits loosely", poor: "doesn’t fit", unchecked: "not checked on another part" };
+  const verdictText = { good: "fits", single: "fits (one part could tell)", loose: "not reliable: fits only loosely", poor: "doesn’t fit", unchecked: "not checked on another part" };
+  // Kept only when it fits (or an estimate no other part of a short clip could judge): a loose fit isn't reliable
   const keepBtn = (r, t) => {
+    if (!(t.fits || t.verdict === "unchecked")) return "";
     const k = r.path + "#" + t.n;
     return '<button type="button" class="btn sm" data-a="keepfound" data-v="' + esc(r.path) + '" data-n="' + esc(t.n) + '"' + (LENS_KEEPING[k] ? " disabled" : "") + '>' + (LENS_KEEPING[k] ? "Keeping…" : "Keep for this mode") + '</button>';
   };
@@ -2915,8 +2928,8 @@ async function addJob(kind) {
     label = op.go.length + (op.go.length === 1 ? " clip" : " clips") + (S.opticalRedo && op.redo ? ", " + op.redo + " measured again" : "");
   }
   if (kind === "lens-find" || kind === "lens-estimate") {
-    const clips = c.selItems.filter((it) => it.kind === "clip" && !it.is360);
-    if (!clips.length) return showError("Select clips to find their lens");
+    const clips = c.selItems.filter((it) => it.kind === "clip" && !it.is360 && lensFrom(it) !== "file");
+    if (!clips.length) return showError(c.selItems.some((it) => lensFrom(it) === "file") ? "The lens is in the file: the camera wrote its own calibration of the clip" : "Select clips to find their lens");
     if (kind === "lens-estimate" && clips.length !== 1) return showError("Estimate lens is for one clip: select the one with the best view (the camera moving through a still scene)");
     options.clips = clips.map((it) => it.id);
     label = clips.length === 1 ? clips[0].name : clips.length + " clips";

@@ -475,8 +475,13 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         lens_pick::apply(&stab, project);
         // Motion measured from the picture, kept beside the clip (afp_motion.rs): what it plays with when its own motion
         // data is none or of no use (the camera stabilized the picture), as gyro would be. Its lens, readout and
-        // refraction come with it, after the preset: the motion was measured with them
-        let measured = if lens_only { None } else {
+        // refraction come with it, after the preset: the motion was measured with them. Left aside where the clip's own
+        // motion data plays (afp_motion::own_motion_plays), as the probe decides
+        let measured_beside = !lens_only && afp_motion::path_for(std::path::Path::new(project)).is_file();
+        let measured = if !measured_beside { None } else if afp_motion::own_motion_plays(std::path::Path::new(project)) {
+            log::info!("{project}: its own motion data plays; the motion measured from the picture beside it is left aside");
+            None
+        } else {
             match afp_motion::read_for(std::path::Path::new(project)) {
                 Some(Ok(m)) => Some(m),
                 Some(Err(e)) => { log::warn!("{project}: its measured motion isn't used: {e}"); None }

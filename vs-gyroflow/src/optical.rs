@@ -64,9 +64,11 @@ pub struct Facts {
 /// measured again when `redo`)
 pub fn decide(project: Option<&Path>, measured: Option<&Path>, redo: bool, facts: &Facts) -> Verdict {
     if project.is_some() { return Verdict::LeaveOut("it has a Gyroflow project, which the player plays".into()); }
+    // Before "measured already": a clip measured once and now stabilized from its own motion data (a HERO12+ with
+    // HyperSmooth on) isn't measured again either way
+    if facts.own_motion { return Verdict::LeaveOut("it has motion data the player stabilizes it with".into()); }
     if measured.is_some() && !redo { return Verdict::LeaveOut("its motion is measured already (Redo measures it again)".into()); }
     if facts.spherical { return Verdict::LeaveOut("a 360° clip: the player's 360 view plays it".into()); }
-    if facts.own_motion { return Verdict::LeaveOut("it has motion data the player stabilizes it with".into()); }
     match &facts.lens {
         Some((lens, profile)) => Verdict::Stabilize { lens: lens.clone(), profile: profile.clone(), replaces: measured.map(Path::to_path_buf) },
         None if facts.has_types => Verdict::LeaveOut(format!("{}: its lens isn't known (a mode not named yet): choose its type in Lens", facts.camera)),
@@ -153,9 +155,11 @@ pub fn verdict(video: &Path, redo: bool) -> Verdict {
     if !video.is_file() { return Verdict::LeaveOut("not found".into()); }
     let project = own_project(video);
     let measured = Some(crate::afp_motion::path_for(video)).filter(|p| p.is_file());
-    if project.is_some() || (measured.is_some() && !redo) { return decide(project.as_deref(), measured.as_deref(), redo, &Facts::default()); }
+    if project.is_some() { return decide(project.as_deref(), measured.as_deref(), redo, &Facts::default()); }
     match facts(video) {
         Ok(f) => decide(project.as_deref(), measured.as_deref(), redo, &f),
+        // Measured once, whatever it is now
+        Err(_) if measured.is_some() && !redo => decide(None, measured.as_deref(), redo, &Facts::default()),
         Err(e) => Verdict::LeaveOut(format!("couldn't be read: {e}")),
     }
 }
@@ -178,6 +182,8 @@ mod tests {
         assert!(matches!(decide(None, Some(measured), false, &lens), Verdict::LeaveOut(r) if r.contains("measured already")));
         assert_eq!(decide(None, Some(measured), true, &lens), Verdict::Stabilize { lens: "in the file".into(), profile: None, replaces: Some(measured.to_path_buf()) });
         assert!(matches!(decide(None, None, false, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
+        // Its own motion data plays (a HERO12+ with HyperSmooth on): not measured again, Redo or not
+        assert!(matches!(decide(None, Some(measured), true, &facts(true, Some("in the file"))), Verdict::LeaveOut(r) if r.contains("motion data")));
         assert!(matches!(decide(None, None, false, &facts(false, None)), Verdict::LeaveOut(r) if r.contains("GoPro HERO12 Black: its lens isn't known")));
         let typed = Facts { has_types: true, ..facts(false, None) };
         assert!(matches!(decide(None, None, false, &typed), Verdict::LeaveOut(r) if r.ends_with("choose its type in Lens")));

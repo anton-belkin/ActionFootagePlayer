@@ -12,7 +12,9 @@
 //   {"mode":"default","motion":"optical","measured":{how, at, lens, in_water, readout_ms, frames, measured_frames},...}
 //                                                       motion measured from the picture beside it (<stem>.afp-motion,
 //                                                       afp_motion.rs): stabilized with it, no horizon lock;
-//                                                       "measured_error" instead when that file is broken or of another clip
+//                                                       "measured_error" instead when that file is broken or of another clip;
+//                                                       a clip with motion data of its own the player uses plays with
+//                                                       that, and says "measured_aside": true when it has such a file
 //   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
 //                                                       player takes for it ("in the file", the label of the one picked
 //                                                       from Gyroflow's database, lens_pick.rs, "" for none), to correct
@@ -233,9 +235,12 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
     };
-    // Motion measured from the picture beside it (afp_motion.rs): stabilized with it as with motion data of its own,
-    // whatever the file has ("motion": "optical"; the horizon can't be locked)
+    // Motion measured from the picture beside it (afp_motion.rs): stabilized with it as with motion data of its own
+    // ("motion": "optical"; the horizon can't be locked) where the clip has none the player uses. Where it has (its
+    // gyro, or a HERO12+ with HyperSmooth on), that plays, and the measured motion is left aside ("measured_aside")
+    let own = !out["mode"].is_null();
     match vs_gyroflow::afp_motion::header_for(std::path::Path::new(&path)) {
+        Some(_) if own => { out["measured_aside"] = true.into(); }
         Some(Ok(h)) => {
             let (w, hh, fps) = video_size(&path).unwrap_or((h.clip.width, h.clip.height, h.clip.fps));
             out["mode"] = "default".into();

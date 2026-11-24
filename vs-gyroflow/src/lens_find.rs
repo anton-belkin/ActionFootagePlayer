@@ -93,6 +93,8 @@ struct Video {
 
 fn video(path: &Path) -> Result<Video, String> {
     let p = path.to_string_lossy().into_owned();
+    // The camera's own calibration of this very clip: nothing to find (Anton, 2026-11-24: not even offered)
+    if crate::probe::lens_in_the_file(&p) { return Err(crate::probe::LENS_IN_THE_FILE.into()); }
     let url = filesystem::path_to_url(&p);
     let mut file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
@@ -161,10 +163,24 @@ fn verdict_name(v: Verdict) -> &'static str {
     match v { Verdict::Good => "good", Verdict::Single => "single", Verdict::Loose => "loose", Verdict::Poor => "poor" }
 }
 
-/// The known lenses of the clip's camera, the one the player takes now first
+/// The known lenses of the clip's camera, the one the player takes now first; not a GoPro's Max Lens Mod for a clip
+/// recorded without it (GX010020, Linear: Find tried only HERO12 Max Lens Mod fisheyes)
 fn candidates_for(v: &Video) -> Vec<Candidate> {
     let loaded = crate::lens_pick::for_clip(&v.path, &v.clip, false).map(|p| p.profile);
     lfv::candidates(crate::lens_pick::database(), (&v.camera.0, &v.camera.1, ""), v.size, v.fps, loaded.as_ref(), 1.0)
+        .into_iter().filter(|c| {
+            let p = c.profile.as_ref();
+            !other_lens_mod(&v.camera.0, &v.camera.1, &v.clip.lens_mode, &[&c.name, p.map_or("", |p| &p.lens_model), p.map_or("", |p| &p.camera_setting)])
+        }).collect()
+}
+
+/// Whether a profile (its name, lens model, camera setting: `names`) is a GoPro's Max Lens Mod one ("Max..." or "MLM"
+/// a word of them, the MAX camera itself aside) offered for a clip whose lens mode isn't the mod's: another lens
+fn other_lens_mod(brand: &str, model: &str, lens_mode: &str, names: &[&str]) -> bool {
+    let max_word = |t: &str| t.split(|ch: char| !ch.is_ascii_alphanumeric()).map(|w| w.to_ascii_lowercase())
+        .any(|w| (w.starts_with("max") && w != "maximum") || w == "mlm");
+    if !brand.eq_ignore_ascii_case("gopro") || max_word(model) { return false; }
+    names.iter().any(|n| max_word(n)) && !lens_mode.to_ascii_lowercase().contains("max")
 }
 
 /// Find: the known lenses tried on three parts of the clip. `progress`: 0-1
@@ -208,9 +224,11 @@ pub fn estimate(path: &Path, progress: &(dyn Fn(f64) + Sync), stop: &(dyn Fn() -
     let v = video(path)?;
     let mut k = read_kept(path).unwrap_or_default();
     let candidates = candidates_for(&v);
-    // Started from what Find thought best, else the nearest known, else a plain wide lens
+    // Started from what Find thought best, else the nearest known that Find didn't find to fit poorly (GX010020: an
+    // estimate started from a fisheye of another lens), else a plain wide lens
+    let poor = |i: usize| k.tried.iter().any(|t| t.n == i.to_string() && t.verdict == "poor");
     let start = k.accepted.as_ref().and_then(|n| n.parse::<usize>().ok()).and_then(|i| candidates.get(i).cloned())
-        .or_else(|| candidates.first().cloned())
+        .or_else(|| candidates.iter().enumerate().find(|(i, _)| !poor(*i)).map(|(_, c)| c.clone()))
         .or_else(|| lfv::candidates::generic(v.size).into_iter().next())
         .ok_or("no lens to start from")?;
     let refraction = crate::water::refraction_for(path)
@@ -251,6 +269,8 @@ pub fn estimate(path: &Path, progress: &(dyn Fn(f64) + Sync), stop: &(dyn Fn() -
 pub fn keep(path: &Path, n: &str) -> Result<(std::path::PathBuf, String, String), String> {
     let k = read_kept(path).ok_or("nothing found for this clip yet: Find lens or Estimate lens first")?;
     let t = k.estimate.iter().chain(k.tried.iter()).find(|t| t.n == n).ok_or_else(|| format!("{n}: not one of what was found for this clip"))?;
+    // Only what fits (an estimate too short to judge on another part as well): one that fits loosely isn't reliable
+    if !(t.fits || t.verdict == "unchecked") { return Err(format!("{}: it doesn't fit reliably ({}), so it isn't kept", t.name, t.verdict)); }
     let json = t.profile.as_ref().ok_or("that lens can't be kept as a profile of this clip's frame")?;
     let profile = LensProfile::from_json(&json.to_string()).map_err(|e| e.to_string())?;
     let v = video(path)?;
@@ -258,4 +278,18 @@ pub fn keep(path: &Path, n: &str) -> Result<(std::path::PathBuf, String, String)
     let how = if n == "estimate" { "estimated from footage" } else if t.readout_measured { "found in the footage, readout measured" } else { "found in the footage" };
     let file = crate::lens_db::assign(&key, &profile, how, &format!("{} ({})", t.name, v.path))?;
     Ok((file, key.describe(), t.name.clone()))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn no_max_lens_mod_for_a_clip_without_it() {
+        let gx0020 = ["GoPro_HERO12 Black_Max_NO-EIS_1080p_16by9_1920x1080-23.98fps (scaled)", "", ""];
+        assert!(super::other_lens_mod("GoPro", "HERO12 Black", "Linear", &gx0020));
+        assert!(super::other_lens_mod("GoPro", "HERO12 Black", "", &["x", "Max Lens Mod 2.0", ""]));
+        assert!(!super::other_lens_mod("GoPro", "HERO12 Black", "Max SuperView", &gx0020));
+        assert!(!super::other_lens_mod("GoPro", "HERO12 Black", "Linear", &["GoPro_HERO12 Black_Linear_4K", "", ""]));
+        assert!(!super::other_lens_mod("GoPro", "MAX", "", &gx0020));
+        assert!(!super::other_lens_mod("DJI", "OsmoAction6", "Wide", &["DJI Max wide", "", ""]));
+    }
 }

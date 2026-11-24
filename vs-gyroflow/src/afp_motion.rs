@@ -207,6 +207,13 @@ fn of_this_clip(header: Header, video: &Path) -> Result<Header, String> {
     Ok(header)
 }
 
+/// Whether the clip plays with its own motion data (probe::probe says so: gyro recorded with the camera's stabilization
+/// off, or a GoPro HERO12+ that recorded how HyperSmooth turned the picture). Then a motion file beside it is left
+/// aside: the camera's motion data is better than what the picture says (GX010020: the measured turn jitters 5x more)
+pub fn own_motion_plays(video: &Path) -> bool {
+    crate::probe::probe(&video.to_string_lossy()).is_ok()
+}
+
 /// The file's stamp (size and time), for the caches of what a clip plays with: "" without one
 pub fn stamp(video: &Path) -> String {
     std::fs::metadata(path_for(video)).ok().map(|m| format!("{}:{:?}", m.len(), m.modified().ok())).unwrap_or_default()

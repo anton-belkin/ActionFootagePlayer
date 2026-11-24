@@ -542,6 +542,19 @@ Each step is its own PR, UI ones with before/after screenshots.
      - Estimate gives f 1763 and readout 31.1 ms, in 20 s.
      - Find took 14 s a clip. #1296's core on our fork branch, Library commands, result list with Assign / Keep.
 
+5. **After the first live test (GX010020, Maldives, HERO12 Linear with HyperSmooth AutoBoost, 2026-11-24):**
+   - Measured optically it wobbled ("jelly"). The measured turn had the right scale but jittered 5x more than the
+     camera's own record (CORI x IORI): 0.04 vs 0.008 deg frame to frame, about 4-5 px of 4K.
+   - It went optical only because HyperSmooth clips played as recorded; #201 stabilizes HERO12+ ones from their gyro.
+   - Find never tried the file's lens and tried only Max Lens Mod fisheyes; Estimate started from one of them; a kept
+     lens would have been ignored for a clip with its lens in the file.
+   - Fixed (Anton's 1-4, with his change to 2):
+     - the clip's own motion data, where the player uses it, wins over an `.afp-motion` beside it (probe:
+       `measured_aside`; load_manager; Stabilize optically leaves it out even with Redo);
+     - a clip with its lens in the file gets no lens choice, Find or Estimate at all;
+     - Find leaves out GoPro Max Lens Mod profiles for clips without the mod;
+     - Estimate never starts from a lens Find found poor; a loose fit is "not reliable" and has no Keep.
+
 **Test sample** (NAS, writes allowed for these clips only), about a dozen clips:
 - HERO4 Black Wide and Medium, in air and in water;
 - HERO3 White;

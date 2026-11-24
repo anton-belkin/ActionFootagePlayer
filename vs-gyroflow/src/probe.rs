@@ -303,9 +303,20 @@ fn lens_pick_mode_key(path: &str, clip: &lens_pick::Clip) -> String {
     crate::lens_db::ModeKey::of(path, clip).describe()
 }
 
-/// `lens_info` with the lenses to choose from (at most `limit`), for the side panel's Source tab
+/// Whether the clip plays with the lens its camera wrote into the file (`LensInfo::from` "file": a GoPro from the
+/// HERO11, a DJI): the camera's own calibration of this very clip, so no lens is chosen, found or estimated for it
+pub fn lens_in_the_file(path: &str) -> bool {
+    lens_read(path).is_some_and(|l| l.from == "file")
+}
+
+/// Why no lens is chosen, found or estimated for a clip whose camera wrote its lens into the file
+pub const LENS_IN_THE_FILE: &str = "the camera wrote this clip's lens into the file (its own calibration), which it plays with";
+
+/// `lens_info` with the lenses to choose from (at most `limit`), for the side panel's Source tab; none for a clip whose
+/// lens is in the file
 pub fn lens_info_with_candidates(path: &str, limit: usize) -> Option<LensInfo> {
     let mut info = lens_info(path)?;
+    if info.from == "file" { return Some(info); }
     if let Some((clip, _)) = lens_clip(path) {
         info.candidates = lens_pick::candidates(path, &clip, limit).into_iter().map(|(c, _)| c).collect();
     }
@@ -315,6 +326,7 @@ pub fn lens_info_with_candidates(path: &str, limit: usize) -> Option<LensInfo> {
 /// A lens chosen for the clip (a `lens_pick::candidates` id) kept as its whole mode's (lens_pick::assign):
 /// {"file", "mode", "lens"}
 pub fn assign_lens(path: &str, id: &str) -> Result<serde_json::Value, String> {
+    if lens_in_the_file(path) { return Err(LENS_IN_THE_FILE.into()); }
     let (clip, _) = lens_clip(path).ok_or("the clip can't be read")?;
     let (file, key, label) = lens_pick::assign(path, &clip, id)?;
     Ok(serde_json::json!({ "file": file.to_string_lossy(), "mode": key.describe(), "lens": label }))
