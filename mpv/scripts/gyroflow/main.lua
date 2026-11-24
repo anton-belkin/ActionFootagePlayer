@@ -1467,8 +1467,9 @@ do
     local dnstep = require 'dnstep'
     local dn = { after = DN_AFTER, epoch = 0, delay = 0, restart = nil, show = nil }
     -- Paused work under way: { kind = "frames" (frame-step N, until_ the newest frame it ends on), "fill-seek" (the
-    -- fill's seek, frames to play after it, until_) }; own_seek: a seek of ours not seen yet; steps waiting behind it
-    local dn_busy, dn_own_seek, dn_queue, dn_fill_timer = nil, false, 0, nil
+    -- fill's seek, frames to play after it, until_) }; own_seek: the time a seek of ours goes to, until it's there (a
+    -- seek landing elsewhere was someone else's: theirs came last); steps waiting behind it
+    local dn_busy, dn_own_seek, dn_queue, dn_fill_timer = nil, nil, 0, nil
     local function dn_publish()
         mp.set_property_native("user-data/gyroflow/gpu_delay", { delay = dn.delay, restart = dn.restart or -1, show = dn.show or -1 })
     end
@@ -1499,7 +1500,7 @@ do
     -- Frame steps and the fill: paused, with the denoise's frames after the shown one (not crop mode)
     local function dn_stepping() return dn.delay > 0 and dn.after > 0 and gpu ~= nil and gpu.shader ~= nil end
     local function dn_seek(t)
-        dn_own_seek = true
+        dn_own_seek = t
         mp.commandv("seek", string.format("%.6f", t), "absolute+exact")
     end
     local function dn_cancel()
@@ -1509,7 +1510,8 @@ do
     -- The ring filled again around the frame on screen, when it hasn't all its neighbours
     local function dn_fill()
         dn_fill_timer = nil
-        if dn_busy or not dn_stepping() or not mp.get_property_native("pause") then return end
+        -- Not over a seek under way (someone else's: its frame is filled once it's there)
+        if dn_busy or dn_own_seek or not dn_stepping() or not mp.get_property_native("pause") or mp.get_property_native("seeking") then return end
         local st = dn_state()
         if not st then return end
         local x = dnstep.shown(st)
@@ -1616,7 +1618,8 @@ do
         dn_publish()
     end })
     mp.register_event("seek", function()
-        if dn_own_seek then dn_own_seek = false return end
+        -- Ours: told apart once it's there (playback-restart)
+        if dn_own_seek then return end
         -- A seek of someone else's (the bar, a mark, the keys): what was under way stops; the frame asked of the shader
         -- goes once the new one is there (until then the shader keeps the old one on screen, no flash of another)
         dn_cancel()
@@ -1624,6 +1627,16 @@ do
     end)
     mp.register_event("playback-restart", function()
         dn.restart = mp.get_property_number("time-pos")
+        if dn_own_seek then
+            local fps = current_source and tonumber(current_source.fps) or 60
+            local ours = dn.restart and math.abs(dn.restart - dn_own_seek) < 0.5 / fps
+            dn_own_seek = nil
+            if not ours then
+                -- Someone else's seek came after ours: theirs it is
+                dn_cancel()
+                dn.clear_show = true
+            end
+        end
         if dn.clear_show then
             dn.clear_show = false
             dn_set_show(nil)
@@ -1678,7 +1691,7 @@ do
     end)
     mp.register_event("end-file", function()
         dn_cancel()
-        dn_own_seek, dn.clear_show = false, false
+        dn_own_seek, dn.clear_show = nil, false
         if dn.show then dn_set_show(nil) end
     end)
     mp.observe_property("user-data/gyroflow/crop", "native", function() dn_sync() end)
