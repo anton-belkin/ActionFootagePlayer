@@ -114,7 +114,8 @@ def plumbing(a, work):
     os.makedirs(os.path.join(plugins, "gyroflow"))
     with open(os.path.join(plugins, "scrubprobe", "main.lua"), "w") as f:
         f.write(PROBE)
-    shutil.copy(a.helper, os.path.join(plugins, "gyroflow", "afp-scrub"))
+    # Linked, not copied: the app's (in its bundle) finds its libraries relative to where it really is
+    os.symlink(os.path.realpath(a.helper), os.path.join(plugins, "gyroflow", "afp-scrub"))
     log = open(os.path.join(work, "mpv.log"), "w")
     m = Mpv(a.mpv, os.path.join(work, "mpv.sock"), log, ["--script=" + os.path.join(plugins, "scrubprobe")])
     try:
