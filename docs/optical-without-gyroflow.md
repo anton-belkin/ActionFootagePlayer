@@ -537,8 +537,8 @@ Answered 2026-11-24:
 - Assign keeps the lens, with its readout, as the default of that camera, mode, size and fps in the local database. An
   estimated lens becomes a known one, and the next clips of the mode take it by themselves.
 
-Still open:
-1. **Gyroflow reuse** (§5.5). Recommendation: link gyroflow-core with #1296 and decode the frames ourselves.
+- **Gyroflow reuse: link gyroflow-core and decode the frames ourselves** (Anton: the result goes straight into
+  `.afp-motion`, with no project in between; the rest is cosmetic). The comparison it was chosen on:
 
    | | Link gyroflow-core, decode ourselves | Gyroflow's command line |
    |---|---|---|
