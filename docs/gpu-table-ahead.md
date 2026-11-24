@@ -111,6 +111,26 @@ runs once a project in a run. The player no longer runs `look` by itself (the ca
 watches the shares, the Library looks after its roots), only when `derived` says a moment isn't where it was; `derived`
 is asked every 30 s.
 
+## A clip with a Gyroflow project, opened cold (2026-11-24)
+
+A clip with a project gets the whole clip's table at once (the project's smoothing is the whole clip's). The journal of
+19–24 Nov showed its first frame waiting for it in proportion to the file's size, ~15 ms a MB from the NAS (200 MB →
+3 s, 469 MB → 8 s), for GoPro clips with Gyroflow's own (Simple) projects, whose motion data `add_motion_data` reads
+from the video. Two causes, measured with the table tool alone (`gyroflow-gpu-table --player`, the clip out of the
+Mac's cache; locally the same table took 0.4 s at any size):
+
+- **A GoPro's second metadata track.** HERO cameras write `gpmd` (the telemetry, a sample a second) and `fdsc`
+  ("GoPro SOS", ~80 samples a second). telemetry-parser's GoPro reader reads only the first; `prefetch.rs` read both,
+  which put a sample every ~95 KB, so on a share the whole file was read in 8 MB stretches. Now a GoPro file (its first
+  metadata sample starts with GPMF's `DEVC`) has its first track alone read: 16 samples instead of ~1250 for a 16 s
+  clip. Other cameras keep every metadata track (water.rs and translation.rs read them all).
+- **Gyroflow's lens database, loaded for every clip.** gyroflow-core gives each `StabilizationManager` its own and loads
+  it (12 409 profiles, 0.35–0.55 s of CPU) when a clip's camera is looked up: the table server paid that for every clip,
+  a clip without a project twice. Now every manager made in vs-gyroflow shares one (`lens_pick::manager`; gyroflow-core's
+  own clones share theirs the same way), and the server loads it as it starts, while the player opens its first clip.
+
+The table's shader is the same byte for byte. NUMBERS
+
 ## Tests
 
 - `luajit tests/gpu_ahead_test.lua`: the policy against a model of the server at share speeds from faster than the NAS

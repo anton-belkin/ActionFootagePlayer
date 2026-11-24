@@ -80,7 +80,17 @@ impl Prefetched {
         let mut this = Self { file, len, pos: 0, chunks: BTreeMap::new(), kept: BTreeMap::new(), samples: Vec::new(), read: Vec::new(), blank_unread: false, from_file: (0, 0), share };
         // The sample table, as telemetry-parser reads it (its reads of the file's ends are kept for it)
         if let Ok(ctx) = telemetry_parser::util::parse_mp4(&mut this, len) {
-            this.samples = metadata_samples(&ctx);
+            let tracks = metadata_tracks(&ctx);
+            // A GoPro's: its GPMF track alone (its first, the one telemetry-parser's GoPro reader reads). Its other one,
+            // "GoPro SOS" (fdsc), has ~80 samples a second that nothing reads, which put the samples close enough
+            // together that on a share the whole file was read through: ~25 ms a MB from the NAS, 7.8 s before the
+            // first frame of a 300 MB clip (2026-11-24)
+            let first = tracks.first().and_then(|t| t.first()).map(|s| s.start);
+            let key = first.and_then(|at| {
+                let mut key = [0u8; 4];
+                (this.seek(SeekFrom::Start(at)).is_ok() && this.read_exact(&mut key).is_ok()).then_some(key)
+            });
+            this.samples = samples_read(tracks, key);
             this.read = vec![false; this.samples.len()];
             let wanted = this.within(range);
             this.fetch(&wanted);
@@ -251,23 +261,24 @@ impl Seek for Prefetched {
     }
 }
 
-/// The samples telemetry-parser reads for the metadata (get_track_samples): the metadata track's, or the unknown
-/// tracks' when there's none; by offset
-fn metadata_samples(ctx: &mp4parse::MediaContext) -> Vec<Sample> {
+/// The samples telemetry-parser reads for the metadata (get_track_samples): the metadata tracks', or the unknown
+/// tracks' when there's none; each track's apart, in the file's order of tracks (its readers that read one take the
+/// first), each by offset
+fn metadata_tracks(ctx: &mp4parse::MediaContext) -> Vec<Vec<Sample>> {
     use mp4parse::TrackType;
     let has = |t| ctx.tracks.iter().any(|x| x.track_type == t);
     let typ = if !has(TrackType::Metadata) && has(TrackType::Unknown) { TrackType::Unknown } else { TrackType::Metadata };
-    let mut samples: Vec<Sample> = ctx.tracks.iter().filter(|x| x.track_type == typ && x.timescale.is_some())
+    ctx.tracks.iter().filter(|x| x.track_type == typ && x.timescale.is_some())
         .filter_map(|x| {
             let scale = x.timescale?.0.max(1) as f64;
-            Some(mp4parse::unstable::create_sample_table(x, 0.into())?.into_iter()
-                .map(move |s| Sample { start: s.start_offset.0 as u64, end: s.end_offset.0 as u64, time: s.start_composition.0 as f64 / scale }))
+            let mut samples: Vec<Sample> = mp4parse::unstable::create_sample_table(x, 0.into())?.into_iter()
+                .map(move |s| Sample { start: s.start_offset.0 as u64, end: s.end_offset.0 as u64, time: s.start_composition.0 as f64 / scale })
+                .filter(|s| s.end > s.start + 4)
+                .collect();
+            samples.sort_by_key(|s| s.start);
+            Some(samples)
         })
-        .flatten()
-        .filter(|s| s.end > s.start + 4)
-        .collect();
-    samples.sort_by_key(|s| s.start);
-    samples
+        .collect()
 }
 
 /// The stretches of the file that `ranges` (in order, apart) are read in: the ranges less than `gap` apart in one, each
@@ -302,6 +313,14 @@ fn on_share(file: &File) -> bool {
 }
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn on_share(_file: &File) -> bool { false }
+
+/// The samples to read of `tracks` (metadata_tracks'), by offset: a GoPro's first track alone (its GPMF, which starts
+/// with `DEVC`: `first_key`, its first sample's first bytes), every track's otherwise
+fn samples_read(tracks: Vec<Vec<Sample>>, first_key: Option<[u8; 4]>) -> Vec<Sample> {
+    let mut samples: Vec<Sample> = if first_key.as_ref() == Some(b"DEVC") { tracks.into_iter().next().unwrap_or_default() } else { tracks.into_iter().flatten().collect() };
+    samples.sort_by_key(|s| s.start);
+    samples
+}
 
 /// The ranges in order, with the ones less than GAP apart joined
 fn merged(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
@@ -361,6 +380,21 @@ fn read_exact_at(file: &File, buf: &mut [u8], offset: u64) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // A GoPro's GPMF track alone: its "GoPro SOS" track's samples (~80 a second) put a sample every ~95 KB, and a share's
+    // file was read through for them
+    #[test]
+    fn a_gopro_reads_its_gpmf_track_alone() {
+        let s = |start: u64, time: f64| Sample { start, end: start + 600, time };
+        let gpmf = vec![s(1_000_000, 0.0), s(8_000_000, 1.0)];
+        let sos: Vec<Sample> = (0..80).map(|i| s(10_000 + i * 95_000, i as f64 / 80.0)).collect();
+        assert_eq!(samples_read(vec![gpmf.clone(), sos.clone()], Some(*b"DEVC")), gpmf);
+        // Another camera's: every track's, in the file's order
+        let all = samples_read(vec![gpmf.clone(), sos.clone()], Some(*b"\x00\x01\x02\x03"));
+        assert_eq!(all.len(), 82);
+        assert!(all.windows(2).all(|w| w[0].start <= w[1].start));
+        assert_eq!(samples_read(vec![gpmf, sos], None).len(), 82);
+    }
 
     #[test]
     fn stretches_hold_whole_ranges() {

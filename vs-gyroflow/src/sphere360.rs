@@ -171,7 +171,7 @@ pub struct Motion {
 impl Motion {
     pub fn load(video: &str, rig: &Rig) -> Result<Motion, String> {
         // The motion, smoothed by nothing: the output camera is the camera at the middle of the frame
-        let stab = StabilizationManager::default();
+        let stab = crate::lens_pick::manager();
         {
             let url = filesystem::path_to_url(video);
             let mut file = std::fs::File::open(video).map_err(|e| format!("{video}: {e}"))?;
