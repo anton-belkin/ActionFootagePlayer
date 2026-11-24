@@ -74,11 +74,15 @@ pub fn build(base: &Path, n: usize) -> Rig {
             let loc = if i % 9 == 0 { r#","location":{"lat":27.9,"lon":34.3,"source":"manual","place":{"country":"Egypt","region":"South Sinai","locality":"Sharm"}}"# } else { "" };
             put(f.join(format!("{dir}/{stem}.afp.json")), format!(r#"{{"format":"actionfootageplayer-clip","version":1,"clip":{{"file":"{stem}.MP4","size":8}},"marks":[{{"t":1.5}}]{tags}{loc}}}"#).as_bytes());
         }
+        // A Gyroflow project beside one clip in fifteen (a render's recipe has its fingerprint)
+        if i % 15 == 0 { put(f.join(format!("{dir}/{stem}.gyroflow")), format!(r#"{{"title":"{stem}"}}"#).as_bytes()); }
         if i % 5 != 0 { put(p.join(format!("_Clips/{dir}/{stem}.afplink.mp4")), &mp4(&format!(r#"{{"v":1,"kind":"clip","clip":"{tree}","size":8}}"#))); }
         if i % 5 == 0 {
             let rel = format!("_Moments/{dir}/{stem} m1.afplink.mp4");
             put(p.join(&rel), &mp4(&format!(r#"{{"v":1,"kind":"moment","clip":"{tree}","in":1,"out":4,"size":8}}"#)));
             if i % 40 == 0 { put(p.join(format!("_Renders/{dir}/{stem} m1.HDR.mov")), &mp4(&format!(r#"{{"v":1,"kind":"render","clip":"{tree}","recipe":{{"v":0}}}}"#))); }
+            // (a moment's own Gyroflow project, one in six)
+            if i % 30 == 0 { put(p.join(format!("_Moments/{dir}/{stem} m1.gyroflow")), format!(r#"{{"title":"{stem} m1"}}"#).as_bytes()); }
             moments.push(rel);
         }
         if i % 10 == 0 {
@@ -300,4 +304,71 @@ fn where_the_time_goes() {
     std::fs::write(base.join("timings.json"), serde_json::to_vec_pretty(&Value::Object(tables)).unwrap()).unwrap();
     *seen::SEEN.write().unwrap() = None;
     if keep.is_none() { let _ = std::fs::remove_dir_all(&base); }
+}
+
+/// A view's look at the moments' renders from the catalog (renders::Ctx not fresh) finds exactly what the disk would:
+/// the same recipe, the same render found, and asks the share nothing (but each Gyroflow project's fingerprint, once)
+#[test]
+fn renders_seen_from_the_catalog_are_the_disks() {
+    let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let base = std::env::temp_dir().join(format!("afl-renders-seen-{}", std::process::id()));
+    let r = build(&base, 240);
+    let (fresh, view) = (renders::Ctx::with(&r.p, true, json!({})), renders::Ctx::with(&r.p, false, json!({})));
+    let (mut gyroflow, mut own, mut old) = (0, 0, 0);
+    nas::take();
+    let mut asked_view = [0u64; 3];
+    for rel in &r.moments {
+        let item = renders::item(&r.p, "moment", rel).unwrap();
+        for p in ["HDR", "SDR"] {
+            let profile = renders::profile(p).unwrap();
+            let a = renders::find(&fresh, &item, profile);
+            nas::take();
+            let b = renders::find(&view, &item, profile);
+            for (x, y) in asked_view.iter_mut().zip(nas::take()) { *x += y; }
+            assert_eq!(a.recipe, b.recipe, "{rel} {p}");
+            assert_eq!((a.hash, a.file, a.stale.clone()), (b.hash, b.file, b.stale.clone()), "{rel} {p}");
+            if p == "HDR" {
+                gyroflow += a.recipe["gyroflow"].is_string() as usize;
+                own += a.recipe["settings"].is_object() as usize;
+                old += a.stale.is_some() as usize;
+            }
+        }
+    }
+    // (what the rig made: Gyroflow projects, clips with their own file, renders made the old way)
+    assert!(gyroflow >= 8 && own >= 20 && old >= 4, "gyroflow {gyroflow}, own {own}, old {old}");
+    assert_eq!(asked_view[0], 0, "no stat asked of the share: {asked_view:?}");
+    // (the Gyroflow projects there are: beside the moments' clips, beside the moments)
+    let projects = r.moments.iter().filter(|m| r.p.join(m.replace(index::LINK_EXT, ".gyroflow")).is_file()).count()
+        + r.moments.iter().filter_map(|m| renders::item(&r.p, "moment", m).ok()?.link["clip"].as_str().map(|c| r.f.join(c).with_extension("gyroflow").is_file())).filter(|x| *x).count();
+    assert!(asked_view[1] <= projects as u64, "reads: only the {projects} fingerprints, once: {asked_view:?}");
+    *seen::SEEN.write().unwrap() = None;
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+/// The Library's start (2026-11-24 journal: the moments, 41 of them, took 1.2 to 4.4 s from the NAS while 4392 clips
+/// took 0.1 to 0.3 s): each view read once as a new process reads it (nothing kept in memory yet), as a share first,
+/// then as this disk. AFL_PERF_CLIPS (2000: 400 moments), AFL_PERF_NAS as above
+///
+///   cargo test --release -- --ignored start_reads --nocapture
+#[test]
+#[ignore]
+fn start_reads() {
+    let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let n: usize = std::env::var("AFL_PERF_CLIPS").ok().and_then(|v| v.parse().ok()).unwrap_or(2000);
+    let base = std::env::temp_dir().join(format!("afl-start-{}", std::process::id()));
+    let r = build(&base, n);
+    println!("{n} clips, {} moments, {} photos, {} exports", r.moments.len(), r.stills.len(), r.exports.len());
+    let (s, rd, w) = nas_ms();
+    let run = |slow: bool| -> Vec<Row> {
+        if slow { nas::set(s, rd, w) } else { nas::set(0.0, 0.0, 0.0) }
+        let mut rows = Vec::new();
+        for v in ["moments", "footage", "stills", "exports"] { timed(&mut rows, &format!("scan {v}"), || r.view(v)); }
+        rows
+    };
+    let slow = run(true);
+    let local = run(false);
+    nas::set(0.0, 0.0, 0.0);
+    report(&format!("The start's reads ({n} clips, {} moments; the share's first)", r.moments.len()), &local, &slow);
+    *seen::SEEN.write().unwrap() = None;
+    let _ = std::fs::remove_dir_all(&base);
 }

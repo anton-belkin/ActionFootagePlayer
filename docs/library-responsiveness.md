@@ -288,3 +288,37 @@ Tests: `library/ui-tests/albums_writes_test.js` (11: add, add failing, add twice
 queued, a copy failing with its tag, move, take out, photo links, three-folder rename failing then whole, new album,
 closing waits); `changed.rs` `album_commands_say_what_a_reading_shows` (each command's answer is what a reading of the
 views shows after it, links included; the window's own files; the rename named back).
+
+## The start: each view read once, moments from the catalog (2026-11-24)
+
+From the journal of 19–24 Nov (`reports/отзывчивость-2026-11-24.md`, item 4): the start took 4.2 s (median) to have
+everything read, and moments and footage were each read twice, side by side.
+
+- **Why twice.** The project's catalog, once read (`seen.rs` `run`), counted a change it couldn't name ("read the views
+  again"), for views read before it was there. The page answered with `refresh()` while `loadProject()` was still
+  reading. Now the catalog's thread counts it only if a view was in fact read without this run's catalog
+  (`seen::reading_view`, called by `scan` after `wait_ready`), and it says it's starting from `seen::start` itself, so a
+  view asked for meanwhile waits for it. On the page, a read asked for while `loadProject()` runs follows it, never
+  alongside it, and the tasks finished before a project opened don't read it again (`S.finished` counted from the
+  first snapshot of it).
+- **Moments from the catalog.** `scan moments` already took the links and `.gyroflow` files from the catalog, but each
+  moment's render state (`renders::states`, its recipe) went to the share for the moment's clip: its copies in each
+  location, its own file read, its Gyroflow project looked for and read, its size; and for the moment's own Gyroflow
+  project. A view's look (`renders::Ctx` not fresh) now takes those from the catalog (`Ctx::clip_seen`; the clip's own
+  file as the catalog keeps it holds everything a recipe reads). Making and copying renders (`fresh`) still read the
+  disk. A Gyroflow project is still read once per run for its fingerprint (`checks::fingerprint_seen`).
+
+| `scan moments` | This disk | As a NAS (5/5/15 ms) | Asked of the share |
+|---|---:|---:|---|
+| `perf.rs` `start_reads`, 2,000 clips, 400 moments, before | 824 ms | 26.5 s | 3,350 stats, 693 reads |
+| after | 100 ms | 1.1 s | 0 stats, 143 reads (134 of them the Gyroflow projects' fingerprints) |
+| The real project on the NAS (41 moments, mounted by IP), a new process each, before | | 747 ms cold, 213–350 ms after | |
+| after | | 112–119 ms | |
+
+The real project's render states are the same either way (`seen.rs` `moments_from_catalog`: 82 of 82); `perf.rs`
+`renders_seen_from_the_catalog_are_the_disks` checks recipes, renders found and that no stat is asked. The journal's
+1.2–4.4 s were with the shares going through Tailscale (since remounted by IP).
+
+Tests: `library/ui-tests/start_scans_test.js` (each view read once; the catalog's "read again" during the start read
+after it, not alongside; tasks finished before), `journal_test.js` (a frozen `__TAURI__.core`), `seen.rs`
+`the_views_read_again_at_the_start_only_when_read_without_its_catalog`.

@@ -23,6 +23,7 @@ const PART: u64 = 1 << 20;
 
 /// A file's fingerprint as links keep it: SHA-256 of its first and last MiB (workspace.rs's fingerprint)
 pub fn fingerprint(path: &Path) -> Option<String> {
+    afp_catalog::store::nas::read();
     let mut f = std::fs::File::open(path).ok()?;
     let size = f.metadata().ok()?.len();
     let part = size.min(PART) as usize;
@@ -39,11 +40,22 @@ pub fn fingerprint(path: &Path) -> Option<String> {
 /// The same, kept while the file's size and time stay (a moved clip searched for again on each look reads nothing)
 pub fn fingerprint_kept(path: &Path) -> Option<String> {
     static KEPT: std::sync::Mutex<Option<HashMap<PathBuf, (u64, std::time::SystemTime, Option<String>)>>> = std::sync::Mutex::new(None);
+    afp_catalog::store::nas::stat();
     let m = std::fs::metadata(path).ok()?;
     let st = (m.len(), m.modified().ok()?);
     if let Some((s, t, h)) = KEPT.lock().unwrap().get_or_insert_with(HashMap::new).get(path) { if (*s, *t) == st { return h.clone(); } }
     let h = fingerprint(path);
     KEPT.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (st.0, st.1, h.clone()));
+    h
+}
+
+/// The same with the file's size and time as the project's catalog saw them (ns): nothing asked of the share but the
+/// file's two parts, once in a run
+pub fn fingerprint_seen(path: &Path, size: u64, mtime: i64) -> Option<String> {
+    static KEPT: std::sync::Mutex<Option<HashMap<PathBuf, (u64, i64, Option<String>)>>> = std::sync::Mutex::new(None);
+    if let Some((s, t, h)) = KEPT.lock().unwrap().get_or_insert_with(HashMap::new).get(path) { if (*s, *t) == (size, mtime) { return h.clone(); } }
+    let h = fingerprint(path);
+    KEPT.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.to_path_buf(), (size, mtime, h.clone()));
     h
 }
 

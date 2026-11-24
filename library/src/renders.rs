@@ -100,6 +100,14 @@ impl Ctx {
 
     fn clip(&self, tree: &str) -> ClipFacts {
         if let Some(c) = self.clips.borrow().get(tree) { return c.clone(); }
+        // A view's look (not fresh): what the project's catalog last saw, where it can say
+        let facts = self.names.as_ref().and_then(|_| self.clip_seen(tree)).unwrap_or_else(|| self.clip_disk(tree));
+        self.clips.borrow_mut().insert(tree.to_string(), facts.clone());
+        facts
+    }
+
+    /// The clip's facts from its files on the disk (tags::clip_own_in's choice of copy)
+    fn clip_disk(&self, tree: &str) -> ClipFacts {
         let mut facts = ClipFacts::default();
         if let Ok((own, clip)) = crate::tags::clip_own_in(&self.locs, tree) {
             let doc = index::read_json(&own).unwrap_or(Value::Null);
@@ -107,12 +115,66 @@ impl Ctx {
             // The clip's Gyroflow project, beside it (<stem>.gyroflow, or <name.ext>.gyroflow)
             let name = clip.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             facts.gyroflow = [clip.with_extension("gyroflow"), clip.with_file_name(format!("{name}.gyroflow"))].iter()
-                .find(|g| g.is_file()).and_then(|g| crate::checks::fingerprint_kept(g)).map(Value::from).unwrap_or(Value::Null);
+                .find(|g| { afp_catalog::store::nas::stat(); g.is_file() }).and_then(|g| crate::checks::fingerprint_kept(g)).map(Value::from).unwrap_or(Value::Null);
+            afp_catalog::store::nas::stat();
             facts.size = std::fs::metadata(&clip).map(|m| json!(m.len())).unwrap_or(Value::Null);
             facts.file = Some(clip);
         }
-        self.clips.borrow_mut().insert(tree.to_string(), facts.clone());
         facts
+    }
+
+    /// The same facts from what the project's catalog last saw of the clip's files (its own file as the catalog keeps
+    /// it: everything but format, version, clip and synced, none of which a recipe reads), the same copy chosen. Each
+    /// moment's clip asked of the share took 30 to 100 ms (2026-11-24 journal: 41 moments, 1.2 to 4.4 s); this asks
+    /// nothing but a Gyroflow project's fingerprint the first time in a run. None: the catalog can't say (a location it
+    /// hasn't looked at, not read yet): the disk then
+    fn clip_seen(&self, tree: &str) -> Option<ClipFacts> {
+        let seen = |p: &Path| -> Option<Option<afp_catalog::state::File>> { crate::seen::file(p).map(|f| f.filter(|f| !f.dir)) };
+        let mut copies: Vec<(PathBuf, bool, afp_catalog::state::File)> = Vec::new();
+        for l in &self.locs {
+            let Some(f) = crate::locations::in_location(tree, l) else { continue };
+            if let Some(x) = seen(&f)? { copies.push((f, l.copies || l.local, x)); }
+        }
+        copies.sort_by_key(|(_, late, _)| *late);
+        let mut own: Option<(usize, afp_catalog::state::File)> = None;
+        for (i, (f, _, _)) in copies.iter().enumerate() {
+            if let Some(o) = seen(&f.with_extension("afp.json"))? { own = Some((i, o)); break; }
+        }
+        let i = match own.as_ref().map(|(i, _)| *i).or_else(|| copies.iter().position(|(_, late, _)| !late)).or((!copies.is_empty()).then_some(0)) {
+            Some(i) => i,
+            // In none of the project's locations
+            None => return Some(ClipFacts::default()),
+        };
+        let (clip, _, file) = &copies[i];
+        let mut facts = ClipFacts::default();
+        if let Some((_, o)) = &own {
+            // (its record without what's inside: not read whole, or written wrong — the disk says, as before)
+            facts.doc = o.meta.as_ref().and_then(|m| m.get("own")).cloned()?;
+        }
+        let name = clip.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        for g in [clip.with_extension("gyroflow"), clip.with_file_name(format!("{name}.gyroflow"))] {
+            if let Some(x) = seen(&g)? {
+                facts.gyroflow = crate::checks::fingerprint_seen(&g, x.size, x.mtime).map(Value::from).unwrap_or(Value::Null);
+                break;
+            }
+        }
+        facts.size = json!(file.size);
+        facts.file = Some(clip.clone());
+        Some(facts)
+    }
+
+    /// A Gyroflow project's fingerprint, None where there's none: for a view's look from the catalog where it has the
+    /// place (fresh: the disk, each time)
+    fn gyroflow_print(&self, g: &Path) -> Option<String> {
+        if self.names.is_some() {
+            match crate::seen::file(g) {
+                Some(Some(x)) if !x.dir => return crate::checks::fingerprint_seen(g, x.size, x.mtime),
+                Some(_) => return None,
+                None => {}
+            }
+        }
+        afp_catalog::store::nas::stat();
+        g.is_file().then(|| crate::checks::fingerprint(g)).flatten()
     }
 
     /// The clip's file an item is rendered from, when it's here
@@ -321,7 +383,7 @@ pub fn recipe_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) ->
     match item.kind {
         Kind::Moment => {
             // Its own Gyroflow project, beside it (else the clip's, which gyroflow-export finds itself)
-            if let Some(own) = own_project(item).filter(|o| o.is_file()).and_then(|o| crate::checks::fingerprint(&o)) { r["gyroflow"] = json!(own); }
+            if let Some(own) = own_project(item).and_then(|o| ctx.gyroflow_print(&o)) { r["gyroflow"] = json!(own); }
             for k in ["in", "out"] { r[k] = l[k].clone(); }
             // Stabilized on its own: a moment kept as made (snap) that says so (the player's render_moments)
             if l["snap"] == json!(true) && l["alone"] == json!(true) { r["alone"] = json!(true); }
@@ -333,6 +395,15 @@ pub fn recipe_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) ->
     // A render made with other settings is another render
     if export.as_object().is_some_and(|o| !o.is_empty()) { r["export"] = export.clone(); }
     trimmed(&r).unwrap_or(Value::Null)
+}
+
+/// index::render_recipe (a moment's render made the old way) from what the look already has: the clip's facts, the
+/// moment's own Gyroflow project (from the catalog, for a view)
+fn old_recipe(ctx: &Ctx, item: &Item, file: &Path, profile: &str) -> Value {
+    if ctx.names.is_none() { return index::render_recipe(&ctx.root, file, &item.link, profile); }
+    let input = item.tree().map(|t| ctx.clip(t).doc["source"].clone()).unwrap_or(Value::Null);
+    let gyroflow = own_project(item).and_then(|o| ctx.gyroflow_print(&o)).map(Value::from).unwrap_or(Value::Null);
+    index::render_recipe_of(&item.link, input, gyroflow, profile)
 }
 
 /// A moment's own Gyroflow project: <name>.gyroflow beside its link
@@ -472,7 +543,7 @@ fn find_as(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> Found {
         let old = index::render_path(&ctx.root, &item.rel, profile.name);
         if crate::seen::is_file(&old) || (ctx.names.is_none() && old.is_file()) {
             let ok = index::link(&old).filter(|l| l["kind"] == "render").and_then(|l| trimmed(&l["recipe"]))
-                .is_some_and(|r| same(&r, &index::render_recipe(&ctx.root, file, &item.link, profile.name)));
+                .is_some_and(|r| same(&r, &old_recipe(ctx, item, file, profile.name)));
             if ok { found.file = Some(old); } else { found.stale = Some(old); }
         }
     }

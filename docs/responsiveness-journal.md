@@ -101,7 +101,10 @@ died on its first draw — and the headless tests never drew. So:
   (`click:<data-a>`, `dblclick:pick`, `key:Meta+a`, `input:#q`, `change:<data-a>`), with the delay before its first
   listener and the page's handlers' time.
 - Every command the page asks of the app, per action: count, total and longest time; a failing one; one ≥ 50 ms as a
-  record of its own. The page's `render*`/`load*`/`derive*`/`apply*`/`show*` functions the same.
+  record of its own. The page's scripts ask through `Journal.invoke` (app.js's `invoke`): the real window's
+  `window.__TAURI__.core` is frozen, so swapping its `invoke` (all journal.js did before 2026-11-24) worked only in the
+  tests, and every run's `load` said `"invokes": false`: no command times, no handoff to the player. Since then `load`
+  says `"invokes": true, "core": <whether the app's own object could be wrapped too>` (page version 2). The page's `render*`/`load*`/`derive*`/`apply*`/`show*` functions the same.
 - Pictures (`<img>` loads) per action: the first, the last, how many. `paint`: the frame after the action's handlers;
   `settled`: the frame after its last command answered and was handled.
 - Double-click → the Library's list as the player's playlist (`open_list`, its `.afplist.m3u8`) or one item

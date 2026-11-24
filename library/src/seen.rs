@@ -50,17 +50,37 @@ impl Seen {
 pub static SEEN: RwLock<Option<Seen>> = RwLock::new(None);
 
 /// The project whose catalog is being read now (the views wait for it rather than walk the disks)
-static STARTING: Mutex<Option<PathBuf>> = Mutex::new(None);
+/// (with the thread's id: a thread stopped as the project is watched again doesn't end the new one's)
+static STARTING: Mutex<Option<(PathBuf, u64)>> = Mutex::new(None);
 
 /// Until the project's catalog is read (or found not to be there: then the views read the disks)
 pub fn wait_ready(root: &Path, most: Duration) {
     let t = Instant::now();
-    while t.elapsed() < most && STARTING.lock().unwrap().as_deref() == Some(root) { std::thread::sleep(Duration::from_millis(50)); }
+    while t.elapsed() < most && STARTING.lock().unwrap().as_ref().is_some_and(|(r, _)| r == root) { std::thread::sleep(Duration::from_millis(50)); }
 }
 
-fn started(root: &Path, on: bool) {
+/// The catalog's thread running now (start()), and whether a view was read without its catalog since it started (none
+/// yet, another's, the one of before the project was watched again): the views are read again once it's read only
+/// then. Every view the page read after waiting for it (wait_ready) is as the catalog says, and a change counted
+/// "can't say" there had the page read everything a second time, alongside its own first read (2026-11-24 journal)
+static RUN: AtomicU64 = AtomicU64::new(0);
+/// (the thread's id it's for: a thread stopped, still finishing, doesn't take the new one's)
+static READ_WITHOUT: AtomicU64 = AtomicU64::new(0);
+
+/// A view about to be read: noted if it's not from the catalog of this run (main.rs's scan, after wait_ready)
+pub fn reading_view(root: &Path) {
+    // Under SEEN's lock: the thread puts its catalog there under the same lock, then asks (ready_counts)
+    let g = SEEN.read().unwrap_or_else(|e| e.into_inner());
+    let run = RUN.load(Ordering::Relaxed);
+    if !g.as_ref().is_some_and(|s| s.root == root && s.id == run) { READ_WITHOUT.store(run, Ordering::Relaxed); }
+}
+
+/// The catalog of thread `id` read: whether the views must be read again (one was read without it)
+fn ready_counts(id: u64) -> bool { READ_WITHOUT.compare_exchange(id, 0, Ordering::Relaxed, Ordering::Relaxed).is_ok() }
+
+fn started(root: &Path, id: u64, on: bool) {
     let mut g = STARTING.lock().unwrap();
-    if on { *g = Some(root.to_path_buf()); } else if g.as_deref() == Some(root) { *g = None; }
+    if on { *g = Some((root.to_path_buf(), id)); } else if g.as_ref().is_some_and(|(r, i)| r == root && *i == id) { *g = None; }
 }
 
 /// Tests that set SEEN, one at a time (it's the process's)
@@ -349,6 +369,10 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
     let root = root.to_path_buf();
     static IDS: AtomicU64 = AtomicU64::new(1);
     let id = IDS.fetch_add(1, Ordering::Relaxed);
+    RUN.store(id, Ordering::Relaxed);
+    // A catalog there to read: the views wait for it from now (not from when the thread gets to it: a view asked for
+    // meanwhile would read the disks)
+    if root.join(".afp").join("catalog").join("snap").is_dir() { started(&root, id, true); }
     // (another project's counts, or this one's from before it was watched again: nothing can be said of them)
     LOG.lock().unwrap().clear();
     RETRY.lock().unwrap().clear();
@@ -468,18 +492,17 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
     // Everything: the first look, a mended library, clips taken in, a batch done. Regularly only the project's own
     // files: originals move only when the library is mended after (docs §9)
     // A catalog there to read: the views wait for it (none yet: they read the disks while it's made)
-    let has = root.join(".afp").join("catalog").join("snap").is_dir();
-    if has { started(&root, true); }
+    // (STARTING set by start(), before the thread)
     let (roots, ours) = project::roots(&root);
     let (own_roots, own) = project::own_roots(&root);
     let mut worker = project::open(&root);
     // Read; nothing there yet: built (the first look at every folder, every file of ours read)
     loop {
-        if stop.load(Ordering::Relaxed) { started(&root, false); return; }
+        if stop.load(Ordering::Relaxed) { started(&root, id, false); return; }
         set(&status, "Reading the project's catalog…");
         match load(&mut worker, &Want::All) {
             Ok(info) if info.empty && info.snapshot.is_none() => {
-                started(&root, false);
+                started(&root, id, false);
                 set(&status, "Making the project's catalog (a first look at every folder)…");
                 if worker.sweep(&roots, &ours, &Sweep::default()).is_ok() { let _ = worker.compact(); break; }
             }
@@ -492,9 +515,9 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
             }
             Err(_) => {}
         }
-        started(&root, false);
+        started(&root, id, false);
         set(&status, "The project's catalog can't be read now (the share?): trying again…");
-        for _ in 0..40 { if stop.load(Ordering::Relaxed) { started(&root, false); return; } std::thread::sleep(Duration::from_millis(250)); }
+        for _ in 0..40 { if stop.load(Ordering::Relaxed) { started(&root, id, false); return; } std::thread::sleep(Duration::from_millis(250)); }
     }
     // Moved here: what it says of the project's folder is of the folder it was in (its footage, now a location): looked
     // at again first, the views waiting meanwhile (its own folders only: seconds)
@@ -507,9 +530,12 @@ fn run(id: u64, root: PathBuf, moved: bool, stop: Arc<AtomicBool>, everything: A
     if load(&mut reader, &Want::All).is_err() { reader = project::open(&root); }
     let mine = Ours { footage_in_project: ours.footage_in_project.clone(), own_only: false };
     *SEEN.write().unwrap() = Some(Seen { id, root: root.clone(), roots: roots.clone(), ours: mine, cat: reader, bump: Some((changes.clone(), last.clone())) });
-    started(&root, false);
+    started(&root, id, false);
     set(&status, "");
-    changed(&changes, &last);
+    // The views read meanwhile without it (the disks, or the catalog of before): read again. Those that waited for it
+    // are as it says: nothing to read again
+    // (a view that saw the catalog of before stored that before the thread could put its own in SEEN: under the lock)
+    if ready_counts(id) { changed(&changes, &last); }
     // A source the catalog has never looked at (just added): looked at now (until then the views ask the disk for each
     // of its files, which on a share takes minutes); the others' views read from the catalog meanwhile
     // (or one whose sources inside it changed: one taken out of the project comes in under it)
@@ -714,6 +740,57 @@ mod tests {
         root
     }
 
+    /// The project opened: the views that waited for its catalog aren't read again once it's read (the 2026-11-24
+    /// journal: every start read moments and footage twice, side by side); a view read before it (the disks, the
+    /// catalog of before) is
+    #[test]
+    fn the_views_read_again_at_the_start_only_when_read_without_its_catalog() {
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        // (a project with no catalog yet: project() above makes one, but no snapshot)
+        let root = std::env::temp_dir().join(format!("afl-seen-ready-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("Day 1")).unwrap();
+        std::fs::write(root.join("Day 1/A.MP4"), b"x").unwrap();
+        std::fs::write(root.join("Project.afproject"), r#"{"id":"seen-ready","locations":[{"name":"Here","at":"","path":"."}]}"#).unwrap();
+        let root = root.canonicalize().unwrap();
+        // (a home of its own: the catalog's cache of this computer not touched, nor another test's used)
+        std::env::set_var("AFP_HOME", root.join(".home"));
+        *SEEN.write().unwrap() = None;
+        let ready = |r: &Runner| {
+            let t = Instant::now();
+            while !(SEEN.read().unwrap().as_ref().is_some_and(|s| s.root == root && s.id == RUN.load(Ordering::Relaxed)) && status(Some(r)).is_empty())
+                && t.elapsed() < Duration::from_secs(30) { std::thread::sleep(Duration::from_millis(20)); }
+            assert!(status(Some(r)).is_empty());
+            std::thread::sleep(Duration::from_millis(300));
+        };
+        let counter = || (Arc::new(AtomicU64::new(0)), Arc::new(Mutex::new(Instant::now())));
+        // No catalog yet: made, the view read from the disks meanwhile, so read again
+        let (c, l) = counter();
+        let r = start(&root, c.clone(), l, false);
+        reading_view(&root);
+        ready(&r);
+        assert!(root.join(".afp/catalog/snap").is_dir(), "the catalog made");
+        assert!(c.load(Ordering::Relaxed) >= 1, "read without it: read again");
+        drop(r);
+        // There: the view waits for it, as main.rs's scan does, and isn't read again
+        let (c, l) = counter();
+        let r = start(&root, c.clone(), l, false);
+        wait_ready(&root, Duration::from_secs(30));
+        reading_view(&root);
+        ready(&r);
+        assert_eq!(c.load(Ordering::Relaxed), 0, "read from it: nothing to read again");
+        drop(r);
+        // Watched again (its locations changed): a view read from the catalog of before is read again
+        let (c, l) = counter();
+        let r = start(&root, c.clone(), l, false);
+        reading_view(&root);
+        ready(&r);
+        assert!(c.load(Ordering::Relaxed) >= 1, "read from the catalog of before: read again");
+        drop(r);
+        *SEEN.write().unwrap() = None;
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn tags(path: &Path) -> serde_json::Value { meta(path).flatten().map(|m| m["own"]["tags"].clone()).unwrap_or_default() }
 
     /// A clip's own file written wrong by a script, noted by the Library: its tags aren't wiped, it's listed for
@@ -810,6 +887,39 @@ mod real {
         let (a, b) = (ids(&files), ids(&seen));
         for x in a.difference(&b).take(5) { println!("only from the disks: {x:?}"); }
         for x in b.difference(&a).take(5) { println!("only from the catalog: {x:?}"); }
+        *SEEN.write().unwrap() = None;
+    }
+
+    /// The moments' view of a real project, as a Library just started reads it (a process of its own: nothing kept in
+    /// memory), its catalog read first (not timed). Reads only.
+    ///   AFL_SEEN=<project> cargo test --release -- --ignored moments_from_catalog --nocapture
+    #[test]
+    #[ignore]
+    fn moments_from_catalog() {
+        let Some(root) = std::env::var_os("AFL_SEEN").map(PathBuf::from) else { return };
+        use super::*;
+        let _one = TESTS.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cat = project::open(&root);
+        cat.load(&Want::All).unwrap();
+        *SEEN.write().unwrap() = Some(Seen::of(&root, cat));
+        for v in ["moments", "footage"] {
+            let t = Instant::now();
+            let out = crate::index::scan(&root, v, false);
+            println!("{v}: {} items in {:.0} ms", out["items"].as_array().map(Vec::len).unwrap_or(0), t.elapsed().as_secs_f64() * 1000.0);
+        }
+        // Each moment's renders as the view finds them from the catalog, and as the disk says (renders::Ctx fresh)
+        let (fresh, view) = (crate::renders::Ctx::new(&root, true), crate::renders::Ctx::new(&root, false));
+        let (mut same, mut differ) = (0, Vec::new());
+        for it in crate::index::scan(&root, "moments", false)["items"].as_array().into_iter().flatten() {
+            let Ok(item) = crate::renders::item(&root, "moment", it["id"].as_str().unwrap_or("")) else { continue };
+            for p in ["HDR", "SDR"] {
+                let profile = crate::renders::profile(p).unwrap();
+                let (a, b) = (crate::renders::find(&fresh, &item, profile), crate::renders::find(&view, &item, profile));
+                if (a.recipe.clone(), a.file.clone(), a.stale.clone()) == (b.recipe.clone(), b.file.clone(), b.stale.clone()) { same += 1 } else { differ.push((item.rel.clone(), p, a.recipe, b.recipe)); }
+            }
+        }
+        println!("renders found the same from the catalog as from the disk: {same}, not: {}", differ.len());
+        for d in differ.iter().take(3) { println!("  {d:?}"); }
         *SEEN.write().unwrap() = None;
     }
 
