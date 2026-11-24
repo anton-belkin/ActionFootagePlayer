@@ -534,8 +534,22 @@ Answered 2026-11-24:
 - The local database is seeded with the 11 profiles of lens_profiles#41 only.
 - Which cameras name their mode: the working hypothesis of §5.2.1, corrected when a "fitting" lens stabilizes badly.
 
-Still open. Until answered, the working choice is the first option of each:
-1. **Assign on a clip of an unambiguous mode.** Keep the lens (with its readout) as that mode's default in the local
-   database, so every clip of the same camera, mode, size and fps takes it by itself? Or only for the ticked clips?
-2. **Gyroflow reuse.** Link gyroflow-core with #1296 and decode frames ourselves (§5.5), rather than going through
-   Gyroflow's command line?
+- Assign keeps the lens, with its readout, as the default of that camera, mode, size and fps in the local database. An
+  estimated lens becomes a known one, and the next clips of the mode take it by themselves.
+
+Still open:
+1. **Gyroflow reuse** (§5.5). Recommendation: link gyroflow-core with #1296 and decode the frames ourselves.
+
+   | | Link gyroflow-core, decode ourselves | Gyroflow's command line |
+   |---|---|---|
+   | Same math as Gyroflow | yes: the same code, compiled in | yes |
+   | Same frames as Gyroflow | nearly: our decode loop (scaling, timestamps, 10-bit to gray) may differ by a little; checked on the sample against Gyroflow's own project | exactly |
+   | Gyroflow app needed | no; also on Windows and Linux, and no App Store sandbox trouble | yes, the right version, on every computer |
+   | Lens from the picture available | now, from our fork branch with #1296 | only after #1296 is merged **and** released, plus new CLI flags for find and estimate, reviewed upstream: Adrian's timetable |
+   | Result | written straight into `.afp-motion` / the local database | a project to convert; errors read from its log; preset quirks |
+   | Progress, cancel, low priority, a key in the player (#208) | ours to control | through a child process |
+   | Upkeep | keeping our fork branch in step until upstream merges (a rebase now and then) | following CLI changes upstream |
+
+   The risk of the first is a small difference in frames from Gyroflow's own decoding; the sample comparison shows it.
+   The risk of the second is waiting for upstream before anything works. #1296 stays offered upstream either way, for
+   Gyroflow's users.
