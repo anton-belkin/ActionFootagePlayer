@@ -129,7 +129,7 @@ Mac's cache; locally the same table took 0.4 s at any size):
   a clip without a project twice. Now every manager made in vs-gyroflow shares one (`lens_pick::manager`; gyroflow-core's
   own clones share theirs the same way), and the server loads it as it starts, while the player opens its first clip.
 
-Measured 2026-11-24 on the NAS (over Tailscale), each clip out of the Mac's cache, as a new player gets its first table
+Measured 2026-11-24 on the NAS (the shares mounted over the LAN; over Tailscale, earlier that morning, a 300 MB clip's table took 7.8 s before), each clip out of the Mac's cache, as a new player gets its first table
 (the server started, the request 0.3 s later), the new build first and then the one before on the same clips:
 
 | GoPro HERO7 clip | before | after |

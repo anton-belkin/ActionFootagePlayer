@@ -83,8 +83,8 @@ impl Prefetched {
             let tracks = metadata_tracks(&ctx);
             // A GoPro's: its GPMF track alone (its first, the one telemetry-parser's GoPro reader reads). Its other one,
             // "GoPro SOS" (fdsc), has ~80 samples a second that nothing reads, which put the samples close enough
-            // together that on a share the whole file was read through: ~25 ms a MB from the NAS, 7.8 s before the
-            // first frame of a 300 MB clip (2026-11-24)
+            // together that on a share the whole file was read through: ~25 ms a MB from the NAS over Tailscale, 7.8 s
+            // before the first frame of a 300 MB clip, ~7 ms a MB over the LAN (2026-11-24)
             let first = tracks.first().and_then(|t| t.first()).map(|s| s.start);
             let key = first.and_then(|at| {
                 let mut key = [0u8; 4];
