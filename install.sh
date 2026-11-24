@@ -210,6 +210,8 @@ put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
 put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
 put mpv/scripts/dlogm/video_color.lua "$DLOGM/video_color.lua" 644
+put mpv/scripts/dlogm/uwcolor.lua "$DLOGM/uwcolor.lua" 644
+put mpv/scripts/dlogm/uw_estimate.lua "$DLOGM/uw_estimate.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
 for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
@@ -218,6 +220,7 @@ put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
 put "$BUILD/nbcu_hlg2sdr.glsl"      "$DLOGM/shaders/nbcu_hlg2sdr.glsl" 644
 put "$BUILD/nbcu_pq2sdr.glsl"       "$DLOGM/shaders/nbcu_pq2sdr.glsl" 644
 put shaders/denoise.glsl            "$DLOGM/shaders/denoise.glsl" 644
+put shaders/underwater_hlg.glsl     "$DLOGM/shaders/underwater_hlg.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
 put luts/gplog_hlg.cube             "$DLOGM/luts/gplog_hlg.cube" 644

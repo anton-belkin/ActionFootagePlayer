@@ -201,9 +201,9 @@ view360="$plugins/view360"
 anylayout="$plugins/any-layout"
 livephoto="$plugins/live-photo"
 mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$agent" "$workspace" "$view360" "$anylayout" "$livephoto"
-cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
+cp mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua mpv/scripts/dlogm/uwcolor.lua mpv/scripts/dlogm/uw_estimate.lua "$dlogm/"
 "$py" -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "$dlogm/shaders/dlogm_hlg.glsl" >/dev/null
-cp shaders/denoise.glsl "$dlogm/shaders/"
+cp shaders/denoise.glsl shaders/underwater_hlg.glsl "$dlogm/shaders/"
 cp luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The other log curves' HDR shaders, from their makers' published formulas, and their LUTs for gyroflow-export (as
 # tools/make_app.sh)

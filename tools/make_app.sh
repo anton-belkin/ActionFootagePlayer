@@ -81,9 +81,10 @@ view360="$res/plugins/view360"
 anylayout="$res/plugins/any-layout"
 livephoto="$res/plugins/live-photo"
 mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace" "$view360" "$anylayout" "$livephoto"
-install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
+install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua \
+    mpv/scripts/dlogm/uwcolor.lua mpv/scripts/dlogm/uw_estimate.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
-install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
+install -m 644 shaders/denoise.glsl shaders/underwater_hlg.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
 mkdir -p "$dlogm/dv"

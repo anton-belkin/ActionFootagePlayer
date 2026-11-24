@@ -58,7 +58,7 @@ local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
 local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
-local CURVE_NAMES = {}
+local CURVE_NAMES = { uw = "SDR, underwater colour" }
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 -- The aspects a frame can have (the Clip tab's output, Save frame's photo), in two rows
 local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
@@ -139,6 +139,13 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 10 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:box(cx + 5 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx, cy, 1.8 * s), color)
+    elseif name == "water" then
+        -- A drop, over a wave
+        u:shape("m " .. at(0, -9) .. " b " .. at(3, -5) .. " " .. at(5.5, -2) .. " " .. at(5.5, 0.5) .. " b " .. at(5.5, 3.8) .. " "
+                .. at(3, 5.5) .. " " .. at(0, 5.5) .. " b " .. at(-3, 5.5) .. " " .. at(-5.5, 3.8) .. " " .. at(-5.5, 0.5)
+                .. " b " .. at(-5.5, -2) .. " " .. at(-3, -5) .. " " .. at(0, -9), color, stroke)
+        u:shape("m " .. at(-9, 8.2) .. " b " .. at(-6, 6.4) .. " " .. at(-3, 6.4) .. " " .. at(0, 8.2) .. " b " .. at(3, 10) .. " "
+                .. at(6, 10) .. " " .. at(9, 8.2), color, { fill = false, border = 1.3 * s })
     elseif name == "telemetry" then
         -- A gauge: an arc, and its needle
         local R, r = 8, 6.4
@@ -216,7 +223,8 @@ end
 -- Source, Transform, Output: how it's read (the source's input), how it's shown (its transform), where (this screen,
 -- a file) (docs/moments-and-workspaces.md, "Source and transform")
 local TABS = {
-    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" }, { "crop", "Save frame" },
+    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" },
+    { "water", "Underwater colour" }, { "crop", "Save frame" },
     { "quality", "Performance & Quality" }, { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" }, { "view360", "360° view" },
 }
 local TAB_TITLES = { support = "Support" }
@@ -1041,17 +1049,12 @@ end
 -- The filter makes the frame (stabilized, or the lens alone): else mpv's own crop and turn do
 local function filtering_note(g) return (g.filter or "") ~= "" end
 
-local function transform_part(u, x, w, y)
+-- Where the transform is defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
+-- a moment's or clip preview's own settings: the Transform's, and the underwater colour's (part of the same bundle)
+local function view_card(u, x, w, y, ws)
     local s = u.s
-    local g, ws = state("gyroflow"), state("workspace")
-    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
-    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
-    local edit = keys["script-binding gyroflow/edit"]
-    local project = g.kind == "project"
-    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     local status = ws and ws.view_status
     local target = ws and ws.view_target
-
     -- Where it's defined
     local at = y
     local ix, iw = x + 10 * s, w - 20 * s
@@ -1076,6 +1079,22 @@ local function transform_part(u, x, w, y)
     y = u:switch(ix, iw, y, "view-auto", "Auto save", ws and ws.auto_save == true, "script-message-to workspace view-auto", nil, not target)
     u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
     y = y + 14 * s
+    return y
+end
+
+local function transform_part(u, x, w, y)
+    local s = u.s
+    local g, ws = state("gyroflow"), state("workspace")
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
+    local edit = keys["script-binding gyroflow/edit"]
+    local project = g.kind == "project"
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
+    local status = ws and ws.view_status
+    local target = ws and ws.view_target
+
+    y = view_card(u, x, w, y, ws)
+    local ix, iw = x + 10 * s, w - 20 * s
 
     -- Stabilization: with motion data (a project, or the clip's own). Over a project too it's saved with the clip: on (the
     -- project as it is), wider (its zoom left out), off (the project kept, not used)
@@ -1256,6 +1275,63 @@ local function telemetry_part(u, x, w, y)
         local on = t.shown and t.shown[f[1]]
         y = u:switch(x, w, y, "field:" .. f[1], f[2], on, "script-message-to dji_telemetry field " .. f[1])
     end
+    return y
+end
+
+-- Underwater colour (the dlogm plugin's uwcolor.lua): its switches, its strength, and what it measured in the frame
+local function signed(v, n) return v and ((v < 0 and "−" or "+") .. string.format("%." .. (n or 2) .. "f", math.abs(v))) or "–" end
+local function water_part(u, x, w, y)
+    local s = u.s
+    local c, ws = state("uwcolor"), state("workspace")
+    if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing plays") end
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
+    y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. Part of the clip's transform",
+                  { color = C.label })
+    y = view_card(u, x, w, y + 6 * s, ws)
+    local on = c.uw == true
+    y = u:switch(x, w, y, "uw-on", "Correct underwater colour", on, "script-message-to dlogm uw-set uw toggle", keys["script-binding dlogm/uw-toggle"],
+                 nil, saved and saved.uw)
+    if on and not c.active and not c.ok then
+        y = u:caption(x, w, y, "Not this clip: it's log or HDR, or has a curve set by hand")
+    end
+    y = u:switch(x, w, y, "uw-hl", "Brighter highlights", c.uw_highlights == true, "script-message-to dlogm uw-set uw_highlights toggle", nil,
+                 not on, saved and saved.uw_highlights)
+    y = u:caption(x, w, y, "Sunlit water and sand get more of HDR's room. Careful at night: a torch's spot gets brighter still")
+    local strength = c.uw_strength or 1
+    u:text(x, y + 10 * s, "Strength", { size = 12, color = C.label, alpha = on and "00" or "80" })
+    if saved and saved.uw_strength ~= nil and saved.uw_strength ~= strength then
+        u:shape(ui.circle_path(x + ui.text_width("Strength", 12, s) + 8 * s, y + 10 * s, 2.6 * s), C.saved)
+    end
+    u:text(x + w, y + 10 * s, string.format("%d %%", math.floor(strength * 100 + 0.5)), { size = 12, color = C.label, align = 6 })
+    y = u:slider(x, w, y + 18 * s, "uw-strength", strength, function(p)
+        mp.commandv("script-message-to", "dlogm", "uw-set", "uw_strength", string.format("%.2f", p))
+    end, "Camera's colour", "Corrected", not on)
+    local t = c.stats
+    if not (c.active and type(t) == "table" and t.under_water) then return y end
+    y = u:heading(x, w, y + 10 * s, "This frame")
+    local function line(label, value)
+        u:text(x, y + 9 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 9 * s, value, { size = 12, align = 6 })
+        y = y + 20 * s
+    end
+    line("Under water", t.under_water >= 0.995 and "yes" or t.under_water <= 0.005 and "no: left as recorded"
+         or string.format("partly, %d %%", math.floor(t.under_water * 100 + 0.5)))
+    line("Smooth water", string.format("%d %% of the frame", math.floor((t.water or 0) * 100 + 0.5)))
+    if t.water_hue then
+        line("Water hue", string.format("%d° → %d°", t.water_hue, t.water_hue_after or t.water_hue))
+        line("Water purple (Oklab a)", signed(t.water_a, 3) .. " → " .. signed(t.water_a_after, 3))
+    end
+    line("Green leaking into red", string.format("%d %% taken out", math.floor((t.leak or 0) * 100 + 0.5)))
+    line("Red (log R/G)", signed(t.red))
+    line("Blue (log B/G)", signed(t.blue) .. ((t.blue_water or 0) > 0 and (" " .. signed(t.blue_water) .. " for green water") or ""))
+    line("Lightness", signed(t.lift) .. " stops")
+    y = u:caption(x, w, y + 2 * s, string.format("Hue under 228° reads green, Oklab a above −0.052 purple. Lightness to Action 6's "
+                  .. "median under water; this frame's is %.2f of SDR white. What plays eases to this over a second "
+                  .. "(now red %s, blue %s, leak %d %%, %s stops). Measured in %d ms", t.median or 0,
+                  signed(t.applied and t.applied.red), signed(t.applied and t.applied.blue),
+                  math.floor(((t.applied and t.applied.leak) or 0) * 100 + 0.5), signed(t.applied and t.applied.lift), t.ms or 0))
     return y
 end
 
@@ -1679,7 +1755,7 @@ local function playlist_part(u, x, w, y)
 end
 
 local PARTS = { project = project_part, playlist = playlist_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
-                dv = dv_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
+                dv = dv_part, water = water_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
                 view360 = view360_part }
 -- Each part's "these as the defaults" (Transform has its own, Use as default)
 local REMEMBER = { output = "script-message-to dlogm remember", quality = "script-message-to gyroflow remember-quality",
@@ -2171,7 +2247,7 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/uwcolor", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
                         "user-data/view360",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",

@@ -86,6 +86,7 @@ jobs:
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/notify_test.lua
+          luajit tests/uwcolor_test.lua
           luajit tests/gyroflow_lens_test.lua
           luajit tests/camera_subs_test.lua
           luajit tests/agent_test.lua
