@@ -97,6 +97,9 @@ pub struct PlayerClip {
     /// opens with the seconds it starts playing at, or a moment's part (motion_range): from a NAS its whole motion
     /// data took 20 s for a 1.5 GB clip, the stretch ~1-2 s
     pub covers: Option<(f64, f64)>,
+    /// The table before this one for the clip as it plays (a stretch that this one extends): the frames both have and
+    /// it had settled are copied from it, so the picture doesn't change where it plays as the new table comes in
+    prev: std::sync::Mutex<Option<std::sync::Arc<PlayerClip>>>,
 }
 
 /// The motion data read for the first table, before where it starts playing (the smoothing's start: motion.rs's
@@ -107,17 +110,24 @@ pub struct PlayerClip {
 pub const BEFORE_S: f64 = 4.0;
 pub const HEAD_S: f64 = 20.0;
 pub const AFTER_S: f64 = 6.0;
+/// How far before the end of a stretch's motion data the smoothing is as it will be with more of it (smoothing.rs's
+/// Predictive: 4 s held p99 under 1 px against the whole clip's), with room: the frames before it are settled
+pub const SETTLE_S: f64 = 5.0;
 
-/// The stretch of a clip without a project whose motion data the player's JSON asks for first: a moment's part
-/// (`time_offset` to `moment_end`), or the seconds from `start` (a clip that streams: the rest read after, "full");
-/// None: all of it (`full`, or neither). And whether that's all it will want (a moment's)
+/// The stretch of a clip without a project whose motion data the player's JSON asks for: a moment's part
+/// (`time_offset` to `moment_end`), or the seconds from `start` to `until` (HEAD_S without it): a clip that streams,
+/// its table extended ahead of where it plays (main.lua); None: all of it (`full`, or neither). And whether that's all
+/// it will want (a moment's)
 pub fn motion_range(j: &serde_json::Value) -> (Option<(f64, f64)>, bool) {
     let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
     if j.get("full").and_then(|v| v.as_bool()).unwrap_or(false) { return (None, true); }
     if let (Some(a), Some(b)) = (f("time_offset"), f("moment_end")) {
         if b > a { return (Some(((a - BEFORE_S).max(0.0), b + AFTER_S)), true); }
     }
-    if let Some(start) = f("start") { return (Some(((start - BEFORE_S).max(0.0), start.max(0.0) + HEAD_S)), false); }
+    if let Some(start) = f("start") {
+        let end = f("until").filter(|u| *u > start).unwrap_or(start.max(0.0) + HEAD_S);
+        return (Some(((start - BEFORE_S).max(0.0), end)), false);
+    }
     (None, true)
 }
 
@@ -128,6 +138,13 @@ pub const PLAYER_GEOMETRY_KEYS: &[&str] = &["project", "preset", "fov", "level",
 
 impl PlayerClip {
     pub fn load(j: &serde_json::Value) -> Result<PlayerClip, String> {
+        let range = if j.get("project").and_then(|v| v.as_str()).is_some_and(crate::is_project_file) { None } else { motion_range(j).0 };
+        Self::load_range(j, range, None)
+    }
+
+    /// The same with the stretch given (s into the clip; None: all of it), whatever the JSON asks for, and the table
+    /// it extends (`prev`, the same clip and settings: see `prev`)
+    pub fn load_range(j: &serde_json::Value, range: Option<(f64, f64)>, prev: Option<std::sync::Arc<PlayerClip>>) -> Result<PlayerClip, String> {
         use crate::{ Fov, Frame, LensMode, Level };
         let s = |k: &str| j.get(k).and_then(|v| v.as_str()).filter(|v| !v.is_empty());
         let f = |k: &str| j.get(k).and_then(|v| v.as_f64());
@@ -141,16 +158,28 @@ impl PlayerClip {
         let frame = Frame::new(j.get("rotation").and_then(|v| v.as_i64()).unwrap_or(0), s("aspect"), j.get("projection").and_then(|v| v.as_i64()))?;
         let lens = match s("lens") { None => LensMode::Stabilized, Some(v) => LensMode::parse(v).ok_or(format!("lens {v}"))? };
         let input = (f("input_width").unwrap_or(0.0) as usize, f("input_height").unwrap_or(0.0) as usize);
-        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch it starts with
-        // (motion_range); a project has its own
-        let range = if crate::is_project_file(project) { None } else { motion_range(j).0 };
+        // A clip's own motion data before it plays (lookahead 0): all of it, or the stretch (motion_range); a project
+        // has its own
+        let range = if crate::is_project_file(project) { None } else { range };
         let p = crate::prepare(project, s("preset"), fov, f("horizon_lock").map(|v| v.clamp(0.0, 100.0)), underwater, level, 0.0, input, None, trim, alone, frame, lens, range)?;
         let sp = p.stab.params.read();
         let video = if crate::is_project_file(project) { gyroflow_core::filesystem::url_to_path(&p.stab.input_file.read().url) } else { project.to_string() };
         // All of the clip after all: a stretch past both its ends
         let duration = sp.frame_count as f64 / sp.fps.max(1.0);
         let covers = range.filter(|(a, b)| *a > 0.0 || *b < duration);
-        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers })
+        // Only one table back: the one before it has been on screen already, its own before it not
+        if let Some(p) = &prev { p.prev.lock().unwrap().take(); }
+        Ok(PlayerClip { video, views: p.views.clone(), tables: Default::default(), wet: Default::default(), size: sp.size, output_size: sp.output_size, fps: sp.fps, frame_count: sp.frame_count, frame_offset_us: p.frame_offset_us, covers,
+                        prev: std::sync::Mutex::new(prev) })
+    }
+
+    /// The clip's length, s
+    pub fn duration(&self) -> f64 { self.frame_count as f64 / self.fps.max(1.0) }
+
+    /// Up to where (s into the clip) the frames are as they'll stay with more of the motion data read: the stretch's
+    /// end less SETTLE_S, or the clip's end
+    pub fn settled(&self) -> f64 {
+        match self.covers { Some((_, b)) if b < self.duration() => (b - SETTLE_S).max(0.0), _ => self.duration() }
     }
 
     /// The index of the view the JSON asks for (wide, level) in `views`
@@ -176,17 +205,35 @@ impl PlayerClip {
         if let Some(t) = self.tables.lock().unwrap().iter().find(|(k, _)| *k == key).map(|(_, t)| t.clone()) { return Ok(t); }
         // A stretch's motion data: its frames' blocks alone (~0.06 ms a frame, the whole of a 7-minute clip 1.5 s), the
         // frames before and after it as its first and last (as gyroflow-core holds the nearest correction it has)
-        let t = std::sync::Arc::new(match self.covers {
-            Some((a, b)) => {
-                let last = clip.frame_count.max(1) - 1;
-                let first = ((a * clip.fps).floor().max(0.0) as usize).min(last);
-                let range = (first, ((b * clip.fps).ceil().max(0.0) as usize).clamp(first, last));
-                let mut t = Table::build(clip, &Options { range: Some(range), ..*opts })?;
-                t.hold_outside(range, clip.frame_count.max(1));
-                t
+        // The frames it has motion data for (a stretch's; the frames before and after it hold its first and last, as
+        // gyroflow-core holds the nearest correction it has: a stretch's frames' blocks alone, ~0.06 ms a frame, the
+        // whole of a 7-minute clip 1.5 s)
+        let frames = clip.frame_count.max(1);
+        let known = self.covers.map(|c| self.frames_of(c)).unwrap_or((0, frames - 1));
+        // The frames the table before this one had too and had settled: its own, copied (the picture doesn't change as
+        // the new one comes in; past them this one's are within a pixel of what it had, SETTLE_S), the rest built
+        let prev = self.prev.lock().unwrap().clone();
+        let splice = match prev.filter(|p| p.frame_count == self.frame_count && p.views.params.len() == self.views.params.len()) {
+            Some(prev) => {
+                let (a, _) = prev.covers.unwrap_or((0.0, prev.duration()));
+                let (c, d) = self.covers.unwrap_or((0.0, self.duration()));
+                let (from, to) = (a.max(c), prev.settled().min(d));
+                if to > from {
+                    let (first, last) = self.frames_of((from, to));
+                    let last = last.saturating_sub(1).max(first);
+                    Some((prev.table(view, &prev.clip_at(view), opts)?, (first, last)))
+                } else { None }
             }
-            None => Table::build(clip, opts)?,
-        });
+            None => None,
+        };
+        let build = match &splice {
+            Some((_, (first, last))) if *first <= known.0 && *last < known.1 => (*last + 1, known.1),
+            _ => known,
+        };
+        let mut t = Table::build(clip, &Options { range: (build != (0, frames - 1)).then_some(build), ..*opts })?;
+        if let Some((before, range)) = &splice { t.copy_frames(before, *range); }
+        if known != (0, frames - 1) { t.hold_outside(known, frames); }
+        let t = std::sync::Arc::new(t);
         let mut tables = self.tables.lock().unwrap();
         tables.push((key, t.clone()));
         if tables.len() > 4 { tables.remove(0); }
@@ -208,9 +255,18 @@ impl PlayerClip {
         }
     }
 
+    /// Frames from `a` to `b` s into the clip, both ends in
+    fn frames_of(&self, (a, b): (f64, f64)) -> (usize, usize) {
+        let last = self.frame_count.max(1) - 1;
+        let first = ((a * self.fps).floor().max(0.0) as usize).min(last);
+        (first, ((b * self.fps).ceil().max(0.0) as usize).clamp(first, last))
+    }
+
     /// The clip in the view the JSON asks for (wide, level)
-    pub fn clip(&self, j: &serde_json::Value) -> Clip {
-        let index = self.view(j);
+    pub fn clip(&self, j: &serde_json::Value) -> Clip { self.clip_at(self.view(j)) }
+
+    /// The clip in view `index` (of `views`)
+    pub fn clip_at(&self, index: usize) -> Clip {
         Clip { params: self.views.params[index].clone(), size: self.size, output_size: self.output_size, fps: self.fps, frame_count: self.frame_count, frame_offset_us: self.frame_offset_us }
     }
 }
@@ -260,8 +316,26 @@ pub enum Mode {
     Planes,
 }
 
-/// The sphere trail's equirect width (its height half of it): 0.18° a texel
-const SPHERE_W: usize = 2048;
+/// The sphere trail's equirect width (its height half of it): 0.7° a texel, coarse on purpose (read back smooth, a
+/// trace's border is soft; tools/edgefill/synth)
+const SPHERE_W: usize = 512;
+
+/// The frame's edge in this many sectors for the sphere (warp.glsl's "pass sphere"): about a tenth of a 16:9 frame's
+/// width each
+const SPHERE_SECTORS: usize = 32;
+
+/// The sums per sector (warp.glsl's SPHERE_SUMS)
+const SPHERE_SUMS: usize = 16;
+
+/// The angles around the frame's axis the output's border's continuation is kept for (warp.glsl's SPHERE_WEDGES)
+const SPHERE_WEDGES: usize = 64;
+
+/// The sphere's buffer (warp.glsl's "pass sphere"), its variables as (GLSL type, name, count; 0: not an array)
+fn sphere_buffer_vars() -> Vec<(&'static str, &'static str, usize)> {
+    vec![("uint", "ge_sum", SPHERE_SECTORS * SPHERE_SUMS), ("uint", "ge_wsum", SPHERE_WEDGES * 4), ("float", "ge_d", SPHERE_SECTORS), ("float", "ge_dc", SPHERE_SECTORS),
+         ("float", "ge_s", SPHERE_SECTORS), ("float", "ge_sc", SPHERE_SECTORS), ("float", "ge_w", SPHERE_WEDGES * 3), ("float", "ge_pts", 0), ("float", "ge_dt", 0),
+         ("float", "ge_epoch", 0), ("uint", "ge_magic", 0)]
+}
 
 /// The largest output the grid texture is made for
 const GRID_MAX: (usize, usize) = (8192, 4608);
@@ -383,6 +457,25 @@ impl Table {
         }
         // Frame 0's block says how many frames there are
         self.data[9 * 4 + 3] = frames as f32;
+    }
+
+    /// Frames `range.0` to `range.1` (both in) as `other` has them: a table of the same clip and layout
+    pub fn copy_frames(&mut self, other: &Table, range: (usize, usize)) {
+        if other.width != self.width || other.block != self.block || other.cols != self.cols || other.data.len() != self.data.len() { return; }
+        let at = |frame: usize| ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        let len = self.block * 4;
+        for frame in range.0..=range.1 {
+            let i = at(frame);
+            if i + len > self.data.len() { break; }
+            self.data[i..i + len].copy_from_slice(&other.data[i..i + len]);
+        }
+        // Frame 0's block says how many frames there are (copied too: the same clip)
+    }
+
+    /// Frame `frame`'s block of texels
+    pub fn frame_block(&self, frame: usize) -> &[f32] {
+        let i = ((frame / self.cols) * self.width + (frame % self.cols) * self.block) * 4;
+        &self.data[i..i + self.block * 4]
     }
 
     pub fn hex(&self) -> String {
@@ -519,8 +612,30 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
         out.push(pass(vec![format!("//!BIND GF{tag}H"), format!("//!SAVE {done}")], sizes[0], "blur", &format!("{}\n#define FILL_DIR ivec2(0, 1)", io(&format!("GF{tag}H"), "IN")), "fill_blur"));
         (out.join("\n"), format!("//!BIND {done}"), format!("#define FILL_RAW {done}_raw\n#define FILL_MUL {done}_mul"))
     };
+    // The sphere's passes at MAIN before the warp samples the frame (warp.glsl's "pass sphere"): each sector's colors
+    // along the frame's edge against the sphere's memory of the same directions, the sectors' strengths, then the sphere
+    // written (what the frame covers, and the edge continued where the sectors differ), then what the output doesn't
+    // show of the changed sectors' wedges, so the warp reads it back in the same frame
+    let sphere_passes = |bind: &str, fdefs: &str| -> String {
+        if !sphere { return String::new(); }
+        let head = |more: &[&str]| d(&[&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!BIND GYROFLOW_SPHERE",
+            "//!BIND GYROFLOW_SPHERE_SLOW", "//!BIND GYROFLOW_EDGES", bind, "//!BIND GYROFLOW_GRID_DONE"][..], more].concat());
+        let extra = |which: &str| format!("{fdefs}\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}");
+        let h = SPHERE_W / 2;
+        let vars: String = sphere_buffer_vars().iter().map(|(t, n, c)| if *c > 0 { format!("//!VAR {t} {n}[{c}]\n") } else { format!("//!VAR {t} {n}\n") }).collect();
+        format!("//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba32f\n//!STORAGE\n\n//!TEXTURE GYROFLOW_SPHERE_SLOW\n//!SIZE {SPHERE_W} {h}\n//!FORMAT rgba16f\n//!STORAGE\n\n//!BUFFER GYROFLOW_EDGES\n{vars}//!STORAGE\n\n{}\n{}\n{}\n{}\n",
+            hook_pass(clip, &head(&["//!SAVE GYROFLOW_SPHERE_EDGES", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
+                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere edges"]), &defs, &extra("SPHERE_EDGES"), pass_body("sphere")),
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_EDGES", "//!SAVE GYROFLOW_SPHERE_SECTORS", &format!("//!WIDTH {SPHERE_WEDGES}"), "//!HEIGHT 1", "//!WHEN gyroflow_gpu_on",
+                &format!("//!COMPUTE {SPHERE_WEDGES} 1"), "//!DESC gyroflow sphere sectors"]), &defs, &extra("SPHERE_SECTORS_PASS"), pass_body("sphere")),
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_SECTORS", "//!SAVE GYROFLOW_SPHERE_WRITTEN", "//!WIDTH OUTPUT.w gyroflow_render_scale * 4 /", "//!HEIGHT OUTPUT.h gyroflow_render_scale * 4 /",
+                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, &extra("SPHERE_WRITE"), pass_body("sphere")),
+            hook_pass(clip, &head(&["//!BIND GYROFLOW_SPHERE_WRITTEN", "//!SAVE GYROFLOW_SPHERE_DONE", &format!("//!WIDTH {SPHERE_W}"), &format!("//!HEIGHT {h}"),
+                "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere beyond"]), &defs, &extra("SPHERE_BEYOND"), pass_body("sphere")))
+    };
     let sample = |hook: &str, desc: &str, extra: &str, tag: &str| {
         let (passes, bind, fdefs) = fill(hook, tag, extra, true);
+        let passes = if hook == "MAIN" { format!("{passes}\n{}", sphere_passes(&bind, &fdefs)) } else { passes };
         format!("{passes}\n{}", hook_pass(clip, &d(&[&format!("//!HOOK {hook}"), "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, sphere_bind, &bind,
             "//!BIND GYROFLOW_GRID_DONE", "//!WIDTH OUTPUT.w gyroflow_render_scale *", "//!HEIGHT OUTPUT.h gyroflow_render_scale *", "//!WHEN gyroflow_gpu_on", &format!("//!DESC {desc}")]), &defs, &format!("{extra}\n{fdefs}"), pass_body("sample")))
     };
@@ -539,13 +654,7 @@ pub fn passes(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 
             format!("{passes}\n{}", hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", &bind, "//!WIDTH OUTPUT.w gyroflow_render_scale *", "//!HEIGHT OUTPUT.h gyroflow_render_scale *",
                 "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow warp"]), &defs, &fdefs, pass_body("exact")))
         }
-        Mode::Grid => format!("{}\n{}{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "", "M"), if sphere {
-            // What the frame covers, written to the sphere by direction after the warp (before the looks, in the same
-            // colors the fill reads back)
-            format!("\n//!TEXTURE GYROFLOW_SPHERE\n//!SIZE {SPHERE_W} {}\n//!FORMAT rgba32f\n//!STORAGE\n\n{}", SPHERE_W / 2,
-                hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_GRID", rb_bind, "//!BIND GYROFLOW_SPHERE", "//!SAVE GYROFLOW_SPHERE_DONE",
-                    "//!WIDTH HOOKED.w 2 /", "//!HEIGHT HOOKED.h 2 /", "//!WHEN gyroflow_gpu_on", "//!COMPUTE 8 8", "//!DESC gyroflow sphere"]), &defs, "#define SPHERE_PASS", pass_body("sphere")))
-        } else { String::new() }),
+        Mode::Grid => format!("{}\n{}", grid("MAIN"), sample("MAIN", "gyroflow warp", "", "M")),
         Mode::Planes => format!("{}\n{}\n{}", grid("LUMA"),
             sample("LUMA", "gyroflow warp luma", "#undef BACKGROUND\n#define BACKGROUND vec4(0.0625)\n#define PLANE_LUMA", "L"),
             sample("CHROMA", "gyroflow warp chroma", &format!("#undef BACKGROUND\n#define BACKGROUND vec4(0.5)\n#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0){}",
@@ -848,6 +957,31 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 #[cfg(test)]
 mod tests {
     #[test]
+    fn frames_copied_from_the_table_before() {
+        // Two tables of the same layout: frames 1-3 of the new one become the old one's, the others stay
+        let (cols, block) = (2usize, 10usize);
+        let width = cols * block;
+        let table = |v: f32| super::Table { width, height: 4, data: vec![v; width * 4 * 4], block, cols, per_frame: 0 };
+        let (old, mut new) = (table(1.0), table(2.0));
+        new.copy_frames(&old, (1, 3));
+        for f in 0..7 { assert!(new.frame_block(f).iter().all(|v| *v == if (1..=3).contains(&f) { 1.0 } else { 2.0 }), "frame {f}"); }
+        // Another layout: nothing copied
+        let mut other = super::Table { width: 30, height: 4, data: vec![3.0; 30 * 4 * 4], block: 15, cols: 2, per_frame: 5 };
+        other.copy_frames(&old, (0, 6));
+        assert!(other.data.iter().all(|v| *v == 3.0));
+    }
+
+    #[test]
+    fn a_stretch_asked_until() {
+        let j = |v: serde_json::Value| super::motion_range(&v);
+        assert_eq!(j(serde_json::json!({ "start": 10.0 })), (Some((6.0, 30.0)), false));
+        assert_eq!(j(serde_json::json!({ "start": 10.0, "until": 55.0 })), (Some((6.0, 55.0)), false));
+        // An end before the start: as without it
+        assert_eq!(j(serde_json::json!({ "start": 10.0, "until": 5.0 })), (Some((6.0, 30.0)), false));
+        assert_eq!(j(serde_json::json!({ "start": 1.0, "full": true })), (None, true));
+    }
+
+    #[test]
     fn frames_outside_a_stretch_hold_its_ends() {
         // 7 frames, 2 a row, blocks of 10 texels (PARAM_TEXELS + 0 knots past the first): frames 2-4 built
         let (cols, block) = (2usize, 10usize);
@@ -886,10 +1020,19 @@ mod tests {
 
     /// Pass `name` as a shader for naga: "grid" a compute shader, the others fragment shaders
     fn glsl(clip: &Clip, opts: &Options, table: &Table, name: &str, uv_out: bool) -> String {
-        let compute = name == "grid" || name == "sphere";
+        let compute = name == "grid" || name.starts_with("sphere_");
         let mut defs = defines(clip, opts, table);
         if name == "grid" { defs += "\n#define GRID_PASS"; }
-        if name == "sphere" { defs += "\n#define SPHERE_PASS"; }
+        // The sphere's four passes, one body (as sphere_passes puts them), with its buffer. naga's GLSL front end has no
+        // atomicAdd nor memoryBarrierBuffer, and takes barrier() for a subgroup barrier wgpu won't validate here (the
+        // denoise's passes aren't checked here for them): a plain add and nothing stand in, the rest is checked. libplacebo
+        // compiles them as they are (tools/edgefill renders them)
+        let which = match name { "sphere_edges" => "SPHERE_EDGES", "sphere_sectors" => "SPHERE_SECTORS_PASS", "sphere_write" => "SPHERE_WRITE", "sphere_beyond" => "SPHERE_BEYOND", _ => "" };
+        if !which.is_empty() {
+            let vars: String = sphere_buffer_vars().iter().map(|(t, n, c)| if *c > 0 { format!(" {t} {n}[{c}];") } else { format!(" {t} {n};") }).collect();
+            defs += &format!("\n#define SPHERE_PASS\n#define SPHERE_SECTORS {SPHERE_SECTORS}\n#define {which}\n#define atomicAdd(a, b) (a += (b))\n#define memoryBarrierBuffer()\n#define barrier()\nlayout(set = 0, binding = 10, std430) buffer GyroflowEdges {{{vars} }};\nlayout(set = 0, binding = 11, rgba16f) uniform image2D sphere_slow_img;\n#define GYROFLOW_SPHERE_SLOW sphere_slow_img");
+        }
+        let name = if which.is_empty() { name } else { "sphere" };
         // The smooth fill's textures (its passes' own, and the grid they leave), as one more texture
         if name.starts_with("fill") { defs += "\n#define FILL_PASS\n#define FILL_W 240\n#define FILL_H 135\n#define FILL_DIR ivec2(1, 0)"; }
         if uv_out && std::env::var("AFP_GPU_STRICT").is_ok() { defs += "\n#define GRID_STRICT"; }
@@ -1145,6 +1288,15 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         let clip = Clip::load(project, Some(10.0)).unwrap();
         eprintln!("{project}: lens {}{}", clip.params.distortion_model.id(), clip.params.digital_lens.as_ref().map(|d| format!(" + {}", d.id())).unwrap_or_default());
         assert_eq!(unsupported(&clip), None);
+        // The player's shader with the sphere: its four passes ahead of the warp's, in order, the buffer declared once
+        let po = Options::player(2, false, Some(0.02), true, false, 0.0);
+        let text = passes(&clip, &po, &Table::build(&clip, &Options { range: Some((0, 0)), ..po }).unwrap(), None);
+        let at = |d: &str| text.find(&format!("//!DESC {d}\n")).unwrap_or_else(|| panic!("no pass {d}"));
+        assert!(at("gyroflow sphere edges") < at("gyroflow sphere sectors") && at("gyroflow sphere sectors") < at("gyroflow sphere")
+            && at("gyroflow sphere") < at("gyroflow sphere beyond") && at("gyroflow sphere beyond") < at("gyroflow warp"), "the sphere's passes out of order");
+        assert!(at("gyroflow fill blur") < at("gyroflow sphere edges"), "the sphere continues the fill: after its passes");
+        assert_eq!((text.matches("//!BUFFER GYROFLOW_EDGES").count(), text.matches("//!TEXTURE GYROFLOW_SPHERE\n").count(),
+            text.matches("//!TEXTURE GYROFLOW_SPHERE_SLOW\n").count()), (1, 1, 1));
         let out = (1920usize, 1080usize);
         let n = clip.frame_count;
         let mut frames: Vec<usize> = [0usize, 600, 1049, 1181, n / 2, n - 1].into_iter().filter(|f| *f < n).collect();
@@ -1215,7 +1367,9 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                 for (mode, name, chromatic, fill, plane) in [(Mode::Exact, "exact", false, None, ""), (Mode::Grid, "sample", false, None, ""), (Mode::Grid, "grid", false, None, ""),
                     (Mode::Exact, "exact", true, Some(0.02), ""), (Mode::Grid, "sample", true, Some(0.02), ""), (Mode::Grid, "grid", true, Some(0.02), ""),
                     (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_LUMA\n"),
-                    (Mode::Grid, "sample", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere", true, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
+                    (Mode::Grid, "sample", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_edges", true, Some(0.019), "SPHERE"),
+                    (Mode::Grid, "sphere_sectors", true, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_write", true, Some(0.019), "SPHERE"),
+                    (Mode::Grid, "sphere_write", false, Some(0.019), "SPHERE"), (Mode::Grid, "sphere_beyond", true, Some(0.019), "SPHERE"), (Mode::Planes, "sample", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
                     (Mode::Grid, "fill_lo", true, Some(0.02), ""), (Mode::Planes, "fill_lo", false, Some(0.02), "#define PLANE_CHROMA\n#define PLANE_OFFSET vec2(0.25, 0.0)\n"),
                     (Mode::Exact, "fill_lo", false, Some(0.02), ""), (Mode::Grid, "fill_pull", false, Some(0.02), ""), (Mode::Grid, "fill_push", false, Some(0.02), ""),
                     (Mode::Grid, "fill_blur", false, Some(0.02), "")] {
@@ -1223,7 +1377,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                     let plane = if plane == "SPHERE" { "" } else { plane };
                     let src = glsl(&clip, &opts, &table, name, false).replacen("#version 450\n", &format!("#version 450\n{plane}"), 1);
                     let scope = g.device.push_error_scope(wgpu::ErrorFilter::Validation);
-                    module(&g, &src, if name == "grid" || name == "sphere" { wgpu::naga::ShaderStage::Compute } else { wgpu::naga::ShaderStage::Fragment });
+                    module(&g, &src, if name == "grid" || name.starts_with("sphere_") { wgpu::naga::ShaderStage::Compute } else { wgpu::naga::ShaderStage::Fragment });
                     let err = pollster::block_on(scope.pop());
                     assert!(err.is_none(), "INTERP {interp}, SHRINK {shrink}, pass {name}: {err:?}");
                 }

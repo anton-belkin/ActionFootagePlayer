@@ -969,7 +969,7 @@ pub fn file_cache(kind: &str, file: &str, extra: &str) -> Option<std::path::Path
     Some(base.join(kind).join(hash))
 }
 
-pub(crate) fn is_project_file(path: &str) -> bool {
+pub fn is_project_file(path: &str) -> bool {
     path.to_ascii_lowercase().ends_with(".gyroflow")
 }
 

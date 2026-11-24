@@ -63,7 +63,7 @@ async function open(o) {
   const defaults = {
     snapshot: () => ({ project: root, jobs: state.jobs, close_asked: state.close_asked, macos: true, changes: state.changes, quiet_ms: state.quiet_ms, catalog: "", missing: 0, moving: null,
       close_waits: !!state.close_waits }),
-    project: () => ({ path: root, name: root.split("/").pop(), legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false, clip_previews: 0, moments: 0, stills: 0, exports: 0 }),
+    project: () => ({ path: root, name: root.split("/").pop(), legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
     engine: () => "/Applications/ActionFootagePlayer.app",
     recent: () => [],
     recent_tags: () => [],
@@ -134,6 +134,12 @@ async function open(o) {
       const e = typeof sel === "string" ? w.document.querySelector(sel) : sel;
       if (!e) throw new Error("nothing to click: " + sel);
       e.dispatchEvent(new w.MouseEvent("click", Object.assign({ bubbles: true, cancelable: true, detail: 1 }, init || {})));
+    },
+    dblclick: (sel) => {
+      const e = typeof sel === "string" ? w.document.querySelector(sel) : sel;
+      if (!e) throw new Error("nothing to double-click: " + sel);
+      for (const d of [1, 2]) e.dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true, detail: d }));
+      e.dispatchEvent(new w.MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
     },
     key: (key, init, target) => (target || w.document.body).dispatchEvent(new w.KeyboardEvent("keydown", Object.assign({ key, bubbles: true, cancelable: true }, init || {}))),
     type: (sel, value) => { const e = w.document.querySelector(sel); e.value = value; e.dispatchEvent(new w.Event("input", { bubbles: true })); },

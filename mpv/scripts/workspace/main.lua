@@ -96,15 +96,32 @@
 -- characters, here and in the plugins that read or write beside the clip (gyroflow, dlogm, highlights, dji-telemetry).
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local utils = require 'mp.utils'
 -- Windows: paths past 260 characters (a clip deep in a trip's folders) for the file calls here and in the modules
 local longpath = require 'longpath'
 longpath.install(utils)
+-- The responsiveness journal (journal.lua, docs/responsiveness-journal.md): every plugin's keys and steps by default;
+-- this one also keeps the player's own (its start, files opened, seeks, the first frame). No local: 200 is the limit.
+-- Protected, as in the other plugins: the journal never stops this one
+do
+    local ok, j = pcall(require, 'journal')
+    if ok and type(j) == "table" and j.core then pcall(j.core) end
+end
 local workspace = require 'workspace'
 local link = require 'link'
 local moments_lib = require 'moments'
 local sidecar_lib = require 'sidecar'
 local projectfile = require 'projectfile'
+-- A list opened from Action Footage Library: the playlist, from the item opened (no local: the file is at Lua's 200)
+require('librarylist').install(mp)
 local has_input, input = pcall(require, 'mp.input')
 if not has_input then input = nil end
 
@@ -614,6 +631,14 @@ local function refresh()
         local info = utils.file_info(state.clip)
         local mine = moments.of_clip(list, { relative = state.relative, size = info and info.size, created = state.created, hash = state.hash })
         local out, chapters = {}, {}
+        -- Just saved (preview-done), not listed yet: shown all the same, for a minute at most
+        local listed = {}
+        for _, m in ipairs(mine) do listed[m.file] = true end
+        for file, f in pairs(state.fresh or {}) do
+            if listed[file] or f.clip ~= state.clip or mp.get_time() - f.at > 60 then state.fresh[file] = nil
+            else mine[#mine + 1] = { name = f.name, file = file, link = { ["in"] = f["in"], out = f.out, snap = f.snap and 1 or nil, alone = f.alone, stab = f.stab } } end
+        end
+        table.sort(mine, function(x, y) return (x.link["in"] or 0) < (y.link["in"] or 0) end)
         for _, m in ipairs(mine) do
             out[#out + 1] = { name = m.name, file = m.file, ["in"] = m.link["in"], out = m.link.out,
                               snap = m.link.snap == 1, alone = m.link.alone == true, stab = m.link.stab }
@@ -639,10 +664,13 @@ local function refresh()
             for _, m in ipairs(list) do if m.link.v == 1 and m.link.kind == "moment" then ms[#ms + 1] = m end end
             found, scanned_project, from_catalog = { list = ms, dirs = {} }, project, true
             show(ms)
-            -- A moment not where it was (moved or removed in Finder) stays shown until the look says which
+            -- A moment not where it was (moved or removed in Finder) stays shown until the look says which. Only
+            -- then: what else changes on the disk the catalog's own care notes (the NAS Helper watches the shares, the
+            -- Library looks after its roots), the player adds no walks of its own (each ran during playback, on the
+            -- share the clip plays from)
             local missing = false
             for _, m in ipairs(list) do if m.missing then missing = true end end
-            catalog.look(project, missing and 0 or 20)
+            if missing then catalog.look(project, 0) end
             -- The project's moments' names and count, once (what the name dialog suggests from)
             if not project_moments or project_moments.project ~= project then
                 project_moments = { project = project, names = {}, total = nil }
@@ -671,10 +699,10 @@ catalog.changed = refresh
 -- folders did (a folder of moments moved in): moments.scan's dirs
 local function watch()
     if not scanned_project or scanned_project ~= state.project then return end
-    -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal)
+    -- From the catalog: asked again (what another computer, or the Library, wrote is in its journal), every 30 s:
+    -- each ask reads the catalog from the project's share
     if from_catalog then
-        if mp.get_time() - last_asked >= 10 then refresh() end
-        catalog.look(state.project, 60)
+        if mp.get_time() - last_asked >= 30 then refresh() end
         return
     end
     for dir, mtime in pairs(found.dirs) do
@@ -686,8 +714,10 @@ end
 -- A moment's file: its original instead, from its in, looping its part (one after another in a playlist)
 local function open_moment(path)
     -- A photo's link file (<name>.afplink.jpg: a small picture with the link in its XMP, made by the Library): its
-    -- original instead, paused at the photo's frame. A rendered photo (a HEIC, a JPEG without that name) opens as
-    -- the picture it is. (Here, not a function of its own: the file is at Lua's 200 local variables)
+    -- original's part around the photo's frame instead, as a video of its own (as a moment), paused at the frame: the
+    -- live-photo plugin shows it as a live photo, the part its live part (1.5 s on each side, or the run of the links
+    -- after it: its user-data/afp/photo span). A rendered photo (a HEIC, a JPEG without that name) opens as the
+    -- picture it is. (Here, not a function of its own: the file is at Lua's 200 local variables)
     if state.clip:lower():match("%.afplink%.jpg$") then
         local praw = fs.read_photo_link(state.clip)
         local p = praw and utils.parse_json(praw)
@@ -699,13 +729,19 @@ local function open_moment(path)
             mp.osd_message(moments_lib.display_name(file) .. ": the clip isn't at " .. tostring(p.clip), 6)
             return
         end
-        mp.set_property("stream-open-filename", original)
-        mp.set_property("file-local-options/start", string.format("%.3f", p.t))
+        local lp = mp.get_property_native("user-data/afp/photo")
+        local span = type(lp) == "table" and lp.file == file and type(lp.span) == "table" and lp.span or { math.max(0, p.t - 1.5), p.t + 1.5 }
+        mp.set_property("stream-open-filename", string.format("edl://!no_chapters;%%%d%%%s,start=%.3f,length=%.3f", #original, original, span[1], span[2] - span[1]))
+        mp.set_property("file-local-options/start", string.format("%.3f", p.t - span[1]))
         mp.set_property("file-local-options/pause", "yes")
+        mp.set_property("file-local-options/force-media-title", (moments_lib.display_name(file):gsub("%.afplink$", "")))
         state = describe(original)
         state.path = path
         state.redirected = true
-        state.photo = { file = file, t = p.t, crop = p.crop, camera = p.camera }
+        state.offset, state.length = span[1], span[2] - span[1]
+        state.photo = { file = file, t = p.t, crop = p.crop, camera = p.camera, name = (moments_lib.display_name(file):gsub("%.afplink$", "")),
+                        ["in"] = span[1], out = span[2], clip = original }
+        state.created = p.created
         return
     end
     local raw = fs.read_link(state.clip)
@@ -739,7 +775,7 @@ local function open_moment(path)
         end
         state.link = { file = file, own = l.own == 1, input = transform.input_of(l.stab), raw = l.stab }
         if l.own == 1 then
-            state.view = transform.complete(l.stab, mp.get_property_native("user-data/gyroflow/session"))
+            state.view = transform.complete(l.stab, transform.session(mp.get_property_native))
             state.saved = copy(state.view)
             state.view_target = "preview"
         end
@@ -782,7 +818,7 @@ local function open_moment(path)
         local own = own_project(file)
         state.snap = true
         state.alone = l.alone == true
-        state.view = transform.complete(l.stab, mp.get_property_native("user-data/gyroflow/session"))
+        state.view = transform.complete(l.stab, transform.session(mp.get_property_native))
         state.saved = copy(state.view)
         state.view_target = "moment"
         state.gyroflow_projects, state.gyroflow_new = { own }, own
@@ -837,6 +873,18 @@ mp.add_hook("on_load", 10, function()
             open_moment(path)
         elseif info and state.clip:lower():match("%.afplink%.jpg$") then
             open_moment(path) -- a photo's link
+        elseif info and (state.clip:lower():match("%.heic$") or state.clip:lower():match("%.jpe?g$")) then
+            -- A photo the player made (gyroflow-export, afp-photo: its link in its XMP): its clip, for Open the whole
+            -- clip (found quietly: a photo copied out of its project just has none)
+            local praw = fs.read_photo_link(state.clip)
+            local p = praw and utils.parse_json(praw)
+            if type(p) == "table" and p.kind == "photo" and type(p.t) == "number" then
+                local original = moments.original(p, moments.project_of(state.clip), { hint_only = true })
+                if original then
+                    state.photo = { file = state.clip, t = p.t, name = moments_lib.display_name(state.clip), clip = original,
+                                    ["in"] = math.max(0, p.t - 1.5), out = p.t + 1.5, made = true }
+                end
+            end
         end
     end
     -- Other own files of this clip (beside its copies in other locations): the main one plays and is saved, they're
@@ -878,7 +926,7 @@ mp.add_hook("on_load", 10, function()
             local raw = doc and transform.pick(doc.view)
             state.source_raw = raw
             if raw then
-                state.view = transform.complete(raw, mp.get_property_native("user-data/gyroflow/session"))
+                state.view = transform.complete(raw, transform.session(mp.get_property_native))
                 state.saved = copy(state.view)
             end
         end
@@ -886,7 +934,9 @@ mp.add_hook("on_load", 10, function()
     state.view_from = state.view and state.view_target or "session"
     -- An export's original, at its part
     if wanted and state.clip == wanted.file then
-        if wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted["in"])) end
+        -- (A photo's clip: at its frame, paused, its live part marked)
+        if wanted.at or wanted["in"] then mp.set_property("file-local-options/start", string.format("%.3f", wanted.at or wanted["in"])) end
+        if wanted.at then mp.set_property("file-local-options/pause", "yes") end
         if wanted["in"] and wanted.out then
             -- The part marked, not looped: the whole clip plays on, before and after it
             mp.set_property("file-local-options/ab-loop-count", "0")
@@ -910,7 +960,22 @@ end)
 
 -- Typed text: the console's (mp.input, mpv 0.38 and later), else none (the suggestion is taken). opts: prompt,
 -- suggestion (Tab puts it in), default (the field filled), history (a file of earlier names, ↑)
+-- In the side panel's dialog (opts.title, subtitle, suggestion, names, ok, ok_typed, placeholder: side-panel/notify.lua),
+-- else in mpv's console (opts.prompt); Esc: done isn't called
 local function ask(opts, done)
+    -- What follows the name never fails in silence: an error is said on screen (and is in the log)
+    local function after(text)
+        local ok, err = xpcall(function() done(((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))) end, debug.traceback)
+        if not ok then
+            mp.msg.error("after the name typed: " .. tostring(err))
+            mp.notify({ id = "workspace:ask", kind = "error", title = "That didn't work", detail = tostring(err):match("^[^\n]*") })
+        end
+    end
+    if opts.title and mp.ask({ title = opts.title, subtitle = opts.subtitle, value = opts.default, suggestion = opts.suggestion,
+                               names = opts.names, ok = opts.ok, ok_typed = opts.ok_typed, placeholder = opts.placeholder },
+                             function(text, cancelled) if not cancelled then after(text) end end) then
+        return
+    end
     if not input then return done("") end
     local id = opts.id or "workspace"
     input.get({
@@ -922,7 +987,7 @@ local function ask(opts, done)
         complete = opts.suggestion and function() return { opts.suggestion }, 1 end or nil,
         submit = function(text)
             input.terminate()
-            done((text or ""):gsub("^%s+", ""):gsub("%s+$", ""))
+            after(text)
         end,
     })
 end
@@ -1027,15 +1092,19 @@ end
 local function current_view()
     local g = mp.get_property_native("user-data/gyroflow")
     if type(g) ~= "table" then return copy(state.saved) end
+    local u = mp.get_property_native("user-data/uwcolor")
+    u = type(u) == "table" and u or {}
     local v = {}
-    for _, k in ipairs(transform.KEYS) do v[k] = g[k] end
+    for _, k in ipairs(transform.KEYS) do
+        if transform.COLOR_KEYS[k] then v[k] = u[k] else v[k] = g[k] end
+    end
     -- The gyroflow plugin's `lens` is the lens profile; the bundle's lens (corrected, as recorded) is its lens_mode
     v.lens = g.lens_mode
     if g.kind == "project" then
         local keep = state.saved or g.session or {}
         for k in pairs(transform.PROJECT_KEYS) do v[k] = keep[k] end
     end
-    return (transform.complete(v, g.session))
+    return (transform.complete(v, transform.session(mp.get_property_native)))
 end
 
 -- The clip's project, for what needs one (moments, exports, clip previews). None is made by itself: the side panel's
@@ -1050,15 +1119,21 @@ end
 
 -- The A-B part saved as a moment named `name`, or `update` (a moment of this clip) written again with it. `quiet`:
 -- nothing on screen unless it fails (the moment that comes with an export)
--- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own)
+-- opts: range ({ a, b }, the clip's time: in place of the part marked), alone, stab (in place of the moment's own),
+-- picture (k's: the preview from the frame shown as it was pressed, export.lua's moment-picture)
 local function save(name, update, typed, quiet, opts)
     opts = opts or {}
+    local PREVIEW_WAIT = 120
     local a, b
     if opts.range then
         a, b = opts.range[1], opts.range[2]
     else
         a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-        if not (a and b and b > a) then return end
+        if not (a and b and b > a) then
+            -- The part was unmarked while the name was typed
+            if not quiet then mp.osd_message("Not saved: the part isn't marked any more (l at its start, l at its end, then k)", 6) end
+            return
+        end
         -- In the clip's time (a moment playing starts at its in)
         a, b = a + (state.offset or 0), b + (state.offset or 0)
     end
@@ -1082,13 +1157,16 @@ local function save(name, update, typed, quiet, opts)
     local info = utils.file_info(state.clip)
     local l = {
         v = 1, kind = "moment", clip = state.relative or tree_of(state.clip, root), size = info and info.size,
+        -- The original's fingerprint, read as it opened: gyroflow-export doesn't read it again (seconds on the NAS while
+        -- it plays)
+        hash = state.hash,
         created = state.created, ["in"] = moments_lib.ms(a), out = moments_lib.ms(b), name = final, roots = { root },
     }
-    -- An update keeps the moment's tags (the Library's) and what it carries from its file's earlier link
+    -- An update keeps the moment's tags, pick, stars and comment (the Library's) from its file's earlier link
     if update then
         local old = utils.parse_json(fs.read_link(update.file) or "")
         -- (not what the stores agreed on: the new file has no Finder tags yet, the next sync puts them on)
-        if type(old) == "table" then l.tags, l.rating, l.pick = old.tags, old.rating, old.pick end
+        moments_lib.carry(old, l)
     end
     -- How it's shown, fixed as it's made (snap): the transform bundle it plays with, whole (stab), its part on its
     -- own or as part of the clip (alone), and a project of its own when the clip plays with one: a copy, so the
@@ -1144,12 +1222,28 @@ local function save(name, update, typed, quiet, opts)
                     keep_playing = opts.keep_playing, alone = l.alone, stab = l.stab }
     state.saving = final
     publish()
-    if not quiet then mp.osd_message((update and "Updating " or "Saving moment ") .. final .. "…", 30) end
+    -- A card while it's made (the preview's frame takes seconds, from a NAS half a minute): it stays until the answer
+    if not quiet then
+        mp.notify({ id = "moment:" .. id, kind = "working", title = (update and "Updating “" or "Saving moment “") .. final .. "”",
+                    detail = "Making its picture" })
+    end
+    -- No answer in two minutes (the preview takes seconds): said, and k works again
+    mp.add_timeout(PREVIEW_WAIT, function()
+        if not pending[id] then return end
+        pending[id] = nil
+        state.saving = nil
+        publish()
+        mp.msg.error("moment " .. final .. ": no answer from the gyroflow plugin in " .. PREVIEW_WAIT .. " s")
+        mp.notify({ id = "moment:" .. id, kind = "error", title = "Couldn't save “" .. final .. "”",
+                    detail = "No answer from the gyroflow plugin (see the player's log)" })
+    end)
     mp.commandv("script-message-to", "gyroflow", "preview", utils.format_json({
         id = id, clip = state.clip, from = a, to = b, at = at, link = utils.format_json(l), dates = dates, output = file,
         force = update ~= nil, reply = mp.get_script_name(),
         -- Its own project, or none (the preset: false); nil: the clip's, as it plays (a moment from before)
         project = preview_project, alone = l.alone == true and preview_project == false,
+        -- k's: the frame on screen as it was pressed, when the gyroflow plugin took it
+        picture = opts.picture,
     }))
 end
 
@@ -1159,11 +1253,29 @@ mp.register_script_message("preview-done", function(id, json)
     if not p then return end
     state.saving = nil
     local r = utils.parse_json(json or "") or {}
+    local card = "moment:" .. id
     if not r.ok then
         publish()
-        mp.osd_message("Couldn't save " .. p.name .. ": " .. tostring(r.error or "gyroflow-export failed"), 6)
+        mp.notify({ id = card, kind = "error", title = "Couldn't save “" .. p.name .. "”", detail = tostring(r.error or "gyroflow-export failed") })
         return
     end
+    -- In the list at once (the catalog lists it a little later): kept until a look at the catalog has it
+    if not p.update and state.clip then
+        state.fresh = state.fresh or {}
+        state.fresh[p.file] = { name = p.name, file = p.file, ["in"] = p.a, out = p.b, snap = p.stab ~= nil, alone = p.alone == true,
+                                stab = p.stab, clip = state.clip, at = mp.get_time() }
+        local list = state.moments or {}
+        local there = false
+        for _, m in ipairs(list) do if m.file == p.file then there = true end end
+        if not there then
+            list[#list + 1] = state.fresh[p.file]
+            table.sort(list, function(x, y) return (x["in"] or 0) < (y["in"] or 0) end)
+            state.moments = list
+        end
+        publish()
+    end
+    local done = { id = card, kind = "done", title = (p.update and "Updated “" or "Saved moment “") .. p.name .. "”",
+                   detail = p.update and nil or "In Moments of this clip" }
     -- The name typed: kept for the next suggestion and ↑
     if p.typed and not p.update then remember_name(p.typed) end
     -- Updated: a new file over the old one, Finder's tags put back on it from its link
@@ -1176,11 +1288,11 @@ mp.register_script_message("preview-done", function(id, json)
         -- Saved: it's now as it's viewed
         -- A moment playing as a video of its own: again, with its new ends (not for its settings remembered)
         if state.moment and state.offset and not p.keep_playing then
-            mp.osd_message("Updated " .. p.name, 3)
+            mp.notify(done)
             return mp.commandv("playlist-play-index", "current")
         end
     end
-    if not p.quiet then mp.osd_message((p.update and "Updated " or "Saved moment ") .. p.name, 3) end
+    if not p.quiet then mp.notify(done) end
     -- Its own Gyroflow project too (written or edited beside it): the Library's badge and filters read it
     local noted = { p.file }
     if fs.is_file(own_project(p.file)) then noted[2] = own_project(p.file) end
@@ -1195,6 +1307,8 @@ end)
 
 -- k: the A-B part as a moment; on a moment playing whose part was moved, update it or save a new one
 local function save_key(given)
+    -- A photo shown (the live-photo plugin): no moment of a still
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     if not state.clip or state.clip:find("://", 1, true) then
         return mp.osd_message("A moment is of a clip on this computer or the NAS", 3)
     end
@@ -1213,22 +1327,29 @@ local function save_key(given)
     -- Asked before the name: there's nowhere to save it yet
     if not need_project("Saving a moment") then return end
     local m = state.moment or state.editing
-    if given and given ~= "" then return save(given, nil, given) end
     local off = state.offset or 0
+    -- Its picture: the frame on screen now, as it's decided, taken by the gyroflow plugin where that's the moment as it
+    -- plays (else its preview is rendered: export.lua's moment-picture). A second to save, not up to 30 s
+    mp.commandv("script-message-to", "gyroflow", "moment-picture", utils.format_json({ a = a + off, b = b + off }))
+    local pic = { picture = true }
+    if given and given ~= "" then return save(given, nil, given, nil, pic) end
     if m then
         if math.abs(a + off - m["in"]) < 0.001 and math.abs(b + off - m.out) < 0.001 then
             return mp.osd_message(m.name .. " is saved as it is: move its start or end with l, then k", 4)
         end
         return ask({ prompt = "Update " .. m.name .. " to " .. clock(a + off) .. "–" .. clock(b + off) .. "? Enter, or a new name for a new one: ",
-                     id = "workspace-update" }, function(text)
-            if text == "" then save(m.name, m) else last_typed = text; save(text, nil, text) end
+                     id = "workspace-update", title = "Update “" .. m.name .. "” to " .. clock(a + off) .. "–" .. clock(b + off) .. "?",
+                     subtitle = "Enter updates it; a name typed saves a new moment instead", placeholder = "A new moment's name",
+                     ok = "Update", ok_typed = "Save new" }, function(text)
+            if text == "" then save(m.name, m, nil, nil, pic) else last_typed = text; save(text, nil, text, nil, pic) end
         end)
     end
     local suggested = suggestion(a)
     ask({ prompt = "Moment " .. clock(a) .. "–" .. clock(b) .. " name (Enter: " .. suggested .. "): ", suggestion = suggested,
-          history = history_file(), id = "workspace-moment" }, function(text)
+          history = history_file(), id = "workspace-moment", title = "Save moment " .. clock(a) .. "–" .. clock(b),
+          subtitle = ws.name(state.clip) .. " · into the project “" .. ws.name(state.project) .. "”", names = moment_names(), ok = "Save" }, function(text)
         if text ~= "" then last_typed = text end
-        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil)
+        save(text ~= "" and text or suggested, nil, text ~= "" and text or nil, nil, pic)
     end)
 end
 
@@ -1367,7 +1488,7 @@ end)
 mp.register_script_message("moment-rename", function(i)
     local m = moment_at(i)
     if not m then return end
-    ask({ prompt = "Rename " .. m.name .. " to: ", default = m.name, id = "workspace-rename" }, function(text)
+    ask({ prompt = "Rename " .. m.name .. " to: ", default = m.name, id = "workspace-rename", title = "Rename “" .. m.name .. "”", ok = "Rename" }, function(text)
         local safe = moments_lib.safe_name(text)
         if not safe or safe == m.name then return end
         local target = ws.join(ws.parent(m.file), safe .. moments_lib.EXT)
@@ -1430,7 +1551,8 @@ mp.register_script_message("export-name", function(json)
     local suggested = same and (same.name:gsub("^export_", "")) or suggestion(a or 0)
     local what = part and ("Export " .. clock(a) .. "–" .. clock(b)) or "Export the clip"
     ask({ prompt = what .. label .. " as (Enter: " .. suggested .. "): ", suggestion = suggested, history = history_file(),
-          id = "workspace-export" }, function(text)
+          id = "workspace-export", title = what .. label, subtitle = ws.name(state.clip) .. " · into the project's Exports",
+          names = moment_names(), ok = "Export" }, function(text)
         if text ~= "" then last_typed = text end
         local safe = moments_lib.safe_name(text ~= "" and text or suggested)
         if not safe then return mp.osd_message("Export: that name has nothing a file name can have", 3) end
@@ -1471,6 +1593,12 @@ mp.register_script_message("open-original", function()
         wanted = { file = e.original, ["in"] = e["in"], out = e.out }
         return mp.commandv("loadfile", e.original, "replace")
     end
+    -- A photo's link, or a photo the player made (its link in its XMP): its clip, its live part marked
+    local ph = state.photo
+    if ph and ph.clip then
+        wanted = { file = ph.clip, ["in"] = ph["in"], out = ph.out, at = ph.t }
+        return mp.commandv("loadfile", ph.clip, "replace")
+    end
     local m = state.moment
     if m and not m.missing and state.clip then
         wanted = { file = state.clip, ["in"] = m["in"], out = m.out, moment = { file = m.file, name = m.name, ["in"] = m["in"], out = m.out,
@@ -1496,7 +1624,6 @@ local function in_only(relative)
     return false
 end
 local recount
-local overlay = mp.create_osd_overlay("ass-events")
 
 -- The highlights plugin's reader of the camera's marks, when it's beside this one (the app has both)
 local markers = nil
@@ -1580,13 +1707,11 @@ local function new_preview_path(dir, c, flat)
     return (moments.unique_file(dir, stem))
 end
 
+-- The clip previews being made: a card (the side panel's), how many of how many
 local function draw_progress()
-    if not clips_job then
-        overlay:remove()
-        return
-    end
-    overlay.data = string.format("{\\an1\\fs18\\bord1.5}Clip previews: %d of %d", clips_job.done, clips_job.total)
-    overlay:update()
+    if not clips_job then return end
+    mp.notify({ id = "clip-previews", kind = "working", title = "Making clip previews",
+                detail = string.format("%d of %d", clips_job.done, clips_job.total), share = clips_job.done / math.max(1, clips_job.total) })
 end
 
 -- Which of the queue's clips comes next: the first in a folder the Library shows now (batch.focus: a file it rewrites
@@ -1632,8 +1757,8 @@ local function next_clip()
             return catalog.after_notes(function() batch.finished({ made = job.made, failed = job.failed, failures = job.failures, stopped = job.stopping }) end)
         end
         local what = job.made == 1 and "1 clip preview" or (job.made .. " clip previews")
-        mp.osd_message((job.stopping and "Stopped: " or "Made ") .. what .. (job.failed > 0 and (", " .. job.failed .. " couldn't be made: "
-            .. job.failures[1][2]) or ""), job.failed > 0 and 6 or 4)
+        mp.notify({ id = "clip-previews", kind = job.failed > 0 and "error" or "done", title = (job.stopping and "Stopped: " or "Made ") .. what,
+                    detail = job.failed > 0 and (job.failed .. " couldn't be made: " .. tostring(job.failures[1][2])) or nil })
         return
     end
     local exporter = mp.get_property_native("user-data/gyroflow/exporter")
@@ -1919,20 +2044,49 @@ mp.register_event("shutdown", function()
     if clips_job and clips_job.id then clips_job.stopping = true; mp.abort_async_command(clips_job.id) end
 end)
 
--- The project's clips counted (a walk of its folders, kept a minute), and this clip's preview. A step at a time (turn,
--- with the file calls): the first one now, the rest on mpv's next turns, published when it's through. A count asked
--- for again replaces the one under way; a quit, or another clip, doesn't wait for it
-local stats_cache = {}
+-- The project's clips counted, and this clip's preview: from the project's catalog (afp-catalog footage, in the
+-- background: no walk of the shares; asked again after a minute), else a walk of its folders, once a project in a
+-- run (made or removed previews count it again: recount). The walk went through every location's every file: on a
+-- NAS thousands of stat calls a minute, again each minute, for the whole time a clip played (2026-11-19: the clip's
+-- own reads and its motion data's waited behind them). A step at a time (turn, with the file calls): the first one
+-- now, the rest on mpv's next turns, published when it's through. A count asked for again replaces the one under
+-- way; a quit, or another clip, doesn't wait for it
+-- (One table: the main chunk is at Lua's 200 local variables)
+local stats = { cache = {}, SECONDS = 60 }
+-- afp-catalog asked from the count's coroutine without holding mpv up: it waits a tenth of a second at a time (step);
+-- the parsed JSON's items, nil without a catalog (or outside the coroutine)
+function stats.ask(args_after)
+    local exe = catalog.tool()
+    if not exe or not counting.co or coroutine.running() ~= counting.co then return nil end
+    local args = { exe }
+    for _, a in ipairs(args_after) do args[#args + 1] = a end
+    local done, items = false, nil
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true, args = args }, function(ok, r)
+        local v = ok and r and r.status == 0 and utils.parse_json(r.stdout or "")
+        if type(v) == "table" and v.catalog == true then items = v.items or {} end
+        done = true
+    end)
+    while not done do coroutine.yield("wait") end
+    return items
+end
+function stats.of(list)
+    local total, previews, new = 0, 0, 0
+    for _, c in ipairs(list) do
+        total = total + 1
+        if preview_for(c.relative, c.size) then previews = previews + 1 else new = new + 1 end
+    end
+    return { total = total, previews = previews, new = new }
+end
 local function count(project, force, s)
-    local cached = stats_cache[project]
-    if force or not cached or mp.get_time() - cached.time > 60 then
-        local total, previews, new = 0, 0, 0
-        for _, c in ipairs(moments.footage(project)) do
-            total = total + 1
-            if preview_for(c.relative, c.size) then previews = previews + 1 else new = new + 1 end
+    local cached = stats.cache[project]
+    if force or not cached or (cached.catalog and mp.get_time() - cached.time > stats.SECONDS) then
+        local list = not (cached and cached.catalog == false) and stats.ask({ "footage", project }) or nil
+        if list then
+            cached = { time = mp.get_time(), catalog = true, stats = stats.of(list) }
+        else
+            cached = { time = mp.get_time(), catalog = false, stats = stats.of(moments.footage(project)) }
         end
-        cached = { time = mp.get_time(), stats = { total = total, previews = previews, new = new } }
-        stats_cache[project] = cached
+        stats.cache[project] = cached
     end
     -- Another clip by now: its own count tells it
     if s ~= state then return end
@@ -1953,7 +2107,8 @@ local function step(co)
         counting.co = nil
         return true
     end
-    mp.add_timeout(0, function() if step(co) then publish() end end)
+    -- Waiting for afp-catalog (coroutine_ask): looked at again in a tenth of a second
+    mp.add_timeout(err == "wait" and 0.1 or 0, function() if step(co) then publish() end end)
 end
 
 extras = function(force)
@@ -2081,7 +2236,8 @@ local function cut_failed(msg)
     state.cutting = nil
     publish()
     mp.msg.warn(msg)
-    mp.osd_message(msg, 8)
+    local title, why = msg:match("^([^:]*): (.*)$")
+    mp.notify({ id = "cut", kind = "error", title = title or msg, detail = why })
 end
 
 -- The parts written and checked: the original to the Trash, the parts in its place, what follows the clip
@@ -2121,7 +2277,7 @@ local function cut_finish()
             state.cutting = nil
             restore_idle()
             mp.commandv("loadfile", c.clip, "replace")
-            return mp.osd_message("The original couldn't go to " .. where .. ": it's as it was, the parts beside it as " .. c.stem .. " (cut 1)…", 8)
+            return mp.notify({ id = "cut", kind = "error", title = "The original couldn't go to " .. where, detail = "It's as it was, the parts beside it as " .. c.stem .. " (cut 1)…" })
         end
         table.remove(originals, 1)
         trash_all(originals, function(left)
@@ -2210,7 +2366,7 @@ local function cut_finish()
             if #own_gone > 0 then lines[#lines + 1] = "Their own Gyroflow projects to the Trash (made for the original), they play with their settings: " .. table.concat(own_gone, ", ") end
             if #left > 0 then lines[#lines + 1] = "Not moved to the Trash: " .. table.concat(left, ", ") end
             mp.msg.info(table.concat(lines, "; "))
-            mp.osd_message(table.concat(lines, "\n"), 8)
+            mp.notify({ id = "cut", kind = "done", title = lines[1], detail = table.concat(lines, "\n", 2), seconds = 8 })
             end)
         end)
     end)
@@ -2227,7 +2383,8 @@ local function cut_next(i)
     if c.lrf then args[#args + 1] = "--lrf" end
     state.cutting = { name = c.name, part = i, parts = #c.parts }
     publish()
-    mp.osd_message("Cutting " .. c.name .. (#c.parts > 1 and (", part " .. i .. " of " .. #c.parts) or "") .. "…", 30)
+    mp.notify({ id = "cut", kind = "working", title = "Cutting " .. c.name, detail = #c.parts > 1 and ("Part " .. i .. " of " .. #c.parts) or "Written and checked by afp-cut",
+                share = #c.parts > 1 and (i - 1) / #c.parts or nil })
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stdout = true, capture_stderr = true }, function(_, r)
         local out = r and utils.parse_json(r.stdout or "")
         local results = type(out) == "table" and out.results or {}
@@ -2292,6 +2449,7 @@ local function cut_out(a, b)
 end
 
 mp.add_key_binding("Ctrl+x", "cut-out", function()
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     if not (a and b and b > a) then
         return mp.osd_message("Mark the spoiled part first (l at its start, l at its end), then Ctrl+x cuts it out", 4)
@@ -2376,7 +2534,7 @@ local function settle_bundle()
     if state.view_target == "source" then raw = state.source_raw
     elseif state.link and state.link.own then raw = state.link.raw end
     if raw == nil then return end
-    local full, added = transform.complete(raw, mp.get_property_native("user-data/gyroflow/session"))
+    local full, added = transform.complete(raw, transform.session(mp.get_property_native))
     local input = state.view_target ~= "source" and transform.input_of(raw) ~= nil
     if (added or input) and write_bundle(full, true) then
         mp.msg.info("transform completed and written: " .. utils.format_json(full))
@@ -2401,6 +2559,7 @@ end)
 mp.register_script_message("view-revert", function()
     if not state.saved then return end
     mp.commandv("script-message-to", "gyroflow", "apply-view", utils.format_json(state.saved))
+    mp.commandv("script-message-to", "dlogm", "uw-apply-view", utils.format_json(state.saved))
     mp.osd_message("Transform as saved", 1.5)
 end)
 
@@ -2550,6 +2709,7 @@ local function view_changed()
     publish_view()
 end
 mp.observe_property("user-data/gyroflow", "native", view_changed)
+mp.observe_property("user-data/uwcolor", "native", view_changed)
 mp.register_event("file-loaded", function()
     settle_bundle()
     autosave_fresh()
@@ -2626,6 +2786,10 @@ local function job_progress()
     local j = marks_job
     state.marks_job = j and { kind = j.kind, done = j.done, total = #j.queue, failed = j.failed } or nil
     publish()
+    if j and #j.queue > 0 then
+        mp.notify({ id = "marks-job", kind = "working", title = j.kind == "moments" and "Making moments of the marks" or "Saving photos of the marks",
+                    detail = string.format("%d of %d", j.done, #j.queue), share = j.done / #j.queue })
+    end
 end
 
 local function job_finish(message)
@@ -2633,7 +2797,8 @@ local function job_finish(message)
     marks_job = nil
     job_progress()
     if batch and j then return batch.finished({ made = j.done - j.failed, failed = j.failed, failures = j.failures, stopped = j.stopping }) end
-    if message then mp.osd_message(message, 5) end
+    if message then mp.notify({ id = "marks-job", kind = (j and j.failed > 0) and "error" or "done", title = message, seconds = 5 })
+    else mp.notify({ id = "marks-job", kind = "hide" }) end
     if j and j.kind == "moments" then refresh() end
 end
 
@@ -2761,19 +2926,18 @@ local function start_marks_job(kind, root)
         if batch then return batch.finished({ made = 0, failed = 0, error = "the highlights plugin isn't there" }) end
         return mp.osd_message("This needs the highlights plugin", 3)
     end
-    mp.osd_message("Looking for the marks in the project's clips…", 30)
+    mp.notify({ id = "marks-job", kind = "working", title = "Looking for the marks", detail = "In the project's clips" })
     if batch then batch.looking() end
     local queue = marks_queue(kind, root)
     if #queue == 0 then
         local why = kind == "moments" and "Every mark is in a moment already" or "Every mark has its photo already"
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
-        return mp.osd_message(why, 4)
+        return mp.notify({ id = "marks-job", kind = "done", title = why, seconds = 4 })
     end
     -- This run's folder (docs/library-management.md §8)
     local dir = ws.join(root, native(moments_lib.generated_rel(kind == "moments" and "Moments" or "Photos", os.time(), false, generated_runs(root))))
     marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, dir = dir,
                   alone = (batch and batch.alone ~= nil) and batch.alone or cache.moments_alone == true }
-    mp.osd_message((kind == "moments" and "Making " .. #queue .. " moments" or "Saving " .. #queue .. " photos") .. " in the background…", 3)
     job_progress()
     job_next()
 end
@@ -2931,11 +3095,11 @@ local function export_next()
         mkdir(m.making)
         return mp.commandv("script-message-to", "gyroflow", "photo-at", utils.format_json({
             id = tostring(j.id), clip = m.original, t = m.photo.t, view = m.rendered, crop = m.photo.crop, camera = m.photo.camera,
-            link = utils.format_json(l), still = true, out_dir = m.making, reply = mp.get_script_name(), done = "export-batch-done" }))
+            link = utils.format_json(l), still = true, out_dir = m.making, export = m.export, reply = mp.get_script_name(), done = "export-batch-done" }))
     end
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
-        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr,
+        from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr, export = m.export,
         progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
     }))
 end
@@ -3044,6 +3208,8 @@ local function render_moments(root, profiles, items)
                 project = own and fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
                 sdr = it.sdr == true, render_out = it.out, render_link = it.link,
                 photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
+                -- The Library's export settings (docs/export-settings.md): size, encoder, quality preset
+                export = type(it.export) == "table" and it.export or nil,
             }
             -- The settings the Library's recipe has (renders.rs `settings`): rendered with them, so the render is what
             -- its hash says; what this player would have taken by itself is told back, for the Library to compare
@@ -3166,10 +3332,14 @@ local function remember_tags(used)
     os.rename(recent_file() .. ".tmp", recent_file())
 end
 
--- What plays, to tag: { kind, file (the original or the moment's file) }; nil for an export, a stream
+-- What plays, to tag: { kind, file (the original, the moment's file or the photo) }; nil for an export, a stream. A
+-- photo (its link, or one the player made, with its link) is tagged itself, as a moment is: its pick and rating in its
+-- link, its tags in its XMP (afp-meta, as the Library writes them); a photo without a link isn't tagged here
 local function tag_target()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return nil end
     if state.moment and state.moment.file then return { kind = "moment", file = state.moment.file } end
+    if state.photo and state.photo.file then return { kind = "photo", file = state.photo.file } end
+    if type(mp.get_property_native("user-data/afp/photo")) == "table" then return nil end
     return { kind = "original", file = state.clip }
 end
 
@@ -3178,6 +3348,12 @@ local function tags_read(t)
     if t.kind == "original" then
         local doc = sidecar.read(t.file)
         return type(doc) == "table" and doc or {}, sidecar.path(t.file)
+    end
+    if t.kind == "photo" then
+        local l = utils.parse_json(fs.read_photo_link(t.file) or "")
+        l = type(l) == "table" and l or {}
+        l.tags = link.photo_tags(t.file)
+        return l, t.file
     end
     local l = utils.parse_json(fs.read_link(t.file) or "")
     return type(l) == "table" and l or {}, t.file
@@ -3190,6 +3366,18 @@ local function tags_write(t, fn)
     end
     local doc = tags_read(t)
     if not fn(doc) then return true end
+    if t.kind == "photo" then
+        -- Its pick and rating in its link, its tags in its XMP: afp-meta writes both (a HEIC's through afp-photo)
+        local meta = plugin_tool("afp-meta")
+        if not meta then return false, "afp-meta isn't installed" end
+        local tags = doc.tags or {}
+        doc.tags = nil
+        local w = mp.command_native({ name = "subprocess", playback_only = false, capture_stderr = true,
+                                      args = { meta, t.file, "--link", utils.format_json(doc), "--tags", utils.format_json(tags) } })
+        if not (w and w.status == 0) then return false, "couldn't write its link and tags (afp-meta: " .. tostring(w and w.stderr) .. ")" end
+        catalog.note(state.project, { t.file })
+        return true
+    end
     local ok = rewrite_link(t.file, function(l) fn(l) end)
     return ok, not ok and "couldn't write its link (afp-cut)" or nil
 end
@@ -3267,7 +3455,8 @@ local function tags_reload(sync)
     if not t then state.tags = nil; return publish() end
     if sync then
         local came = tags_sync(t)
-        if came then mp.osd_message("Tags changed in " .. came .. ": taken into the library", 2) end
+        -- (taken in quietly: the panel's chips show them)
+        if came then mp.msg.info("tags changed in " .. came .. ": taken into the library") end
     end
     local m = tags_lib.model(tags_read(t))
     state.tags = { kind = t.kind, pick = m.pick, rating = m.rating, list = m.tags, recent = recent_tags(), stores = enabled_stores() }
@@ -3293,7 +3482,7 @@ local function tags_change(op)
     for _, a in ipairs(after.tags) do if not tags_lib.find(before.tags, a) then added[#added + 1] = a; parts[#parts + 1] = "+" .. a end end
     for _, b in ipairs(before.tags) do if not tags_lib.find(after.tags, b) then parts[#parts + 1] = "−" .. b end end
     remember_tags(added)
-    if #parts > 0 then mp.osd_message((t.kind == "moment" and "Moment: " or "Original: ") .. table.concat(parts, "  "), 2) end
+    if #parts > 0 then mp.osd_message((t.kind == "moment" and "Moment: " or t.kind == "photo" and "Photo: " or "Original: ") .. table.concat(parts, "  "), 2) end
     tags_reload(false)
 end
 
@@ -3301,11 +3490,19 @@ end
 local function tags_ask()
     local t = tag_target()
     if not t then return mp.osd_message("Nothing to tag here", 2) end
-    if not input then return mp.osd_message("Typing a tag needs mpv 0.38 or later", 3) end
     local now = state.tags and state.tags.list or {}
     local offer = {}
     for _, r in ipairs(recent_tags()) do offer[#offer + 1] = r end
     for _, n in ipairs(now) do if not tags_lib.find(offer, n) then offer[#offer + 1] = n end end
+    -- The side panel's dialog: the recent tags as its earlier names (one clicked puts it in: on, or off if it's on)
+    if mp.ask({ title = "Tag the " .. t.kind, subtitle = #now > 0 and ("Now: " .. table.concat(now, ", ")) or "No tags yet",
+                placeholder = "A tag (one it has: off); -tag takes it off; commas for more", names = offer, ok = "Tag" },
+              function(text, cancelled)
+                  if not cancelled and text ~= "" then tags_change(tags_lib.parse(text)) end
+              end) then
+        return
+    end
+    if not input then return mp.osd_message("Typing a tag needs mpv 0.38 or later", 3) end
     input.get({
         prompt = "Tag the " .. t.kind .. (#now > 0 and (" [" .. table.concat(now, ", ") .. "]") or "") .. " (a tag on/off, -off):",
         id = "workspace-tags",
@@ -3379,12 +3576,11 @@ local function heard(msg)
             if now ~= lens_loaded then
                 lens_loaded = now
                 if not state.moment and not state.offset and state.clip then
-                    mp.osd_message("Lens type changed in the Library: playing with it", 3)
                     mp.msg.info("lens type " .. tostring(now) .. " from the Library: the clip loaded again")
                     wanted = { file = state.clip, ["in"] = mp.get_property_number("time-pos") }
                     mp.commandv("loadfile", state.clip, "replace")
                 else
-                    mp.osd_message("Lens type changed in the Library: the clip plays with it when opened again", 4)
+                    mp.msg.info("lens type changed in the Library: the clip plays with it when opened again")
                 end
             end
         end

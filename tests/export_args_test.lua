@@ -34,6 +34,7 @@ local mp = {
     register_script_message = function(name, fn) messages[name] = fn end,
     create_osd_overlay = function() return { update = function() end, remove = function() end } end,
     osd_message = function() end,
+    notify = function() end,
     add_timeout = function() return { kill = function() end } end,
     add_periodic_timer = function() return { kill = function() end, resume = function() end, stop = function() end } end,
     get_script_directory = function() return "/plugins/gyroflow" end,
@@ -120,6 +121,62 @@ a = last()
 expect("photo-at: --photo", has(a, "--photo 4.5000"), true)
 expect("photo-at: the view's fringes", has(a, "--chromatic no"), true)
 expect("photo-at: the session's denoise for its motion", has(a, "--denoise full"), true)
+
+-- The export's settings (docs/export-settings.md): the player's own, kept in gyroflow.conf by export-setting, and the
+-- Library's, in its request
+local saved = {}
+require('platform').save_options = function(name, kv) for _, p in ipairs(kv) do saved[name .. "." .. p[1]] = p[2] end end
+props["user-data/gyroflow/export_settings"] = nil
+props["user-data/gyroflow/denoise"] = true
+props["user-data/gyroflow/edges"] = "sphere"
+-- (each a clip of its own: one being exported asks before cancelling)
+props.path = "/clips/d.MP4"
+bindings.export()
+a = last()
+expect("nothing set: no size", has(a, "--resolution"), false)
+expect("nothing set: no encoder mode", has(a, "--encode"), false)
+expect("nothing set: no interpolation", a:find("interpolation", 1, true), nil)
+messages["export-setting"]("video", "size", "1080")
+messages["export-setting"]("video", "encode", "quality")
+messages["export-setting"]("video", "quality", "quickest")
+messages["export-setting"]("video", "size", "8K")
+messages["export-setting"]("photo", "quality", "highest")
+expect("kept in gyroflow.conf", saved["gyroflow.export_size"], "1080")
+expect("…the encoder", saved["gyroflow.export_encode"], "quality")
+expect("…the photo's quality under its own key", saved["gyroflow.photo_quality"], "highest")
+expect("a value it doesn't have: ignored", props["user-data/gyroflow/export_settings"].video.size, "1080")
+props.path = "/clips/e.MP4"
+bindings.export()
+a = last()
+expect("Shift+E: the size", has(a, "--resolution 1080"), true)
+expect("Shift+E: the encoder", has(a, "--encode quality"), true)
+expect("Shift+E quickest: no denoise", has(a, "--denoise"), false)
+expect("Shift+E quickest: bilinear", has(a, "--gpu-interpolation bilinear"), true)
+expect("Shift+E: the clip still last", a:match("(%S+) $"), "/clips/e.MP4")
+-- The Library's request carries its own
+props["user-data/gyroflow/temporal_denoise"] = "off"
+requests.req = { id = 1, clip = "/clips/a.MP4", output = "/out/a.mov", reply = "workspace", view = { denoise = true, temporal_denoise = "light" },
+                 export = { size = "720", encode = "fast", quality = "highest" } }
+messages["export-batch"]("req")
+a = last()
+expect("batch: the Library's size", has(a, "--resolution 720"), true)
+expect("batch: its encoder (fast: nothing)", has(a, "--encode"), false)
+expect("batch highest: the full denoise over the recipe's light", has(a, "--denoise full"), true)
+expect("batch highest: Lanczos", has(a, "--interpolation lanczos"), true)
+requests.req.export = nil
+messages["export-batch"]("req")
+a = last()
+expect("batch without settings: as before", has(a, "--resolution") or has(a, "--encode") or a:find("interpolation", 1, true) ~= nil, false)
+expect("batch without settings: the recipe's light", has(a, "--denoise light"), true)
+requests.photo = { id = 3, clip = "/clips/c.MP4", t = 4.5, reply = "workspace", view = {}, export = { size = "1080", quality = "quickest" } }
+messages["photo-at"]("photo")
+a = last()
+expect("photo-at: the Library's size", has(a, "--resolution 1080"), true)
+expect("photo-at quickest: not cleaned up", has(a, "--radius 0"), true)
+requests.photo.export = nil
+messages["photo-at"]("photo")
+a = last()
+expect("photo-at without the Library's: this player's photo settings (highest)", has(a, "--radius 7"), true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

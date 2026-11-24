@@ -17,7 +17,7 @@
     clip(3, "Day 1", { tags: [] }),
     clip(4, "Day 1", { tags: ["Wreck"], rating: 5 }),
     clip(5, "Day 2", { tags: ["Reef", "Wreck"], rating: 3, pick: "accept" }),
-    clip(6, "Day 2", { tags: ["for family"] }),
+    clip(6, "Day 2", { tags: ["for family"], comment: "Ёжик под камнем, потом мурена" }),
     clip(7, "Day 2", { tags: [], pick: "reject" }),
   ];
   for (const c of clips) c.path = ROOT + "/" + c.id;
@@ -76,6 +76,8 @@
       for (const t of a.add) if (!M.recentTags.some((x) => same(x, t))) M.recentTags.unshift(t);
       return [];
     },
+    set_comment: (a) => { for (const i of a.items) { const it = find(i); if (it) { if (a.comment) it.comment = a.comment; else delete it.comment; } } return []; },
+    writes_pending: () => null,
     open_project: (a) => { M.root = a.path; return a.path; },
     close_project: () => { M.root = null; return null; },
     open_at_start: () => { const r = M.recent.find((x) => x.path === M.atStart); if (M.root || !r || !r.here) return null; M.root = r.path; return r.path; },

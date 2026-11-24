@@ -26,7 +26,7 @@ end
 function M.draw(u, ui, x, w, y, t, keys, send)
     local C, s = ui.C, u.s
     keys = keys or {}
-    y = u:heading(x, w, y, t.kind == "moment" and "This moment: keep it?" or "The original: keep it?")
+    y = u:heading(x, w, y, t.kind == "moment" and "This moment: keep it?" or t.kind == "photo" and "This photo: keep it?" or "The original: keep it?")
     -- Accept / Reject: the one on is lit; clicked again, neither
     local half = (w - 8 * s) / 2
     local function pick(px, id, label, key, on, color)
@@ -75,7 +75,7 @@ function M.draw(u, ui, x, w, y, t, keys, send)
         cx = cx + tw + gap
     end
     y = y + h + 6 * s
-    local where = t.kind == "moment" and "Kept in its link" or "Kept in the original's own file"
+    local where = (t.kind == "moment" or t.kind == "photo") and "Kept in its link" or "Kept in the original's own file"
     local synced = {}
     for _, st in ipairs(t.stores or {}) do synced[#synced + 1] = st == "finder" and "Finder's tags" or st end
     y = u:caption(x, w, y, where .. (#synced > 0 and ("; synced with " .. table.concat(synced, ", ")) or ""))

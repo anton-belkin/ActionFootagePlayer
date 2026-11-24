@@ -79,10 +79,12 @@ agent="$res/plugins/agent"
 workspace="$res/plugins/workspace"
 view360="$res/plugins/view360"
 anylayout="$res/plugins/any-layout"
-mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace" "$view360" "$anylayout"
-install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua "$dlogm/"
+livephoto="$res/plugins/live-photo"
+mkdir -p "$dlogm/shaders" "$dlogm/luts" "$gyroflow" "$telemetry" "$highlights" "$menu" "$panel" "$sdrcheck" "$agent" "$workspace" "$view360" "$anylayout" "$livephoto"
+install -m 644 mpv/scripts/dlogm/main.lua mpv/scripts/dlogm/dji_color.lua mpv/scripts/dlogm/gopro_color.lua mpv/scripts/dlogm/video_color.lua \
+    mpv/scripts/dlogm/uwcolor.lua mpv/scripts/dlogm/uw_estimate.lua "$dlogm/"
 install -m 644 "$hlg" "$dlogm/shaders/dlogm_hlg.glsl"
-install -m 644 shaders/denoise.glsl "$dlogm/shaders/"
+install -m 644 shaders/denoise.glsl shaders/underwater_hlg.glsl "$dlogm/shaders/"
 install -m 644 luts/dlogm_hlg.cube luts/gplog_hlg.cube "$dlogm/luts/"
 # The Dolby Vision looks and their RPUs (tools/make_dv_rpu.sh)
 mkdir -p "$dlogm/dv"
@@ -100,7 +102,7 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua \
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/ahead.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
@@ -108,11 +110,13 @@ for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
+install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
-install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
-install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua mpv/scripts/workspace/longpath.lua mpv/scripts/workspace/tags.lua "$workspace/"
+install -m 644 mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
+install -m 644 mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua mpv/scripts/workspace/longpath.lua mpv/scripts/workspace/tags.lua mpv/scripts/workspace/librarylist.lua mpv/scripts/workspace/journal.lua "$workspace/"
 install -m 644 mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/recording.lua mpv/scripts/view360/view360.glsl "$view360/"
 # Tells when macOS has an SDR monitor set up as the HDR display it had before: the plugin and its helper, for Apple
 # Silicon (on an Intel Mac the helper doesn't run and the plugin stays quiet)

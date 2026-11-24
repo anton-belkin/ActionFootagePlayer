@@ -186,8 +186,23 @@
 -- VapourSynth anyway
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default; its own steps through package.loaded.journal (no local: this file is
+-- at Lua's 200). Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- Windows: paths past 260 characters (a clip deep in a trip's folders), by the workspace plugin's longpath.lua beside
 -- this plugin's folder; without it, as before
@@ -206,7 +221,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -771,7 +786,7 @@ local function gyroflow_filter(source, enabled)
                                                 rotation = frame.rotation ~= 0 and frame.rotation or nil,
                                                 aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
                                                 projection = lens_projection(source),
-                                                lens = filter_lens(source) or "stabilized" }),
+                                                lens = filter_lens(source) or "stabilized", version = source.version }),
             -- Frames mpv requests in parallel: one per GPU worker plus one being decoded. More only costs
             -- memory (an 8K 10-bit frame is ~100 MB); mpv's default (core count) makes 8K crawl
             ["concurrent-frames"] = "4",
@@ -828,6 +843,37 @@ crop.init({
     camera = function(c) gpu_camera(c) end,
     focal = function() return gpu and gpu.focal end,
 })
+
+-- A photo link playing (the workspace plugin's photo, the live-photo plugin's still): its own frame, as Share renders
+-- it: Save frame's camera (crop.view) and its crop, in shares of the frame. Crop mode's crop goes into the camera's zoom
+-- (crop.fold: cut out of the whole frame, the picture trembled), what's left of it, and any other, as mpv's video-crop
+-- of the picture shown
+;(function()
+    local function apply()
+        local ws = mp.get_property_native("user-data/workspace")
+        local ph = type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.photo) == "table" and ws.photo or nil
+        local cam = ph and type(ph.camera) == "table" and ph.camera or nil
+        local c = ph and type(ph.crop) == "table" and ph.crop or nil
+        local folded = crop.fold(cam, c)
+        if folded then cam, c = folded.camera, folded.rest end
+        crop.view(cam)
+        local o = mp.get_property_native("video-out-params")
+        if c and type(o) == "table" and o.w and o.h then
+            mp.set_property("file-local-options/video-crop", string.format("%dx%d+%d+%d",
+                math.floor(c.w * o.w + 0.5), math.floor(c.h * o.h + 0.5), math.floor(c.x * o.w + 0.5), math.floor(c.y * o.h + 0.5)))
+        end
+        return c ~= nil and not (type(o) == "table" and o.w)
+    end
+    mp.register_event("file-loaded", function()
+        -- Its crop once the picture's size is known (after the filters)
+        if apply() then
+            local function once(_, o)
+                if type(o) == "table" and o.w then mp.unobserve_property(once); apply() end
+            end
+            mp.observe_property("video-out-params", "native", once)
+        end
+    end)
+end)()
 
 -- The upright source's ratio, W:H reduced
 local function source_aspect()
@@ -919,6 +965,8 @@ local function rebuild_filter()
         if f.label == LABEL then vf[i] = gyroflow_filter(current_source, f.enabled) end
     end
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
 end
 
 -- A clip played again from where it was (play_again)
@@ -1106,6 +1154,8 @@ local function gpu_set_shader(old, new, extra_mb)
     mp.commandv("script-message-to", "dlogm", "gyroflow-shader", old or "", new or "")
     if old and old ~= new and old ~= GPU_HOLD_SHADER and not gpu_kept[old] then os.remove(old) end
     gpu_resident_add(new, extra_mb)
+    -- Journal: the warp's in mpv's list (stabilization on); the picture changes with the next frame mpv renders
+    if package.loaded.journal and new then package.loaded.journal.step("warp-set") package.loaded.journal.shown("picture") end
 end
 
 -- The player's table server (gyroflow-gpu-table --serve): it keeps the clips it loaded, so a change of the view, the
@@ -1129,6 +1179,8 @@ local gpu_held = false
 local function gpu_unhold()
     if gpu_held then
         gpu_held = false
+        -- Journal: the black hold over, the clip plays stabilized
+        if package.loaded.journal then package.loaded.journal.step("unhold") end
         mp.set_property_native("pause", false)
     end
 end
@@ -1149,14 +1201,38 @@ end
 -- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
 local trans_rev = 0
 
--- The shader applied (further down): the whole clip's table, once it's there, in place of its first seconds'
+-- The shader applied (further down): a table extended ahead of where it plays in place of the one before
 local gpu_apply
+
+-- The table kept ahead of where a clip plays (gpu_ahead.tick, further down; the policy: ahead.lua). One table: the
+-- main chunk is at Lua's 200 local variables
+local gpu_ahead = { policy = require 'ahead', busy = nil, held = false, failed = nil }
+
+-- Asks gyroflow-gpu-table (its server when it runs) for the shader of `req`, to then_(reply)
+function gpu_ahead.ask(req, then_)
+    gpu_count = gpu_count + 1
+    local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
+    local t = mp.get_time()
+    local args = { GPU_TABLE, "--player", utils.format_json(req), out }
+    if gpu_server_running then
+        table.insert(args, "--server")
+        table.insert(args, GPU_SERVER)
+    end
+    mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
+        local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
+        if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
+        reply.ms = math.floor((mp.get_time() - t) * 1000)
+        reply.denoise = req.gpu_denoise
+        reply.translation = reply.translation == true
+        then_(reply)
+    end)
+end
 
 local function gpu_table(source, done)
     local ud = gpu_user_data(source)
     -- A clip without a project: its motion data from the NAS took seconds (20 s for a 1.5 GB clip, cold), so the
     -- table starts from a stretch of it, as the filter's path does (motion.rs): a moment's part (all it plays), or the
-    -- seconds it starts playing at, the reply "partial", the whole clip's table asked for after (below)
+    -- seconds it starts playing at, the reply "partial", extended ahead of where it plays after (gpu_ahead)
     if not has_project(source) then ud.moment_end = moment_end() end
     -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
     -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
@@ -1173,28 +1249,13 @@ local function gpu_table(source, done)
         local reply = {}
         for k, v in pairs(hit.reply) do reply[k] = v end
         reply.ms, reply.reused = 0, true
+        if package.loaded.journal then package.loaded.journal.step("gpu-table", { reused = true }) end
         mp.add_timeout(0, function() done(reply) end)
         return
     end
-    local function ask(req, then_)
-        gpu_count = gpu_count + 1
-        local out = utils.join_path(platform.temp_dir(), string.format("mpv-gyroflow-%d-%d.glsl", utils.getpid(), gpu_count))
-        local t = mp.get_time()
-        local args = { GPU_TABLE, "--player", utils.format_json(req), out }
-        if gpu_server_running then
-            table.insert(args, "--server")
-            table.insert(args, GPU_SERVER)
-        end
-        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, playback_only = false }, function(_, r)
-            local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
-            if not reply then reply = { error = "gyroflow-gpu-table failed: " .. tostring(r and (r.error_string ~= "" and r.error_string or r.status)) } end
-            reply.ms = math.floor((mp.get_time() - t) * 1000)
-            reply.denoise = ud.gpu_denoise
-            reply.translation = reply.translation == true
-            then_(reply)
-        end)
-    end
-    -- From where it plays now (0 as it opens), not kept by it: the whole clip's table is the same
+    local ask = gpu_ahead.ask
+    -- From where it plays now (0 as it opens), not kept by it: the whole clip's table is the same. A stretch: the
+    -- request kept with the reply, gpu_ahead asks for more of it as it plays
     if not has_project(source) and not ud.moment_end then
         local req = {}
         for k, v in pairs(ud) do req[k] = v end
@@ -1204,21 +1265,8 @@ local function gpu_table(source, done)
                 if reply.shader then gpu_remember(key, reply) end
                 return done(reply)
             end
+            reply.request = ud
             done(reply)
-            -- The whole clip's, once its motion data is all read (the table server reads it meanwhile), in place of
-            -- the stretch's: unless something else took its place
-            local first = reply.shader
-            local whole = {}
-            for k, v in pairs(ud) do whole[k] = v end
-            whole.full = true
-            ask(whole, function(full)
-                if not full.shader then return mp.msg.info("the whole clip's motion data: " .. tostring(full.error or full.unsupported)) end
-                gpu_remember(key, full)
-                if gpu and gpu.shader == first and current_source == source then
-                    gpu_apply(full)
-                    mp.msg.info(string.format("the whole clip's motion data in %d ms", full.ms or 0))
-                end
-            end)
         end)
     end
     ask(ud, function(reply)
@@ -1237,8 +1285,11 @@ end
 local render_scale = 1
 -- The short side it renders at, for quality.lua (nil: not the GPU path)
 local gpu_render_short = nil
+-- (The line last logged inside a block of its own: the main chunk is at Lua's 200 local variables)
+local gpu_render_scale
+do
 local render_logged = nil
-local function gpu_render_scale()
+function gpu_render_scale()
     if not gpu or not gpu.shader or gpu.sphere then return end
     local d = mp.get_property_native("osd-dimensions") or {}
     local dw, dh = (d.w or 0) - (d.ml or 0) - (d.mr or 0), (d.h or 0) - (d.mt or 0) - (d.mb or 0)
@@ -1263,6 +1314,7 @@ local function gpu_render_scale()
     opts.gyroflow_render_scale = string.format("%.4f", s)
     mp.set_property_native("glsl-shader-opts", opts)
 end
+end
 
 gpu_apply = function(reply)
     -- The frame on screen, before the new shader (its ring of frames starts again from the newest)
@@ -1283,12 +1335,88 @@ gpu_apply = function(reply)
     mp.set_property("file-local-options/cscale", reply.mode == "grid" and "bilinear" or (mp.get_property("options/cscale") or "bilinear"))
     gpu = { shader = reply.shader, output = { w, h }, mode = reply.mode, chromatic = reply.chromatic,
             focal = type(reply.focal) == "table" and reply.focal or nil, denoise = reply.denoise or false, translation = reply.translation or false }
+    -- A stretch of the clip's motion data (gpu_ahead extends it as it plays): what it covers, up to where it's
+    -- settled, and the request it came from
+    if reply.partial and type(reply.covers) == "table" and type(reply.request) == "table" then
+        gpu.covers, gpu.settled, gpu.duration, gpu.request = reply.covers, reply.settled, reply.duration, reply.request
+    end
     mp.set_property_native("user-data/gyroflow/gpu", { mode = reply.mode or "", chromatic = reply.chromatic or false })
     gpu_render_scale()
     dn_sync(shown)
     -- The panel's sideways jerks: computed for this clip or not
     publish()
 end
+
+-- A clip without a project plays from a stretch of its motion data: the table is extended ahead of where it plays,
+-- a step at a time, the new one in place of the one before as it comes in (its frames where both have them are the
+-- old one's: nothing on screen changes), ahead.lua says when and how far (docs/gpu-table-ahead.md). Before, the whole
+-- clip's motion data was read in one go after the first stretch: 1.7 GB from the NAS, 35-48 s, and playback ran past
+-- the stretch's 20 s into the unstabilized picture until it came (2026-11-19).
+-- If it still plays up to the end of what the table knows (a share slower than the video), it waits there, paused
+-- with a card, rather than playing on unstabilized: the picture holds the last known correction past it, which is
+-- the shaking camera turned by a fixed angle, the dropout itself. Paused by the plugin (`held`): unpaused when the
+-- table is there, unless the viewer paused or played meanwhile
+function gpu_ahead.card(t)
+    if mp.notify then return mp.notify(t) end
+    if t.kind == "hide" then mp.osd_message("", 0) else mp.osd_message(t.title or "", t.kind == "working" and 30 or 3) end
+end
+function gpu_ahead.release()
+    if not gpu_ahead.held then return end
+    gpu_ahead.held = false
+    gpu_ahead.card({ kind = "hide", id = "gyroflow-ahead" })
+    if mp.get_property_native("pause") then mp.set_property_native("pause", false) end
+end
+function gpu_ahead.tick()
+    local g = gpu
+    if not g or not g.covers or not g.request or g.shader == gpu_ahead.failed then return gpu_ahead.release() end
+    local tp = mp.get_property_number("time-pos")
+    if not tp then return end
+    local offset = g.request.time_offset or 0
+    local la, lb = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
+    local s = { pos = tp + offset, duration = g.duration, paused = mp.get_property_native("pause") and not gpu_ahead.held,
+                covers = g.covers, settled = g.settled, busy = gpu_ahead.busy == g.shader,
+                loop = (la and lb) and { a = la + offset, b = lb + offset } or nil }
+    local want = gpu_ahead.policy.next(s)
+    if want then
+        local req = {}
+        for k, v in pairs(g.request) do req[k] = v end
+        req.start, req["until"], req.urgent = want.start, want.until_, want.urgent
+        local source, shader = current_source, g.shader
+        gpu_ahead.busy, s.busy = shader, true
+        gpu_ahead.ask(req, function(reply)
+            if gpu_ahead.busy == shader then gpu_ahead.busy = nil end
+            if current_source ~= source or not gpu or gpu.shader ~= shader then return end
+            if not reply.shader then
+                gpu_ahead.failed = shader
+                mp.msg.warn("the table ahead of where it plays: " .. tostring(reply.error or reply.unsupported))
+                return gpu_ahead.release()
+            end
+            reply.request = g.request
+            gpu_apply(reply)
+            mp.msg.verbose(string.format("the table now covers %s s (asked from %.1f s), %d ms", reply.covers and
+                string.format("%.1f-%.1f", reply.covers[1], reply.covers[2]) or "all", want.start, reply.ms or 0))
+            gpu_ahead.tick()
+        end)
+    end
+    if gpu_ahead.policy.wait(s) then
+        if not gpu_ahead.held and not mp.get_property_native("pause") then
+            gpu_ahead.held = true
+            mp.set_property_native("pause", true)
+            gpu_ahead.card({ kind = "working", id = "gyroflow-ahead", title = "Stabilization is catching up",
+                   detail = "Reading the clip's motion data from the share; it plays on in a moment" })
+            mp.msg.info(string.format("waiting at %.1f s for the table (it has %.1f-%.1f s)", s.pos, g.covers[1], g.covers[2]))
+        end
+    else
+        gpu_ahead.release()
+    end
+end
+mp.add_periodic_timer(0.25, function() if gpu and gpu.covers then gpu_ahead.tick() elseif gpu_ahead.held then gpu_ahead.release() end end)
+mp.register_event("seek", function() if gpu and gpu.covers then gpu_ahead.tick() end end)
+-- The viewer played or paused while it waited: theirs from then on
+mp.observe_property("pause", "bool", function(_, paused)
+    if gpu_ahead.held and paused == false then gpu_ahead.held = false; gpu_ahead.card({ kind = "hide", id = "gyroflow-ahead" }) end
+end)
+mp.register_event("end-file", function() gpu_ahead.release(); gpu_ahead.busy = nil end)
 
 -- Crop mode's camera on the GPU path (crop.lua): the warp's gyroflow_cam_ parameters, set as it turns (no table
 -- written again, nothing rendered again but the frame): gyroflow-core's view rotation (yaw about y, pitch about x, roll
@@ -1675,9 +1803,11 @@ end
 -- Loading waits for the probe, with the script free meanwhile: quitting doesn't wait for it
 mp.add_hook("on_load", 50, function(hook)
     hook:defer()
-    local slow = mp.add_timeout(0.7, function() mp.osd_message("Gyroflow: reading the clip…", 30) end)
+    local slow = mp.add_timeout(0.7, function()
+        mp.notify({ id = "gyroflow:reading", kind = "working", title = "Reading the clip's motion", detail = "For the stabilization" })
+    end)
     setup(function()
-        if not slow:is_enabled() then mp.osd_message("", 0) end
+        if not slow:is_enabled() then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
         slow:kill()
         -- Held for a clip before this one that didn't get to play on the GPU path
         if not (gpu and gpu.hold) then gpu_unhold() end
@@ -1693,8 +1823,9 @@ play_again = function()
 end
 
 -- What it does until the first frame shows: the filter reads the clip's motion and is set up (seconds from a NAS),
--- and the window, there at once (the Windows app's force-window=immediate), stays black meanwhile. The label as
--- before, and past a second without a frame, that the first one is being prepared, until it shows
+-- and the window, there at once (the Windows app's force-window=immediate), stays black meanwhile. Past a second
+-- without a frame, a card says the first one is being prepared, until it shows. (What it plays with isn't said: the
+-- panel shows it)
 local first_frame = { timer = nil, observer = nil, waiting = false }
 local function first_frame_done()
     if first_frame.timer then first_frame.timer:kill() end
@@ -1705,13 +1836,12 @@ local function first_frame_done()
 end
 local function first_frame_message(label)
     first_frame_done()
-    mp.osd_message(label, 1.5)
     if mp.get_property_native("video-frame-info") ~= nil then return end
     first_frame.observer = function(_, info)
         if info == nil then return end
         if first_frame_done() then
             mp.msg.verbose("the first frame shows")
-            mp.osd_message(label, 1.5)
+            mp.notify({ id = "gyroflow:first-frame", kind = "hide" })
         end
     end
     mp.observe_property("video-frame-info", "native", first_frame.observer)
@@ -1719,11 +1849,16 @@ local function first_frame_message(label)
         first_frame.timer = nil
         first_frame.waiting = true
         mp.msg.verbose("no frame yet: the first one is being prepared")
-        mp.osd_message(label .. "\nPreparing the first frame…", 120)
+        mp.notify({ id = "gyroflow:first-frame", kind = "working", title = "Preparing the first frame", detail = "The stabilization is being set up" })
+        -- Never for good (as mpv's text was: two minutes)
+        first_frame.timer = mp.add_timeout(120, function()
+            first_frame.timer = nil
+            mp.notify({ id = "gyroflow:first-frame", kind = "hide" })
+        end)
     end)
 end
 mp.register_event("end-file", function()
-    if first_frame_done() then mp.osd_message("", 0) end
+    if first_frame_done() then mp.notify({ id = "gyroflow:first-frame", kind = "hide" }) end
 end)
 
 mp.register_event("file-loaded", function()
@@ -1769,6 +1904,7 @@ local function set_edges(mode)
 end
 
 mp.add_key_binding("Ctrl+b", "edges", function()
+    if platform.photo_shown() then return end
     local i = 1
     for k, m in ipairs(EDGE_MODES) do
         if m == edge_mode then i = k end
@@ -1820,6 +1956,8 @@ place_filters = function(enabled, full)
     if step then table.insert(vf, at, step) end
     if hwdec and hwdec ~= mp.get_property("file-local-options/hwdec") then mp.set_property("file-local-options/hwdec", hwdec) end
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
 end
 
 -- The GPU path after a change (view, level, horizon, lens, edges, color fringes, the frame): the shader written again
@@ -1846,7 +1984,12 @@ gpu_refresh = function()
     gpu_table(source, function(reply)
         local again = gpu_pending == "again"
         gpu_pending = false
-        if current_source ~= source or not gpu then return end
+        if current_source ~= source or not gpu then
+            -- Asked again meanwhile for what plays now (a project saved in Gyroflow while this one was written): that
+            -- one's written, not dropped with this
+            if again and gpu and current_source then gpu_refresh() end
+            return
+        end
         if reply.shader then
             gpu_apply(reply)
         else
@@ -1857,7 +2000,9 @@ gpu_refresh = function()
         if again then gpu_refresh() end
     end)
 end
-mp.register_event("shutdown", function() if gpu and gpu.shader then os.remove(gpu.shader) end end)
+-- (never the hold shader: it is the plugin's own file, not one written for a clip. Quitting while it held removed
+-- it from the app, and the next start had no shader to hold with)
+mp.register_event("shutdown", function() if gpu and gpu.shader and gpu.shader ~= GPU_HOLD_SHADER then os.remove(gpu.shader) end end)
 -- Ctrl+p on the GPU path: the denoise in or out of the shader
 mp.observe_property("user-data/gyroflow/still", "native", function() if gpu then gpu_refresh() end end)
 
@@ -1869,16 +2014,21 @@ local function with_pause(message, change)
     if gpu then return change() end
     local paused = mp.get_property_native("pause")
     if not paused then mp.set_property_native("pause", true) end
-    mp.osd_message(message, 10)
+    -- A card while it's set up again ("Gyroflow: the lens corrected…" says what changes)
+    local title = (message or ""):gsub("^Gyroflow: ", ""):gsub("…$", "")
+    if title ~= "" then
+        title = title:sub(1, 1):upper() .. title:sub(2)
+        mp.notify({ id = "gyroflow:setup", kind = "working", title = title, detail = "Setting the stabilization up again" })
+    end
     change()
-    if paused then return mp.osd_message("", 0) end
+    if paused then return mp.notify({ id = "gyroflow:setup", kind = "hide" }) end
     local timer = nil
     local function resume()
         mp.unregister_event(resume)
         timer:kill()
         mp.add_timeout(0.3, function()
             mp.set_property_native("pause", false)
-            mp.osd_message("", 0)
+            mp.notify({ id = "gyroflow:setup", kind = "hide" })
         end)
     end
     mp.register_event("playback-restart", resume)
@@ -2100,6 +2250,7 @@ end)
 
 -- on -> wider view -> off -> on
 mp.add_key_binding("Ctrl+g", "toggle", function()
+    if platform.photo_shown() then return end
     if stab_off then show("normal") else show(view == "normal" and "wide" or "off") end
 end)
 
@@ -2123,6 +2274,7 @@ end
 
 -- weak -> medium -> strong -> weak
 mp.add_key_binding("Ctrl+k", "level", function()
+    if platform.photo_shown() then return end
     for i, l in ipairs(LEVELS) do
         if l == level then return set_level(LEVELS[i % #LEVELS + 1]) end
     end
@@ -2174,6 +2326,7 @@ end)
 -- Above water <-> what it was (under water, as the camera says, or as the project says). Not named "lens": a key
 -- binding's name is a script message too (mpv's defaults.lua), and it took the Lens drop-down's message over
 mp.add_key_binding("Ctrl+u", "above-water", function()
+    if platform.photo_shown() then return end
     set_underwater(underwater == "no" and underwater_back or "no")
 end)
 
@@ -2239,10 +2392,11 @@ local function trans_compute()
         local p = f and utils.parse_json(f:read("*a") or "") or nil
         if f then f:close() end
         trans.progress = tonumber(p and p.translation) or trans.progress
-        mp.osd_message(string.format("Gyroflow: measuring the sideways jerks… %d %%", trans.progress), 1)
+        mp.notify({ id = "gyroflow:translation", kind = "working", title = "Measuring the sideways jerks", detail = "In the picture, for this clip (kept for next time)",
+                    share = (tonumber(trans.progress) or 0) / 100 })
         publish()
     end)
-    mp.osd_message("Gyroflow: measuring the sideways jerks…", 2)
+    mp.notify({ id = "gyroflow:translation", kind = "working", title = "Measuring the sideways jerks", detail = "In the picture, for this clip (kept for next time)" })
     trans.job = mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
         poll:kill()
         trans.job = nil
@@ -2251,18 +2405,20 @@ local function trans_compute()
         local reply = r and r.status == 0 and utils.parse_json((r.stdout or ""):match("[^\n]*")) or nil
         if not (reply and reply.translation) then
             local why = r and (r.stderr or ""):match("failed, ([^\n]*)") or r and (r.stderr or ""):match("skipped, ([^\n]*)")
-            return mp.osd_message("Gyroflow: the sideways jerks couldn't be measured" .. (why and (": " .. why) or ""), 4)
+            return mp.notify({ id = "gyroflow:translation", kind = "error", title = "The sideways jerks couldn't be measured", detail = why })
         end
         trans_rev, trans.on = trans_rev + 1, true
         trans_apply()
         if current_source == source then gpu_refresh() end
         local share = tonumber(reply.share) or 0
-        mp.osd_message(share < 0.25 and "Gyroflow: little to take out of this clip's sideways jerks (no close subject to measure them on)"
-            or string.format("Gyroflow: sideways jerks taken out, %.1f → %.1f px (Ctrl+j off and on)", tonumber(reply.before) or 0, tonumber(reply.after) or 0), 4)
+        mp.notify({ id = "gyroflow:translation", kind = "done", seconds = 4, title = share < 0.25 and "Little to take out of the sideways jerks" or "Sideways jerks taken out",
+                    detail = share < 0.25 and "No close subject to measure them on"
+                        or string.format("%.1f → %.1f px (Ctrl+j off and on)", tonumber(reply.before) or 0, tonumber(reply.after) or 0) })
     end)
     publish()
 end
 mp.add_key_binding("Ctrl+j", "translation", function()
+    if platform.photo_shown() then return end
     if not (gpu and gpu.shader) then
         return mp.osd_message("Gyroflow: the sideways jerks are taken out on the GPU path only", 3)
     end
@@ -2275,7 +2431,7 @@ mp.add_key_binding("Ctrl+j", "translation", function()
     mp.osd_message("Gyroflow: sideways jerks " .. (trans.on and "taken out" or "left as recorded"), 2)
 end)
 
-mp.add_key_binding("Ctrl+a", "fringes", function() set_chromatic(not chromatic) end)
+mp.add_key_binding("Ctrl+a", "fringes", function() if not platform.photo_shown() then set_chromatic(not chromatic) end end)
 
 -- The temporal denoise's Stronger (the panel's Transform): kept with the clip's transform; the shader takes it at once
 -- (gyroflow_dn_strong, nothing written again)
@@ -2403,6 +2559,8 @@ mp.register_script_message("remember", function()
         for k, v in pairs(b) do session[k] = v end
         publish()
     end
+    -- The underwater colour's part of the transform (the dlogm plugin's uwcolor.conf)
+    mp.commandv("script-message-to", "dlogm", "uw-remember")
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
@@ -2447,10 +2605,8 @@ end)
 local WATCH_INTERVAL = 0.5
 local watch = nil
 
-local function file_version(path)
-    local info = utils.file_info(path)
-    return info and info.is_file and string.format("%s/%d", tostring(info.mtime), info.size) or nil
-end
+-- The project's version and when a save is taken up (projectwatch.lua)
+local projectwatch = require 'projectwatch'
 
 local function stop_watching()
     if watch then watch.timer:kill() end
@@ -2467,52 +2623,47 @@ local function reload_project(project, version)
         mp.msg.warn("not reloading " .. project .. ": not a Gyroflow project")
         return
     end
-    -- The same video: its camera records the water or not as it did
+    -- The same video: its camera records the water or not as it did. The save's version goes into the filter's and
+    -- the GPU path's settings (gyroflow_filter): mpv keeps a filter whose parameters didn't change, the shader is
+    -- reused by its settings, and the table server keeps the clips it loaded, and the project's path hasn't changed
     local source = { project = project, kind = "project", width = w, height = h, fps = fps, out_width = ow, out_height = oh,
-                     water = current_source and current_source.water, sizes = current_source and current_source.sizes }
+                     water = current_source and current_source.water, sizes = current_source and current_source.sizes, version = version }
+    -- Playing from now: the settings below write the GPU path's shader again (write_edge_control) for this source. A
+    -- table asked for the one before is dropped as it comes (gpu_refresh), which left the old shader in place
+    current_source = source
     -- The project as Gyroflow has it: written from the wider view, it has that view's FOV itself, and the horizon lock
     -- and the lens it played with here
     view = "normal"
     clip_settings(source)
+    -- The GPU path: its shader from the project as saved, put in place of the old while the video plays on
     write_edge_control()
     local vf = mp.get_property_native("vf") or {}
     for i, f in ipairs(vf) do
-        if f.label == LABEL then
-            local filter = gyroflow_filter(source, f.enabled)
-            -- mpv keeps a filter whose parameters didn't change, and the project's path may not have
-            local data = utils.parse_json(filter.params["user-data"])
-            data.version = version
-            filter.params["user-data"] = utils.format_json(data)
-            vf[i] = filter
-        end
+        if f.label == LABEL then vf[i] = gyroflow_filter(source, f.enabled) end
     end
-    current_source = source
     mp.set_property_native("vf", vf)
+    -- Journal: the filter's in mpv's list; the picture changes with the next frame mpv makes
+    if package.loaded.journal then package.loaded.journal.step("vf-set") package.loaded.journal.shown("picture") end
     publish()
     mp.msg.info("reloaded " .. project)
     mp.osd_message("Gyroflow: project reloaded", 3)
 end
 
--- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval. For a video that
--- had no project, the first one found next to it, once it stays the same
+-- Gyroflow writes the file in place: a version is taken once it stayed the same for an interval (projectwatch.lua). For
+-- a video that had no project, the first one found next to it, once it stays the same
 local function check_project()
     local project = watch.project or find_project(watch.video)
     if not project then return end
-    local v = file_version(project)
-    if not v or v == watch.version then
-        watch.pending = nil
-    elseif v ~= watch.pending then
-        watch.pending = v
-    elseif not watch.project then
+    local action, version = projectwatch.step(watch, projectwatch.version(utils, project))
+    if action == "found" then
         -- Saved from Gyroflow beside the clip: into the project's catalog (the Library's motion data and badge)
         mp.commandv("script-message-to", "workspace", "catalog-note", project)
         mp.msg.info("found " .. project .. ", loading the video again with it")
         mp.osd_message("Gyroflow: project saved, stabilizing", 3)
         stop_watching()
         play_again()
-    else
-        watch.version, watch.pending = v, nil
-        reload_project(watch.project, v)
+    elseif action == "reload" then
+        reload_project(watch.project, version)
     end
 end
 
@@ -2555,7 +2706,7 @@ local function open_in_gyroflow(file, project, opened_message, preset)
     local video = clip_path()
     if not (watch and watch.project == project and watch.video == video) then
         stop_watching()
-        watch = { project = project, video = video, version = project and file_version(project) or nil }
+        watch = { project = project, video = video, version = project and projectwatch.version(utils, project) or nil }
         watch.timer = mp.add_periodic_timer(WATCH_INTERVAL, check_project)
     end
     waiting = project == nil
@@ -2576,6 +2727,7 @@ local function edit_project(project)
 end
 
 mp.add_key_binding("Ctrl+e", "edit", function()
+    if platform.photo_shown() then return end
     local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Gyroflow: not a local file", 1.5)
@@ -2619,16 +2771,17 @@ mp.add_key_binding("Ctrl+e", "edit", function()
         table.insert(args, "--alone"); table.insert(args, ws.alone and "yes" or "no")
     end
     table.insert(args, path); table.insert(args, project)
-    mp.osd_message("Gyroflow: writing the project...", 2)
+    mp.notify({ id = "gyroflow:project", kind = "working", title = "Writing the Gyroflow project", detail = platform.file_name(project) })
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         if r and r.status == 0 then
             mp.msg.info("wrote " .. project)
+            mp.notify({ id = "gyroflow:project", kind = "hide" })
             mp.commandv("script-message-to", "workspace", "catalog-note", project)
             edit_project(project)
         else
             local err = (r and r.stderr or ""):gsub("%s+$", "")
             mp.msg.warn("gyroflow-project: " .. err)
-            mp.osd_message("Gyroflow: couldn't write the project: " .. (err:match("([^\n]+)$") or "failed"), 4)
+            mp.notify({ id = "gyroflow:project", kind = "error", title = "Couldn't write the Gyroflow project", detail = err:match("([^\n]+)$") or "gyroflow-project failed" })
         end
     end)
 end)
@@ -2641,6 +2794,14 @@ do
     local v = tostring(o.live_photo)
     if v ~= "no" and v ~= "motion" and not (v == "live" and platform.macos) then v = platform.macos and "live" or "motion" end
     mp.set_property_native("user-data/gyroflow/live_photo", v)
+end
+-- The export's settings (exportsettings.lua: a video's size, encoder and quality preset, a photo's size and preset),
+-- as gyroflow.conf keeps them; export.lua's export-setting message changes them
+do
+    local es = require 'exportsettings'
+    mp.set_property_native("user-data/gyroflow/export_settings", {
+        video = es.normalize({ size = o.export_size, encode = o.export_encode, quality = o.export_quality }, "video"),
+        photo = es.normalize({ size = o.photo_size, quality = o.photo_quality }, "photo"), choices = es.CHOICES })
 end
 require 'export'
 

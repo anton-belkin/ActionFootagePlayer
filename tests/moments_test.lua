@@ -278,5 +278,18 @@ do
     expect("trips: no time", clips[6].trip, nil)
 end
 
+-- A moment saved again with a new in and out: the Library's tags, pick, stars and comment carried from its old link
+do
+    local old = { v = 1, kind = "moment", ["in"] = 1000, out = 2000, tags = { "Turtle" }, rating = 4, pick = "accept",
+                  comment = "Черепаха ест медузу", snap = 1 }
+    local l = moments_lib.carry(old, { v = 1, kind = "moment", ["in"] = 1500, out = 2500 })
+    expect("carry: comment", l.comment, "Черепаха ест медузу")
+    expect("carry: tags", l.tags and l.tags[1], "Turtle")
+    expect("carry: stars and pick", tostring(l.rating) .. l.pick, "4accept")
+    expect("carry: the new part, not the old", l["in"], 1500)
+    expect("carry: nothing else of the old", l.snap, nil)
+    expect("carry: no old link", moments_lib.carry(nil, { v = 1 }).comment, nil)
+end
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

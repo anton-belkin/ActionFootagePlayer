@@ -53,6 +53,7 @@
 local mp = require 'mp'
 local utils = require 'mp.utils'
 local platform = require 'platform'
+local es = require 'exportsettings'
 
 local EXPORT = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-export"))
 -- Shift+E twice within this many seconds cancels
@@ -64,7 +65,6 @@ local KILL_AFTER = 5
 -- file's last contents), cancelling }
 local running = {}
 local order = {}
-local overlay = mp.create_osd_overlay("ass-events")
 local confirm = nil
 local playing = false
 local timer
@@ -157,29 +157,25 @@ local function clock(s)
     return string.format("%d:%02d", math.floor(s / 60), s % 60)
 end
 
-local function line(job)
-    local st = job.state or {}
-    local text = job.name .. job.range .. "  "
-    if job.cancelling then return text .. "cancelling" end
-    if not st.total then return text .. "starting" end
-    -- A flat 360 export measures the hold on what's in the middle first, when it's asked for and not measured yet
-    if st.stage == "measuring" then text = text .. "measuring the hold " end
-    text = text .. string.format("%d%%", math.floor(st.done / st.total * 100))
-    if st.background then return text .. "  slowed while playing" end
-    return text .. string.format("  %.0f fps  %s left", st.fps, clock(st.eta))
-end
-
+-- Each export a card (the side panel's, side-panel/notify.lua): its share done, the speed and the time left
 local function redraw()
-    if #order == 0 then
-        overlay:remove()
-        return
-    end
-    local lines = {}
     for _, path in ipairs(order) do
-        table.insert(lines, (line(running[path]):gsub("\\", "\\\\"):gsub("{", "\\{")))
+        local job = running[path]
+        local st = job.state or {}
+        local detail, share
+        if job.cancelling then
+            detail = "Cancelling"
+        elseif not st.total then
+            detail = "Starting"
+        else
+            share = st.done / math.max(1, st.total)
+            -- A flat 360 export measures the hold on what's in the middle first, when it's asked for and not measured yet
+            detail = (st.stage == "measuring" and "Measuring the hold on the middle · " or "")
+                .. (st.background and "Slowed while the video plays: pause it for full speed"
+                    or string.format("%.0f fps · %s left", st.fps or 0, clock(st.eta or 0)))
+        end
+        mp.notify({ id = "export:" .. path, kind = "working", title = "Exporting " .. job.name .. job.range, detail = detail, share = share })
     end
-    overlay.data = "{\\an9\\fs16\\bord1.2}Exporting\\N" .. table.concat(lines, "\\N")
-    overlay:update()
 end
 
 local function poll()
@@ -251,6 +247,8 @@ end)
 
 -- The clip playing, or nil (and why on screen)
 local function local_path()
+    -- A photo shown: nothing to export or take a frame of (quietly: the key does nothing)
+    if platform.photo_shown() then return nil end
     local path = clip_path()
     if not path or path:find("://", 1, true) then
         mp.osd_message("Export: not a local file", 2)
@@ -260,6 +258,13 @@ local function local_path()
 end
 
 local run_export
+
+-- The export's settings (exportsettings.lua, docs/export-settings.md): a video's (size, encode, quality) and a photo's
+-- (size, quality), kept in gyroflow.conf (export_*, photo_*), published by main.lua as user-data/gyroflow/export_settings
+local function settings(kind)
+    local all = mp.get_property_native("user-data/gyroflow/export_settings")
+    return es.normalize(type(all) == "table" and all[kind] or nil, kind)
+end
 
 -- The output's lens (the gyroflow plugin's projection), as gyroflow-export names it; linear is its default
 local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true, orthographic = true }
@@ -295,7 +300,7 @@ local function cleanup_args(args, denoise, strong, chromatic, amount)
     table.insert(args, "--chromatic"); table.insert(args, chromatic and "yes" or "no")
 end
 
-local function as_it_plays(args, sdr, photo, live)
+local function as_it_plays(args, sdr, photo, live, s)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
     if look == "off" or curve == "" then
         table.insert(args, "--curve"); table.insert(args, "none")
@@ -347,13 +352,13 @@ local function as_it_plays(args, sdr, photo, live)
     if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
     local projection = gyroflow("projection")
     if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
-    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"))
+    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"), es.amount(s, nil))
 end
 
 -- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
 -- args, for a clip that isn't the one playing (the Project tab's moments and photos of marks): what isn't saved is
 -- gyroflow-export's own default (the curve from the clip's metadata, the preset's), the edge fill as it's set here
-local function view_args(args, v)
+local function view_args(args, v, s)
     local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
     if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
     -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
@@ -380,7 +385,7 @@ local function view_args(args, v)
     local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
     if aspect and aspect ~= "original" then add("--aspect", aspect) end
     if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
-    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, v.temporal_denoise)
+    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, es.amount(s, v.temporal_denoise))
 end
 
 -- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
@@ -415,8 +420,11 @@ local function start(path, how, named)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    as_it_plays(args, how == "sdr", false, false)
+    -- The export's settings: its size, encoder and quality preset
+    local s = settings("video")
+    as_it_plays(args, how == "sdr", false, false, s)
     if how == "youtube" then youtube_args(args) end
+    es.apply(args, s, "video")
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
     if named and named.from and named.to then a, b = named.from, named.to end
@@ -440,26 +448,26 @@ function run_export(path, args, range, progress, control)
     local job = { name = name, range = range, progress = progress, control = control }
     running[path] = job
     table.insert(order, path)
-    mp.osd_message("Exporting " .. name .. range .. (playing and " (slowly while the video plays)" or ""), 3)
     mp.msg.info("export: " .. table.concat(args, " "))
     job.id = mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         finish(path)
         local err = r and r.stderr or ""
         -- gyroflow-export's last line for a video it exported: "  -> <output>"
         local out = ("\n" .. err):match("\n  %-> ([^\r\n]+)")
+        local card = "export:" .. path
         if job.cancelling then
-            mp.osd_message("Export cancelled: " .. name .. range, 4)
+            mp.notify({ id = card, kind = "info", title = "Export cancelled", detail = name .. range, seconds = 4 })
             notify("Export cancelled", name .. range)
         elseif r and r.status == 0 and out then
             last_export = out
             tell_catalog(out)
             publish()
-            mp.osd_message("Exported " .. name .. range .. "\n" .. out, 5)
+            mp.notify({ id = card, kind = "done", title = "Exported " .. name .. range, detail = platform.file_name(out), seconds = 5 })
             notify("Exported " .. name, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
             mp.msg.warn("export: " .. err)
-            mp.osd_message("Export failed: " .. why, 6)
+            mp.notify({ id = card, kind = "error", title = "Export failed: " .. name .. range, detail = why })
             notify("Export failed: " .. name, why)
         end
     end)
@@ -592,33 +600,59 @@ mp.register_script_message("reveal-last-export", function()
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false }, function() end)
 end)
 
+-- A moment's picture, the frame on screen as k is pressed (the workspace plugin's moment-picture { a, b }: the part,
+-- in the clip's time): mpv's screenshot of the video as it's rendered (the stabilization, the look; no OSD, panel or
+-- console) in SDR (screenshot-tag-colorspace no: an HDR look tone-mapped to sRGB, as Alt+s's photo links have it),
+-- for the preview that follows (preview's `picture`). Taken only where it's the moment as it will play: a window that
+-- renders (not --vo=null, not the Library's batches), the frame on screen inside the part, Save frame's crop mode off
+-- (a moment keeps neither its camera nor its frame; paused, its screenshot can be stale: the denoise's ring). Else
+-- none, and the preview is rendered by gyroflow-export as before
+local moment_picture = nil
+
 -- A moment's preview, for the workspace plugin: one frame in SDR, stabilized as the clip plays, held for its part.
--- Short (a second or two), so it runs at once, beside an export if there's one
+-- Short (a second or two), so it runs at once, beside an export if there's one. With `picture` (k's): the frame taken
+-- as k was pressed (moment-picture) made into it, no clip decoded (a second, where rendering one takes up to 30 s on
+-- the NAS); without one taken, rendered
 mp.register_script_message("preview", function(json)
     local req = utils.parse_json(json or "")
     if type(req) ~= "table" or not req.clip or not req.output or not req.reply then return end
+    local picture = req.picture == true and moment_picture or nil
+    moment_picture = nil
     local function reply(ok, err)
+        if picture then os.remove(picture) end
         mp.commandv("script-message-to", req.reply, req.done or "preview-done", tostring(req.id or ""), utils.format_json({ ok = ok, error = err }))
     end
     local info = utils.file_info(EXPORT)
     if not info or not info.is_file then return reply(false, "gyroflow-export isn't installed") end
     local args = { EXPORT, "--preview", "still" }
     if req.force then table.insert(args, "--force") end
-    -- Another clip's (req.view: its saved view), or as this one plays
-    if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+    if picture then
+        table.insert(args, "--picture"); table.insert(args, picture)
+    else
+        -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+        local ok, err = xpcall(function()
+            if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+        end, debug.traceback)
+        if not ok then
+            mp.msg.error("preview: " .. tostring(err))
+            return reply(false, tostring(err):match("^[^\n]*"))
+        end
+    end
     -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
-    -- on its own
-    if req.project ~= nil then
+    -- on its own (with a picture: it's in the picture already)
+    if picture then
+    elseif req.project ~= nil then
         for i = #args - 1, 1, -1 do
             if args[i] == "--project" then table.remove(args, i + 1); table.remove(args, i) end
         end
         if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
     end
-    if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
+    if picture then
+    elseif req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
     add("--from", req.from and string.format("%.3f", req.from))
     add("--to", req.to and string.format("%.3f", req.to))
-    add("--at", req.at and string.format("%.3f", req.at))
+    if not picture then add("--at", req.at and string.format("%.3f", req.at)) end
     add("--link", req.link)
     add("--dates", req.dates)
     add("--output", req.output)
@@ -654,7 +688,9 @@ mp.register_script_message("export-batch", function(json)
     local args = { EXPORT, "--force" }
     if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
     if control then table.insert(args, "--control"); table.insert(args, control) end
-    view_args(args, type(req.view) == "table" and req.view or {})
+    -- The Library's export settings (Share's dialog), else the defaults
+    local s = es.normalize(req.export, "video")
+    view_args(args, type(req.view) == "table" and req.view or {}, s)
     if req.sdr == true then table.insert(args, "--nbcu") end
     if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
     if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
@@ -663,6 +699,7 @@ mp.register_script_message("export-batch", function(json)
     add("--to", req.to and string.format("%.3f", req.to))
     add("--output", req.output)
     add("--link", req.link)
+    es.apply(args, s, "video")
     table.insert(args, req.clip)
     mp.msg.info("export (batch): " .. table.concat(args, " "))
     local job = { control = control, progress = req.progress, state = {} }
@@ -754,6 +791,40 @@ local function shown_time()
     return math.max(restart, t - d.delay)
 end
 
+-- k's moment picture (moment_picture, above)
+mp.register_script_message("moment-picture", function(json)
+    if moment_picture then os.remove(moment_picture); moment_picture = nil end
+    local req = utils.parse_json(json or "")
+    if type(req) ~= "table" or type(req.a) ~= "number" or type(req.b) ~= "number" then return end
+    local vo = mp.get_property("current-vo")
+    if not vo or vo == "null" or vo == "image" or (os.getenv("AFP_BATCH") or "") ~= "" then return end
+    if not mp.get_property_native("vo-configured") then return end
+    local crop = mp.get_property_native("user-data/gyroflow/crop") or {}
+    if crop.active then return end
+    local t = shown_time()
+    -- A moment playing as a video of its own: its time plus where it starts in the clip
+    local ws = mp.get_property_native("user-data/workspace")
+    if t and type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.offset) == "number" then t = t + ws.offset end
+    -- A frame's slack at the ends (B is where the loop turns back)
+    if not t or t < req.a - 0.05 or t > req.b + 0.05 then
+        return mp.msg.info("moment picture: the frame on screen isn't inside the part: the preview is rendered")
+    end
+    local file = utils.join_path(platform.temp_dir(), string.format("afp-moment-%d.jpg", utils.getpid()))
+    local saved = {}
+    for k, v in pairs({ ["screenshot-format"] = "jpg", ["screenshot-jpeg-quality"] = "95", ["screenshot-tag-colorspace"] = "no", ["screenshot-high-bit-depth"] = "no" }) do
+        saved[k] = mp.get_property(k)
+        mp.set_property(k, v)
+    end
+    local t0 = mp.get_time()
+    os.remove(file)
+    mp.command_native({ "screenshot-to-file", file, "video" })
+    for k, v in pairs(saved) do mp.set_property(k, v) end
+    if utils.file_info(file) then
+        moment_picture = file
+        mp.msg.info(string.format("moment picture: the frame at %.3f s, taken in %d ms", t, math.floor((mp.get_time() - t0) * 1000)))
+    end
+end)
+
 -- Where a photo goes: the project's _Stills/Generated/ (docs/library-management.md §8), as the workspace plugin says
 -- the project is; with the project's generated_runs, a folder a day in it (<date>); nil: gyroflow-export's own choice
 -- (stabilized/ beside a clip of no project)
@@ -804,7 +875,9 @@ local function photo_full()
     if live then table.insert(args, "--live") end
     -- A Motion Photo is a JPEG (the default off macOS)
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
-    as_it_plays(args, false, true, live)
+    -- The photo's settings: its size and quality preset (its motion's too)
+    local s = settings("photo")
+    as_it_plays(args, false, true, live, s)
     -- A moment stabilized on its own (by its part's motion alone, the gyroflow plugin's fixed()), as it plays: its
     -- part of the clip; one with a project of its own, the project's "only within the trim range" as it's viewed
     local moment = type(ws) == "table" and ws.path == mp.get_property("path")
@@ -820,14 +893,18 @@ local function photo_full()
     if f then table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h)) end
     local dir = photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
-    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again)
-    local frame_args, frame_file = gpu_frame()
+    -- On the GPU path, the frame as it's rendered, taken now (quick: no decoding and stabilizing it again); at the
+    -- highest quality gyroflow-export renders it itself, at its best
+    local frame_args, frame_file
+    if s.quality ~= "highest" then frame_args, frame_file = gpu_frame() end
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
+    es.apply(args, s, "photo")
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
     local kind = mode == "live" and "Live Photo" or mode == "motion" and "Motion Photo" or "photo"
-    mp.osd_message("Saving a " .. kind .. " of " .. name .. " at " .. clock(t) .. "…", 60)
+    local card = "photo:" .. photos .. ":" .. tostring(mp.get_time())
+    mp.notify({ id = card, kind = "working", title = "Saving a " .. kind, detail = name .. " at " .. clock(t) })
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
         photos = photos - 1
@@ -839,12 +916,12 @@ local function photo_full()
             tell_catalog(out)
             publish()
             local saved = live and err:find("\n  Live Photo:") and "Live Photo saved" or live and err:find("\n  Motion Photo:") and "Motion Photo saved" or "Photo saved"
-            mp.osd_message(saved .. ": " .. platform.file_name(out), 4)
+            mp.notify({ id = card, kind = "done", title = saved, detail = platform.file_name(out), seconds = 4 })
             notify(saved, out)
         else
             local why = last_line(err) or "gyroflow-export failed"
             mp.msg.warn("photo: " .. err)
-            mp.osd_message("Photo failed: " .. why, 6)
+            mp.notify({ id = card, kind = "error", title = "Photo failed: " .. name, detail = why })
             notify("Photo failed: " .. name, why)
         end
     end)
@@ -904,7 +981,9 @@ mp.register_script_message("photo-at", function(json)
     if mode == "live" or mode == "motion" then table.insert(args, "--live") end
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     local view = type(req.view) == "table" and req.view or {}
-    view_args(args, view)
+    -- Its settings: the Library's (Share's dialog), else this player's for photos
+    local s = type(req.export) == "table" and es.normalize(req.export, "photo") or settings("photo")
+    view_args(args, view, s)
     -- A photo link's own frame (its crop in shares of the frame, its camera), and what its link is to carry
     local c, f = req.camera, req.crop
     if type(c) == "table" and c.yaw and c.pitch and c.roll and c.zoom then
@@ -923,6 +1002,7 @@ mp.register_script_message("photo-at", function(json)
     -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
     local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
+    es.apply(args, s, "photo")
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)
@@ -932,6 +1012,22 @@ mp.register_script_message("photo-at", function(json)
         mp.msg.warn("photo: " .. err)
         reply(false, last_line(err) or "gyroflow-export failed")
     end)
+end)
+
+-- export-setting <video|photo> <size|encode|quality> <value>: one of the export's settings (exportsettings.lua), kept
+-- in gyroflow.conf at once (export_size, photo_quality, ...)
+mp.register_script_message("export-setting", function(kind, key, value)
+    if not es.KEYS[kind] then return end
+    local all = mp.get_property_native("user-data/gyroflow/export_settings")
+    all = type(all) == "table" and all or {}
+    local now = es.normalize(all[kind], kind)
+    if now[key] == nil then return end
+    now[key] = value
+    now = es.normalize(now, kind)
+    if now[key] ~= value then return end
+    all[kind] = now
+    mp.set_property_native("user-data/gyroflow/export_settings", all)
+    platform.save_options("gyroflow", { { (kind == "photo" and "photo_" or "export_") .. key, value } })
 end)
 
 -- Live Photos need afp-photo (macOS)

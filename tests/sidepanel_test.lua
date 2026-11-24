@@ -53,9 +53,11 @@ function mp.command_native_async() end
 function mp.get_script_name() return "side_panel" end
 mp.msg = { info = function() end, warn = function() end, error = function() end, debug = function() end, verbose = function() end }
 package.preload.mp = function() return mp end
+package.preload["mp.utils"] = function() return { parse_json = function() return nil end, format_json = function() return "{}" end } end
 package.preload["mp.options"] = function() return { read_options = function(o) o.shown, o.open, o.tab = true, true, "output" end } end
 
 local ui = require 'ui'
+local tl = require 'timeline'
 local new = ui.new
 
 dofile("mpv/scripts/side-panel/main.lua")
@@ -269,61 +271,71 @@ mp.set_property_native("user-data/dji_telemetry", { available = false, model = "
 expect("no subtitles: none in Telemetry", find("subtitles"), nil)
 messages.tab("output")
 
--- Drop-downs (#196): a single choice is a field with the value chosen; a click opens its list over the panel, a pick
--- runs it and closes the list; Esc, a click outside or the field again close it; Up, Down and Enter work in it
+-- Drop-downs (#196): a single choice of more than three is a field with the value chosen; a click opens its list over
+-- the panel, a pick runs it and closes the list; Esc, a click outside or the field again close it; Up, Down and Enter
+-- work in it. Two or three choices are buttons in a row again, the chosen one lit (as before #196)
 local stab = { available = true, kind = "default", motion = true, view = "normal", level = "medium", horizon_lock = "yes",
                lens_mode = "corrected", projection = "linear", filter = "stabilized", edges = "sphere", aspect = "original",
                orientation = "as-is", source_aspect = "4:3", frame_aspect = "4:3", exporting = false, last_export = "" }
 mp.set_property_native("user-data/gyroflow", stab)
 messages.tab("transform")
-expect("level: one field, no buttons", find("level") ~= nil and find("level:2") == nil, true)
-expect("closed: no rows", find("level:strong"), nil)
-click("level")
-expect("open: its rows", find("level:weak") ~= nil and find("level:medium") ~= nil and find("level:strong") ~= nil, true)
+-- Three choices: buttons, each its own place, no field and no list
+expect("level: buttons, no field", find("level") == nil and find("level:weak") ~= nil and find("level:strong") ~= nil, true)
+expect("…the chosen one has no place (it's lit)", find("level:medium"), nil)
+n = #ran
+click("level:strong")
+expect("a button runs its command", last_ran(), "script-message-to gyroflow level strong")
+expect("…one", #ran, n + 1)
+expect("…and opens no list", bindings["popover-esc"], nil)
+expect("two choices: buttons (horizon)", find("horizon:no") ~= nil and find("horizon") == nil, true)
+expect("three: buttons (the view)", find("view:wide") ~= nil and find("view:off") ~= nil, true)
+-- Five: a drop-down
+expect("aspect: one field, no buttons", find("ratio") ~= nil and find("ratio:2") == nil and find("ratio:16:9") == nil, true)
+click("ratio")
+expect("open: its rows", find("ratio:16:9") ~= nil and find("ratio:1:1") ~= nil, true)
 expect("Esc bound while it's open", bindings["popover-esc"] ~= nil, true)
 expect("Up, Down and Enter too", bindings["popover-up"] ~= nil and bindings["popover-down"] ~= nil and bindings["popover-enter"] ~= nil, true)
 n = #ran
-click("level:strong")
-expect("a pick runs its command", last_ran(), "script-message-to gyroflow level strong")
+click("ratio:1:1")
+expect("a pick runs its command", last_ran(), "script-message-to gyroflow aspect 1:1")
 expect("…one", #ran, n + 1)
-expect("…and closes the list", find("level:strong"), nil)
+expect("…and closes the list", find("ratio:1:1"), nil)
 expect("…and lets the keys go", bindings["popover-down"] == nil and bindings["popover-esc"] == nil, true)
 -- A click outside: closed, nothing run
-click("level")
+click("ratio")
 n = #ran
 click_at(100, 300)
-expect("a click outside closes it", find("level:weak"), nil)
+expect("a click outside closes it", find("ratio:16:9"), nil)
 expect("…and runs nothing", #ran, n)
 -- The field again
-click("level")
-click("level")
-expect("the field again closes it", find("level:weak"), nil)
+click("ratio")
+click("ratio")
+expect("the field again closes it", find("ratio:16:9"), nil)
 -- Esc
-click("level")
+click("ratio")
 bindings["popover-esc"].fn()
-expect("Esc closes it", find("level:weak"), nil)
+expect("Esc closes it", find("ratio:16:9"), nil)
 -- Another drop-down's field while one is open: the click only closes the open one
-click("level")
+click("ratio")
 n = #ran
-click("view")
-expect("one list at a time", find("view:wide") == nil and find("level:weak") == nil, true)
+click("lens")
+expect("one list at a time", find("lens:stereographic") == nil and find("ratio:16:9") == nil, true)
 expect("…nothing run", #ran, n)
--- The keys: from the one chosen (medium), down and Enter
-click("level")
+-- The keys: from the one chosen (its own), down and Enter
+click("ratio")
 bindings["popover-down"].fn()
 bindings["popover-enter"].fn()
-expect("Down, Enter: the next one", last_ran(), "script-message-to gyroflow level strong")
-expect("Enter closes it", find("level:weak") == nil and bindings["popover-enter"] == nil, true)
-click("level")
-bindings["popover-up"].fn()
+expect("Down, Enter: the next one", last_ran(), "script-message-to gyroflow aspect 16:9")
+expect("Enter closes it", find("ratio:16:9") == nil and bindings["popover-enter"] == nil, true)
+click("ratio")
 bindings["popover-up"].fn()
 bindings["popover-up"].fn()
 bindings["popover-enter"].fn()
-expect("Up past the top stays on the first", last_ran(), "script-message-to gyroflow level weak")
+expect("Up past the top stays on the first", last_ran(), "script-message-to gyroflow aspect original")
 -- Enter on the one chosen picks it again (no harm), and closes
-click("level")
+click("ratio")
 bindings["popover-kp-enter"].fn()
-expect("Enter alone: the one chosen", last_ran(), "script-message-to gyroflow level medium")
+expect("Enter alone: the one chosen", last_ran(), "script-message-to gyroflow aspect original")
 -- Greyed rows are skipped by the keys and can't be clicked
 mp.set_property_native("user-data/view360", { available = true, active = true, stamped = true, heading = "camera", projection = "auto",
                                               modes = { travel = { available = false, why = "no GPS" }, north = { available = false } },
@@ -401,6 +413,132 @@ mp.set_property_native("user-data/workspace", { path = "/footage/_Moments/Turtle
 expect("tags: a moment's, none yet", find("tag:Turtle") == nil and find("tag-ask") ~= nil and find("star:1") ~= nil, true)
 mp.set_property_native("user-data/workspace", { path = "https://x/y.mp4", clip = "https://x/y.mp4" })
 expect("tags: none for a stream", find("tag-ask"), nil)
+messages.tab("output")
+
+-- The photo button and the export's settings (docs/export-settings.md): the Output tab's Export has its size, encoding
+-- and quality, and a button saving a photo of the frame as Alt+s does; Save frame has the photo's kind, size and quality
+-- and the same button, framing or not. The choices are the gyroflow plugin's (exportsettings.lua), published with them
+local es = dofile("mpv/scripts/gyroflow/exportsettings.lua")
+local function gyro(extra)
+    local g = { available = true, exporting = false, last_export = "", live_photo = "no", export_settings = {
+        video = { size = "original", encode = "fast", quality = "displayed" }, photo = { size = "original", quality = "displayed" }, choices = es.CHOICES } }
+    for k, v in pairs(extra or {}) do g[k] = v end
+    return g
+end
+mp.set_property_native("user-data/view360", { available = false })
+mp.set_property_native("user-data/workspace", nil)
+mp.set_property_native("user-data/gyroflow", gyro())
+messages.tab("output")
+expect("Output: the photo button", find("photo") ~= nil, true)
+click("photo")
+expect("…saves a photo as Alt+s does", last_ran(), "script-message-to gyroflow photo")
+-- Size: four, a drop-down; encoding (two) and quality (three): buttons
+expect("size: a drop-down", find("video-size") ~= nil and find("video-size:1080") == nil, true)
+click("video-size")
+click("video-size:1080")
+expect("size picked", last_ran(), "script-message-to gyroflow export-setting video size 1080")
+expect("encoding: buttons", find("video-encode:quality") ~= nil and find("video-encode") == nil, true)
+expect("…the chosen one lit (no place)", find("video-encode:fast"), nil)
+click("video-encode:quality")
+expect("encoding picked", last_ran(), "script-message-to gyroflow export-setting video encode quality")
+expect("quality: buttons", find("video-quality:quickest") ~= nil and find("video-quality:highest") ~= nil, true)
+click("video-quality:highest")
+expect("quality picked", last_ran(), "script-message-to gyroflow export-setting video quality highest")
+-- The plugin keeps it and says so: drawn as chosen
+local g = gyro()
+g.export_settings.video.quality = "highest"
+mp.set_property_native("user-data/gyroflow", g)
+expect("highest shown chosen", find("video-quality:highest") == nil and find("video-quality:displayed") ~= nil, true)
+-- A 360 export: its own settings, these greyed
+mp.set_property_native("user-data/view360", { available = true, stamped = true, active = true, heading = "camera",
+                                              recording = { can = true, parts = 0, spans = {} } })
+messages.tab("output")
+click("export:more")
+click("export-kind:360")
+expect("360: no size", find("video-size"), nil)
+expect("360: no quality buttons", find("video-quality:quickest"), nil)
+mp.set_property_native("user-data/view360", { available = false })
+-- An older gyroflow plugin (no settings published): no rows, the export as it was
+mp.set_property_native("user-data/gyroflow", { available = true, exporting = false, last_export = "" })
+messages.tab("output")
+expect("no settings published: no rows", find("video-size") == nil and find("video-encode:quality") == nil, true)
+expect("…the export button still", find("export") ~= nil, true)
+-- Save frame, not framing: the photo block anyway
+mp.set_property_native("user-data/gyroflow", gyro({ crop = { active = false } }))
+messages.tab("crop")
+expect("Save frame: the photo button without framing", find("crop-photo") ~= nil, true)
+click("crop-photo")
+expect("…saves a photo as Alt+s does", last_ran(), "script-message-to gyroflow photo")
+expect("Save frame: the kind as buttons (three)", find("crop-live:live") ~= nil and find("crop-live:motion") ~= nil, true)
+expect("Save frame: the photo's size", find("photo-size") ~= nil, true)
+expect("Save frame: no encoding for a photo", find("photo-encode:quality"), nil)
+click("photo-quality:quickest")
+expect("photo quality picked", last_ran(), "script-message-to gyroflow export-setting photo quality quickest")
+-- Framing: the same, Enter on its button
+mp.set_property_native("user-data/gyroflow", gyro({ crop = { active = true, aspect = "original", flat = { zoom = 0 } } }))
+expect("framing: the photo button", find("crop-photo") ~= nil, true)
+expect("framing: the size", find("photo-size") ~= nil, true)
+-- Buttons for short lists, drop-downs for long ones: what fits a button decides too
+expect("rule: 3 short labels are buttons", ui.as_buttons({ { label = "Off" }, { label = "Light" }, { label = "Full" } }, 260, 1), true)
+expect("rule: 2 are buttons", ui.as_buttons({ { label = "Level" }, { label = "Free" } }, 260, 1), true)
+expect("rule: 4 are a drop-down", ui.as_buttons({ { label = "A" }, { label = "B" }, { label = "C" }, { label = "D" } }, 260, 1), false)
+expect("rule: 1 is a drop-down", ui.as_buttons({ { label = "A" } }, 260, 1), false)
+expect("rule: labels too long for a third of the row: a drop-down",
+       ui.as_buttons({ { label = "Trail by direction" }, { label = "Frame's edge spread out" }, { label = "Background color" } }, 260, 1), false)
+expect("rule: a value off the list (1.5×): a drop-down", ui.as_buttons({ { label = "1×" }, { label = "2×" } }, 260, 1, { text = "1.5×" }), false)
+mp.set_property_native("user-data/gyroflow", { available = true, edges = "sphere", fps_limit = 0, resolution = "auto", temporal_denoise = "full" })
+messages.tab("quality")
+expect("Quality: the frame rate as buttons", find("fps:30") ~= nil, true)
+expect("Quality: the edges stay a drop-down (long labels)", find("edges") ~= nil and find("edges:smooth") == nil, true)
+expect("Quality: the size (five) a drop-down", find("size") ~= nil, true)
+
+-- The Playlist tab (the rail's button, F8) with the clip playing near the end of a long list: opening it scrolls the
+-- clip into the middle, past the list's end, and the panel was drawn twice and given up (render's `draw() or draw()`
+-- both nil): an error in render, the panel and the bar left unpainted, black (Anton). Now drawn until it settles
+local list = {}
+for i = 1, 60 do list[i] = { filename = ("/footage/DJI_%04d.MP4"):format(i), current = i == 59 or nil, playing = i == 59 or nil } end
+mp.set_property_native("video-exts", { "mp4" })
+mp.set_property_native("playlist", list)
+mp.set_property_native("playlist-count", 60)
+mp.set_property_native("playlist-pos", 58)
+mp.set_property_native("osd-dimensions", { w = 1280, h = 700 })
+for _, open_it in ipairs({ function() messages.tab("playlist") end, function() bindings.playlist.fn() end,
+                           function() messages.tab("output"); click("rail:playlist") end }) do
+    local ok, err = pcall(open_it)
+    expect("the playlist opens near the list's end without an error" .. (ok and "" or (": " .. tostring(err))), ok, true)
+    expect("…and the panel is drawn (its rail)", find("rail:playlist") ~= nil, true)
+    expect("…the clip playing in view", find("pl:58") ~= nil, true)
+    events["file-loaded"]()
+end
+-- An error in a part's drawing doesn't take the panel down: the part says so, the rail and the bar are still drawn
+local list_rows = tl.playlist_rows
+tl.playlist_rows = function() error("boom") end
+local ok = pcall(function() messages.tab("playlist") end)
+expect("a part that fails: no error out of the panel", ok, true)
+expect("…the rail still drawn", find("rail:playlist") ~= nil, true)
+tl.playlist_rows = list_rows
+mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
+-- Underwater colour: its own tab, its switches and strength part of the clip's transform (the dot: what's saved)
+mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", view_target = "source",
+    view_status = "changed", view_from = "source", saved = { uw = false, uw_highlights = false, uw_strength = 1 } })
+mp.set_property_native("user-data/uwcolor", { uw = true, uw_highlights = false, uw_strength = 0.6, active = true, ok = true,
+    session = {}, defaults = {}, stats = { under_water = 1, water = 0.48, water_hue = 263, water_hue_after = 263, water_a = -0.012,
+    water_a_after = -0.043, leak = 0.5, red = 0.09, blue = 0.18, blue_water = 0, lift = 0.94, median = 0.12,
+    applied = { red = 0.09, blue = 0.18, leak = 0.5, lift = 0.94 }, ms = 300 } })
+messages.tab("water")
+expect("underwater: the rail has its button", find("rail:water") ~= nil, true)
+expect("underwater: its switches and strength", find("uw-on") ~= nil and find("uw-hl") ~= nil and find("uw-strength") ~= nil, true)
+expect("underwater: the transform's Save there too", find("view-save") ~= nil and find("view-revert") ~= nil, true)
+click("uw-on")
+expect("underwater: the switch", last_ran(), "script-message-to dlogm uw-set uw toggle")
+click("uw-hl")
+expect("underwater: brighter highlights", last_ran(), "script-message-to dlogm uw-set uw_highlights toggle")
+click("view-save")
+expect("underwater: Save saves the transform", last_ran(), "script-message-to workspace view-save")
+click("view-default")
+expect("underwater: Use as default is the transform's", last_ran(), "script-message-to gyroflow remember")
+mp.set_property_native("user-data/uwcolor", { uw = false, uw_highlights = false, uw_strength = 1, active = false, ok = true, stats = {} })
+expect("underwater: off, highlights can't be switched", (function() local before = #ran; click("uw-hl"); return #ran == before end)(), true)
 messages.tab("output")
 
 print(("%d checks, %d failed"):format(checks, failures))

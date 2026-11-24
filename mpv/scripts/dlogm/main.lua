@@ -97,8 +97,22 @@
 -- file ends. Source files are never modified.
 
 local mp = require 'mp'
+-- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
+pcall(function()
+    package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
+    require 'notify_client'
+end)
+-- (without it: mpv's own text, and the console asks)
+mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
+mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
+do
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    pcall(require, 'journal')
+end
 
 -- Windows: paths past 260 characters (a clip deep in a trip's folders), by the workspace plugin's longpath.lua beside
 -- this plugin's folder; without it, as before
@@ -158,6 +172,12 @@ local DV_TRIMS = { "slope", "offset", "power", "midContrast", "clipTrim", "satur
 local DV_L3 = { l3Min = true, l3Avg = true, l3Max = true }
 local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
+-- Underwater colour (uwcolor.lua's switch): a plain SDR clip (GoPro's, not log) corrected and turned into HLG
+-- by its shader, then shown in the looks like a log curve. Not in Ctrl+l's round, never saved as the clip's curve
+local UW = { id = "uw", name = "Underwater colour", hdr = "shaders/underwater_hlg.glsl" }
+CURVE.uw = UW
+local uwcolor = require 'uwcolor'
+
 -- What the cameras' metadata says, as a curve
 local DJI_CURVES = { dlogm = "dlogm", dlog = "dlog" }
 local GOPRO_CURVES = { GPLOG2 = "gplog2", LOG = "gplog" }
@@ -305,8 +325,8 @@ local function plugin_file(name)
     return nil
 end
 
--- The player's Dolby Vision RPU for video in a transfer (further down)
-local our_rpu
+-- The player's Dolby Vision RPU for video in a transfer, and the underwater colour's (further down)
+local our_rpu, uw_rpu
 
 -- The looks this file has, in Ctrl+s's order: hdr and dv (the system tones them down), mpv's tone mapping, then
 -- the SDR ones whose shaders are there. An HDR file's dv looks: its own Dolby Vision (profile 8: an HLG or HDR10 base
@@ -413,6 +433,8 @@ local function publish()
         dv_own = hdr ~= nil and not curve and hdr.dv_signaled == true,
         -- What the file is, for the Source tab: its primaries, its Dolby Vision ("8.4", "8.1", "5", "" none)
         prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
+        -- A plain SDR clip, which the underwater colour can take (or has)
+        uw_ok = base ~= nil and not hdr and recorded == nil and (curve == nil or curve == UW),
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -580,7 +602,7 @@ local function apply(m)
                     dvsdr = { c.hdr } }
     local rpu = nil
     if DV_LOOKS[m] then
-        rpu = dv_user_rpu or plugin_file(DV_RPU)
+        rpu = (c == UW and uw_rpu()) or dv_user_rpu or plugin_file(DV_RPU)
         if not (DV_OK and rpu) then
             mp.osd_message(label(m) .. ": not with this mpv", 3)
             return false
@@ -656,7 +678,11 @@ local function ask_screens(done)
         finish(found, main)
     end)
 end
-ask_screens()
+-- Asked as the player starts; the answer published (follow_screen, further down) for a file that didn't wait for it:
+-- one that isn't log (a photo) is set up at once, and when its window came before the answer the screen stayed
+-- unknown, counted as HDR: a Motion Photo's HDR rendition went to an SDR screen, tone-mapped grey (2026-11-20, Anton)
+local follow_screen
+ask_screens(function() if follow_screen then follow_screen() end end)
 
 -- The log curve the source is read with (the workspace plugin's input, from its own file; docs/moments-and-workspaces.md
 -- "Source and transform"): a curve's id, auto (its metadata's), or nil (nothing set)
@@ -668,7 +694,7 @@ end
 
 -- The curve chosen by hand, into the source's own file at once: auto when it's the one the metadata says
 local function keep_curve()
-    local id = (curve == nil or curve == recorded) and "auto" or curve.id
+    local id = (curve == nil or curve == recorded or curve == UW) and "auto" or curve.id
     mp.commandv("script-message-to", "workspace", "input-set", "curve", id)
 end
 
@@ -695,6 +721,8 @@ mp.add_hook("on_preloaded", 50, function(hook)
     local path = clip_path()
     if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
+    -- The underwater colour as the clip's (or moment's) transform says, taken before the curve is picked
+    local uw_on = uwcolor.file_start()
     for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end
     local trc, prim
     if not path:find("://", 1, true) then trc, prim = video_color.read(path) end
@@ -718,6 +746,7 @@ mp.add_hook("on_preloaded", 50, function(hook)
     if not trc then
         recorded = recorded_curve(path)
         curve = (saved and CURVE[saved]) or recorded
+        if uw_on and not curve then curve = UW end
         if not curve then
             mp.msg.verbose("not log footage it knows")
             if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
@@ -753,14 +782,12 @@ mp.observe_property("video-dec-params", "native", function(_, p)
     hdr = { trc = p.gamma, prim = p.primaries or "bt.2020", dovi = p.colormatrix == "dolbyvision" }
     if curve then mp.msg.info(curve.name .. " in the metadata, but the video is tagged " .. HDR_NAMES[hdr.trc] .. ": not log") end
     recorded, curve = nil, nil
-    if apply(resolve(chosen[screen()])) then
-        mp.msg.info(label(current))
-        mp.osd_message(label(current), 1.5)
-    end
+    -- (not said on screen: the panel shows the look)
+    if apply(resolve(chosen[screen()])) then mp.msg.info(label(current)) end
 end)
 
 mp.register_event("file-loaded", function()
-    if announce then mp.osd_message(label(current), 1.5) end
+    -- What it plays with is the panel's to show, not said over the clip as it opens
     announce = false
 end)
 
@@ -829,7 +856,7 @@ end
 
 -- The window on another screen: the file keeps its look (only what the panel says about the screen changes); a
 -- screen macOS hasn't been asked about yet (just connected) is asked about first
-local function follow_screen()
+follow_screen = function()
     if not screens then return end
     local name = window_screen()
     if platform == "darwin" and name and name ~= "" and screens[name] == nil and not asking then
@@ -892,6 +919,20 @@ mp.register_script_message("curve", function(id)
     else
         curve = before
     end
+end)
+
+-- The underwater colour on or off for this file (uwcolor.lua, as its switch changes): only a plain SDR clip,
+-- not one given a curve by hand
+mp.register_script_message("uw-color", function(v)
+    if not base or hdr or recorded then return end
+    if v == "yes" and curve == nil then
+        curve = UW
+        if apply(kept_look()) then mp.msg.info(label(current)) else curve = nil end
+    elseif v == "no" and curve == UW then
+        apply("off")
+        curve, current = nil, nil
+    end
+    publish()
 end)
 
 -- This file's look by name, as Ctrl+s would choose it
@@ -973,6 +1014,53 @@ local function make_dv_rpu()
         mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
                                   args = { AFP_RPU, "--look", tmp, "--profile", "8.1", "-o", out_pq } }, function(_, r2) done(r2) end)
     end)
+end
+
+-- The underwater colour's RPU: the dv look's trims (the user's, else the shipped ones) with the chroma weight halfway
+-- from theirs to its lowest (the author's 361: 180), so the lights that'd turn lilac on an SDR screen stay light and
+-- neutral (Anton, 2026-11-24). Made by afp-rpu when the trims it's made from change (or there's none yet), kept beside the user's look
+-- (look.uw.json: what it was made from); until it's there the dv look's own plays
+local uw_made, uw_busy = nil, false
+local function uw_wanted_look()
+    local want = {}
+    for k, v in pairs(load_dv_look()) do want[k] = v end
+    want.rpu, want.made = nil, nil
+    want.chromaWeight = math.floor((tonumber(want.chromaWeight) or 2048) / 2 + 0.5)
+    return want, utils.format_json(want)
+end
+local function make_uw_rpu()
+    if uw_busy or not file_exists(AFP_RPU) then return end
+    local want, key = uw_wanted_look()
+    local meta = read_json(utils.join_path(DV_USER, "look.uw.json"))
+    if type(meta) == "table" and meta.made == key and meta.rpu and file_exists(utils.join_path(DV_USER, "look.uw." .. meta.rpu .. ".rpu")) then
+        uw_made = { key = key, path = utils.join_path(DV_USER, "look.uw." .. meta.rpu .. ".rpu") }
+        return
+    end
+    uw_busy = true
+    local next = (type(meta) == "table" and meta.rpu == "a") and "b" or "a"
+    local out = utils.join_path(DV_USER, "look.uw." .. next .. ".rpu")
+    local tmp = utils.join_path(DV_USER, "look.uw.tmp.json")
+    mp.command_native({ name = "subprocess", playback_only = false, args = { "mkdir", "-p", DV_USER } })
+    local f = io.open(tmp, "w")
+    if not f then uw_busy = false; return mp.msg.warn("can't write " .. tmp) end
+    f:write(utils.format_json(want))
+    f:close()
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                              args = { AFP_RPU, "--look", tmp, "-o", out } }, function(_, r)
+        uw_busy = false
+        if not (r and r.status == 0) then return mp.msg.warn("afp-rpu (underwater colour): " .. ((r and r.stderr) or "failed")) end
+        local mf = io.open(utils.join_path(DV_USER, "look.uw.json"), "w")
+        if mf then mf:write(utils.format_json({ made = key, rpu = next })); mf:close() end
+        uw_made = { key = key, path = out }
+        if curve == UW and DV_LOOKS[current] then apply(current) end
+    end)
+end
+-- The RPU for an underwater clip now (nil: not made yet for these trims, the dv look's own meanwhile)
+uw_rpu = function()
+    local _, key = uw_wanted_look()
+    if uw_made and uw_made.key == key and file_exists(uw_made.path) then return uw_made.path end
+    make_uw_rpu()
+    return uw_made and uw_made.key == key and uw_made.path or nil
 end
 
 -- The user's look changed: saved and its RPU made shortly (sliders send many). With each frame's own L1, the scene

@@ -7,7 +7,8 @@
 #                               ~/Library/Application Support/ActionFootagePlayer/dlogm/ (the dlogm plugin's DLOGM_DATA).
 #                               DJI's LUT isn't redistributed: it's downloaded from DJI and checked, or <cube> is used
 #   setup.sh default            ActionFootagePlayer becomes the default app for MP4 videos
-#   setup.sh quick-actions      the Finder Quick Actions Play Stabilized and Stabilize + LUT, in ~/Library/Services
+#   setup.sh quick-actions      the Finder Quick Actions Play Stabilized and Stabilize + LUT (videos) and Play Live
+#                               Photo (photos: the player shows them as a phone does), in ~/Library/Services
 #                               (SERVICES_DIR overrides it)
 #   setup.sh fetch-lut <out>    just the download, checked
 #
@@ -80,8 +81,11 @@ quick_actions() {
         NSTouchBarPlayTemplate "open -b $player_id \"\$@\""
     "$py" -I "$res/tools/make_workflow.py" "$services/Stabilize + LUT.workflow" "Stabilize + LUT" \
         NSTouchBarExitFullScreenTemplate "\"$res/export-finder.sh\" \"\$@\""
+    # Photos (HEIC, JPEG): the player, without being their default app
+    "$py" -I "$res/tools/make_workflow.py" "$services/Play Live Photo.workflow" "Play Live Photo" \
+        NSTouchBarPlayTemplate "open -b $player_id \"\$@\"" image
     /System/Library/CoreServices/pbs -flush >/dev/null 2>&1 || true
-    echo "Finder Quick Actions: Play Stabilized, Stabilize + LUT"
+    echo "Finder Quick Actions: Play Stabilized, Stabilize + LUT, Play Live Photo"
 }
 
 if [ "${1:-}" = fetch-lut ]; then

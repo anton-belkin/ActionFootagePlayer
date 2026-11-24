@@ -125,6 +125,7 @@ PANEL="$MPV_DIR/scripts/side-panel"
 AGENT="$MPV_DIR/scripts/agent"
 WORKSPACE="$MPV_DIR/scripts/workspace"
 ANYLAYOUT="$MPV_DIR/scripts/any-layout"
+LIVEPHOTO="$MPV_DIR/scripts/live-photo"
 VIEW360="$MPV_DIR/scripts/view360"
 stamp=$(date +%Y%m%d-%H%M%S)
 # Not next to scripts: mpv would try to load scripts/*.bak-* as scripts
@@ -209,6 +210,8 @@ put mpv/scripts/dlogm/main.lua      "$DLOGM/main.lua" 644
 put mpv/scripts/dlogm/dji_color.lua "$DLOGM/dji_color.lua" 644
 put mpv/scripts/dlogm/gopro_color.lua "$DLOGM/gopro_color.lua" 644
 put mpv/scripts/dlogm/video_color.lua "$DLOGM/video_color.lua" 644
+put mpv/scripts/dlogm/uwcolor.lua "$DLOGM/uwcolor.lua" 644
+put mpv/scripts/dlogm/uw_estimate.lua "$DLOGM/uw_estimate.lua" 644
 put "$BUILD/dlogm_hlg.glsl"         "$DLOGM/shaders/dlogm_hlg.glsl" 644
 for curve in $HDR_CURVES gplog; do
     put "$BUILD/${curve}_hlg.glsl"  "$DLOGM/shaders/${curve}_hlg.glsl" 644
@@ -217,6 +220,7 @@ put "$BUILD/dlogm_lut3d.glsl"       "$DLOGM/shaders/dlogm_lut3d.glsl" 644
 put "$BUILD/nbcu_hlg2sdr.glsl"      "$DLOGM/shaders/nbcu_hlg2sdr.glsl" 644
 put "$BUILD/nbcu_pq2sdr.glsl"       "$DLOGM/shaders/nbcu_pq2sdr.glsl" 644
 put shaders/denoise.glsl            "$DLOGM/shaders/denoise.glsl" 644
+put shaders/underwater_hlg.glsl     "$DLOGM/shaders/underwater_hlg.glsl" 644
 # The LUTs themselves, for gyroflow-export
 put luts/dlogm_hlg.cube             "$DLOGM/luts/dlogm_hlg.cube" 644
 put luts/gplog_hlg.cube             "$DLOGM/luts/gplog_hlg.cube" 644
@@ -235,6 +239,9 @@ put mpv/scripts/gyroflow/still.lua   "$GYROFLOW/still.lua" 644
 put mpv/scripts/gyroflow/crop.lua    "$GYROFLOW/crop.lua" 644
 put mpv/scripts/gyroflow/gestures.lua "$GYROFLOW/gestures.lua" 644
 put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
+put mpv/scripts/gyroflow/exportsettings.lua "$GYROFLOW/exportsettings.lua" 644
+put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
+put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
 put mpv/scripts/gyroflow/sphere360.vpy "$GYROFLOW/sphere360.vpy" 644
 put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
@@ -266,9 +273,12 @@ put mpv/scripts/footage-menu/main.lua "$MENU/main.lua" 644
 put mpv/scripts/side-panel/main.lua "$PANEL/main.lua" 644
 put mpv/scripts/side-panel/ui.lua   "$PANEL/ui.lua" 644
 put mpv/scripts/side-panel/bar.lua  "$PANEL/bar.lua" 644
+put mpv/scripts/side-panel/navkeys.lua "$PANEL/navkeys.lua" 644
 put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
+put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
+put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644
@@ -284,9 +294,15 @@ put mpv/scripts/workspace/transform.lua "$WORKSPACE/transform.lua" 644
 put mpv/scripts/workspace/projectfile.lua "$WORKSPACE/projectfile.lua" 644
 put mpv/scripts/workspace/longpath.lua  "$WORKSPACE/longpath.lua" 644
 put mpv/scripts/workspace/tags.lua      "$WORKSPACE/tags.lua" 644
+put mpv/scripts/workspace/journal.lua   "$WORKSPACE/journal.lua" 644
+put mpv/scripts/workspace/librarylist.lua "$WORKSPACE/librarylist.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
+
+# Photos as a phone shows them: the picture, its live part (Live Photo, Motion Photo) under the Live icon
+put mpv/scripts/live-photo/main.lua "$LIVEPHOTO/main.lua" 644
+put mpv/scripts/live-photo/live.lua "$LIVEPHOTO/live.lua" 644
 
 # 360° clips as a view to look around in (with the gyroflow plugin's probe and gestures.lua)
 put mpv/scripts/view360/main.lua     "$VIEW360/main.lua" 644

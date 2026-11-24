@@ -63,7 +63,9 @@ jobs:
       # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
       # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
       # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
-      # for mpv, its drop-downs, and the gyroflow plugin's lens over a Gyroflow project; LuaJIT is one of mpv's dependencies
+      # for mpv, its drop-downs and button rows, the photo button and the export's settings (and their gyroflow-export
+      # options), and the gyroflow plugin's lens over a Gyroflow project; the GPU table kept ahead of where a clip plays
+      # (ahead.lua) against a model of the table server; LuaJIT is one of mpv's dependencies
       - name: Tests
         run: |
           luajit tests/workspace_test.lua
@@ -76,15 +78,27 @@ jobs:
           luajit tests/render_settings_test.lua
           luajit tests/projectfile_test.lua
           luajit tests/longpath_test.lua
+          luajit tests/journal_test.lua
+          python3 tests/journal_report_test.py
+          sh tests/journal_mpv_test.sh
           luajit tests/timeline_test.lua
+          luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
           luajit tests/sidepanel_test.lua
+          luajit tests/notify_test.lua
+          luajit tests/uwcolor_test.lua
           luajit tests/gyroflow_lens_test.lua
           luajit tests/camera_subs_test.lua
           luajit tests/agent_test.lua
           luajit tests/export_args_test.lua
+          luajit tests/exportsettings_test.lua
+          luajit tests/gpu_ahead_test.lua
+          python3 tests/packaging_test.py
           luajit tests/tags_test.lua
-          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans)
+          luajit tests/live_photo_test.lua
+          luajit tests/photo_link_fold_test.lua
+          luajit tests/librarylist_test.lua
+          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans export_settings an_image_is_made_smaller)
 
       - name: Build
         run: |

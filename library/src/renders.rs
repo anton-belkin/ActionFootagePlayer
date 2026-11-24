@@ -282,7 +282,29 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
 /// renders with exactly these, sent in its request), opts (the player's edge fill and temporal denoise), gyroflow (the
 /// fingerprint of the Gyroflow project used: a moment's own, else the clip's), preset (the player's preset's, where
 /// there is no project), profile { name, look }
-pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value {
+pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value { recipe_with(ctx, item, profile, &Value::Null) }
+
+/// The export's settings an item is rendered with (Share's dialog: docs/export-settings.md), the values that aren't
+/// the defaults: { size, encode, quality } for a video, { size, quality } for a photo. The defaults are what was
+/// rendered before there were settings, so with them the recipe, its hash and its render stay what they were
+pub const EXPORT_CHOICES: [(&str, &[&str]); 3] = [("size", &["original", "2160", "1080", "720"]), ("encode", &["fast", "quality"]),
+                                                  ("quality", &["displayed", "quickest", "highest"])];
+
+/// `settings` (Share's: { video: {...}, photo: {...} }, or one kind's) as a recipe has them for a photo or a video:
+/// the valid values that aren't the defaults (each choice's first), nothing else
+pub fn export_settings(settings: &Value, photo: bool) -> Value {
+    let kind = if photo { "photo" } else { "video" };
+    let s = if settings[kind].is_object() { &settings[kind] } else { settings };
+    let mut out = serde_json::Map::new();
+    for (key, values) in EXPORT_CHOICES {
+        if photo && key == "encode" { continue; }
+        if let Some(v) = s[key].as_str().filter(|v| values.contains(v) && *v != values[0]) { out.insert(key.into(), json!(v)); }
+    }
+    Value::Object(out)
+}
+
+/// The recipe with the export's settings (`export`: export_settings's; empty: the defaults, the recipe as it was)
+pub fn recipe_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> Value {
     let l = &item.link;
     let tree = item.tree().unwrap_or("");
     let facts = ctx.clip(tree);
@@ -308,6 +330,8 @@ pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value {
         Kind::Clip => {}
     }
     if r["gyroflow"].is_null() { r["preset"] = ctx.preset.clone(); }
+    // A render made with other settings is another render
+    if export.as_object().is_some_and(|o| !o.is_empty()) { r["export"] = export.clone(); }
     trimmed(&r).unwrap_or(Value::Null)
 }
 
@@ -420,19 +444,22 @@ impl Ctx {
     }
 }
 
-pub fn find(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
-    let found = find_as(ctx, item, profile);
+pub fn find(ctx: &Ctx, item: &Item, profile: &Profile) -> Found { find_with(ctx, item, profile, &Value::Null) }
+
+/// An item's render with the export's settings (`export`: export_settings's)
+pub fn find_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> Found {
+    let found = find_as(ctx, item, profile, export);
     // An SDR clip's HDR is its SDR render (resolve): looked for only where the HDR's own isn't there and an SDR one is
     if profile.name == "HDR" && found.file.is_none() && !profile.photo {
         let sdr = self::profile("SDR").unwrap();
-        let other = find_as(ctx, item, sdr);
+        let other = find_as(ctx, item, sdr, export);
         if other.file.is_some() && ctx.is_sdr(item) == Some(true) { return other; }
     }
     found
 }
 
-fn find_as(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
-    let recipe = recipe(ctx, item, profile);
+fn find_as(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> Found {
+    let recipe = recipe_with(ctx, item, profile, export);
     let hash = hash(&recipe);
     let mut found = Found { recipe, hash, file: None, stale: None };
     for ext in profile.exts {
@@ -440,7 +467,8 @@ fn find_as(ctx: &Ctx, item: &Item, profile: &Profile) -> Found {
         if ctx.has(&name) { found.file = Some(ctx.root.join(DIR).join(name)); return found; }
     }
     // Made the old way: _Renders/<the moment's path>.<profile>.mov, current while its v1 recipe is the moment's
-    if let (Kind::Moment, false, Some(file)) = (item.kind, profile.photo, &item.file) {
+    let default = !export.as_object().is_some_and(|o| !o.is_empty());
+    if let (Kind::Moment, false, Some(file), true) = (item.kind, profile.photo, &item.file, default) {
         let old = index::render_path(&ctx.root, &item.rel, profile.name);
         if crate::seen::is_file(&old) || (ctx.names.is_none() && old.is_file()) {
             let ok = index::link(&old).filter(|l| l["kind"] == "render").and_then(|l| trimmed(&l["recipe"]))
@@ -643,6 +671,38 @@ mod tests {
             if !same(&got, &c["want"]) { bad.push(format!("{}:\n  got  {got}\n  want {}", c["name"], c["want"])); }
         }
         assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
+    #[test]
+    fn the_export_settings_are_part_of_a_render() {
+        let (root, moment, photo, _clip) = project("export-settings");
+        let ctx = look(&root, true);
+        let (hdr, ph) = (profile("HDR").unwrap(), profile("Photo").unwrap());
+        let base = hash(&recipe(&ctx, &moment, hdr));
+        // The defaults, said or not, are the render as it was: renders made before the settings stay found
+        assert_eq!(export_settings(&Value::Null, false), json!({}));
+        let defaults = json!({ "video": { "size": "original", "encode": "fast", "quality": "displayed" }, "photo": { "size": "original", "quality": "displayed" } });
+        assert_eq!(export_settings(&defaults, false), json!({}));
+        assert_eq!(hash(&recipe_with(&ctx, &moment, hdr, &export_settings(&defaults, false))), base);
+        // Each other value is another render
+        let mut seen = HashSet::from([base.clone()]);
+        for (k, v) in [("size", "1080"), ("size", "720"), ("encode", "quality"), ("quality", "quickest"), ("quality", "highest")] {
+            let s = export_settings(&json!({ "video": { k: v } }), false);
+            assert_eq!(s, json!({ k: v }));
+            assert!(seen.insert(hash(&recipe_with(&ctx, &moment, hdr, &s))), "{k} {v} didn't change the hash");
+        }
+        // A value it doesn't have: left out (the default)
+        assert_eq!(export_settings(&json!({ "video": { "size": "8K", "quality": "best" } }), false), json!({}));
+        // A photo: its own settings, no encoder
+        let s = export_settings(&json!({ "video": { "size": "720" }, "photo": { "size": "1080", "encode": "quality", "quality": "highest" } }), true);
+        assert_eq!(s, json!({ "size": "1080", "quality": "highest" }));
+        assert_ne!(hash(&recipe_with(&ctx, &photo, ph, &s)), hash(&recipe(&ctx, &photo, ph)));
+        // A render with settings is found by them, not by the defaults'
+        let found = find_with(&ctx, &moment, hdr, &json!({ "size": "1080" }));
+        std::fs::create_dir_all(root.join(DIR)).unwrap();
+        std::fs::write(cache_path(&root, &found.hash, hdr, "mov"), b"1080").unwrap();
+        assert!(find_with(&look(&root, true), &moment, hdr, &json!({ "size": "1080" })).file.is_some());
+        assert!(find(&look(&root, true), &moment, hdr).file.is_none());
     }
 
     #[test]

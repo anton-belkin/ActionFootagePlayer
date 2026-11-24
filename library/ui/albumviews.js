@@ -52,7 +52,7 @@ function albumTopRows(layout, filt) {
       th = avMosaic(its);
       sub = filt ? its.length.toLocaleString("en-US") + " of " + avCount(all.length, m.one, m.many) + " match" : avCount(all.length, m.one, m.many);
     } else { th = '<span class="th avic" aria-hidden="true">' + (AV_ICON[v[0]] || "") + '</span>'; sub = AV_SUB[v[0]] || ""; }
-    const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Open ' + esc(v[1]) + '"';
+    const a = 'type="button" data-a="aview" data-v="' + esc(v[0]) + '" title="Double-click to open ' + esc(v[1]) + '"';
     if (layout === "list") return '<button ' + a + ' class="row avrow">' + th + '<span style="min-width:0"><span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span></span>' +
       '<span class="cell hide-s"></span><span class="cell hide-s"></span><span class="cell hide-s"></span><span class="chips hide-s"></span><span class="cell"></span></button>';
     return '<button ' + a + ' class="card avrow">' + th + '<span class="nm">' + esc(v[1]) + '</span><span class="sub">' + esc(sub) + '</span><span class="chips"></span></button>';
@@ -64,7 +64,7 @@ function avMosaic(list, folder) {
   const its = [];
   for (const it of list) { if (it.thumbPath) its.push(it); if (its.length === 4) break; }
   let h = '<span class="mosaic">';
-  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + img(its[i].thumbPath) + '</i>' : '<i></i>';
+  for (let i = 0; i < 4; i++) h += its[i] ? '<i>' + itemImg(its[i]) + '</i>' : '<i></i>';
   return h + (folder ? '<span class="fb">' + ICON.fsm + '</span>' : "") + '</span>';
 }
 // The heading before the folders' part of the top (Generated, Other folders)
@@ -204,12 +204,10 @@ function avSelBar(n, c) {
   const nSel = VISIBLE.filter((k) => S.sel[k]).length;
   return '<span class="sub" style="display:inline">' + (nSel ? nSel + " of " + n + " selected" : "None selected") + '</span><button type="button" class="btn sm" data-a="selall"' + (nSel === n ? " disabled" : "") + '>Select all</button><button type="button" class="btn sm" data-a="desel"' + (nSel ? "" : " disabled") + '>Select none</button>' + albumBar(c) + (typeof shareBar === "function" ? shareBar(c) : ""); // albums.js, share.js
 }
-// An item as the ordinary grid has it
-function avCard(it, cls, sub) {
-  const key = keyOf(it), sel = !!S.sel[key];
-  return '<button type="button" class="card' + (cls || "") + (sel ? " sel" : "") + (it.offline ? " off" : "") + '" data-a="pick" data-v="' + esc(key) + '" aria-pressed="' + sel + '">' +
-    '<span class="th">' + (it.thumbPath ? img(it.thumbPath) : "") + (it.dur ? '<span class="d">' + esc(it.dur) + '</span>' : "") + (cls && typeof cullBadge === "function" ? cullBadge(it) : "") + '</span>' +
-    '<span class="nm">' + esc(it.name) + '</span><span class="sub">' + esc(sub != null ? sub : it.sub) + '</span>' + (cls ? "" : '<span class="chips">' + chips(it) + '</span>') + '</button>';
+// An item as the ordinary grid has it (tiles.js); `cls`: " tl", Timeline's fixed size, its caption as wide
+function avCard(it, cls) {
+  const key = keyOf(it);
+  return itemTile(it, key, { cls, sel: !!S.sel[key], w: cls === " tl" ? TL.tileW - TILE.inner : (TILE.w = tileWidth($("main"))) });
 }
 // A list of items in the ordinary grid, the first AV.more of a long one and a button for the next
 function avGrid(list) {
@@ -223,9 +221,22 @@ document.addEventListener("click", (e) => {
   const el = e.target.closest && e.target.closest("[data-a]");
   if (!el || el.disabled) return;
   const a = el.dataset.a, v = el.dataset.v;
-  if (a === "aview") { albumViewGo(v); return; }
+  if (a === "aview") {
+    // An album's tile opens by a double click, as a folder's does: one click only marks it. Its breadcrumb, and
+    // Enter or Space on the tile (a click with no mouse behind it), open at once
+    if (el.classList.contains("avrow") && e.detail > 0) {
+      for (const x of document.querySelectorAll(".avrow.sel")) x.classList.remove("sel");
+      el.classList.add("sel");
+      return;
+    }
+    albumViewGo(v); return;
+  }
   if (a === "avmore") { AV.more += 400; renderMain(); return; }
   if (!albumViewOpen()) return;
   if (typeof timelineClick === "function" && timelineClick(a, v)) return;
   if (typeof mapClick === "function") mapClick(a, v);
+});
+document.addEventListener("dblclick", (e) => {
+  const el = e.target.closest && e.target.closest('.avrow[data-a="aview"]');
+  if (el && !el.disabled) albumViewGo(el.dataset.v);
 });

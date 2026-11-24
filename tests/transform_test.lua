@@ -164,6 +164,25 @@ expect("denoise: its own kept", t.complete({ view = "wide", denoise = false }, {
 expect("denoise: an old bundle plays as the session", t.complete({ view = "wide" }, { view = "normal", denoise = false }).denoise, false)
 expect("denoise: not a boolean", t.complete({ denoise = "no" }, { denoise = true }).denoise, true)
 expect("denoise: a change is a change", t.status({ denoise = true }, { denoise = false }, false), "changed")
+-- The underwater colour (uw, uw_highlights, uw_strength): a clip's own kept; an old bundle plays as the session; a
+-- change is a change; not in what a render is made with
+b = t.complete({ view = "wide", uw = true, uw_strength = 0.4 }, { uw = false, uw_highlights = true, uw_strength = 1 })
+expect("uw: its own kept", b.uw, true)
+expect("uw: its strength kept", b.uw_strength, 0.4)
+expect("uw: highlights as the session", b.uw_highlights, true)
+expect("uw: an old bundle plays as the session", t.complete({ view = "wide" }, { uw = true, uw_highlights = false, uw_strength = 0.7 }).uw, true)
+expect("uw: strength out of range", t.complete({ uw_strength = 1.5 }, { uw_strength = 1 }).uw_strength, 1)
+expect("uw: strength not a number", t.complete({ uw_strength = "0.5" }, { uw_strength = 1 }).uw_strength, 1)
+expect("uw: a change is a change", t.status({ uw = false }, { uw = true }, false), "changed")
+expect("uw: strength changed", t.status({ uw_strength = 1 }, { uw_strength = 0.5 }, false), "changed")
+local bundle, rendered = t.render_settings({ view = { view = "wide", uw = true, uw_strength = 0.5 } }, nil, { view = "normal" })
+expect("uw: not in a render's bundle", bundle.uw == nil and bundle.uw_strength == nil, true)
+expect("uw: not in a render's recipe", rendered.uw == nil and rendered.uw_highlights == nil, true)
+local got = t.session(function(name)
+    if name == "user-data/gyroflow/session" then return { view = "wide", uw = "theirs" } end
+    if name == "user-data/uwcolor/session" then return { uw = true } end
+end)
+expect("session: both plugins', the colour's own", got.view == "wide" and got.uw == true, true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

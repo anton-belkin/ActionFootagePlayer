@@ -220,9 +220,13 @@ vec3 ray_to_dir(vec2 ray)
 // Stabilization::rotate_and_distort: a ray in the output camera, turned into the source camera by row rotation q,
 // imaged by the lens. False where the ray has no image (past the field limit, outside Snell's window)
 // want_boundary: where the ray has no image (past the lens's field, outside Snell's window), uv is still found, where the
-// ray at the edge of what the lens sees lands (boundary_uv set), for the edge fill to take its colors from
+// ray at the edge of what the lens sees lands (boundary_uv set), for the edge fill to take its colors from, and how far
+// past that edge the ray is (boundary_excess, radians, near enough): every ray past the field lands on the same circle,
+// so the distance from the frame stops growing there, and anything that eases out with it (the sphere's continuation)
+// would show the circle
 bool want_boundary = false;
 bool boundary_uv = false;
+float boundary_excess = 0.0;
 bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
 {
     vec3 p = qrot(q, d) + t3;
@@ -230,10 +234,12 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
     float theta = atan(rxy, p.z);
     uv = vec2(0.0);
     boundary_uv = false;
+    boundary_excess = 0.0;
     bool fail = false;
     if (lens.w > 0.0 && theta > lens.w) {
         if (!want_boundary || rxy < 1e-12) return false;
         fail = true;
+        boundary_excess = theta - lens.w;
         theta = lens.w;
         p = vec3(p.xy * (sin(theta) / rxy), cos(theta));
         rxy = length(p.xy);
@@ -245,6 +251,7 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
         if (sin_d >= 1.0 || p.z <= 0.0) {
             if (!want_boundary) return false;
             fail = true;
+            boundary_excess += p.z <= 0.0 ? 1.0 : sin_d - 1.0;
             sin_d = 0.9999;
         }
         float theta_d = asin(sin_d);
@@ -629,7 +636,7 @@ bool source_coord(vec2 j, out vec2 uv)
     return rotate_and_distort(d, row_rotation(idx, rows), uv);
 }
 
-#if !defined(GRID_PASS) && !defined(SPHERE_PASS) && !defined(DN_COMPUTE)
+#if !defined(GRID_PASS) && !defined(DN_COMPUTE)
 // The picture at source coordinate uv (Gyroflow's frame); past the frame by more than half a pixel, the background, as
 // Gyroflow's taps outside it are
 bool outside(vec2 uv) { return any(lessThan(uv, vec2(-0.5))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 0.5)); }
@@ -669,11 +676,18 @@ float feather(vec2 uv)
 vec4 edge_fill(vec2 uv)
 {
 #if EDGE_FILL && !defined(UV_OUT)
-    vec4 f = texture(FILL_RAW, (cur_j + 0.5) / RT) * FILL_MUL;
+    // No implicit level of detail: the sphere pass (compute) continues the edge with it too; the grid has no mips
+    vec4 f = textureLod(FILL_RAW, (cur_j + 0.5) / RT, 0.0) * FILL_MUL;
     vec2 edge = clamp(uv, vec2(-0.5), vec2(SRC_W, SRC_H) - 0.5);
     float t = clamp(length(uv - edge) / (FILL_MUTE_RAMP * float(SRC_H)), 0.0, 1.0);
     float m = t * t * (3.0 - 2.0 * t);
+#if SPHERE_FILL
+    // Under the sphere the continuation is written into it and stays: muted, it would leave gray patches no part of
+    // the picture has (2026-11-18); the blur alone keeps it from drawing the eye
+    float sat = 1.0, bright = 1.0;
+#else
     float sat = 1.0 - 0.35 * m, bright = 1.0 - 0.12 * m;
+#endif
 #ifdef PLANE_CHROMA
     return vec4(0.5 + (f.xy - 0.5) * sat, 0.0, 1.0);
 #elif defined(PLANE_LUMA)
@@ -690,50 +704,84 @@ vec4 edge_fill(vec2 uv)
 
 #if !defined(DN_PASS) && !defined(FILL_PASS)
 #if SPHERE_FILL
-ivec2 sphere_texel(vec3 w)
+// The sphere (the plugin's sphere trail): an equirect of the world (GYROFLOW_SPHERE, 512 x 256, 0.7 degrees a texel),
+// each texel a color and a time: what was seen in that direction (written when seen, pass sphere), or the frame's edge
+// continued there (pass sphere where it held nothing, and passes sphere and sphere_beyond where the world changed at
+// that part of the frame's edge: pass sphere_edges and sphere_sectors). Read back past the frame (sphere_fill)
+//
+// Direction w of the world -> the sphere's texel coordinates (texel i covers i .. i + 1)
+vec2 sphere_coord(vec3 w)
 {
     vec2 size = vec2(imageSize(GYROFLOW_SPHERE));
     float lon = atan(w.x, w.z), lat = asin(clamp(w.y / length(w), -1.0, 1.0));
-    return ivec2(floor(vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5) * size));
+    return vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5) * size;
 }
 
-// The sphere trail (the plugin's sphere): what was last seen in this pixel's direction of the world, fading over a few
-// seconds (a half-life of 2.5 s, gone after 10), over the smooth fill; where nothing was seen, the smooth fill
+// The texel at texel coordinates tc
+ivec2 sphere_texel(vec2 tc, ivec2 size) { return ivec2(int(tc.x) % size.x, clamp(int(tc.y), 0, size.y - 1)); }
+
+// The world's direction of output pixel j (frame_setup first)
+vec3 sphere_world(vec2 j) { return qrot(table(15), output_ray(j)); }
+
+// Whether a texel written at time t (PTS + 1000) holds anything: written at all, and not after now (after a seek back).
+// A trace doesn't fade with time: it stays until the frame or the edge's continuation is written over it (pass sphere;
+// a seek starts the sphere over there)
+bool sphere_written(float t) { return t >= 999.0 && t <= PTS + 1000.05; }
+
+#ifndef SPHERE_PASS
+// What the sphere holds in this pixel's direction of the world. The write pass fills every texel the output shows
+// before this reads it (the frame, or the edge's continuation where the sphere held nothing), so the smooth fill under
+// it only shows through a texel no write reached. Read as a cubic B-spline over 4 x 4 texels (smooth, no ringing, all
+// its weights positive, so empty texels just drop out)
 vec4 sphere_fill(vec2 uv)
 {
     vec4 base = edge_fill(uv);
     if (!frame_setup()) return base;
-    ivec2 t = sphere_texel(qrot(table(15), output_ray(cur_j)));
+    vec2 tc = sphere_coord(sphere_world(cur_j)) - 0.5;
     ivec2 size = imageSize(GYROFLOW_SPHERE);
+    vec2 c = floor(tc), f = tc - c;
+    vec2 f2 = f * f, f3 = f2 * f;
+    vec2 w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0, w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+    vec2 w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0, w3 = f3 / 6.0;
+    vec4 wx = vec4(w0.x, w1.x, w2.x, w3.x), wy = vec4(w0.y, w1.y, w2.y, w3.y);
+    ivec2 i0 = ivec2(c) - 1;
     vec3 sum = vec3(0.0);
     float ws = 0.0;
-    for (int y = -1; y <= 1; y++) {
-        for (int x = -1; x <= 1; x++) {
-            ivec2 p = ivec2((t.x + 2 * x + size.x) % size.x, clamp(t.y + 2 * y, 0, size.y - 1));
-            vec4 s = imageLoad(GYROFLOW_SPHERE, p);
-            float age = PTS + 1000.0 - s.a;
-            if (age >= -0.05 && age < 10.0) {
-                float k = exp2(-max(age, 0.0) / 2.5);
+    for (int y = 0; y < 4; y++) {
+        int py = clamp(i0.y + y, 0, size.y - 1);
+        for (int x = 0; x < 4; x++) {
+            vec4 s = imageLoad(GYROFLOW_SPHERE, ivec2((i0.x + x + size.x) % size.x, py));
+            float k = sphere_written(s.a) ? wx[x] * wy[y] : 0.0;
+            if (k > 0.0) {
                 sum += k * s.rgb;
                 ws += k;
             }
         }
     }
-    if (ws <= 0.0) return base;
-    return vec4(mix(base.rgb, sum / ws, clamp(ws / 9.0 * 1.5, 0.0, 1.0)), base.a);
+    if (ws <= 1e-6) return base;
+    // Fully the sphere's once two thirds of the taps' weight is written (a texel no write reached doesn't show as a hole)
+    return vec4(mix(base.rgb, sum / ws, clamp(ws * 1.5, 0.0, 1.0)), base.a);
 }
 #endif
+#endif
 
-// The fill where the frame doesn't cover the output: the sphere trail over the smooth fill, or the smooth fill
+#ifndef SPHERE_PASS
+// The fill where the frame doesn't cover the output: the sphere over the smooth fill, or the smooth fill. Kept for the
+// pixel: under water finish_rgb asks for it again for red and blue at the same place
+bool fill_kept = false;
+vec4 fill_value;
 vec4 fill_at(vec2 uv)
 {
+    if (fill_kept) return fill_value;
 #if SPHERE_FILL
-    return sphere_fill(uv);
+    fill_value = sphere_fill(uv);
 #elif EDGE_FILL
-    return edge_fill(uv);
+    fill_value = edge_fill(uv);
 #else
-    return BACKGROUND;
+    fill_value = BACKGROUND;
 #endif
+    fill_kept = true;
+    return fill_value;
 }
 
 vec4 finish(vec2 uv)
@@ -797,6 +845,7 @@ vec4 finish_rgb(vec2 uv, vec4 rb)
     return c;
 #endif
 }
+#endif
 #endif
 #endif
 #endif
@@ -1031,29 +1080,431 @@ vec4 hook()
 }
 
 // ==== pass sphere ====
-#ifdef SPHERE_PASS
-ivec2 sphere_texel(vec3 w)
+// The sphere's four passes, at MAIN before the warp samples the frame (so what they write shows in this very frame;
+// HOOKED is the frame as decoded, in RGB). gpu_table.rs defines SPHERE_EDGES, SPHERE_SECTORS_PASS, SPHERE_WRITE or
+// SPHERE_BEYOND for each. The rule was worked out on a model first (tools/edgefill/synth, 2026-11-19: its MEMORY=split,
+// SW=512, the hard write and REACH=antipode), and the shader is checked against it there.
+//
+// What the sphere holds (Anton's model): the frame's trace where the frame has been, and the frame's edge continued (the
+// smooth fill's colors) where it hasn't. Nothing fades with time: a texel keeps what was written there until the frame
+// or a new continuation is written over it. The output always shows the sphere past the frame. The sphere is coarse
+// (512 x 256, 0.7 degrees a texel) and read back smooth (a B-spline), which is what softens a trace's border.
+// - Inside the frame: the frame, wholly (averaged over the texel), but for its outermost SPHERE_SOFT_IN of the height
+//   (the interpolation's taps there reach past the edge) easing in to SPHERE_SOFT. A wide soft edge had weakened what
+//   only the frame's outer part saw and left a frozen soft band where a shaking frame came to rest.
+// - Past the frame, where the sphere holds nothing (the first frame, a seek, a turn to where the camera hasn't
+//   looked): the continuation, wholly.
+// - Past the frame, where it holds something: the continuation only where the world has changed at that part of the
+//   edge. The frame's edge, all the way round, in SPHERE_SECTORS sectors; per sector, in a band of SPHERE_BAND of the
+//   height inside the edge, the frame now against the sphere's memory of the same directions (its slow layer,
+//   GYROFLOW_SPHERE_SLOW). The memory is kept apart for what the camera saw and what only a continuation put there:
+//   a texel the camera has seen keeps what it saw in the slow layer (continuations written over it don't move it), so a
+//   shaking frame whose edge keeps leaving and coming back finds the same memory and wipes nothing; only the world
+//   changed (a cut, surfacing, the light) makes it differ. Texels that only ever held a continuation are compared on
+//   their own, and they alone are rewritten when the frame shows the continuation was wrong.
+//   Where a sector differs, the continuation is written over the whole wedge of the sphere past it: everything around
+//   the frame's axis in that direction, out to the point behind the camera, the parts the output doesn't show too
+//   (pass sphere_beyond), a share of the way each frame (half of it in SPHERE_TAKE). A trace is worth something only
+//   while it joins the frame; one past a changed edge is a picture of a world that isn't there any more.
+// The difference: the distance between the two averages in Y'CbCr of the signal as decoded, chroma counted
+// SPHERE_CHROMA times; from SPHERE_LO nothing is written, at SPHERE_HI the whole continuation, smoothstep between. Each
+// sector's distance is smoothed over time (half-life SPHERE_RISE going up, SPHERE_FALL going down), and the strength
+// between sector middles is interpolated along the edge. The sums are pass sphere's, per texel as the sphere holds it,
+// so the strengths a frame writes with are the frame before's (a frame late against a 0.15 s smoothing). A seek (or the first frame) starts the sphere over: texels
+// written before it count as empty (ge_epoch). SPHERE_DEBUG 1 writes the continuation red over traces, green where the
+// sphere held nothing, blue in the wedges past the output
+#define SPHERE_BAND 0.03
+#define SPHERE_CHROMA 2.0
+#define SPHERE_LO 0.04
+#define SPHERE_HI 0.10
+#define SPHERE_RISE 0.15
+#define SPHERE_FALL 0.3
+#define SPHERE_SLOW 0.5
+#define SPHERE_TAKE 0.08
+#define SPHERE_SOFT 0.012
+#define SPHERE_SOFT_IN 0.004
+#define SPHERE_SUMS 16u
+#define SPHERE_WEDGES 64
+#ifndef SPHERE_DEBUG
+#define SPHERE_DEBUG 0
+#endif
+#define SPHERE_MAGIC 0x5e3d1a7cu
+
+// Whether a texel written at time t holds something of this run (since the last seek; not after now)
+bool sphere_known(float t) { return t >= ge_epoch - 0.001 && t <= PTS + 1000.05; }
+
+// The slow layer's alpha: 0 where the texel only ever held a continuation; 1 + the frame's share it has had (the soft
+// edge's: written again while the camera holds still, it mustn't add up) where the camera has seen it
+bool slow_seen(float a) { return a >= 0.5; }
+float slow_share(float a) { return a >= 0.5 ? clamp(a - 1.0, 0.0, 1.0) : 0.0; }
+float slow_alpha(bool seen, float w) { return seen ? 1.0 + clamp(w, 0.0, 1.0) : 0.0; }
+
+// Output pixel j's place in the frame, the grid's, else where the lens's field ends (boundary_uv); past the field,
+// beyond_d: how far past it, in source pixels (the focal length's worth a radian), to add to the distance from the frame
+float beyond_d;
+bool sphere_uv(vec2 j, out vec2 uv)
 {
-    vec2 size = vec2(imageSize(GYROFLOW_SPHERE));
-    float lon = atan(w.x, w.z), lat = asin(clamp(w.y / length(w), -1.0, 1.0));
-    return ivec2(floor(vec2(lon / (2.0 * PI) + 0.5, lat / PI + 0.5) * size));
+    beyond_d = 0.0;
+    if (grid_coord(j, uv)) return true;
+    want_boundary = true;
+    bool ok = source_coord(j, uv);
+    want_boundary = false;
+    if (!ok && boundary_uv) beyond_d = max(boundary_excess, 0.0) * abs(fc.x) + 1.0;
+    return ok || boundary_uv;
+}
+
+// The place along the frame's edge nearest to uv, 0 .. 1 clockwise from the top left corner (its share of the
+// perimeter), and how far in from the edge uv is (in_d, source pixels; 0 outside)
+float in_d;
+float edge_place(vec2 uv)
+{
+    vec2 lo = vec2(-0.5), hi = vec2(SRC_W, SRC_H) - 0.5;
+    vec2 e = clamp(uv, lo, hi);
+    float dl = e.x - lo.x, dr = hi.x - e.x, dt = e.y - lo.y, db = hi.y - e.y;
+    float w = float(SRC_W), h = float(SRC_H);
+    in_d = min(min(dl, dr), min(dt, db));
+    float p;
+    if (in_d == dt) p = dl;
+    else if (in_d == dr) p = w + dt;
+    else if (in_d == db) p = w + h + dr;
+    else p = 2.0 * w + h + db;
+    return p / (2.0 * (w + h));
+}
+
+// A direction of the world's angle around the frame's axis (the middle row's camera), -pi .. pi, and the place on the
+// frame's edge that angle points to from the frame's middle (wedge_place): the wedge of the sphere a sector heads
+float wedge_place;
+float wedge_angle(vec3 w)
+{
+    float rows = t2.z;
+    vec4 v = table(15);
+    vec3 p = qrot(row_rotation(rows > 1.0 ? int(rows) / 2 : 0, rows), qrot(vec4(-v.xyz, v.w), w));
+    float phi = atan(p.y, p.x);
+    vec2 d = vec2(cos(phi), sin(phi)), h = 0.5 * vec2(SRC_W, SRC_H);
+    float t = 0.999 * min(h.x / max(abs(d.x), 1e-9), h.y / max(abs(d.y), 1e-9));
+    wedge_place = edge_place(h + t * d);
+    return phi;
+}
+
+// The decoded frame at source coordinate uv, bilinear (a compute pass: no implicit level of detail)
+vec3 sphere_src(vec2 uv) { return (textureLod(HOOKED_raw, (texel(uv) + 0.5) * HOOKED_pt, 0.0) * HOOKED_mul).rgb; }
+
+// How different two colors look: Y'CbCr (BT.709's weights) distance, chroma counted SPHERE_CHROMA times
+float edge_distance(vec3 a, vec3 b)
+{
+    vec3 d = a - b;
+    float y = dot(d, vec3(0.2126, 0.7152, 0.0722));
+    return length(vec3(y, SPHERE_CHROMA * (d.b - y) / 1.8556, SPHERE_CHROMA * (d.r - y) / 1.5748));
+}
+
+#ifdef SPHERE_EDGES
+// The output's border (every fourth pixel along it): the continuation there per angle around the frame's axis, summed
+// (fixed point, 1/1024): the color the wedges past the output get. (The sectors' sums are pass sphere's: it knows each
+// texel inside the frame's edge as the sphere has it, the frame averaged over the texel and its memory; compared at a
+// pixel, a thin bright post against a 0.7 degree texel's average read as a change)
+void hook()
+{
+    vec2 j = vec2(gl_GlobalInvocationID.xy) * 4.0 + 1.5;
+    if (any(greaterThanEqual(j, RT)) || !frame_setup()) return;
+    vec2 last = (ceil((RT - 1.5) / 4.0) - 1.0) * 4.0 + 1.5;
+    if (!(j.x == 1.5 || j.y == 1.5 || j.x == last.x || j.y == last.y)) return;
+    cur_j = j;
+    uvec3 c = uvec3(clamp(edge_fill(vec2(0.0)).rgb, 0.0, 1.0) * 1024.0 + 0.5);
+    float phi = wedge_angle(sphere_world(j));
+    uint b = (uint(floor((phi + PI) / (2.0 * PI) * float(SPHERE_WEDGES))) % uint(SPHERE_WEDGES)) * 4u;
+    atomicAdd(ge_wsum[b], c.r);
+    atomicAdd(ge_wsum[b + 1u], c.g);
+    atomicAdd(ge_wsum[b + 2u], c.b);
+    atomicAdd(ge_wsum[b + 3u], 1u);
 }
 #endif
 
+#ifdef SPHERE_SECTORS_PASS
+// One sector's difference from its sums at k (the frame, how much, the memory), the band having n_in pixels: none
+// without memory (nothing to say it's wrong); counted less where the memory covers under a third of the band
+float sector_difference(uint k, float n_in)
+{
+    float f = float(ge_sum[k + 3u]) / 1024.0;
+    if (f <= 1e-3) return 0.0;
+    vec3 e = vec3(ge_sum[k], ge_sum[k + 1u], ge_sum[k + 2u]) / (1024.0 * f);
+    vec3 m = vec3(ge_sum[k + 4u], ge_sum[k + 5u], ge_sum[k + 6u]) / (1024.0 * f);
+    return edge_distance(e, m) * clamp(3.0 * f / n_in, 0.0, 1.0);
+}
+
+// A difference smoothed over time: up with half-life SPHERE_RISE (a moment's difference doesn't count), down with
+// SPHERE_FALL; no reading (d_now < 0: the sector off the band) eases it down
+float sector_smooth(float dm, float d_now, float dt, bool jump)
+{
+    if (jump) return 0.0;
+    if (d_now >= 0.0) return dm + (d_now - dm) * (1.0 - exp2(-dt / (d_now > dm ? SPHERE_RISE : SPHERE_FALL)));
+    return dm - dm * (1.0 - exp2(-dt / SPHERE_FALL));
+}
+
+// One workgroup of SPHERE_WEDGES: each sector's two differences (the seen memory's, the continuations') from the sums,
+// smoothed over time, and their strengths; each wedge's color (where the border has none, between the nearest that
+// have); the sums cleared for the next frame. The buffer starts as garbage: nothing is trusted until the pass has run
+// once (ge_magic). Rendering the same frame again (paused, a redraw) changes nothing; a seek starts the sphere over
+// (ge_epoch) and the smoothing too
+shared vec3 s_wc[SPHERE_WEDGES];
+shared bool s_wh[SPHERE_WEDGES];
 void hook()
 {
-    // Every other output pixel each way (a texel of the sphere is ~3.5 of a 1080p frame's): where the frame covers it,
-    // its color, by its direction of the world, with the time it was seen
-#ifdef SPHERE_PASS
-    vec2 j = vec2(gl_GlobalInvocationID.xy) * 2.0;
-    if (any(greaterThanEqual(j, RT))) return;
-    vec2 uv;
-    if (!grid_coord(j, uv) || any(lessThan(uv, vec2(1.0))) || any(greaterThan(uv, vec2(SRC_W, SRC_H) - 2.0))) return;
-    if (!frame_setup()) return;
-    vec4 c = HOOKED_mul * texelFetch(HOOKED_raw, ivec2(j), 0);
-    imageStore(GYROFLOW_SPHERE, sphere_texel(qrot(table(15), output_ray(j))), vec4(c.rgb, PTS + 1000.0));
-#endif
+    uint i = gl_LocalInvocationID.x;
+    bool first = ge_magic != SPHERE_MAGIC;
+    float dt = PTS - ge_pts;
+    bool jump = first || dt < -0.001 || dt > 0.5;
+    memoryBarrierBuffer();
+    barrier();
+    for (uint s = i; s < uint(SPHERE_SECTORS); s += uint(SPHERE_WEDGES)) {
+        uint k = s * SPHERE_SUMS;
+        float n_in = float(ge_sum[k]);
+        bool has = !first && n_in >= 4.0;
+        float dw = has ? sector_difference(k + 1u, n_in) : -1.0;
+        float dc = has ? sector_difference(k + 8u, n_in) : -1.0;
+        ge_d[s] = sector_smooth(first ? 0.0 : ge_d[s], dw, dt, jump);
+        ge_dc[s] = sector_smooth(first ? 0.0 : ge_dc[s], dc, dt, jump);
+        ge_s[s] = smoothstep(SPHERE_LO, SPHERE_HI, ge_d[s]);
+        ge_sc[s] = smoothstep(SPHERE_LO, SPHERE_HI, ge_dc[s]);
+        for (uint q = 0u; q < SPHERE_SUMS; q++) ge_sum[k + q] = 0u;
+    }
+    if (i < uint(SPHERE_WEDGES)) {
+        uint b = i * 4u;
+        float n = float(ge_wsum[b + 3u]);
+        s_wh[i] = n > 0.0;
+        s_wc[i] = n > 0.0 ? vec3(ge_wsum[b], ge_wsum[b + 1u], ge_wsum[b + 2u]) / (1024.0 * n) : vec3(0.0);
+        for (uint q = 0u; q < 4u; q++) ge_wsum[b + q] = 0u;
+    }
+    barrier();
+    if (i < uint(SPHERE_WEDGES)) {
+        int b = int(i);
+        vec3 c = s_wc[b];
+        bool ok = s_wh[b];
+        if (!ok) {
+            int lo = 0, hi = 0;
+            for (int d = 1; d < SPHERE_WEDGES; d++) {
+                if (lo == 0 && s_wh[(b - d + SPHERE_WEDGES) % SPHERE_WEDGES]) lo = d;
+                if (hi == 0 && s_wh[(b + d) % SPHERE_WEDGES]) hi = d;
+            }
+            ok = lo > 0 && hi > 0;
+            if (ok) c = mix(s_wc[(b - lo + SPHERE_WEDGES) % SPHERE_WEDGES], s_wc[(b + hi) % SPHERE_WEDGES], float(lo) / float(lo + hi));
+        }
+        if (ok) {
+            ge_w[b * 3] = c.r;
+            ge_w[b * 3 + 1] = c.g;
+            ge_w[b * 3 + 2] = c.b;
+        }
+    }
+    memoryBarrierBuffer();
+    barrier();
+    if (i == 0u) {
+        // The time since the frame before, for the write passes' shares (none when the same frame is drawn again)
+        ge_dt = jump ? 0.0 : max(dt, 0.0);
+        ge_pts = PTS;
+        if (jump) ge_epoch = PTS + 1000.0;
+        ge_magic = SPHERE_MAGIC;
+    }
 }
+#endif
+
+#if defined(SPHERE_WRITE) || defined(SPHERE_BEYOND)
+// The sector strength at a place along the edge, between the two nearest sectors' middles: the seen memory's for a
+// texel the camera has seen, else the larger of it and the continuations'
+float sphere_strength(float place, bool seen)
+{
+    if (ge_magic != SPHERE_MAGIC) return 0.0;
+    float x = place * float(SPHERE_SECTORS) - 0.5;
+    float c = floor(x);
+    int a = (int(c) + SPHERE_SECTORS) % SPHERE_SECTORS, b = (a + 1) % SPHERE_SECTORS;
+    float s = mix(ge_s[a], ge_s[b], x - c);
+    return seen ? s : max(s, mix(ge_sc[a], ge_sc[b], x - c));
+}
+#endif
+
+#ifdef SPHERE_WRITE
+// Every fourth output pixel each way (a texel of the sphere is several of a 1080p frame's), and each texel of the
+// sphere these pixels reach written by one of them: the one nearest the texel's middle in steps of the pixels (their
+// lattice mapped onto the sphere by its local derivatives, from the neighbours' places in the workgroup), whether the
+// pixels are smaller than a texel or bigger (near the poles, a wide view). Every texel reached is stored with this
+// frame's time, changed or not, so pass sphere_beyond leaves it alone. The texel's middle decides what it gets: inside
+// the frame, the frame's color there (4 x 4 taps over the texel's footprint, a Gaussian of half a texel: the frame
+// averaged as the coarse texel sees it, no aliasing) over what the texel held, as SPHERE_SOFT says; past the frame,
+// the continuation (the smooth fill's color there): wholly where the texel held nothing, else with the share the
+// sector's strength gives it. Texels inside the frame's edge by up to SPHERE_BAND of the height are summed per sector
+// for the next frame's sectors
+shared vec2 s_tc[64];
+shared vec2 s_uv[64];
+shared bool s_ok[64];
+void hook()
+{
+    ivec2 l = ivec2(gl_LocalInvocationID.xy);
+    int li = l.y * 8 + l.x;
+    vec2 j = vec2(gl_GlobalInvocationID.xy) * 4.0;
+    if (!frame_setup()) return;
+    vec2 uv = vec2(0.0);
+    bool ok = sphere_uv(j, uv);
+    float beyond = beyond_d;
+    ivec2 size = imageSize(GYROFLOW_SPHERE);
+    vec2 tc = sphere_coord(sphere_world(j));
+    s_tc[li] = tc;
+    s_uv[li] = uv;
+    s_ok[li] = ok;
+    barrier();
+    if (!ok || any(greaterThanEqual(j, RT))) return;
+    // The lattice's steps on the sphere and in the frame: to the next pixel in the workgroup, or back from the last
+    int nx = l.x < 7 ? li + 1 : li - 1, ny = l.y < 7 ? li + 8 : li - 8;
+    float sx = l.x < 7 ? 1.0 : -1.0, sy = l.y < 7 ? 1.0 : -1.0;
+    vec2 dx = (s_tc[nx] - tc) * sx, dy = (s_tc[ny] - tc) * sy;
+    dx.x -= float(size.x) * round(dx.x / float(size.x));
+    dy.x -= float(size.x) * round(dy.x / float(size.x));
+    mat2 m = mat2(dx, dy);
+    if (abs(determinant(m)) < 1e-10) return;
+    mat2 inv = inverse(m);
+    bool box = s_ok[nx] && s_ok[ny];
+    mat2 juv = mat2((s_uv[nx] - uv) * sx, (s_uv[ny] - uv) * sy);
+    // A texel's sides in the frame's pixels
+    mat2 tuv = juv * inv;
+    float now = PTS + 1000.0;
+    float slow_k = 1.0 - exp2(-ge_dt / SPHERE_SLOW), take = 1.0 - exp2(-ge_dt / SPHERE_TAKE);
+    vec2 lo = vec2(-0.5), hi = vec2(SRC_W, SRC_H) - 0.5;
+    ivec2 t0 = ivec2(floor(tc));
+    // As many texels each way as a step of the lattice spans (near the sphere's poles, where Gyroflow's world has its
+    // y axis, a step spans many texels across), at most 6 across and 2 down
+    ivec2 r = clamp(ivec2(ceil(0.5 * (abs(dx) + abs(dy)))) + 1, ivec2(1), ivec2(6, 2));
+    for (int y = -r.y; y <= r.y; y++) {
+        for (int x = -r.x; x <= r.x; x++) {
+            ivec2 t = t0 + ivec2(x, y);
+            if (t.y < 0 || t.y >= size.y) continue;
+            vec2 k = inv * (tc - (vec2(t) + 0.5));
+            if (any(lessThan(k, vec2(-0.5))) || any(greaterThanEqual(k, vec2(0.5)))) continue;
+            t.x = (t.x + size.x) % size.x;
+            // The texel's middle: in the output (in pixels) and in the frame
+            vec2 uc = box ? uv - juv * k : uv;
+            cur_j = j - 4.0 * k;
+            vec4 old = imageLoad(GYROFLOW_SPHERE, t);
+            bool known = sphere_known(old.a);
+            vec4 sl = imageLoad(GYROFLOW_SPHERE_SLOW, t);
+            bool seen = known && slow_seen(sl.a);
+            float w = seen ? slow_share(sl.a) : 0.0;
+            vec3 slow = sl.rgb;
+            float out_d = length(uc - clamp(uc, lo, hi)) + beyond;
+            if (out_d <= 0.0) {
+                // The frame's share: none on its outermost pixels (the interpolation's taps there reach past the edge,
+                // and some cameras' outermost rows are off in color), whole from SPHERE_SOFT of the height in
+                vec2 dn = min(uc - lo, hi - uc);
+                float a = smoothstep(SPHERE_SOFT_IN * float(SRC_H) + 1.5, SPHERE_SOFT * float(SRC_H), min(dn.x, dn.y));
+                vec3 under = known ? old.rgb : edge_fill(uc).rgb;
+                vec3 c = under;
+                // Only the share it doesn't have yet: the frame wholly further in; at the edge, more of it only as the
+                // edge comes further in
+                float share = a >= 0.999 ? 1.0 : a > w ? (a - w) / (1.0 - w) : 0.0;
+                bool band = min(dn.x, dn.y) <= SPHERE_BAND * float(SRC_H);
+                vec3 f = vec3(0.0);
+                if (a > 0.0 || band) {
+                    if (box) {
+                        vec2 cl = vec2(0.0), ch = vec2(SRC_W, SRC_H) - 1.0;
+                        f = vec3(0.0);
+                        float ws = 0.0;
+                        for (int v = 0; v < 4; v++) {
+                            for (int u = 0; u < 4; u++) {
+                                vec2 o = vec2(float(u), float(v)) * 0.5 - 0.75;
+                                float g = exp(-2.0 * dot(o, o));
+                                f += g * sphere_src(clamp(uc + tuv * o, cl, ch));
+                                ws += g;
+                            }
+                        }
+                        f /= ws;
+                    } else {
+                        f = sphere_src(uc);
+                    }
+                    if (band) {
+                        // The sectors' sums for the next frame's pass sphere_sectors (as each texel was before this
+                        // frame): how many texels in the band inside the edge; then apart for texels the camera has
+                        // seen and texels holding only a continuation, the frame and the memory
+                        uint q = uint(min(floor(edge_place(uc) * float(SPHERE_SECTORS)), float(SPHERE_SECTORS - 1))) * SPHERE_SUMS;
+                        atomicAdd(ge_sum[q], 1u);
+                        if (known) {
+                            q += seen ? 1u : 8u;
+                            uvec3 fc_ = uvec3(clamp(f, 0.0, 1.0) * 1024.0 + 0.5), m = uvec3(clamp(slow, 0.0, 1.0) * 1024.0 + 0.5);
+                            atomicAdd(ge_sum[q], fc_.r);
+                            atomicAdd(ge_sum[q + 1u], fc_.g);
+                            atomicAdd(ge_sum[q + 2u], fc_.b);
+                            atomicAdd(ge_sum[q + 3u], 1024u);
+                            atomicAdd(ge_sum[q + 4u], m.r);
+                            atomicAdd(ge_sum[q + 5u], m.g);
+                            atomicAdd(ge_sum[q + 6u], m.b);
+                        }
+                    }
+                }
+                if (a > 0.0) {
+                    c = mix(under, f, share);
+                    // The slow layer: what the camera saw here over the last second or so (an average, half-life
+                    // SPHERE_SLOW), the memory the next frames' frame is checked against; started over where the
+                    // camera hadn't seen it
+                    slow = seen ? mix(slow, f, slow_k) : f;
+                } else if (!known) {
+                    slow = c;
+                }
+                imageStore(GYROFLOW_SPHERE_SLOW, t, vec4(slow, slow_alpha(seen || a > 0.0, max(w, a))));
+                imageStore(GYROFLOW_SPHERE, t, vec4(c, now));
+                continue;
+            }
+            // Past the frame: the continuation, wholly where the texel held nothing; over what it held, a share of the
+            // way each frame (half of it in SPHERE_TAKE), so a moment's difference barely touches the traces and a
+            // lasting one (a cut) replaces them within a few tenths of a second. A seen texel's memory stays what the
+            // camera saw
+            float a = 1.0;
+            if (known) {
+                a = take * sphere_strength(edge_place(uc), seen);
+                if (a < 1.0 / 512.0) a = 0.0;
+            }
+            vec3 c = old.rgb;
+            if (a > 0.0) {
+                vec3 cont = edge_fill(uc).rgb;
+#if SPHERE_DEBUG
+                // Red: written over traces the sphere held; green: where it held nothing
+                cont = known ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+#endif
+                c = known ? mix(old.rgb, cont, a) : cont;
+                if (!seen) slow = known ? mix(slow, cont, a) : cont;
+            }
+            imageStore(GYROFLOW_SPHERE_SLOW, t, vec4(slow, slow_alpha(seen, w * (1.0 - a))));
+            imageStore(GYROFLOW_SPHERE, t, vec4(c, now));
+        }
+    }
+}
+#endif
+
+#ifdef SPHERE_BEYOND
+// Every texel of the sphere pass sphere did not reach this frame (not in the output): where its wedge's sector says
+// the world changed, the wedge's color (the continuation where that angle leaves the output, from pass sphere_sectors),
+// a share of the way each frame as past the frame in the output
+void hook()
+{
+    ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(GYROFLOW_SPHERE);
+    if (any(greaterThanEqual(t, size)) || !frame_setup() || ge_magic != SPHERE_MAGIC) return;
+    float take = 1.0 - exp2(-ge_dt / SPHERE_TAKE);
+    if (take <= 0.0) return;
+    vec4 old = imageLoad(GYROFLOW_SPHERE, t);
+    float now = PTS + 1000.0;
+    if (!sphere_known(old.a) || abs(old.a - now) < 1e-3) return;
+    vec2 ll = ((vec2(t) + 0.5) / vec2(size) - 0.5) * vec2(2.0 * PI, PI);
+    float phi = wedge_angle(vec3(cos(ll.y) * sin(ll.x), sin(ll.y), cos(ll.y) * cos(ll.x)));
+    vec4 sl = imageLoad(GYROFLOW_SPHERE_SLOW, t);
+    bool seen = slow_seen(sl.a);
+    float a = take * sphere_strength(wedge_place, seen);
+    if (a < 1.0 / 512.0) return;
+    float x = (phi + PI) / (2.0 * PI) * float(SPHERE_WEDGES) - 0.5;
+    float c = floor(x);
+    int b0 = (int(c) + SPHERE_WEDGES) % SPHERE_WEDGES, b1 = (b0 + 1) % SPHERE_WEDGES;
+    vec3 col = mix(vec3(ge_w[b0 * 3], ge_w[b0 * 3 + 1], ge_w[b0 * 3 + 2]), vec3(ge_w[b1 * 3], ge_w[b1 * 3 + 1], ge_w[b1 * 3 + 2]), x - c);
+#if SPHERE_DEBUG
+    col = vec3(0.0, 0.0, 1.0);
+#endif
+    imageStore(GYROFLOW_SPHERE, t, vec4(mix(old.rgb, col, a), now));
+    imageStore(GYROFLOW_SPHERE_SLOW, t, vec4(seen ? sl.rgb : mix(sl.rgb, col, a), slow_alpha(seen, slow_share(sl.a) * (1.0 - a))));
+}
+#endif
 
 // ==== pass dn_luma ====
 // Temporal denoise (the clean frame: Ctrl+p), after the warp at MAIN, in RGB. The paused frame's way

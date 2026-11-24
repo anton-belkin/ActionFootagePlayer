@@ -99,6 +99,17 @@ expect("location kept", (s.read(clip)).location.lon, 34.25)
 s.update(clip, function(d) d.location = nil end)
 expect("location gone: removed", exists(s.path(clip)), false)
 
+-- A comment the Library wrote (docs/tags-and-culling.md, "The comment"): the player's own writes keep it, and the
+-- last of the player's parts going keeps the file with it
+s.update(clip, function(d) d.comment = "Черепаха у рифа, then the wreck"; d.rating = 3 end)
+s.update(clip, function(d) d.marks = { { t = 5 } } end)
+expect("comment kept by a write of marks", s.read(clip).comment, "Черепаха у рифа, then the wreck")
+s.update(clip, function(d) d.marks = nil; d.rating = nil end)
+expect("comment alone: kept", exists(s.path(clip)), true)
+expect("comment alone: still there", s.read(clip).comment, "Черепаха у рифа, then the wreck")
+s.update(clip, function(d) d.comment = nil end)
+expect("comment gone: removed", exists(s.path(clip)), false)
+
 -- Someone else's file of that name: left alone
 write(s.path(clip), serialize({ format = "something-else" }))
 local d2, f2, problem = s.read(clip)

@@ -6,6 +6,7 @@
 local mp = require 'mp'
 local ui = require 'ui'
 local tl = require 'timeline'
+local navkeys = require 'navkeys'
 
 local C = ui.C
 local M = {}
@@ -16,6 +17,10 @@ local PAD = 14
 local TRACK = 21
 local ROW = 47
 local BUTTON = 30
+-- The buttons whose key is written under them (navkeys.lua's: the arrows with a modifier), as a reminder
+local HINTED = { ["playlist-prev"] = true, ["playlist-next"] = true, ["frame-back-step"] = true, ["frame-step"] = true }
+local MAC = (mp.get_property("platform") or "") == "darwin"
+local HINT_SIZE = 10
 -- How near (points) a click must be to a mark to land on it
 M.SNAP = 7
 
@@ -141,6 +146,7 @@ local function width_of(b, s)
         w = ui.text_width(b.wide or b.text, b.pill and 12 or 13, s) / s + (b.pill and 18 or 12)
     else
         w = b.small and 24 or BUTTON + 2
+        if b.hint then w = math.max(w, ui.text_width(b.hint, HINT_SIZE, s) / s + 6) end
     end
     return (w + (b.gap or 2)) * s
 end
@@ -229,10 +235,17 @@ function M.draw(u, x0, x1, h, st, opts)
 
     -- The buttons
     local list = buttons(st, opts.remaining)
-    for _, b in ipairs(list) do b.w = width_of(b, s) end
+    for _, b in ipairs(list) do
+        b.hint = HINTED[b.cmd] and navkeys.key_label(opts.keys and opts.keys[b.cmd], MAC) or nil
+        b.w = width_of(b, s)
+    end
     local shown = tl.fit(list, x1 - x0 - 2 * (PAD - 4) * s)
     local lx, rx = x0 + (PAD - 4) * s, x1 - (PAD - 4) * s
     local cy = top + ROW * s
+    -- With keys under some buttons, the row's icons and words a little higher (where they're clicked stays)
+    local hinted = false
+    for _, b in ipairs(shown) do if b.hint then hinted = true end end
+    local dy = hinted and 4 * s or 0
     local right = {}
     for _, b in ipairs(shown) do
         if b.group == "right" then right[#right + 1] = b end
@@ -245,16 +258,18 @@ function M.draw(u, x0, x1, h, st, opts)
         local color = b.disabled and C.line or (b.active and C.text or (hovered and C.text or C.label))
         if b.pill then
             local ph = 22 * s
-            u:box(bx, cy - ph / 2, w, ph, 6, b.active and C.accent or (hovered and C.hover or C.field),
+            u:box(bx, cy - dy - ph / 2, w, ph, 6, b.active and C.accent or (hovered and C.hover or C.field),
                   { border = 1 * s, border_color = b.active and C.accent or C.line })
-            u:text(bx + w / 2, cy, b.text, { align = 5, size = 12, bold = b.active, color = b.active and C.knob or C.label })
+            u:text(bx + w / 2, cy - dy, b.text, { align = 5, size = 12, bold = b.active, color = b.active and C.knob or C.label })
         elseif b.text then
             if hovered then u:box(bx, cy - BUTTON / 2 * s, w, BUTTON * s, 6, C.hover) end
-            u:text(bx + 6 * s, cy, b.text, { size = 13, color = C.text })
+            u:text(bx + 6 * s, cy - dy, b.text, { size = 13, color = C.text })
         else
             if hovered then u:box(bx, cy - BUTTON / 2 * s, w, BUTTON * s, 6, C.hover) end
-            if b.active then u:box(bx + 4 * s, cy + 11 * s, w - 8 * s, 2 * s, 1, C.accent) end
-            icon(u, b.icon, bx + w / 2, cy, color)
+            if b.active then u:box(bx + 4 * s, cy - dy + 11 * s, w - 8 * s, 2 * s, 1, C.accent) end
+            icon(u, b.icon, bx + w / 2, cy - dy, color)
+            -- Its key under it, small
+            if b.hint then u:text(bx + w / 2, cy - dy + 15 * s, b.hint, { align = 5, size = HINT_SIZE, color = b.disabled and C.line or C.label }) end
         end
         if hovered then tip = { b = b, x = bx + w / 2 } end
         if not b.disabled then
@@ -272,7 +287,7 @@ function M.draw(u, x0, x1, h, st, opts)
     end
     -- The hovered button's name, and its key, above the bar
     if tip and not over then
-        local key = opts.keys and opts.keys[tip.b.cmd]
+        local key = navkeys.key_label(opts.keys and opts.keys[tip.b.cmd], MAC)
         local label = tip.b.tip .. (key and ("   " .. key) or "")
         local bw = ui.text_width(label, 12, s) + 16 * s
         local bx = math.min(math.max(tip.x - bw / 2, x0 + 4 * s), x1 - bw - 4 * s)

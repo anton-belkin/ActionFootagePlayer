@@ -1417,6 +1417,7 @@ mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
 mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
+mpv/scripts/gyroflow/projectwatch.lua  Ctrl+e's watch on the Gyroflow project: when a save there is taken up
 mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
                               rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
                               ~/.config/mpv/scripts/view360, and in ActionFootagePlayer

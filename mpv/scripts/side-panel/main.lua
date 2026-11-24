@@ -23,16 +23,27 @@
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
 --   popover [<id>]                  open a list over the panel (export: the Output tab's Export kinds), or close it
---   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file (for checking its look
---                                   without a window)
+--   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file, the cards and the
+--                                   dialog (notify.lua) over it (for checking its look without a window)
 
 local mp = require 'mp'
+-- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- file reads and what it draws, timed by default; J.step / J.label for what's its own. A stand-in that does nothing
+-- where the workspace plugin isn't beside this one
+local J = (function()
+    package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
+    local ok, j = pcall(require, 'journal')
+    if ok then return j end
+    return setmetatable({}, { __index = function(_, k) return k == "span" and function() return function() end end or function() end end })
+end)()
 local options = require 'mp.options'
 local ui = require 'ui'
 local bar = require 'bar'
 local tl = require 'timeline'
 local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
+-- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
+local notify = require 'notify'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -40,12 +51,14 @@ options.read_options(o, "side_panel")
 local C = ui.C
 local RAIL, PANEL, HEADER, FOOTER, PAD = 48, 292, 44, 56, 16
 local platform = mp.get_property("platform") or ""
+-- Option/Alt+arrows a frame, Cmd (Ctrl)+arrows the playlist's items (navkeys.lua): before the keys are read below
+require('navkeys').install(mp, platform == "darwin")
 local WEBSITE = "https://actionfootageplayer.ch"
 local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
 local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
-local CURVE_NAMES = {}
+local CURVE_NAMES = { uw = "SDR, underwater colour" }
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 -- The aspects a frame can have (the Clip tab's output, Save frame's photo), in two rows
 local ASPECT_ROWS = { { { "original", "Original" }, { "16:9" }, { "4:3" }, { "1:1" } }, { { "4:5" }, { "3:4" }, { "9:16" } } }
@@ -126,6 +139,13 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 10 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:box(cx + 5 * s, cy - 0.75 * s, 5 * s, 1.5 * s, 0, color)
         u:shape(ui.circle_path(cx, cy, 1.8 * s), color)
+    elseif name == "water" then
+        -- A drop, over a wave
+        u:shape("m " .. at(0, -9) .. " b " .. at(3, -5) .. " " .. at(5.5, -2) .. " " .. at(5.5, 0.5) .. " b " .. at(5.5, 3.8) .. " "
+                .. at(3, 5.5) .. " " .. at(0, 5.5) .. " b " .. at(-3, 5.5) .. " " .. at(-5.5, 3.8) .. " " .. at(-5.5, 0.5)
+                .. " b " .. at(-5.5, -2) .. " " .. at(-3, -5) .. " " .. at(0, -9), color, stroke)
+        u:shape("m " .. at(-9, 8.2) .. " b " .. at(-6, 6.4) .. " " .. at(-3, 6.4) .. " " .. at(0, 8.2) .. " b " .. at(3, 10) .. " "
+                .. at(6, 10) .. " " .. at(9, 8.2), color, { fill = false, border = 1.3 * s })
     elseif name == "telemetry" then
         -- A gauge: an arc, and its needle
         local R, r = 8, 6.4
@@ -203,18 +223,23 @@ end
 -- Source, Transform, Output: how it's read (the source's input), how it's shown (its transform), where (this screen,
 -- a file) (docs/moments-and-workspaces.md, "Source and transform")
 local TABS = {
-    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" }, { "crop", "Save frame" },
+    { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" },
+    { "water", "Underwater colour" }, { "crop", "Save frame" },
     { "quality", "Performance & Quality" }, { "telemetry", "Telemetry" }, { "player", "Player", true }, { "dv", "Dolby Vision" }, { "view360", "360° view" },
 }
 local TAB_TITLES = { support = "Support" }
 for _, t in ipairs(TABS) do TAB_TITLES[t[1]] = t[2] end
 
+-- The parts for a clip only: not on the rail while a photo shows (the live-photo plugin's user-data/afp/photo)
+local FOR_CLIPS = { source = true, transform = true, output = true, crop = true, dv = true, view360 = true }
+
 -- The parts the rail has: Dolby Vision only where the dv look can be (the app's mpv on macOS), the 360 view only for a
--- 360° clip
+-- 360° clip, neither of them nor the clip's own parts for a photo
 local function shown_tabs()
     local list, d, v = {}, state("dlogm"), state("view360")
+    local photo = type(mp.get_property_native("user-data/afp/photo")) == "table"
     for _, t in ipairs(TABS) do
-        if not t[3] and (t[1] ~= "dv" or (d and d.dv))
+        if not t[3] and not (photo and FOR_CLIPS[t[1]]) and (t[1] ~= "dv" or (d and d.dv))
            and (t[1] ~= "view360" or (type(v) == "table" and (v.available or v.note))) then
             table.insert(list, t)
         end
@@ -604,11 +629,17 @@ local function project_part(u, x, w, y)
     y = y + 8 * s
     u:divider(x, w, y)
     local file = ws.clip:match("([^/\\]+)$") or ws.clip
-    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows
+    -- A moment playing is a video of its own (its part of the clip): it's what the panel shows. A photo too (a photo's
+    -- link: its clip's part around the frame; a photo the player made: the picture), with its clip a button away
     local mo = ws.moment and not ws.moment.missing and ws.offset and ws.moment or nil
-    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
+    local ph = not mo and type(ws.photo) == "table" and ws.photo.clip and ws.photo or nil
+    u:text(x, y + 14 * s, fit((mo and ("THIS MOMENT · " .. mo.name) or ph and ("THIS PHOTO · " .. (ph.name or file)) or ("THIS CLIP · " .. file)), w, 11, s, true), { size = 11, bold = true, color = C.dim })
     y = y + 28 * s
-    if mo then
+    if ph then
+        -- (to the hundredth: photos of one clip are often a second apart)
+        y = u:caption(x, w, y - 6 * s, "The frame at " .. tl.clock(ph.t) .. " of " .. (ph.clip:match("([^/\\]+)$") or ph.clip))
+        y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. tl.clock(ph.t), "script-message-to workspace open-original")
+    elseif mo then
         y = u:caption(x, w, y - 6 * s, clock(mo["in"]) .. "–" .. clock(mo.out) .. " of " .. file)
         y = u:button(x, w, y + 2 * s, "whole", "Open the whole clip at " .. clock(mo["in"]), "script-message-to workspace open-original")
         -- How it's stabilized: on its own or with its clip, written into it (its transform is on the Transform tab)
@@ -644,6 +675,8 @@ local function project_part(u, x, w, y)
                           tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
     end
 
+    -- A photo: no marks, moments or part of its own (those are its clip's: Open the whole clip)
+    if ph then return y + 8 * s end
     local pos = mp.get_property_number("time-pos", 0)
     y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
@@ -707,7 +740,8 @@ local function project_part(u, x, w, y)
     -- The part in the clip's time (a moment playing starts at its in)
     local off = ws.offset or 0
     if ws.saving then
-        y = u:caption(ix, iw, y, "Saving " .. ws.saving .. "…", { color = C.text })
+        -- Its progress is on the card at the top of the video (notify.lua): here the button waits
+        y = u:button(ix, iw, y, "save", "Saving “" .. fit(ws.saving, iw * 0.6, 12, s, true) .. "”…", nil, { disabled = true })
     elseif a and b and b > a and not ws.project then
         y = u:caption(ix, iw, y, "To keep it as a moment, initialize the project above")
         y = u:button(ix, iw, y, "part-clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no")
@@ -848,6 +882,26 @@ local function subtitles_block(u, x, w, y, heading)
     return y
 end
 
+-- An export's settings (the gyroflow plugin's exportsettings.lua publishes them with their choices: docs/
+-- export-settings.md): kind (video, photo)'s rows, a pick kept for this computer at once. why: the reason they can't
+-- be had for this export (greyed, said under them)
+local SETTING_LABELS = { size = "Size", encode = "Encoding", quality = "Quality" }
+local function settings_rows(u, x, w, y, g, kind, why)
+    local es = type(g) == "table" and g.export_settings
+    if type(es) ~= "table" or type(es.choices) ~= "table" then return y end
+    local now = type(es[kind]) == "table" and es[kind] or {}
+    local note
+    for _, k in ipairs(kind == "photo" and { "size", "quality" } or { "size", "encode", "quality" }) do
+        local rows = {}
+        for _, c in ipairs(es.choices[k] or {}) do
+            rows[#rows + 1] = { kind = c[1], label = c[2], cmd = "script-message-to gyroflow export-setting " .. kind .. " " .. k .. " " .. c[1] }
+            if k == "quality" and c[1] == now[k] then note = c[3] end
+        end
+        y = u:select_row(x, w, y, kind .. "-" .. k, SETTING_LABELS[k], rows, now[k], { disabled = why ~= nil })
+    end
+    return u:caption(x, w, y, why or note or "")
+end
+
 local function output_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
@@ -913,6 +967,8 @@ local function output_part(u, x, w, y)
                 r.cmd = function() export_choice[clip_kind] = k; set_popover(nil) end
             end
             local busy = exportkind.busy(kind, v)
+            -- Its settings: size, encoding, quality (360° exports have their own)
+            y = settings_rows(u, x, w, y + 4 * s, g, "video", exportkind.settings_unavailable(kind))
             -- Cut only when it's sure not to fit: the part's times are digits, which the estimate takes as wide
             local label, room = exportkind.label(kind, d, a, b, clock), w - (ui.SPLIT_ARROW + 12) * s
             if ui.text_width(label, 12, s, true) > room then label = fit(label, room, 12, s, true) end
@@ -923,7 +979,10 @@ local function output_part(u, x, w, y)
             if busy then y = u:caption(x, w, y, busy) end
         end
         y = u:button(x, w, y, "last", "Show the last export", "script-message-to gyroflow reveal-last-export", { disabled = (g.last_export or "") == "" })
-        y = u:caption(x, w, y, "A still or a Live Photo: Save frame")
+        -- A photo of the frame on screen, as its key makes it (Alt+s); its kind, size and quality are Save frame's
+        y = u:heading(x, w, y + 10 * s, "Photo", keys["script-binding gyroflow/photo"])
+        y = u:button(x, w, y - 2 * s, "photo", "Save a photo of this frame", "script-message-to gyroflow photo", { primary = true })
+        y = u:caption(x, w, y, "Its kind (Live Photo…), size and quality, and framing it: Save frame")
     end
     return y
 end
@@ -990,17 +1049,12 @@ end
 -- The filter makes the frame (stabilized, or the lens alone): else mpv's own crop and turn do
 local function filtering_note(g) return (g.filter or "") ~= "" end
 
-local function transform_part(u, x, w, y)
+-- Where the transform is defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
+-- a moment's or clip preview's own settings: the Transform's, and the underwater colour's (part of the same bundle)
+local function view_card(u, x, w, y, ws)
     local s = u.s
-    local g, ws = state("gyroflow"), state("workspace")
-    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
-    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
-    local edit = keys["script-binding gyroflow/edit"]
-    local project = g.kind == "project"
-    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     local status = ws and ws.view_status
     local target = ws and ws.view_target
-
     -- Where it's defined
     local at = y
     local ix, iw = x + 10 * s, w - 20 * s
@@ -1025,6 +1079,22 @@ local function transform_part(u, x, w, y)
     y = u:switch(ix, iw, y, "view-auto", "Auto save", ws and ws.auto_save == true, "script-message-to workspace view-auto", nil, not target)
     u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
     y = y + 14 * s
+    return y
+end
+
+local function transform_part(u, x, w, y)
+    local s = u.s
+    local g, ws = state("gyroflow"), state("workspace")
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
+    local edit = keys["script-binding gyroflow/edit"]
+    local project = g.kind == "project"
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
+    local status = ws and ws.view_status
+    local target = ws and ws.view_target
+
+    y = view_card(u, x, w, y, ws)
+    local ix, iw = x + 10 * s, w - 20 * s
 
     -- Stabilization: with motion data (a project, or the clip's own). Over a project too it's saved with the clip: on (the
     -- project as it is), wider (its zoom left out), off (the project kept, not used)
@@ -1208,6 +1278,63 @@ local function telemetry_part(u, x, w, y)
     return y
 end
 
+-- Underwater colour (the dlogm plugin's uwcolor.lua): its switches, its strength, and what it measured in the frame
+local function signed(v, n) return v and ((v < 0 and "−" or "+") .. string.format("%." .. (n or 2) .. "f", math.abs(v))) or "–" end
+local function water_part(u, x, w, y)
+    local s = u.s
+    local c, ws = state("uwcolor"), state("workspace")
+    if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing plays") end
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
+    y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. Part of the clip's transform",
+                  { color = C.label })
+    y = view_card(u, x, w, y + 6 * s, ws)
+    local on = c.uw == true
+    y = u:switch(x, w, y, "uw-on", "Correct underwater colour", on, "script-message-to dlogm uw-set uw toggle", keys["script-binding dlogm/uw-toggle"],
+                 nil, saved and saved.uw)
+    if on and not c.active and not c.ok then
+        y = u:caption(x, w, y, "Not this clip: it's log or HDR, or has a curve set by hand")
+    end
+    y = u:switch(x, w, y, "uw-hl", "Brighter highlights", c.uw_highlights == true, "script-message-to dlogm uw-set uw_highlights toggle", nil,
+                 not on, saved and saved.uw_highlights)
+    y = u:caption(x, w, y, "Sunlit water and sand get more of HDR's room. Careful at night: a torch's spot gets brighter still")
+    local strength = c.uw_strength or 1
+    u:text(x, y + 10 * s, "Strength", { size = 12, color = C.label, alpha = on and "00" or "80" })
+    if saved and saved.uw_strength ~= nil and saved.uw_strength ~= strength then
+        u:shape(ui.circle_path(x + ui.text_width("Strength", 12, s) + 8 * s, y + 10 * s, 2.6 * s), C.saved)
+    end
+    u:text(x + w, y + 10 * s, string.format("%d %%", math.floor(strength * 100 + 0.5)), { size = 12, color = C.label, align = 6 })
+    y = u:slider(x, w, y + 18 * s, "uw-strength", strength, function(p)
+        mp.commandv("script-message-to", "dlogm", "uw-set", "uw_strength", string.format("%.2f", p))
+    end, "Camera's colour", "Corrected", not on)
+    local t = c.stats
+    if not (c.active and type(t) == "table" and t.under_water) then return y end
+    y = u:heading(x, w, y + 10 * s, "This frame")
+    local function line(label, value)
+        u:text(x, y + 9 * s, label, { size = 12, color = C.label })
+        u:text(x + w, y + 9 * s, value, { size = 12, align = 6 })
+        y = y + 20 * s
+    end
+    line("Under water", t.under_water >= 0.995 and "yes" or t.under_water <= 0.005 and "no: left as recorded"
+         or string.format("partly, %d %%", math.floor(t.under_water * 100 + 0.5)))
+    line("Smooth water", string.format("%d %% of the frame", math.floor((t.water or 0) * 100 + 0.5)))
+    if t.water_hue then
+        line("Water hue", string.format("%d° → %d°", t.water_hue, t.water_hue_after or t.water_hue))
+        line("Water purple (Oklab a)", signed(t.water_a, 3) .. " → " .. signed(t.water_a_after, 3))
+    end
+    line("Green leaking into red", string.format("%d %% taken out", math.floor((t.leak or 0) * 100 + 0.5)))
+    line("Red (log R/G)", signed(t.red))
+    line("Blue (log B/G)", signed(t.blue) .. ((t.blue_water or 0) > 0 and (" " .. signed(t.blue_water) .. " for green water") or ""))
+    line("Lightness", signed(t.lift) .. " stops")
+    y = u:caption(x, w, y + 2 * s, string.format("Hue under 228° reads green, Oklab a above −0.052 purple. Lightness to Action 6's "
+                  .. "median under water; this frame's is %.2f of SDR white. What plays eases to this over a second "
+                  .. "(now red %s, blue %s, leak %d %%, %s stops). Measured in %d ms", t.median or 0,
+                  signed(t.applied and t.applied.red), signed(t.applied and t.applied.blue),
+                  math.floor(((t.applied and t.applied.leak) or 0) * 100 + 0.5), signed(t.applied and t.applied.lift), t.ms or 0))
+    return y
+end
+
 local SPEEDS = { 0.5, 1, 1.5, 2 }
 
 local function player_part(u, x, w, y)
@@ -1288,10 +1415,34 @@ local function crop_part(u, x, w, y)
         return u:button(x, w, y + 4 * s, "crop-gyroflow", g.available and "Open in Gyroflow…" or "Stabilize in Gyroflow…",
                         "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
     end
+    -- The photo: its kind (alone, Live, Motion), size and quality, and the button saving it (Alt+s's photo); framing,
+    -- Enter does it too
+    local function photo_block(y, framing)
+        local mode = g.live_photo or "no"
+        local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
+        if platform ~= "darwin" then table.remove(modes, 2) end
+        y = u:heading(x, w, y + 10 * s, "Photo", keys["script-binding gyroflow/photo"])
+        y = u:select_row(x, w, y - 2 * s, "crop-live", "Kind", choices(modes, "script-message-to gyroflow live-photo"), mode)
+        y = settings_rows(u, x, w, y, g, "photo")
+        y = u:button(x, w, y + 4 * s, "crop-photo", framing and "Save the frame as a photo" or "Save a photo of this frame",
+                     "script-message-to gyroflow photo", { primary = true, key = framing and "Enter" or nil })
+        local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
+                  or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
+                  or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
+        -- In a project the key keeps a photo link (the workspace plugin's), rendered by the Library's Share with its own
+        -- settings; elsewhere gyroflow-export renders it now, into stabilized/ next to the clip
+        local ws = state("workspace")
+        if type(ws) == "table" and ws.project then
+            return u:caption(x, w, y, "In this project it's kept as a photo link in _Stills/Generated: the Library's Share renders it, "
+                                      .. "with the size and quality chosen there. Rendered now with these: Alt+Shift+s")
+        end
+        return u:caption(x, w, y, what .. " in the stabilized folder by the clip: the SDR look, brighter where the screen has HDR")
+    end
     y = u:switch(x, w, y, "crop", "Frame the photo", c.active == true, "script-message-to gyroflow crop toggle", keys["script-binding gyroflow/crop"])
     if not c.active then
         y = u:caption(x, w, y, "A frame over the video, for a photo of the frame on screen. Where the clip is stabilized, "
                                .. "moving the picture turns the camera, and zoom is its angle of view")
+        y = photo_block(y, false)
         return whole_video(y)
     end
     local function set(key, v) mp.commandv("script-message-to", "gyroflow", "crop-set", key, string.format("%.5f", v)) end
@@ -1336,20 +1487,7 @@ local function crop_part(u, x, w, y)
         y = u:button(x, w, y + 10 * s, "crop-reset", "Back to the start", "script-message-to gyroflow crop-reset", { key = "BS" })
         y = u:caption(x, w, y + 4 * s, "Not stabilized: the picture itself moves and zooms. Drag to move it, wheel or pinch to zoom")
     end
-    -- The photo alone, or with the video around it as Apple's devices (macOS only) or Android's take it
-    local mode = g.live_photo or "no"
-    local modes = { { "no", "Still" }, { "live", "Live Photo" }, { "motion", "Motion Photo" } }
-    if platform ~= "darwin" then table.remove(modes, 2) end
-    y = u:select_row(x, w, y + 10 * s, "crop-live", "Photo", choices(modes, "script-message-to gyroflow live-photo"), mode)
-    y = u:button(x, w, y + 6 * s, "crop-photo", "Save the frame as a photo", "script-message-to gyroflow photo", { primary = true, key = "Enter" })
-    local what = mode == "live" and "A HEIC and a .mov of the 3 s around it, one Live Photo for Apple's devices,"
-              or mode == "motion" and "An Ultra HDR JPEG with the 3 s around it inside, a Motion Photo for Android's,"
-              or (platform == "darwin" and "A HEIC" or "An Ultra HDR JPEG")
-    -- Where gyroflow-export puts it: the project's _Stills/Generated (the gyroflow plugin says), else
-    -- stabilized/ next to the clip
-    local ws = state("workspace")
-    local where = type(ws) == "table" and ws.project and "the project's _Stills/Generated" or "the stabilized folder by the clip"
-    y = u:caption(x, w, y, what .. " in " .. where .. ": the SDR look, brighter where the screen has HDR")
+    y = photo_block(y, true)
     y = u:button(x, w, y + 6 * s, "crop-leave", "Done framing", "script-message-to gyroflow crop no", { key = "Esc" })
     return whole_video(y)
 end
@@ -1577,14 +1715,24 @@ end)
 local function playlist_part(u, x, w, y)
     local s = u.s
     local list = mp.get_property_native("playlist") or {}
-    local rows = tl.playlist_rows(list, tl.set_of(mp.get_property_native("video-exts")), played)
+    -- A list opened from Action Footage Library (the workspace plugin's librarylist.lua): all of it, as the Library
+    -- showed it, and what it was. Photos in any list (the live-photo plugin shows them; a Live Photo's .mov is out of
+    -- the playlist already)
+    local lib = tl.library_list(list, mp.get_property_native("user-data/library-list"))
+    local rows = tl.playlist_rows(list, not lib and tl.set_of(mp.get_property_native("video-exts")) or nil, played,
+                                  tl.set_of(mp.get_property_native("image-exts")))
     if #rows == 0 then return u:caption(x, w, y, "Nothing plays") end
-    local dir = tl.common_folder(list)
+    local dir = not lib and tl.common_folder(list)
+    if lib then
+        u:text(x, y + 9 * s, fit_end(lib.label ~= "" and lib.label or "Action Footage Library", w, 13, s), { size = 13, bold = true })
+        y = u:caption(x, w, y + 20 * s, (#rows == 1 and "1 item" or (#rows .. " items")) .. " as the Library showed them") + 6 * s
+    else
     if dir and local_file(dir) then
         u:text(x, y + 9 * s, fit_end(folder_label(dir), w, 13, s), { size = 13, bold = true })
         y = y + 20 * s
     end
-    y = u:caption(x, w, y, #rows == 1 and "1 video" or (#rows .. " videos")) + 6 * s
+    y = u:caption(x, w, y, tl.rows_label(rows)) + 6 * s
+    end
     for _, r in ipairs(rows) do
         if r.current and reveal and u.clip then
             reveal = false
@@ -1607,7 +1755,7 @@ local function playlist_part(u, x, w, y)
 end
 
 local PARTS = { project = project_part, playlist = playlist_part, source = source_part, transform = transform_part, output = output_part, crop = crop_part,
-                dv = dv_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
+                dv = dv_part, water = water_part, quality = quality_part, telemetry = telemetry_part, player = player_part, support = support_part,
                 view360 = view360_part }
 -- Each part's "these as the defaults" (Transform has its own, Use as default)
 local REMEMBER = { output = "script-message-to dlogm remember", quality = "script-message-to gyroflow remember-quality",
@@ -1624,7 +1772,9 @@ end
 -- macOS shows the window's title bar over the video's top when the mouse moves there: the panel starts below it
 local TITLE_BAR = 28
 
-local function draw(w, h, s, hovered)
+local drawn
+-- final: the last try (drawn), whatever the scroll still wants: nil is never returned then
+local function draw(w, h, s, hovered, final)
     local u = ui.new(s)
     u.hover = hovered
     -- The drop-downs: which is open, how one opens, the row the keys are on
@@ -1663,8 +1813,20 @@ local function draw(w, h, s, hovered)
         local y0 = top + 14 * s
         local off = scroll[tab] or 0
         local fn = PARTS[tab]
-        local y_end = fn and fn(u, x, cw, y0 - off) or y0
+        -- A part that fails says so in its place, and the log names the cause: the rail, the other parts and the bar
+        -- are still drawn (an error here once left the panel and the bar black)
+        local ok, y_end = true, y0
+        if fn then
+            ok, y_end = xpcall(fn, debug.traceback, u, x, cw, y0 - off)
+            if not ok then
+                mp.msg.error("the " .. tostring(tab) .. " part failed: " .. tostring(y_end))
+                for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
+                u.hits = {}
+                y_end = u:caption(x, cw, y0, "This part couldn't be drawn (the log says why)")
+            end
+        end
         u.clip = nil
+        if redraw and final then redraw = false end
         if redraw then
             redraw = false
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
@@ -1675,7 +1837,7 @@ local function draw(w, h, s, hovered)
         local content = y_end + off - y0 + 24 * s
         local room = bottom - top
         local max = math.max(0, content - room)
-        if off > max then
+        if off > max and not final then
             scroll[tab] = max
             for i = #u.events, before + 1, -1 do table.remove(u.events, i) end
             u.hits = {}
@@ -1760,6 +1922,22 @@ local function bar_shown()
 end
 
 local bar_timer
+-- The panel drawn: again while it moves its own scroll (a part bringing a row into view, the scroll past the end
+-- clamped), at most a few times, the last drawn as it is. An error outside the parts (they're guarded in draw) is
+-- logged and the panel hidden (Tab shows it again), so its margin isn't left there unpainted
+function drawn(w, h, s, hovered)
+    for i = 1, 4 do
+        local ok, u = xpcall(draw, debug.traceback, w, h, s, hovered, i == 4)
+        if not ok then
+            mp.msg.error("the panel failed to draw, hidden: " .. tostring(u))
+            shown, open = false, false
+            if popover then popover = nil end
+            return ui.new(s)
+        end
+        if u then return u end
+    end
+    return ui.new(s)
+end
 local function render_bar()
     local d = dims
     if d.w <= 0 then return end
@@ -1812,8 +1990,7 @@ local function render()
     if not d or d.w <= 0 then return end
     dims = d
     local s = scale()
-    local u = draw(d.w, d.h, s, hover)
-    if not u then u = draw(d.w, d.h, s, hover) end
+    local u = drawn(d.w, d.h, s, hover)
     hits = u.hits
     overlay.res_x, overlay.res_y = d.w, d.h
     overlay.data = u:render()
@@ -1821,6 +1998,7 @@ local function render()
     -- The video beside it, not under it
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
     render_bar()
+    notify.set_panel_open(shown and open)
 end
 
 local function hit_at(x, y)
@@ -1893,6 +2071,8 @@ local function click(info)
         return update()
     end
     if not h then return end
+    -- Journal: the click is the button's action
+    J.label("panel/" .. tostring(h.id))
     if type(h.cmd) == "table" and h.cmd.drag then
         h.cmd.drag(pos.x, pos.y)
         if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
@@ -1951,6 +2131,7 @@ local function list_enter()
     for _, r in ipairs(l and l.rows or {}) do
         if r.kind == at and not r.disabled then cmd = r.cmd end
     end
+    J.label("panel/list/" .. tostring(at))
     if type(cmd) == "function" then cmd() elseif cmd then mp.command(cmd) end
     set_popover(nil)
     update()
@@ -2039,7 +2220,7 @@ end)
 mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
     read_keys()
     w, h, s = tonumber(w), tonumber(h), tonumber(s) or 1
-    local u = draw(w, h, s, hovered) or draw(w, h, s, hovered)
+    local u = drawn(w, h, s, hovered)
     if not bar_never then
         local b = ui.new(s)
         b.hover = hovered
@@ -2048,6 +2229,10 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
         for _, e in ipairs(u.events) do b.events[#b.events + 1] = e end
         u = b
     end
+    -- The cards and the dialog over them (notify.lua), as they are now
+    local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false) and TITLE_BAR * s or 0
+    local area = { x0 = 0, y0 = t0, x1 = w - width(s), y1 = h - (docked() and bar.HEIGHT * s or 0), s = s }
+    for _, e in ipairs(notify.draw(w, h, area).events) do u.events[#u.events + 1] = e end
     local f = io.open(path, "w")
     if not f then return mp.msg.error("can't write " .. path) end
     f:write("[Script Info]\nScriptType: v4.00+\nPlayResX: " .. w .. "\nPlayResY: " .. h .. "\nScaledBorderAndShadow: yes\n\n")
@@ -2062,7 +2247,7 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
 end)
 
 -- What it shows comes from the plugins' state and the player's
-for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
+for _, prop in ipairs({ "user-data/dlogm", "user-data/uwcolor", "user-data/gyroflow", "user-data/dji_telemetry", "user-data/highlights", "user-data/workspace",
                         "user-data/view360",
                         "user-data/footage_menu", "user-data/agent", "osd-dimensions",
                         "display-hidpi-scale", "border", "path", "pause", "fullscreen", "ontop", "loop-file", "speed",
@@ -2070,6 +2255,17 @@ for _, prop in ipairs({ "user-data/dlogm", "user-data/gyroflow", "user-data/dji_
                         "chapter-list" }) do
     mp.observe_property(prop, "native", function() update() end)
 end
+-- A photo shown: a clip's part chosen gives way to the playlist, and comes back with the next clip
+local before_photo = nil
+mp.observe_property("user-data/afp/photo", "native", function(_, p)
+    if type(p) == "table" then
+        if FOR_CLIPS[tab] then before_photo, tab = tab, "playlist" end
+    elseif before_photo then
+        tab, before_photo = before_photo, nil
+    end
+    update()
+end)
+
 -- Crop mode on: its part shows; off again: back to the one there was
 local crop_on, before_crop = false, nil
 mp.observe_property("user-data/gyroflow/crop", "native", function(_, c)
