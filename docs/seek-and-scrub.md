@@ -1,6 +1,6 @@
 # Seek, frame steps and scrubbing
 
-Analysis and proposal, 2026-11-24. Nothing here is built yet: this is the plan for Anton to agree on.
+Analysis 2026-11-24, then Anton's answers the same day (below). Nothing is built yet.
 
 Two related problems:
 
@@ -13,6 +13,23 @@ Two related problems:
 Rigs used here are in `tools/scrub/`: `dnrepro.py` (problem 1 without a window) and `thumbbench.c` (picture timings).
 
 ---
+
+## Decided (Anton, 2026-11-24)
+
+- **Problem 1: proposal A.** Paused after a click, the raw frame at once and the clean one replaces it on screen, as
+  long as showing the raw frame first costs no extra time.
+- **Problem 2:**
+  - No snapping. The bar goes to any time, as now; a click is an exact seek to the cursor's time.
+  - With an LRF/LRV beside the clip, the picture is that exact frame (any frame, not only keyframes: measured fast
+    enough, below). Without one, the picture is the clip's keyframe at or before the cursor (the last one that has
+    already happened), and the click still lands at the cursor's time.
+  - The picture shows on plain hover, and while dragging; dragging doesn't seek: one exact seek on release.
+  - Nothing is built ahead or in the background: every picture is made when the mouse asks for it (~15-50 ms).
+    Pictures already made may be kept, in memory and on this computer's disk only (never beside the clips).
+  - Size: about twice the height of the bar (the bar is 66 pt, so ~130 pt high, ~230 pt wide for 16:9).
+  - Colours as the file has them: no LUT, no stabilization (a log clip without a sidecar looks flat; that's fine).
+  - Insta360 / 360 clips: postponed.
+
 
 ## 1. Pause, seek and frame steps with the temporal denoise
 
@@ -99,8 +116,9 @@ set, `dn_window()` finds the slot with that PTS in the unbroken row and averages
   this when the denoise delay is on, and mpv's own commands otherwise.
 
 **A3. Paused, the ring is refilled around the shown frame.** When the shown frame has fewer than 5+5 neighbours
-(after a click on the bar, a `,` past the ring, a clip opened paused) and nothing has happened for `still_delay`
-(0.4 s, as the VapourSynth path's clean frame waits): seek exact to the shown frame − 5 frames, then
+(after a click on the bar, a `,` past the ring, a clip opened paused): after a click, at once, once the raw frame is
+on screen (the raw frame is the click's own exact seek, as now: no extra time before it); after frame steps, once
+they stop for `still_delay` (0.4 s), so quick stepping isn't held up. The refill: seek exact to the shown frame − 5 frames, then
 `frame-step 10` (mpv 0.41 takes a count; measured: 10 frames played in ~180 ms at 60 fps, ~330 ms at 30 fps), with
 `dn_show` held on the shown frame the whole time so the picture doesn't move — it only gets cleaner. The old raw
 copy of that frame stays in the ring until the new, clean one replaces it (the ring is 11 slots; the refill writes
@@ -111,13 +129,13 @@ Edge cases to handle: the last 5 frames of a clip (no frames after: show what th
 already), `fps_limit` (frames every 2nd/4th: steps are in played frames), a moment link (its own time offset),
 Light (3+3).
 
-### Simpler alternative (proposal B)
+### Simpler alternative (proposal B, not chosen)
 
 Paused, use no frames after the shown one (after = 0, as crop mode does) — then the newest decoded frame *is* the
 shown one, `time-pos` is right, and mpv's `frame-step` is always correct. Costs: at the moment of pausing the
 picture jumps 5 frames forward (to the newest), the paused frame is cleaned from 5 frames before it only (one-sided:
 weaker, about like Light); `,` still breaks the row (noisy until a refill of 5 frames before it). Less code, worse
-picture. I recommend A.
+picture. Anton chose A.
 
 ---
 
@@ -150,12 +168,15 @@ picture. I recommend A.
 **What Anton asked for:** a small picture at the cursor at once while hovering the bar; no colour correction or
 stabilization; a click lands exactly on the moment shown.
 
-**Landing exactly on what you saw.** A preview from a keyframe is the picture at that keyframe, not at the cursor.
-So, as proposed: while hovering, the bar **snaps to keyframes** — the bubble's time, the thin line and the preview
-are all the keyframe at or before the cursor (or the nearest one), and a click seeks exactly there. A bonus: an exact
-seek *to* a keyframe decodes one frame (~15–35 ms instead of ~150–250), so the click is fast too. Fine positioning
-after that: `,` `.` and Shift+←/→. Marks keep their snap (a mark wins over a keyframe within 7 pt). With the
-denoise on, the landing frame is then cleaned by A3.
+**Which picture, and where the click lands** (as decided, no snapping):
+
+- With an LRF/LRV: the exact frame at the cursor's time (the sidecar's own frame nearest it: it has 30 frames a
+  second, the clip may have 60, so within 1/60 s). The click seeks exactly to the cursor's time: what you saw is
+  where you land.
+- Without one: the picture is the keyframe at or before the cursor (up to 1 s earlier on Action 6 / HERO12, 0.5 s on
+  HERO4), labelled with the cursor's time; the click still seeks exactly to the cursor's time. So the picture can be
+  up to a second before where you land — enough to find the place, then `,` `.` or Shift+←/→.
+- A mark still wins within 7 pt (the bar's snap to marks stays).
 
 **Sources, per camera** (checked on the NAS, `/Volumes/photo/DATA` incl. DJI_Inbox, `#recycle` left out):
 
@@ -173,7 +194,7 @@ denoise on, the landing frame is then cleaned by A3.
 - GoPro `.THM` and the MJPEG cover stream inside DJI's MP4/LRF are one picture per clip: no use for scrubbing.
 - **The LRF is not log.** On a D-Log M Action 6 clip the LRF frame has the camera's normal look while the MP4's is
   flat grey (`docs/img/seek-scrub-lrf-vs-mp4.jpg`, left LRF, right MP4, same time). Keyframes of a log clip will look
-  flat (as they do in Finder); a 3D LUT on a 320-px picture is cheap if wanted (question below).
+  flat (as they do in Finder); no LUT for now (decided).
 - The Library already finds these files (`library/src/index.rs:359`, `camera_thumb()`); its rule lacks HERO3/4's
   `GOPR<n>.LRV` — one rule should serve both.
 - Where there's no sidecar: the clip's own keyframes.
@@ -199,44 +220,65 @@ from the Mac's cache first with `msync(MS_INVALIDATE)`):
 | for comparison: `ffmpeg -ss t -skip_frame nokey … -frames 1`, a process per picture | local | | **160–180 ms** | |
 | for comparison: exact frame, VT (what a click costs now) | NAS cold | | 157–205 / 261–280 ms | 6–7 MB |
 
-Whole strip in one pass (`ffmpeg -skip_frame nokey`, reads the whole file): LRF 48 s local 0.62 s, LRF 58 s on the
-NAS 0.93 s; the 4K MP4 local 0.77 s — but that reads all 550 MB, so on the NAS the MP4's strip must be built by
-seeking to each keyframe instead (~1.5 s per minute of clip cold, ~700 KB per keyframe).
+For the record (a strip built ahead was dropped, see Decided): all keyframes in one pass with `ffmpeg -skip_frame
+nokey` took 0.62 s for a 48 s LRF locally, 0.93 s for a 58 s LRF on the NAS.
+
+**Any frame from the sidecar** (Anton's question: is a non-key frame from the LRF/LRV fast too? — yes). Same rig,
+`--exact`: seek to the keyframe before the time, decode on to the exact frame (on average ~17 frames of the small
+H.264), picture 460 px wide. The decoder's threading matters: frame threads, not slice threads (slice: 74 ms local).
+
+| sidecar | where | per picture, median / p90 | read per picture |
+|---|---|---:|---:|
+| Action 6 0068 `.LRF` (720p) | local | 27 / 34 ms | 1 MB |
+| Action 6 0087 `.LRF` | NAS warm | 26 / 35 ms | 1 MB |
+| Action 6 0087 `.LRF` | NAS cold | 52 / 133 ms (max 191) | 1 MB |
+| HERO12 GL010057 `.LRV` (768×432) | NAS cold | 15 / 109 ms | 0.4 MB |
+| HERO4 GOPR1030 `.LRV` (432×240) | NAS cold | 6 / 39 ms | 0.1 MB |
+| Action 6 0087 `.LRF`, the mouse moving along the bar (0.1 s steps: decode on, no seek) | NAS cold | **1.7 / 5.7 ms** | 0.1 MB |
+| VideoToolbox for the LRF instead | local | 59 / 101 ms (slower for small H.264) | |
+
+So any frame from the sidecar takes ~15-50 ms, with cold NAS outliers up to ~0.1-0.2 s (each picture reads up to a
+second of the sidecar in small requests; a bigger read buffer should cut those), and as the mouse moves along the bar
+the next picture comes from the decoder already there in ~2 ms. A keyframe of the clip itself (no sidecar):
+~15 ms local, ~20-35 ms from the NAS cold (table above).
+
 
 Conclusions:
 
-- A picture under the cursor in **~15–35 ms**, even from the NAS cold, if the helper stays running and keeps the
-  file open. A process per picture (160–180 ms) is too slow: that's the main design constraint.
+- A picture under the cursor in **~15–50 ms**, even from the NAS cold, if the helper stays running and keeps the
+  file and its decoder open. A process per picture (160–180 ms) is too slow: that's the main design constraint.
+  That's fast enough to make every picture on demand: nothing needs building ahead.
 - LRF/LRV vs the clip's keyframes: about the same speed on this Mac (VideoToolbox decodes a 4K keyframe in ~15 ms),
   but the sidecar reads **4–9× less** from the NAS, decodes on the CPU (no contention with the player's own GPU
   decode while it plays) and, for DJI log clips, already looks normal. Prefer the sidecar; keyframes otherwise.
-- With 1 s keyframes, a 10-minute clip has 600 places on a ~1000 px bar: fine enough to find a place.
 
 **The helper.** A small long-lived program, `afp-scrub`, on the libav libraries mpv already ships (macOS, Windows,
-Linux alike), exactly what `thumbbench.c` does: open a file once, answer `<file> <time>` requests by seeking to
-the keyframe and decoding it (VideoToolbox / D3D11VA / VA-API for HEVC, CPU for the small H.264 sidecars), writing
-BGRA into one strip file per clip at slot `i` of the keyframe list (from the index: free once the file is open).
-The player's Lua shows a slot with mpv's `overlay-add` (raw BGRA from a file at an offset: no decoding in mpv, no
-copy), positioned over the bar's ASS. thumbfast does the same with a second headless mpv; ours avoids a second
-player's memory and start-up and gives keyframe-exact times. (Alternative on macOS only: extend `afp-thumbs` with
-`AVAssetImageGenerator`; not for Windows/Linux, so not preferred.)
+Linux alike), doing what `thumbbench.c` does: keep the file and a decoder open, answer `<file> <time> <exact|key>`
+requests — seek to the keyframe before it (or not, when the time is just ahead of the frame the decoder is at),
+decode on to the frame (sidecar, CPU, frame threads) or take the keyframe (the clip, VideoToolbox / D3D11VA /
+VA-API) — scale it and write BGRA into a picture file. The newest request wins: one under way is dropped when the
+mouse has moved on. The player's Lua shows the picture with mpv's `overlay-add` (raw BGRA from a file: no decoding in
+mpv), placed above the bar beside its time bubble. thumbfast does the same with a second headless mpv; ours avoids a
+second player's memory and start-up and does the exact sidecar frame. (macOS-only alternative, `afp-thumbs` +
+`AVAssetImageGenerator`: not for Windows/Linux, so not preferred.)
 
-**Order of work.** On hover, the picture under the cursor first (the newest request wins; older ones are dropped).
-In the background, at low priority: the whole strip, coarse to fine (every 16th keyframe, then every 8th…) so the
-bar is covered quickly — from the sidecar right after the clip opens (5 min of Action 6: ~300 pictures, ~53 MB from
-the NAS, a few seconds); from the clip's own keyframes only while paused or hovering (~210 MB per 5 min from the NAS
-would compete with playback on the same SMB connection, the lesson of #272).
+**When it reads.** Only while the mouse is over the bar: the helper opens the clip's sidecar (or the clip) on the
+first hover and keeps it open while the clip plays; nothing is read ahead or in the background, so playback on the
+NAS has the share to itself (the lesson of #272).
 
-**Cache.** In memory: the strip file itself (320×180 BGRA = 230 KB a picture; 5 min = ~70 MB, mmapped, dropped when
-the clip closes — or 240 px wide, ~40 MB). On disk, per computer: JPEG strips in
-`~/Library/Caches/ActionFootage/scrub/<file identity>.jpgs` (~10 KB a picture, ~3 MB per 5 min), keyed like the
-Library's identity (size + mtime + path), readable by the Library later for hover-scrubbing its cards. Nothing on
-the NAS (no writes beside originals). Opening a clip seen before: the strip is there at once.
+**Keeping what's made.** In memory, the pictures made for this clip (460×260 BGRA ≈ 480 KB each; a few hundred kept,
+the oldest dropped), so going back over the same stretch is instant. On disk, only on this computer, optionally: the
+same pictures as small JPEGs in `~/Library/Caches/ActionFootage/scrub/<file identity>/` (size + mtime + path, like the
+Library's identity), so a clip opened again scrubs from its cache at once. Never beside the clips. Disk cache can
+come second: it's not needed for speed.
 
-**Drag.** With previews the video needn't follow the mouse: drag = previews only, one exact seek on release
-(question below). Today's keyframe seeks on each move are what makes dragging lag on the NAS.
+**Drag.** The picture follows the mouse; the video doesn't seek while dragging (today's keyframe seek on each move is
+what makes dragging lag on the NAS); one exact seek on release.
 
----
+**Sidecar rules.** One rule shared with the Library (`index.rs:359`, `camera_thumb()`), extended with HERO3/4's
+`GOPR<n>.LRV` / `GP<ch><n>.LRV`; a sidecar is used only when its duration matches the clip's (±0.1 s). A moment
+link plays a stretch of its original: the original's sidecar, at the original's time.
+
 
 ## 3. Order of steps
 
@@ -244,29 +286,20 @@ the NAS (no writes beside originals). Opening a clip seen before: the strip is t
    Small; fixes the bar-vs-picture offset. Test: `dnrepro.py` extended to read `shown-pos`; Lua unit tests.
 2. **A2, `dn_show` in the shader + one step binding** for `,` `.` Option+arrows, the bar's buttons, the wheel.
    Test offscreen (the libplacebo rig of `denoise-noise-gate`/export `AFP_WARP_TEMPLATE`) plus a short live check.
-3. **A3, refill when paused** (seek − 5, `frame-step 10`, `dn_show` held). Live check of the timing and that the
-   picture doesn't move.
+3. **A3, refill when paused** (raw frame first, then seek − 5, `frame-step 10`, `dn_show` held). Live check of the
+   timing and that the picture doesn't move.
 4. **`afp-scrub` helper** + build scripts (macOS/Windows/Linux), sidecar rules shared with the Library.
-5. **Preview on hover** in `bar.lua` (`overlay-add`), keyframe snap, click = exact seek to the keyframe; drag as
-   agreed.
-6. **Background strip + disk cache**, NAS-friendly order; journal timings for hover → picture.
+5. **Picture on hover and drag** in `bar.lua` (`overlay-add`): sidecar exact frame, else the keyframe before;
+   click/release = exact seek to the cursor's time; no seeks while dragging. In-memory keep.
+6. Journal timings (hover → picture on screen); disk keep only if the numbers ask for it.
 7. UI PR with before/after screenshots.
 
 Steps 1–3 and 4–6 are independent and can go in parallel.
 
-## 4. Questions for Anton
+## 4. Open points
 
-1. Task 1: proposal A (always clean paused frame, steps instant within the last frames, refill ~0.3–0.6 s after a
-   click) or the simpler B (paused frame cleaned only from frames before it, 5-frame jump on pausing)?
-2. Paused click on the bar: the raw frame at once and the clean one ~0.3–0.6 s later (as the VS path's clean frame
-   does) — OK?
-3. Hover snaps to keyframes (1 s apart, 0.5 s on HERO4) and the click lands exactly on that keyframe — OK? Or land at
-   the cursor's time even if the preview showed the keyframe before it?
-4. Drag: previews only and one seek on release, or the video follows the drag as now?
-5. Strip in the background: from LRF/LRV right after opening; from the clip's own keyframes (NAS reads ~210 MB per
-   5 min) only while paused/hovering — or also in the background?
-6. Disk cache on this computer (~3 MB per 5 min of clip), shared with the Library for later — OK?
-7. Preview size about 160 pt wide (320 px)? Log clips without a sidecar look flat grey: leave as is (as asked) or put
-   the clip's LUT on the small picture (cheap)?
-8. Insta360: preview from the front lens only, or both fisheyes side by side? (I couldn't check their LRV files: none
-   on the NAS.)
+- The refill's real cost live (each of the 10 frames is a full warp + denoise render, ~10 ms with Full): measured
+  only headless (`frame-step 10` = ~180 ms at 60 fps with `--vo=null`). Whether `speed` > 1 with `framedrop=no`
+  makes it faster is for the live check.
+- The cold-NAS outliers of the sidecar's exact frame (p90 ~0.1 s): try a larger read buffer in the helper.
+- Insta360 and other 360 clips: postponed (Anton).

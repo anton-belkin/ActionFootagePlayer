@@ -3,6 +3,9 @@
 // Opens the file once, then for N times spread over the clip (in a shuffled order, as a mouse would): seek to the
 // keyframe at/before t, decode the first frame (or, --exact, up to t), scale to W wide RGBA. Prints open ms, per-picture
 // ms (median, p90, max), bytes read per picture. --cold: drop the file's pages from the cache first (msync MS_INVALIDATE).
+// --threads slice|frame|one: the decoder's threading (slice: the keyframe at once; frame: faster through a GOP).
+// --walk S: times in a row from a quarter of the clip, S seconds apart (a mouse moving along the bar); a time ahead of
+// the last frame decoded, within 2 s, is decoded on to without a seek.
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
 #include <libavutil/hwcontext.h>
@@ -38,7 +41,7 @@ static enum AVPixelFormat hw_fmt(AVCodecContext *c, const enum AVPixelFormat *f)
 
 int main(int argc, char **argv)
 {
-    int cold = 0, hw = 0, exact = 0, W = 320, N = 40; const char *dump = NULL, *path = NULL;
+    int cold = 0, hw = 0, exact = 0, W = 320, N = 40, threads = 0; double walk = 0; const char *dump = NULL, *path = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--cold")) cold = 1;
         else if (!strcmp(argv[i], "--hw")) hw = 1;
@@ -46,6 +49,8 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--width")) W = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--n")) N = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--dump")) dump = argv[++i];
+        else if (!strcmp(argv[i], "--threads")) { i++; threads = !strcmp(argv[i], "frame") ? 1 : !strcmp(argv[i], "one") ? 2 : 0; }
+        else if (!strcmp(argv[i], "--walk")) walk = atof(argv[++i]);
         else path = argv[i];
     }
     av_log_set_level(AV_LOG_ERROR);
@@ -59,7 +64,7 @@ int main(int argc, char **argv)
     const AVCodec *dec = avcodec_find_decoder(st->codecpar->codec_id);
     AVCodecContext *cc = avcodec_alloc_context3(dec);
     avcodec_parameters_to_context(cc, st->codecpar);
-    cc->thread_count = 0; cc->thread_type = FF_THREAD_SLICE;
+    cc->thread_count = threads == 2 ? 1 : 0; cc->thread_type = threads == 1 ? FF_THREAD_FRAME : FF_THREAD_SLICE;
     if (hw) {
         AVBufferRef *dev = NULL;
         if (av_hwdevice_ctx_create(&dev, AV_HWDEVICE_TYPE_VIDEOTOOLBOX, NULL, NULL, 0) == 0) { cc->hw_device_ctx = dev; cc->get_format = hw_fmt; }
@@ -75,14 +80,16 @@ int main(int argc, char **argv)
     double *ts = calloc(N, sizeof(double));
     for (int i = 0; i < N; i++) ts[i] = dur * (i + 0.5) / N;
     srand(7); for (int i = N - 1; i > 0; i--) { int j = rand() % (i + 1); double x = ts[i]; ts[i] = ts[j]; ts[j] = x; }
+    if (walk > 0) for (int i = 0; i < N; i++) ts[i] = dur * 0.25 + i * walk;
+    int64_t last_pts = INT64_MIN;
     int frames_decoded = 0;
     for (int i = 0; i < N; i++) {
         double t = ts[i];
         int64_t before = fc->pb->bytes_read;
         double a = now_ms();
         int64_t target = (int64_t)(t / av_q2d(st->time_base)) + (st->start_time != AV_NOPTS_VALUE ? st->start_time : 0);
-        av_seek_frame(fc, vs, target, AVSEEK_FLAG_BACKWARD);
-        avcodec_flush_buffers(cc);
+        int ahead = exact && last_pts != INT64_MIN && target > last_pts && (target - last_pts) * av_q2d(st->time_base) < 2.0;
+        if (!ahead) { av_seek_frame(fc, vs, target, AVSEEK_FLAG_BACKWARD); avcodec_flush_buffers(cc); }
         int got = 0;
         while (!got && av_read_frame(fc, pkt) >= 0) {
             if (pkt->stream_index == vs) {
@@ -91,7 +98,7 @@ int main(int argc, char **argv)
                 while (avcodec_receive_frame(cc, fr) == 0) {
                     frames_decoded++;
                     if (exact && fr->pts != AV_NOPTS_VALUE && fr->pts < target) { av_frame_unref(fr); continue; }
-                    got = 1; break;
+                    got = 1; last_pts = fr->pts; break;
                 }
             }
             av_packet_unref(pkt);
@@ -117,8 +124,8 @@ int main(int argc, char **argv)
     }
     double total = 0; for (int i = 0; i < N; i++) total += ms[i];
     qsort(ms, N, sizeof(double), cmp);
-    printf("%s%s%s open %.0f ms (%.0f KB) | per picture median %.1f p90 %.1f max %.1f ms, all %d: %.0f ms | %.0f KB read each, %.1f frames decoded each\n",
-           cold ? "cold " : "warm ", hw ? "hw " : "sw ", exact ? "exact" : "key", open_ms, open_bytes / 1024.0,
+    printf("%s%s%s%s%s open %.0f ms (%.0f KB) | per picture median %.1f p90 %.1f max %.1f ms, all %d: %.0f ms | %.0f KB read each, %.1f frames decoded each\n",
+           cold ? "cold " : "warm ", hw ? "hw " : "sw ", exact ? "exact" : "key", threads == 1 ? " frame-threads" : threads == 2 ? " 1-thread" : "", walk > 0 ? " walk" : "", open_ms, open_bytes / 1024.0,
            ms[N / 2], ms[(int)(N * 0.9)], ms[N - 1], N, total, bytes_total / N / 1024.0, (double)frames_decoded / N);
     return 0;
 }
