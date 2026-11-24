@@ -339,8 +339,9 @@ pub fn camera_rig(path: &str) -> Option<CameraRig> {
     let parse = |probe_only: bool| -> Option<Input> {
         let mut file = std::fs::File::open(path).ok()?;
         let size = file.metadata().ok()?.len();
-        Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)),
-                                        InputOptions { probe_only, dont_look_for_sidecar_files: true, ..Default::default() }).ok()
+        let options = InputOptions { dont_look_for_sidecar_files: true, ..Default::default() };
+        if probe_only { return crate::probe::probe_input(&mut file, size, path, options).ok(); }
+        Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()
     };
     let rig_in = |input: &Input| -> Option<CameraRig> {
         input.samples.as_deref().unwrap_or_default().iter().find_map(|s| match s.tag_map.as_ref().and_then(|m| m.get(&GroupId::Lens)).and_then(|g| g.get(&TagId::Rig)).map(|t| &t.value) {

@@ -31,7 +31,7 @@ use std::path::{ Path, PathBuf };
 use std::process::{ Command, Stdio };
 use std::time::Duration;
 use gyroflow_core::{ filesystem, util };
-use gyroflow_core::telemetry_parser::{ Input, InputOptions, tags_impl::* };
+use gyroflow_core::telemetry_parser::{ InputOptions, tags_impl::* };
 use serde_json::{ json, Value };
 
 /// What's done with a clip
@@ -100,8 +100,7 @@ fn read_clip(video: &Path, path: &str) -> Result<(crate::lens_pick::Clip, bool),
     let mut file = std::fs::File::open(video).map_err(|e| e.to_string())?;
     let size = file.metadata().map_err(|e| e.to_string())?.len();
     let meta = util::get_video_metadata(&mut file, size, &url).map_err(|e| format!("not a video Gyroflow reads: {e}"))?;
-    let options = InputOptions { probe_only: true, ..Default::default() };
-    match Input::from_stream_with_options(&mut file, size, path, |_| (), std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)), options) {
+    match crate::probe::probe_input(&mut file, size, path, InputOptions::default()) {
         Ok(input) => {
             let in_file = input.samples.as_deref().unwrap_or_default().iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Lens))
                 .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));

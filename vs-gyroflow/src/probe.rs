@@ -9,12 +9,30 @@ use gyroflow_core::{ filesystem, util };
 use crate::lens_pick;
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
+/// The most metadata samples (or Insta360 trailer records) a probe reads. telemetry-parser's probe stops at the first
+/// sample it decodes, but a DJI file whose samples it can't decode (a Mini 4 Pro's) has none, and the probe went on to
+/// every sample, one per frame spread over the whole file: 2-5 s from a NAS for a minute of 4K, 11 s for 900 MB, to
+/// learn there's no motion data. A file that can be read decodes at its first sample (DJI, GoPro, Sony, Blackmagic
+/// stop there), and an Insta360 trailer walk reads one record per call, a few dozen at most
+const PROBE_MAX_READS: usize = 64;
+
+/// telemetry-parser's probe of the file (`probe_only`, with `options` otherwise), stopped after [PROBE_MAX_READS]
+/// reads; Ok with no samples when it stopped there
+pub fn probe_input<T: Read + Seek>(file: &mut T, size: u64, path: &str, options: InputOptions) -> std::io::Result<Input> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let reads = std::sync::atomic::AtomicUsize::new(0);
+    let stop = cancel.clone();
+    let progress = move |_: f64| {
+        if reads.fetch_add(1, Ordering::Relaxed) + 1 >= PROBE_MAX_READS { stop.store(true, Ordering::Relaxed); }
+    };
+    Input::from_stream_with_options(file, size, path, progress, cancel, InputOptions { probe_only: true, ..options })
+}
+
 /// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
 pub fn camera(path: &str) -> Option<(String, Option<String>)> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
-    let options = InputOptions { probe_only: true, ..Default::default() };
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
+    let input = probe_input(&mut file, size, path, InputOptions::default()).ok()?;
     let maker = input.camera_type();
     if maker.is_empty() { return None; }
     Some((maker, input.camera_model().map(|m| m.to_string()).filter(|m| !m.is_empty())))
@@ -42,8 +60,7 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     // Up to the first metadata sample and gyro reading, which have what's decided here: a long clip has one sample
     // per frame spread over the whole file (36 538 in 7 GB of 4K60), ~20 s of reads from an SD card. The plugin
     // reads them all once it plays (Engine::load)
-    let options = InputOptions { probe_only: true, ..Default::default() };
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).map_err(|e| e.to_string())?;
+    let input = probe_input(&mut file, size, path, InputOptions::default()).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
     let samples = input.samples.as_deref().unwrap_or_default();
     *in_camera = stabilized_in_camera(&camera, samples);
@@ -194,9 +211,8 @@ fn lens_clip(path: &str) -> Option<(lens_pick::Clip, bool)> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
     let video = util::get_video_metadata(&mut file, size, &url).ok()?;
-    let options = InputOptions { probe_only: true, ..Default::default() };
     // A file telemetry-parser doesn't read at all (a Mavic Pro's) can still name its camera itself
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok();
+    let input = probe_input(&mut file, size, path, InputOptions::default()).ok();
     let in_file = input.as_ref().is_some_and(|i| lens_in_file(i.samples.as_deref().unwrap_or_default()));
     // The camera, Gyroflow's name for the lens mode it recorded ("Wide"), which the curated list's "recorded" can
     // name too, and the size

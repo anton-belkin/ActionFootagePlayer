@@ -1759,6 +1759,28 @@ local function add_sphere(source)
                               tracks, tostring(rig.width), tostring(rig.height), step > 1 and string.format(", every %s frames", step) or ""))
 end
 
+-- The card shown while a clip's loading waits for this plugin: first the check of what it can be stabilized with
+-- (gyroflow-probe: from a NAS a second or more), then, for a clip that has motion data, the reading of it for the
+-- filter. One that has none (a drone's, a phone's) is only checked. (In a block of its own with setup and the hook:
+-- the main chunk is at Lua's 200 local variables)
+do
+local loading = {
+    phase = "checking", shown = false,
+    cards = {
+        checking = { title = "Checking the clip for motion data", detail = "Whether it can be stabilized" },
+        reading = { title = "Reading the clip's motion", detail = "For the stabilization" },
+    },
+}
+function loading.card()
+    loading.shown = true
+    local card = loading.cards[loading.phase]
+    mp.notify({ id = "gyroflow:reading", kind = "working", title = card.title, detail = card.detail })
+end
+function loading.to(phase)
+    loading.phase = phase
+    if loading.shown then loading.card() end
+end
+
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
@@ -1793,6 +1815,7 @@ local function setup(done)
             return done()
         end
         if not source then return done() end
+        if source.kind ~= "lens" then loading.to("reading") end
         add_filter(source, function()
             done()
             if source.kind == "project" then find_water(path, source) end
@@ -1803,18 +1826,19 @@ end
 -- Loading waits for the probe, with the script free meanwhile: quitting doesn't wait for it
 mp.add_hook("on_load", 50, function(hook)
     hook:defer()
-    local slow = mp.add_timeout(0.7, function()
-        mp.notify({ id = "gyroflow:reading", kind = "working", title = "Reading the clip's motion", detail = "For the stabilization" })
-    end)
+    loading.phase, loading.shown = "checking", false
+    local slow = mp.add_timeout(0.7, loading.card)
     setup(function()
-        if not slow:is_enabled() then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
+        if loading.shown then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
         slow:kill()
+        loading.shown = false
         -- Held for a clip before this one that didn't get to play on the GPU path
         if not (gpu and gpu.hold) then gpu_unhold() end
         publish()
         hook:cont()
     end)
 end)
+end
 
 -- The clip loaded again from where it plays: to stabilize it with a project that wasn't there when it loaded
 play_again = function()
