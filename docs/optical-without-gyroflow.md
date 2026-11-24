@@ -351,21 +351,63 @@ Cons:
 - **The curated list** (`curated_lenses.json`, built-in + user) stays what it is: the map from a camera's recorded mode
   codes to lens types, for cameras whose modes Gyroflow doesn't name (HERO4 SETT, DJI fov_type). A type can now name a
   local profile.
-- **Seed:** Anton's 11 profiles from lens_profiles#41, which this build's Gyroflow DB lacks, plus whichever of the other
-  archive profiles he wants (`research_notes/lens_refine/archive/profiles`: drones, Action 6 1080 EIS).
+- **Seed:** only Anton's 11 profiles from lens_profiles#41, which this build's Gyroflow DB lacks. They are known to be
+  good. The other archive profiles (drones, Action 6 1080 EIS) stay out; their quality wasn't checked.
 
 ### 5.2 When the lens is taken by itself
 
-Without any command, in this order:
+Anton's rule (2026-11-24): **a lens is reliable only when it matches the clip in every parameter, the rolling-shutter
+readout included.** In every other case the player says "no ready lens", and Find lens / Estimate lens are the way.
 
-1. **A hand choice:** `source.lens` (a profile) or `source.lens_type`.
-2. **The lens in the file:** DJI with EIS off, HERO12+, Insta360.
-3. **A reliable profile for the clip's mode**, when the camera's metadata names that mode **unambiguously**:
-   - "Unambiguously" is a per-camera mark in the curated list. Proposed yes for GoPro HERO5+ (GPMF lens mode + EIS), DJI
-     fov_type for named modes, one-lens drones, and HERO4 SETT codes once their meaning is confirmed. Proposed no for
-     HERO3 White (its codes proved untrustworthy) and for dynamic-crop EIS.
-   - "Reliable": see question 1.
-4. Otherwise **lens unknown**. The clip plays as it does today without a lens, and Find lens is the way out.
+Taken without any command, in this order:
+
+1. **A hand choice:** `source.lens` (a profile, kept with its readout) or `source.lens_type`.
+2. **The lens in the file**, where the camera wrote it (DJI with EIS off, GoPro HERO12+, Insta360). DJI writes the
+   readout with it (Action 6: 9.74 ms). Whether every GoPro does (GPMF `SROT`) is checked in step 3. Where none is
+   written, it counts as not reliable.
+3. **A profile from the local database or Gyroflow's that matches exactly:**
+   - same camera, same recorded lens mode, same in-camera stabilization, same resolution, same fps (readout goes with
+     the sensor mode and the frame rate: HERO4 2.7K Medium reads out in 31, 24 and 12 ms at 24, 30 and 60 fps);
+   - and it **has a readout**;
+   - official, ours or community alike, provided nobody voted it down.
+   - This only applies to a camera whose metadata names its lens mode unambiguously (§5.2.1).
+4. Otherwise **no ready lens.** The clip plays as it does without a lens (lens-only or as recorded), and Source says so,
+   with Find lens and Estimate lens.
+
+A profile without a readout, or one that matches only nearly (other fps, resolution or EIS), is not taken by itself. It
+is a **starting point**: Find lens tries it and measures the readout on the clip itself (#1296 does this already:
+`readout_measured`, "Rolling shutter readout time measured"). That takes tens of seconds instead of a full estimate. When
+it fits, Assign keeps the profile with the measured readout in the local database for that exact camera, mode, size and
+fps, so the next clip of that mode takes it by itself.
+
+How much this changes, by Gyroflow's DB v41 (the one in our build):
+- 9810 profiles, 1094 with a readout, 76 official with a readout;
+- HERO7 Black: 54 profiles, 5 with a readout;
+- HERO4 Black: 26 and 0;
+- Osmo Action: 26 and 0;
+- no drone of Anton's has a profile with a readout.
+
+So most of Anton's clips will start as "no ready lens". Find lens and Estimate lens fill the local database mode by
+mode; the 11 profiles of #41 cover the commonest old modes from day one.
+
+This also changes today's behaviour: gyro clips stabilized now with a "nearest" DB pick (HERO7) show "no ready lens"
+until Find lens has run on one clip of their mode.
+
+#### 5.2.1 Which cameras name their lens mode unambiguously (working hypothesis, from the code)
+
+What the metadata gives, as gyroflow-core's `camera_identifier.rs` and our `probe.rs` / `markers.rs` read it:
+
+| Camera | Lens mode read from | Also read | Hypothesis |
+|---|---|---|---|
+| GoPro HERO5–HERO12 (GPMF) | `VFOV` (Wide, Linear, SuperView, Narrow, Medium, Max…), `PRJT` (Max Wide) | `EISA`/`EISE` (HyperSmooth on/off, Boost, AutoBoost), `ZFOV` (only to tell Narrow from Linear), resolution, fps | **unambiguous**, except AutoBoost (the crop changes during the clip) and a digital zoom other than Linear's, which isn't read |
+| GoPro HERO4 Black (no GPMF) | udta `SETT` byte 7 low nibble (`markers::hero4_lens_mode`): 0, 2, 4 | resolution, fps | **unambiguous for 0 (Wide) and 2 (Medium)**: the archive estimates confirm them. 4 (Narrow?) unconfirmed |
+| GoPro HERO3 White (no GPMF, "unsupported file format") | its `SETT` codes proved untrustworthy | resolution, fps | **one lens per resolution** (the archive found its two codes to be one lens); no mode used |
+| DJI Osmo Action 6 | StreamMeta `fov_type` (1 Wide, 2 Normal; 6, 0, 3, 7 not named) | `eis_status`, resolution, fps; lens + readout in the file for Wide with EIS off | **unambiguous with EIS off** for named fov types; with EIS on (RockSteady, RockSteady+, Horizon) not: the camera warped the picture |
+| DJI drones (Mini 4 Pro, Mavic Air 2, Mavic Pro) | the model (from the file or a sibling photo); one fixed lens | resolution, fps | **unambiguous by resolution + fps**, except digital zoom, which isn't read |
+| Insta360 | lens in the file | | the file's |
+
+If a lens marked "fits" stabilizes badly in Anton's viewing, something the metadata doesn't tell is missing for that
+camera. Its row gets fixed then.
 
 ### 5.3 The three commands (Library, on the selected clips; no automation beyond them)
 
@@ -374,8 +416,13 @@ Without any command, in this order:
 - Per clip: candidates of the same camera, local first, then Gyroflow's, nearest first, up to 8.
 - Checked on three fragments (start, middle, ~80 %), in air and in water. This is #1296's `find_known`.
 - About 10–30 s a clip.
-- The result is a list: clip → the profile that fits (Good / Loose / none), the medium it saw, and its readout.
-- **Assign** writes `source.lens` for the clips the user ticks. Clips with none stay selected for the next step.
+- A candidate without a readout, or with one for another fps, gets its readout measured on the clip with the lens held
+  as it is.
+- The result is a list: clip → the profile that fits (Good / Loose / none), the medium it saw, and its readout (the
+  profile's own, or measured).
+- **Assign** writes `source.lens` for the clips the user ticks. When the profile needed a measured readout, or was a
+  near match, it is also kept in the local database with that readout for the clip's exact camera, mode, size and fps.
+  Then other clips of that mode take it by itself (§5.2). Clips with none stay selected for the next step.
 - The medium found never overwrites a water flag set by hand; it only shows where it disagrees.
 
 **Estimate lens** (one clip):
@@ -481,20 +528,14 @@ The exact list goes into the first PR.
 
 ## 9. Questions for Anton
 
-1. **When is a lens "reliable" enough to be taken without Find lens?** It is always taken when it's in the file, chosen
-   by hand, or in our local database for a mode the camera names unambiguously. For Gyroflow's database, which of these
-   count:
-   - a. only official profiles and our estimated ones (with readout);
-   - b. a. plus community profiles whose identifier matches the clip exactly and aren't voted down;
-   - c. b. plus "nearest" picks (another resolution, fps or EIS), as today.
+Answered 2026-11-24:
+- "Reliable" means an exact match in every parameter, readout included (§5.2). Everything else is a starting point for
+  Find lens, which measures the readout, or for Estimate lens.
+- The local database is seeded with the 11 profiles of lens_profiles#41 only.
+- Which cameras name their mode: the working hypothesis of §5.2.1, corrected when a "fitting" lens stabilizes badly.
 
-   With a. or b., some GoPro clips that stabilize today (HERO7 on a "nearest" pick) would show "lens unknown" until
-   Find lens has run on them. Is that what you want?
-2. **Which cameras name their mode unambiguously?** Proposed yes: GoPro HERO5+, DJI fov_type (named modes), one-lens
-   drones, HERO4 SETT. Proposed no: HERO3 White, dynamic-crop EIS. Is the HERO4 SETT meaning settled for you
-   (0 = Wide, 2 = Medium, 4 = Narrow)?
-3. **Assign on a clip of an unambiguous mode:** only the ticked clips, or also as that mode's default for all its clips
-   (as #231 does from a project)?
-4. **Gyroflow reuse:** OK with "link gyroflow-core, decode ourselves" (§5.5), instead of Gyroflow's command line?
-5. **Local database seed:** besides the 11 profiles in Gyroflow v43, add the other archive profiles (Mavic Pro, Mavic
-   Air 2, Mini 4 Pro, Action 6 1080 EIS)?
+Still open. Until answered, the working choice is the first option of each:
+1. **Assign on a clip of an unambiguous mode.** Keep the lens (with its readout) as that mode's default in the local
+   database, so every clip of the same camera, mode, size and fps takes it by itself? Or only for the ticked clips?
+2. **Gyroflow reuse.** Link gyroflow-core with #1296 and decode frames ourselves (§5.5), rather than going through
+   Gyroflow's command line?
