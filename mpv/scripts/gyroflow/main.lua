@@ -371,9 +371,11 @@ local function find_source(path, done)
                 if not preset and file_exists(p) then preset = p end
             end
         end
-        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
+        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by.
+        -- optical: its motion measured from the picture (<stem>.afp-motion beside it, gyroflow-probe's "measured"), with
+        -- no horizon in it to lock
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
-               rotation = tonumber(info.rotation) or 0 })
+               rotation = tonumber(info.rotation) or 0, optical = info.motion == "optical" and (type(info.measured) == "table" and info.measured or {}) or nil })
     end)
 end
 
@@ -657,6 +659,7 @@ local function take(b)
     -- & Quality's Off leaves it out whatever this says (still.lua)
     if type(b.denoise) == "boolean" then still.set(b.denoise) else still.set(session.denoise) end
     if dn_sync then dn_sync() end
+    if (current_source and current_source.optical) then horizon = false end
     return b.view == "off"
 end
 
@@ -680,6 +683,9 @@ local function clip_settings(source)
     frame.rotation = (r == 90 or r == 180 or r == 270) and r or 0
     if has_project(source) then
         horizon, underwater = nil, "project"
+    elseif (source and source.optical) then
+        -- The refraction the motion was measured with: the measured motion's own, as a project's
+        horizon, underwater = false, "project"
     else
         underwater = (UNDERWATER_LABELS[i.underwater] and i.underwater ~= "project") and i.underwater or default_underwater
     end
@@ -924,6 +930,9 @@ function publish()
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
+        -- Motion measured from the picture (gyroflow-probe's "measured": how, at, lens, in_water, readout_ms, frames,
+        -- measured_frames), false for any other
+        optical = current_source and current_source.optical or false,
         -- The session's bundle and the app's defaults (the workspace plugin fills and makes bundles with them)
         session = session, defaults = DEFAULTS,
         -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
@@ -2287,6 +2296,10 @@ end)
 -- Level (locked) or Free; "project", from before, as the preset has it
 mp.register_script_message("horizon-lock", function(value)
     if project_owns("the horizon") then return end
+    if (current_source and current_source.optical) then
+        return mp.notify({ id = "gyroflow:horizon", kind = "info", seconds = 4, title = "No horizon to lock",
+                           detail = "This clip's motion was measured from the picture: it has no gravity in it" })
+    end
     if value == "project" then value = DEFAULTS.preset_horizon end
     if value == "toggle" then
         horizon = not horizon
@@ -2303,6 +2316,13 @@ end)
 
 local function set_underwater(value)
     if value == "project" or project_owns("the lens") then return end
+    if (current_source and current_source.optical) then
+        -- Kept for the clip (the next measurement's medium), but the motion plays in the medium it was measured in
+        mp.commandv("script-message-to", "workspace", "input-set", "underwater", value)
+        local wet = current_source.optical.in_water == true
+        return mp.notify({ id = "gyroflow:water", kind = "info", seconds = 5, title = "Kept for the next measurement",
+                           detail = "The motion was measured " .. (wet and "in water" or "in air") .. ": it plays so until it's measured again" })
+    end
     underwater = value
     if value ~= "no" then underwater_back = value end
     -- Input: the source's correction, into its own file at once

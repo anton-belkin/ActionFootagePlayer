@@ -980,6 +980,14 @@ Project). Then, as buttons:
   passed over (the release's copy can sit beside it, in `~/Applications` say). Lens types of your own: *Your own
   lens list*.
 
+  **Motion measured from the picture, without a project:** `<clip>.afp-motion` beside the clip keeps what Gyroflow's
+  analysis measured, with the lens, the rolling shutter and the water it was measured with. With one and no Gyroflow
+  project, the clip plays stabilized like a clip with gyro: the player's levels, frame and projection, its own
+  settings saved with it. The horizon lock is off and can't be turned on: motion measured from the picture has no
+  gravity in it. A Gyroflow project beside the clip still wins. `gyroflow-optical --from-project <clip>...` writes one
+  from the clip's project (nothing measured again), `gyroflow-optical --show <clip>...` prints what's in it. Design:
+  [docs/optical-without-gyroflow.md](docs/optical-without-gyroflow.md).
+
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
 why. The player can play meanwhile. Closing the window while some are queued asks first; on a Mac it keeps the Mac

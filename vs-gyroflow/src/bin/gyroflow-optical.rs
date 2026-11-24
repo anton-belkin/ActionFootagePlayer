@@ -14,6 +14,15 @@
 //                                                                       "default", "mode" (the camera's number)}, for
 //                                                                       the picker
 //   gyroflow-optical --batch <request.json>                             Action Footage Library's "Stabilize optically"
+//   gyroflow-optical --from-project [--force] <video>...                the motion a Gyroflow project beside each clip
+//                                                                       measured from the picture, kept in the clip's own
+//                                                                       <stem>.afp-motion (afp_motion.rs), so it plays
+//                                                                       with it once the project is gone; one JSON line
+//                                                                       each: {"path", "written", "lens", "in_water",
+//                                                                       "frames"} or {"path", "error"}. --force: over a
+//                                                                       motion file the clip has already
+//   gyroflow-optical --show <video>...                                  the header of each clip's .afp-motion, one JSON
+//                                                                       line each ({"path", "error"} without one)
 //
 // The batch's request: {"clips": [paths], "redo": false, "status": <file>, "stop": <file>, "strength": <%, 100>,
 // "tracking": "klt"}.
@@ -128,11 +137,27 @@ fn run(clips: Vec<PathBuf>, redo: bool, settings: Settings, status_file: Option<
     i32::from(!failures.is_empty())
 }
 
+/// The motion the Gyroflow project beside `video` measured from the picture, written to its .afp-motion
+fn motion_from_project(video: &Path, force: bool) -> Result<Value, String> {
+    use vs_gyroflow::afp_motion;
+    if !video.is_file() { return Err("not found".into()); }
+    let project = optical::own_project(video).ok_or("no Gyroflow project beside it")?;
+    let out = afp_motion::path_for(video);
+    if out.exists() && !force { return Err(format!("{} is there already (--force writes over it)", name_of(&out))); }
+    let doc: Value = serde_json::from_slice(&std::fs::read(&project).map_err(|e| format!("{}: {e}", project.display()))?)
+        .map_err(|e| format!("{}: {e}", project.display()))?;
+    let m = afp_motion::from_project(&doc, &project, video)?;
+    m.write(&out)?;
+    let h = &m.header;
+    Ok(json!({ "written": out.display().to_string(), "lens": h.lens_name, "in_water": h.in_water(), "readout_ms": h.readout_ms,
+               "frames": h.measured.frames, "measured_frames": h.measured.measured_frames }))
+}
+
 fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
@@ -145,6 +170,30 @@ fn main() {
                 let line = match optical::verdict(&p, redo) {
                     Verdict::Stabilize { lens, replaces, .. } => json!({ "path": a, "stabilize": true, "lens": lens, "replaces": replaces }),
                     Verdict::LeaveOut(why) => json!({ "path": a, "stabilize": false, "why": why }),
+                };
+                println!("{line}");
+            }
+        }
+        "--from-project" => {
+            let force = args.get(1).is_some_and(|a| a == "--force");
+            let mut failed = false;
+            for a in &args[if force { 2 } else { 1 }..] {
+                let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+                let line = match motion_from_project(&p, force) {
+                    Ok(v) => { let mut v = v; v["path"] = json!(a); v }
+                    Err(e) => { failed = true; json!({ "path": a, "error": e }) }
+                };
+                println!("{line}");
+            }
+            std::process::exit(if failed { 1 } else { 0 });
+        }
+        "--show" => {
+            for a in &args[1..] {
+                let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+                let line = match vs_gyroflow::afp_motion::header_for(&p) {
+                    Some(Ok(h)) => { let mut v = serde_json::to_value(h).unwrap_or_default(); v["path"] = json!(a); v }
+                    Some(Err(e)) => json!({ "path": a, "error": e }),
+                    None => json!({ "path": a, "error": "no .afp-motion beside it" }),
                 };
                 println!("{line}");
             }

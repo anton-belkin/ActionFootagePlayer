@@ -151,6 +151,9 @@ pub struct Motion {
     /// The lens under water as the player has it, and the clip: Auto follows the camera's In water / Out of water as
     /// far as it's read (water.rs)
     underwater: Mutex<Option<(Underwater, String)>>,
+    /// The motion is all there from the start (measured from the picture, afp_motion.rs): the file's own isn't read
+    /// as it plays, only the level followed
+    frozen: AtomicBool,
 }
 
 impl Motion {
@@ -198,7 +201,7 @@ impl Motion {
             }
         }
         let len = clip.len;
-        Ok((Arc::new(Motion { clip, url: url.to_string(), lookahead, asked: Mutex::new(Instant::now()), stop: AtomicBool::new(false), underwater: Mutex::new(None) }), len))
+        Ok((Arc::new(Motion { clip, url: url.to_string(), lookahead, asked: Mutex::new(Instant::now()), stop: AtomicBool::new(false), underwater: Mutex::new(None), frozen: AtomicBool::new(false) }), len))
     }
 
     pub fn set_underwater(&self, underwater: Underwater, video: &str) {
@@ -224,6 +227,10 @@ impl Motion {
     }
 
     pub fn stop(&self) { self.stop.store(true, Ordering::Relaxed); }
+
+    /// See `frozen`
+    pub fn freeze(&self) { self.frozen.store(true, Ordering::Relaxed); }
+    pub fn is_frozen(&self) -> bool { self.frozen.load(Ordering::Relaxed) }
 
     /// The thread that reads the rest, adds it to `stab`'s motion data and smooths it again; and smooths again when the
     /// level changes (`level_now`, the control file's)
@@ -251,6 +258,7 @@ impl Motion {
                 level = now_level;
                 if !new_data { restabilize(&stab, &geometry, level); }
             }
+            if self.is_frozen() { continue; }
             let head = self.clip.playhead.load(Ordering::Relaxed) as f64 / 1_000_000.0;
             // Another engine of the clip plays it: it reads for both, and this one catches up if it's played again
             let idle = self.asked.lock().elapsed() >= PAUSED;

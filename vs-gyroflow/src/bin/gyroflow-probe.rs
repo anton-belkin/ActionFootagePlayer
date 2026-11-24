@@ -7,6 +7,10 @@
 //                                                       in-camera stabilization (DJI with EIS off, GoPro with
 //                                                       HyperSmooth off, Insta360 with FlowState off in the camera):
 //                                                       stabilize it with the default preset
+//   {"mode":"default","motion":"optical","measured":{how, at, lens, in_water, readout_ms, frames, measured_frames},...}
+//                                                       motion measured from the picture beside it (<stem>.afp-motion,
+//                                                       afp_motion.rs): stabilized with it, no horizon lock;
+//                                                       "measured_error" instead when that file is broken or of another clip
 //   {"mode":null,"reason":"...","lens":"...",...}       nothing to stabilize it with; "lens": the lens profile the
 //                                                       player takes for it ("in the file", the label of the one picked
 //                                                       from Gyroflow's database, lens_pick.rs, "" for none), to correct
@@ -143,7 +147,9 @@ fn main() {
     let build = std::env::current_exe().ok().and_then(|e| std::fs::metadata(e).ok()).and_then(|m| m.modified().ok()).map(|t| format!("{t:?}")).unwrap_or_default();
     // The lens type given to the clip by hand decides its lens profile: an answer kept for another isn't this one
     // and so does the user's own curated list (lens_pick::user_file), as it is now
-    let build = format!("{build}|{}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default(), vs_gyroflow::lens_pick::user_file_stamp());
+    // and the motion measured from the picture beside it (afp_motion.rs), as it is now
+    let build = format!("{build}|{}|{}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default(), vs_gyroflow::lens_pick::user_file_stamp(),
+                        vs_gyroflow::afp_motion::stamp(std::path::Path::new(&path)));
     if library {
         let cache = vs_gyroflow::file_cache("library", &path, &build);
         if let Some(text) = cache.as_ref().and_then(|c| std::fs::read_to_string(c).ok()).filter(|t| t.starts_with('{')) {
@@ -191,6 +197,21 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
         Ok(v) => v,
         Err(reason) => serde_json::json!({ "mode": null, "reason": reason }),
     };
+    // Motion measured from the picture beside it (afp_motion.rs): stabilized with it as with motion data of its own,
+    // whatever the file has ("motion": "optical"; the horizon can't be locked)
+    match vs_gyroflow::afp_motion::header_for(std::path::Path::new(&path)) {
+        Some(Ok(h)) => {
+            let (w, hh, fps) = video_size(&path).unwrap_or((h.clip.width, h.clip.height, h.clip.fps));
+            out["mode"] = "default".into();
+            out["motion"] = "optical".into();
+            out["width"] = w.into(); out["height"] = hh.into(); out["fps"] = fps.into();
+            out["measured"] = serde_json::json!({ "how": h.measured.how, "at": h.measured.at, "lens": h.lens_name, "in_water": h.in_water(),
+                                                  "readout_ms": h.readout_ms, "frames": h.measured.frames, "measured_frames": h.measured.measured_frames });
+            if let Some(o) = out.as_object_mut() { o.remove("reason"); }
+        }
+        Some(Err(e)) => { out["measured_error"] = e.into(); }
+        None => {}
+    }
     out["stabilized_in_camera"] = match in_camera {
         Some(how) if how.is_empty() => false.into(),
         Some(how) => how.into(),

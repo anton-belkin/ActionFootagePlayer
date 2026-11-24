@@ -6,7 +6,8 @@
 // lens profile, smoothing, zoom and refraction from it. The refraction as the player has the lens under water: Auto
 // writes the camera's In water / Out of water as keyframes, which Gyroflow shows on its timeline. The horizon lock and
 // the view as the player has them too: the level (levels.rs) is Gyroflow's zoom off at the level's FOV and its
-// Smoothness, and the wider view the same at that view's FOV, so the clip looks about the same in Gyroflow. About:
+// Smoothness, and the wider view the same at that view's FOV, so the clip looks about the same in Gyroflow. Motion
+// measured from the picture (afp_motion.rs) goes in as Gyroflow's own analysis would keep it, with its lens. About:
 // Gyroflow smooths with its Default, whose second pass measures against the clip's largest drift, not the level's
 // margin (smoothing.rs). The motion data goes into the project, so Gyroflow doesn't read it from the video again.
 
@@ -26,7 +27,9 @@ use crate::water::Underwater;
 /// project's rotation, output size and output projection; its rotation on top of the file's own turn
 pub fn from_motion_data(video: &str, preset: Option<&str>, underwater: Underwater, horizon_lock: Option<f64>, level: Level, wide: bool, project_path: &str, frame: crate::Frame) -> Result<String, String> {
     let (stab, _, _) = crate::load_manager(video, preset, horizon_lock, underwater, 0.0, false, None)?;
-    if !stab.gyro.read().has_motion() {
+    // Its own motion data, or motion measured from the picture beside it (afp_motion.rs), which the project keeps as
+    // Gyroflow's own analysis would (its optical correction)
+    if !stab.gyro.read().has_motion() && stab.gyro.read().optical_correction.is_none() {
         return Err(format!("{video} has no motion data"));
     }
     // Before the level's or the wider view's FOV is measured, as Engine::load; turned upright as the file says (its

@@ -283,13 +283,13 @@ Cons:
   is small, JSON and rewritten often.
 - **Where:** beside the clip's main `.afp.json`, as chosen by the main sidecar rule (`library/src/tags.rs` `clip_own`,
   `workspace.lua` `own_path`): the first copy over the project's locations that has one. Same stem, other extension.
-- **Read in portions:** the body is laid out in blocks of a few seconds (video_base and spline points of those frames),
-  with an index after the header.
-  - The player reads the header, the index and the first ~20 s (a moment: its own range) before the first frame, then
-    the rest in the background. This is the same "partial, then full" protocol the GPU table already has for gyro
-    (#193).
-  - First measure it: if a cold read of the whole file from the NAS is under ~50 ms (one sequential 2 MB read, unlike
-    GPMF's scattered samples), reading it whole is simpler and the blocks only keep the option open.
+- **Read whole, measured (step 1, 2026-11-24):** Anton asked for reading in portions if it pays. It doesn't:
+  - the file is ~60 bytes a frame, so even the longest of the 1911 batch projects is 2-4 MB;
+  - read cold from the NAS, those took 11-38 ms;
+  - by contrast, the gyro in an MP4 is scattered through the file, which is why it is streamed.
+
+  The file is two lines of text: the header as JSON (`head -1` shows it), then the correction as Gyroflow's projects
+  keep it (base91 of zlib'd CBOR). `vs-gyroflow/src/afp_motion.rs`.
 - **Player:**
   - In `load_manager`, the "own file" branch: after `load_video_file` and the lens, if `<stem>.afp-motion` exists and its
     clip identity matches, call `stab.set_optical_correction(...)` (and set `ignore_file_motion` for in-camera-stabilized

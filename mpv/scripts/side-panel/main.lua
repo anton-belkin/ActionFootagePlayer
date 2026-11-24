@@ -265,7 +265,7 @@ local function passport(d, g, t, h)
         elseif d.hdr and d.hdr ~= "" then table.insert(parts, "HDR (" .. d.hdr:upper() .. ")")
         else table.insert(parts, "not log") end
     end
-    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or g.motion and "gyro" or "no motion data") end
+    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or type(g.optical) == "table" and "motion from the picture" or g.motion and "gyro" or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry")
     elseif t and type(t.subtitles) == "table" and t.subtitles.camera then table.insert(parts, "camera data as subtitles") end
     if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
@@ -389,13 +389,20 @@ local function source_part(u, x, w, y)
         y = u:heading(x, w, y + 8 * s, "Lens")
         local l = type(g.lens) == "table" and g.lens or {}
         local known = g.available == true
+        -- Motion measured from the picture (<stem>.afp-motion): the lens and water it was measured with are its own. Its
+        -- lens's name as short as it reads: a tool's prefix ("lens_refine own:") and ".json" left out, the end kept
+        local measured = type(g.optical) == "table" and g.optical or nil
+        local measured_lens = measured and tostring(measured.lens or ""):gsub("^[^:]*:", ""):gsub("%.json$", ""):gsub("_", " ") or ""
+        if #measured_lens > 30 then measured_lens = "…" .. measured_lens:sub(-29) end
         local rows = { { "Camera", (l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or (g.lens and "unknown" or "…") },
-                       { "Profile", project and "From the project" or (not g.lens and "…") or l.lens == "in the file" and "From the file"
+                       { "Profile", project and "From the project" or measured and (measured_lens ~= "" and measured_lens or "As measured with")
+                           or (not g.lens and "…") or l.lens == "in the file" and "From the file"
                            or (l.lens or "") ~= "" and (l.lens:gsub("_", " "))
                            -- No profile: the lens type it was recorded in (or given) when it's named, and the camera's own
                            -- number for the mode, for trying lenses on it
                            or l.type_label and ("Unknown (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("Unknown (mode " .. l.mode .. ")") or "Unknown" },
-                       { "Motion data", project and "Gyroflow project" or g.motion and "Gyro, in-camera stabilization off"
+                       { "Motion data", project and "Gyroflow project" or measured and ("Measured from the picture" .. (measured.in_water and ", in water" or ", in air"))
+                           or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
         for _, r in ipairs(rows) do
             u:text(x, y + 9 * s, r[1], { size = 13 })
@@ -405,11 +412,14 @@ local function source_part(u, x, w, y)
         if not known and g.lens then
             y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected. Picking one by hand comes later")
         end
-        local water = (not project and index_of(WATER, g.underwater)) and g.underwater or nil
+        -- Measured motion plays in the medium it was measured in: that one shown
+        local water = measured and (measured.in_water and "yes" or "no") or (not project and index_of(WATER, g.underwater)) and g.underwater or nil
         y = u:select_row(x, w, y + 6 * s, "water", "Under water", choices(WATER, "script-message-to gyroflow underwater"), water,
                          { key = keys["script-binding gyroflow/above-water"], disabled = project or not known, text = project and "Project's" or nil,
                            saved = saved_input and (saved_input.underwater or "auto") or nil })
-        y = u:caption(x, w, y, project and "As defined in the Gyroflow project" or not known and "Needs a known lens"
+        y = u:caption(x, w, y, project and "As defined in the Gyroflow project"
+            or measured and ("The motion was measured " .. (measured.in_water and "in water" or "in air") .. ": it plays so. A change here is kept for when it's measured again")
+            or not known and "Needs a known lens"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")
                 .. ". For a flat port (the camera's own glass, a flat housing); behind a dome port pick No"))
         y = u:button(x, w, y + 2 * s, "edit-lens", "Edit in Gyroflow…", "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
@@ -1119,8 +1129,10 @@ local function transform_part(u, x, w, y)
         y = u:select_row(x, w, y + 2 * s, "level", "Level", choices(LEVELS, "script-message-to gyroflow level"), g.level,
                          { key = keys["script-binding gyroflow/level"], disabled = off, saved = saved and saved.level or nil })
         y = u:caption(x, w, y, LEVEL_NOTES[g.level] or "")
-        y = u:select_row(x, w, y + 2 * s, "horizon", "Horizon", choices(HORIZONS, "script-message-to gyroflow horizon-lock"), g.horizon_lock,
-                         { disabled = off, saved = saved and saved.horizon_lock or nil })
+        local optical = type(g.optical) == "table"
+        y = u:select_row(x, w, y + 2 * s, "horizon", "Horizon", choices(HORIZONS, "script-message-to gyroflow horizon-lock"), optical and "no" or g.horizon_lock,
+                         { disabled = off or optical, saved = (not optical and saved) and saved.horizon_lock or nil })
+        if optical then y = u:caption(x, w, y, "Motion measured from the picture has no gravity in it: no horizon to lock") end
     end
 
     -- The lens, apart from the stabilization: corrected in a projection, or as recorded; it needs a lens profile. Over a
