@@ -2,10 +2,9 @@
 -- purple, the lightness of Action 6's footage under water (research_notes/underwater_color; the rule: estimate.lua).
 --
 -- Part of the dlogm plugin (required by its main.lua), which shows such a clip through shaders/underwater_hlg.glsl as if it were log (curve "uw"), in its HDR,
--- Dolby Vision or SDR look. This plugin decides how much: every second while it plays (and at once after a seek
--- or a new file) it reads the frame as recorded (ffmpeg, the keyframe at or before the moment), works out the frame's
--- numbers from a 320x180 grid of it, eases them in over a second or two and hands them to the shader
--- (glsl-shader-opts uw_*).
+-- Dolby Vision or SDR look. This plugin decides how much: a few times a second while it plays (and at once after a
+-- seek or a new file) it reads the frame as recorded (ffmpeg, half a second ahead), works out the frame's numbers from
+-- a 320x180 grid of it, and the shader's numbers (glsl-shader-opts uw_*) glide to them, quicker when the scene changed.
 --
 -- Its three settings are part of the transform bundle (docs/moments-and-workspaces.md, "Source and transform";
 -- mpv/scripts/workspace/transform.lua), the clip's or moment's like the stabilization's:
@@ -40,13 +39,10 @@ for _, k in ipairs(BUNDLE) do session[k], cur[k] = DEFAULTS[k], DEFAULTS[k] end
 
 local HIGHLIGHTS = 2.5
 local GW, GH = 320, 180
-local PERIOD = 1.0
-local TAU = 1.5              -- seconds the numbers take to follow the frame (about 2/3 of the way)
 local KEYS = { "dr", "db", "k", "ev" }
 
 local params = nil           -- the numbers the shader has, eased
 local stats = {}
-local last_time = nil
 
 local function active()
     return mp.get_property_native("user-data/dlogm/curve") == "uw"
@@ -91,61 +87,103 @@ local function round(x, n)
     return math.floor(x * m + 0.5) / m
 end
 
--- The frame as recorded, measured; `jump`: take its numbers at once (a seek, a new file), else ease towards them.
--- Read by ffmpeg beside mpv (in the background, so playback never waits): the keyframe at or before the playing
--- moment, 960x540. Not mpv's own screenshot: the video is tagged HLG for the shader, and a software screenshot
--- converts it as if it were
-local busy = false
+-- The frame as recorded, measured. Read by ffmpeg beside mpv (in the background, so playback never waits), 960x540:
+-- while it plays the frame LEAD seconds ahead, as that's about when the numbers are ready (the keyframes alone, a
+-- second apart on GoPro, lagged a scene change by up to a second: Anton, 2026-11-24); paused, the frame shown.
+-- Decoded by VideoToolbox on macOS (an exact frame costs about what a keyframe did). Not mpv's own screenshot: the
+-- video is tagged HLG for the shader, and a software screenshot converts it as if it were.
+-- `jump`: the numbers taken at once (a seek, a new file); else they're the target the shader's numbers ease to
+local LEAD = 0.5
+local MIN_GAP = 0.35         -- seconds between the starts of two measurements while it plays
+local busy, started, epoch = false, -1, 0
+local target = nil
+local HWACCEL = (mp.get_property("platform") or "") == "darwin" and { "-hwaccel", "videotoolbox" } or {}
 local function measure(jump)
-    if busy or not active() then return end
+    if not active() then return end
+    if busy then
+        -- one in flight from before a seek: its answer is dropped, and this one runs when it's back
+        if jump then epoch = epoch + 1; busy = "again" end
+        return
+    end
     local path = mp.get_property("path")
     local t = mp.get_property_number("time-pos")
     if not path or path:find("://", 1, true) or not t then return end
-    busy = true
-    local t0 = mp.get_time()
-    mp.command_native_async({
-        name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true,
-        args = { "ffmpeg", "-v", "error", "-nostdin", "-noaccurate_seek", "-ss", string.format("%.3f", t), "-skip_frame", "nokey",
-                 "-i", path, "-map", "0:v:0", "-frames:v", "1", "-vf", string.format("scale=%d:%d:flags=area", GW * 3, GH * 3),
-                 "-f", "rawvideo", "-pix_fmt", "bgr0", "-" },
-    }, function(ok, res)
+    local playing = not mp.get_property_native("pause")
+    local at = playing and t + LEAD or t
+    local dur = mp.get_property_number("duration")
+    if dur and at > dur - 0.05 then at = math.max(0, dur - 0.05) end
+    busy, started = true, mp.get_time()
+    local mine = epoch
+    local args = { "ffmpeg", "-v", "error", "-nostdin" }
+    for _, a in ipairs(HWACCEL) do args[#args + 1] = a end
+    for _, a in ipairs({ "-ss", string.format("%.3f", at), "-i", path, "-map", "0:v:0", "-frames:v", "1",
+                         "-vf", string.format("scale=%d:%d:flags=area", GW * 3, GH * 3), "-f", "rawvideo", "-pix_fmt", "bgr0", "-" }) do
+        args[#args + 1] = a
+    end
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stdout = true, capture_stderr = true, args = args },
+    function(ok, res)
+        local again = busy == "again"
         busy = false
+        if again or mine ~= epoch then return measure(true) end
         local data = ok and res and res.stdout
         if not data or #data ~= GW * 3 * GH * 3 * 4 then
             mp.msg.verbose("underwater colour: no frame from ffmpeg " .. tostring(res and res.stderr))
             return
         end
         if not active() then return end
-        local grabbed = mp.get_time() - t0
+        local grabbed = mp.get_time() - started
         local R, G, B = E.grid_from_bgr0(data, GW * 3, GH * 3, GW * 3 * 4, GW, GH)
         data = nil
         local p, st = E.estimate(R, G, B, GW, GH)
-        local now = mp.get_time()
-        if jump or not params or not last_time then
-            params = p
-        else
-            local a = 1 - math.exp(-(now - last_time) / TAU)
-            for _, key in ipairs(KEYS) do params[key] = params[key] + (p[key] - params[key]) * a end
+        target = p
+        if jump or not params then
+            params = {}
+            for _, key in ipairs(KEYS) do params[key] = p[key] end
+            send()
         end
-        last_time = now
-        send()
         stats = {
             under_water = round(st.f), water = round(st.water), red = round(st.red), blue = round(st.blue), blue_water = round(st.blue_water),
             leak = round(st.leak), water_hue = round(st.water_hue, 0), water_hue_after = round(st.water_hue_after, 0),
             water_a = round(st.water_a, 3), water_a_after = round(st.water_a_after, 3), lift = round(st.ev),
-            median = round(st.median_y), at = round(t, 1),
+            median = round(st.median_y), at = round(at, 1),
             applied = { red = round(params.dr), blue = round(params.db), leak = round(params.k), lift = round(params.ev) },
-            ms = math.floor((now - t0) * 1000 + 0.5), grab_ms = math.floor(grabbed * 1000 + 0.5),
+            ms = math.floor((mp.get_time() - started) * 1000 + 0.5), grab_ms = math.floor(grabbed * 1000 + 0.5),
         }
         publish()
     end)
 end
 
-mp.add_periodic_timer(PERIOD, function()
-    if active() and not mp.get_property_native("pause") and not mp.get_property_native("seeking") then measure(false) end
+-- The shader's numbers eased towards the last measurement, 20 times a second: no step to see. Slowly (TAU_SLOW) for
+-- the small wander between frames of one scene; quickly (TAU_FAST) when the scene changed (far from it)
+local TAU_SLOW, TAU_FAST = 1.2, 0.35
+local FAR = { dr = 0.12, db = 0.12, k = 0.12, ev = 0.25 }
+local last_ease = nil
+mp.add_periodic_timer(0.05, function()
+    local now = mp.get_time()
+    local dt = last_ease and math.min(0.2, now - last_ease) or 0.05
+    last_ease = now
+    if not (active() and params and target) then return end
+    local far, moved = false, false
+    for _, key in ipairs(KEYS) do
+        if math.abs(target[key] - params[key]) > FAR[key] then far = true end
+    end
+    local a = 1 - math.exp(-dt / (far and TAU_FAST or TAU_SLOW))
+    for _, key in ipairs(KEYS) do
+        local d = target[key] - params[key]
+        if math.abs(d) > 0.002 then params[key] = params[key] + d * a; moved = true end
+    end
+    if moved then send() end
+end)
+
+-- Measured again as soon as there's room while it plays
+mp.add_periodic_timer(0.1, function()
+    if active() and not busy and mp.get_time() - started >= MIN_GAP and not mp.get_property_native("pause")
+       and not mp.get_property_native("seeking") then
+        measure(false)
+    end
 end)
 mp.register_event("playback-restart", function() if active() then measure(true) end end)
-mp.register_event("file-loaded", function() params, last_time, stats = nil, nil, {}; send(); publish() end)
+mp.register_event("file-loaded", function() params, target, stats = nil, nil, {}; send(); publish() end)
 mp.observe_property("user-data/dlogm/curve", "native", function()
     if active() then measure(true) end
     publish()

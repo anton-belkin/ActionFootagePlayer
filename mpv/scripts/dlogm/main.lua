@@ -311,8 +311,8 @@ local function plugin_file(name)
     return nil
 end
 
--- The player's Dolby Vision RPU for video in a transfer (further down)
-local our_rpu
+-- The player's Dolby Vision RPU for video in a transfer, and the underwater colour's (further down)
+local our_rpu, uw_rpu
 
 -- The looks this file has, in Ctrl+s's order: hdr and dv (the system tones them down), mpv's tone mapping, then
 -- the SDR ones whose shaders are there. An HDR file's dv looks: its own Dolby Vision (profile 8: an HLG or HDR10 base
@@ -588,7 +588,7 @@ local function apply(m)
                     dvsdr = { c.hdr } }
     local rpu = nil
     if DV_LOOKS[m] then
-        rpu = dv_user_rpu or plugin_file(DV_RPU)
+        rpu = (c == UW and uw_rpu()) or dv_user_rpu or plugin_file(DV_RPU)
         if not (DV_OK and rpu) then
             mp.osd_message(label(m) .. ": not with this mpv", 3)
             return false
@@ -998,6 +998,53 @@ local function make_dv_rpu()
         mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
                                   args = { AFP_RPU, "--look", tmp, "--profile", "8.1", "-o", out_pq } }, function(_, r2) done(r2) end)
     end)
+end
+
+-- The underwater colour's RPU: the dv look's trims (the user's, else the shipped ones) with the chroma weight halfway
+-- from theirs to its lowest (the author's 361: 180), so the lights that'd turn lilac on an SDR screen stay light and
+-- neutral (Anton, 2026-11-24). Made by afp-rpu when the trims it's made from change (or there's none yet), kept beside the user's look
+-- (look.uw.json: what it was made from); until it's there the dv look's own plays
+local uw_made, uw_busy = nil, false
+local function uw_wanted_look()
+    local want = {}
+    for k, v in pairs(load_dv_look()) do want[k] = v end
+    want.rpu, want.made = nil, nil
+    want.chromaWeight = math.floor((tonumber(want.chromaWeight) or 2048) / 2 + 0.5)
+    return want, utils.format_json(want)
+end
+local function make_uw_rpu()
+    if uw_busy or not file_exists(AFP_RPU) then return end
+    local want, key = uw_wanted_look()
+    local meta = read_json(utils.join_path(DV_USER, "look.uw.json"))
+    if type(meta) == "table" and meta.made == key and meta.rpu and file_exists(utils.join_path(DV_USER, "look.uw." .. meta.rpu .. ".rpu")) then
+        uw_made = { key = key, path = utils.join_path(DV_USER, "look.uw." .. meta.rpu .. ".rpu") }
+        return
+    end
+    uw_busy = true
+    local next = (type(meta) == "table" and meta.rpu == "a") and "b" or "a"
+    local out = utils.join_path(DV_USER, "look.uw." .. next .. ".rpu")
+    local tmp = utils.join_path(DV_USER, "look.uw.tmp.json")
+    mp.command_native({ name = "subprocess", playback_only = false, args = { "mkdir", "-p", DV_USER } })
+    local f = io.open(tmp, "w")
+    if not f then uw_busy = false; return mp.msg.warn("can't write " .. tmp) end
+    f:write(utils.format_json(want))
+    f:close()
+    mp.command_native_async({ name = "subprocess", playback_only = false, capture_stderr = true,
+                              args = { AFP_RPU, "--look", tmp, "-o", out } }, function(_, r)
+        uw_busy = false
+        if not (r and r.status == 0) then return mp.msg.warn("afp-rpu (underwater colour): " .. ((r and r.stderr) or "failed")) end
+        local mf = io.open(utils.join_path(DV_USER, "look.uw.json"), "w")
+        if mf then mf:write(utils.format_json({ made = key, rpu = next })); mf:close() end
+        uw_made = { key = key, path = out }
+        if curve == UW and DV_LOOKS[current] then apply(current) end
+    end)
+end
+-- The RPU for an underwater clip now (nil: not made yet for these trims, the dv look's own meanwhile)
+uw_rpu = function()
+    local _, key = uw_wanted_look()
+    if uw_made and uw_made.key == key and file_exists(uw_made.path) then return uw_made.path end
+    make_uw_rpu()
+    return uw_made and uw_made.key == key and uw_made.path or nil
 end
 
 -- The user's look changed: saved and its RPU made shortly (sliders send many). With each frame's own L1, the scene
