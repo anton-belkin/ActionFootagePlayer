@@ -322,6 +322,48 @@ call); the exact frame on release. A click without moving seeks once, exactly.
 `GOPR<n>.LRV` / `GP<ch><n>.LRV`; a sidecar is used only when its duration matches the clip's (±0.1 s). A moment
 link plays a stretch of its original: the original's sidecar, at the original's time.
 
+### As built (the picture, steps 4–6)
+
+- **`afp-scrub`** (`tools/scrub/afp-scrub.c`, built by `tools/scrub/build.sh`): as designed above. Requests
+  `<id> <file> <time> <exact|key|open-exact|open-key> <out.bgra> <w> <h> [<clip>]`, one a line, on stdin or (the
+  player's) from the property `user-data/afp-scrub/request` over mpv's IPC socket; replies `<id> ok <ms> <kind>
+  <frame time>` / `opened` / `dropped` / `error`, on stdout or as `script-message-to side_panel scrub`. Up to 4 files
+  open, the sidecar's decoder on the CPU with frame threads, the clip's on VideoToolbox (D3D11VA / VA-API where they
+  are), the sidecar's length checked against the clip's header (no decoder opened for that), 256 KB reads, 160 MB of
+  pictures kept (~330 at 462×260), the newest request wins (a waiting one answered `dropped`, a decode under way
+  stops at its next frame). `open-*`: the files opened as the mouse reaches the bar, before it's over the track.
+- **`side-panel/scrub.lua`**: the sidecar's names (`sidecar_names()`, the Library's `low_res_names()`: both held to
+  `tests/scrub_sidecar_cases.txt`), what a file's picture comes from (a moment's link: its original at the original's
+  time; `.insv` and spheres: none), the size (130 pt high, the video's aspect, rotation counted) and place (centred
+  on the mouse, above the time bubble, kept in the window), the helper (started when the mouse reaches the bar, on
+  the agent's IPC socket or one of its own; started again three times at most), `overlay-add` id 37 with the BGRA
+  file, which is removed once the next picture is up. The bar draws a frame round it. `user-data/afp-scrub/shown`
+  says what's on screen. Journal: `bar/preview` when the mouse comes over the track, `preview` shown with its ms,
+  `bar/preview-pictures` (count, median, p90, max, kinds) when it leaves.
+- Drag: as decided after Anton's try (keyframe seeks as it moves, exact on release); the picture follows the mouse
+  too. No disk keep: the memory keep makes going back over a stretch < 1 ms.
+- Not built: Windows (the shipped mpv is static: no libav DLLs for the helper, and its IPC is a named pipe;
+  `scrub.lua` is shipped and offers nothing there); Linux builds it in `install.sh` where libav's development files
+  are (not for a Flatpak/Snap mpv).
+
+Measured (`tools/scrub/scrubbench.py`, the helper alone over stdin, 462×260 pictures; "cold" = the files dropped
+from this Mac's cache first; NAS read-only):
+
+| file | where | first (opens it) | hover here and there, median / p90 | along the bar (0.1 s steps) | again (kept) |
+|---|---|---:|---:|---:|---:|
+| Action 6 0068 `.LRF`, exact | local | 57 ms | 28 / 38 ms | 1.8 / 3.3 ms (walk) | 0.4 ms |
+| Action 6 0068 `.MP4`, keyframe (VT) | local | 176 ms | 17 / 19 ms | | 0.7 ms |
+| Action 6 0087 `.LRF`, exact | NAS cold | 134 ms | 34 / 45 ms (max 93) | 2.0 / 15 ms | 0.6 ms |
+| Action 6 0087 `.MP4`, keyframe | NAS cold | 177 ms | p90 41 ms, max 71 (24 of 39 the same keyframe: kept) | | 0.5 ms |
+| HERO12 GL010057 `.LRV`, exact | NAS cold | 50 ms | 12 / 18 ms | 1.2 / 2.0 ms | 0.6 ms |
+| HERO12 GX010057 (5.3K), keyframe | NAS cold | 184 ms | p90 44 ms, max 50 (23 of 39 kept) | | 0.6 ms |
+| HERO4 GOPR1030 `.LRV`, exact | NAS cold | 106 ms | 4.6 / 5.9 ms | 1.3 / 3.1 ms | 0.5 ms |
+| HERO4 GOPR1030 `.MP4`, keyframe | NAS cold | 257 ms | 31 / 41 ms | | 0.4 ms |
+
+The 256 KB reads took the cold-NAS sidecar's p90 from ~133 ms (thumbbench, 32 KB reads) to 45 ms. Two requests at
+once: the first dropped every time. In mpv (`tests/scrub_ipc.py`, headless, the helper over IPC, asked → on screen):
+first picture 18–160 ms (files opened at the bar; the higher when they weren't in the Mac's cache), along the bar
+median 1.7 ms, back over it from memory, a keyframe picture of a clip opened without the bar first ~140 ms.
 
 ## 3. Order of steps
 
@@ -333,7 +375,7 @@ link plays a stretch of its original: the original's sidecar, at the original's 
    timing and that the picture doesn't move.
 4. **`afp-scrub` helper** + build scripts (macOS/Windows/Linux), sidecar rules shared with the Library.
 5. **Picture on hover and drag** in `bar.lua` (`overlay-add`): sidecar exact frame, else the keyframe before;
-   click/release = exact seek to the cursor's time; no seeks while dragging. In-memory keep.
+   click/release = exact seek to the cursor's time; keyframe seeks while dragging (Anton's call). In-memory keep.
 6. Journal timings (hover → picture on screen); disk keep only if the numbers ask for it.
 7. UI PR with before/after screenshots.
 
@@ -344,5 +386,6 @@ Steps 1–3 and 4–6 are independent and can go in parallel.
 - The refill's real cost live (each of the 10 frames is a full warp + denoise render, ~10 ms with Full): measured
   only headless (`frame-step 10` = ~180 ms at 60 fps with `--vo=null`). Whether `speed` > 1 with `framedrop=no`
   makes it faster is for the live check.
-- The cold-NAS outliers of the sidecar's exact frame (p90 ~0.1 s): try a larger read buffer in the helper.
+- The cold-NAS outliers of the sidecar's exact frame (p90 ~0.1 s): a 256 KB read buffer in the helper took them to
+  45 ms (as built, above).
 - Insta360 and other 360 clips: postponed (Anton).

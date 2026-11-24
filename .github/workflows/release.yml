@@ -84,6 +84,7 @@ jobs:
           luajit tests/timeline_test.lua
           luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
+          luajit tests/scrub_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/notify_test.lua
           luajit tests/uwcolor_test.lua

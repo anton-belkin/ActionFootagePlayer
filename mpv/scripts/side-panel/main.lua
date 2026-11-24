@@ -51,6 +51,8 @@ options.read_options(o, "side_panel")
 local C = ui.C
 local RAIL, PANEL, HEADER, FOOTER, PAD = 48, 292, 44, 56, 16
 local platform = mp.get_property("platform") or ""
+-- The picture over the seek bar under the mouse (scrub.lua, made by afp-scrub)
+local scrub = require('scrub').new(mp, require 'mp.utils', J, platform)
 -- Option/Alt+arrows a frame, Cmd (Ctrl)+arrows the playlist's items (navkeys.lua): before the keys are read below
 require('navkeys').install(mp, platform == "darwin")
 local WEBSITE = "https://actionfootageplayer.ch"
@@ -1951,10 +1953,12 @@ local function render_bar()
         bar_hits = {}
         if bar_drawn then bar_overlay:remove(); bar_drawn = false end
         bar_timer:kill()
+        scrub.hide()
         return
     end
     local u = ui.new(s)
     u.hover = hover
+    local previewed = false
     bar.draw(u, 0, d.w - width(s), d.h, bar.snapshot(), {
         docked = docked(), hover = hover, mouse = over_bar and mouse or nil, dragging = drag_t ~= nil, drag_t = drag_t,
         remaining = remaining, keys = keys,
@@ -1963,7 +1967,12 @@ local function render_bar()
             drag_t = not exact and t or nil
             mp.commandv("seek", tostring(t), exact and "absolute+exact" or "absolute+keyframes")
         end,
+        preview = scrub.available and function(t, mx, x0, x1, top)
+            previewed = true
+            return scrub.want(t, mx, x0, x1, top, s)
+        end or nil,
     })
+    if not previewed then scrub.hide() end
     bar_hits = u.hits
     bar_overlay.res_x, bar_overlay.res_y = d.w, d.h
     bar_overlay.data = u:render()
@@ -2169,6 +2178,7 @@ mp.observe_property("mouse-pos", "native", function(_, pos)
     local inside = in_panel(pos)
     local was_over = over_bar
     over_bar = (pos.hover and not inside and not bar_never and pos.y >= dims.h - bar.HEIGHT * s) or false
+    if over_bar and not was_over and scrub.available then scrub.warm() end
     capture((inside or over_bar or popover ~= nil) and true or false)
     -- Over the video, a move shows it; leaving the window hides it
     if pos.hover then bar_until = mp.get_time() + SHOW_FOR else bar_until = 0 end
@@ -2181,6 +2191,13 @@ mp.observe_property("mouse-pos", "native", function(_, pos)
         render_bar()
     end
 end)
+
+-- The seek bar's picture: afp-scrub's answer; another file, the pictures asked for it forgotten
+mp.register_script_message("scrub", function(line)
+    if scrub.reply(line) then render_bar() end
+end)
+mp.register_event("start-file", function() scrub.forget_clip() end)
+mp.register_event("shutdown", function() scrub.quit() end)
 
 -- A seek with the keys shows where it went
 mp.register_event("seek", function() if not docked() then show_bar() end end)
@@ -2226,16 +2243,24 @@ mp.register_script_message("bar", function(v)
 end)
 
 -- What it draws, as an .ass file, at a window size given; the bar too, and what the mouse would show over it at x, y
--- with hover the id there ("bar:track", "bar:mark", "pl:3")
-mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
+-- with hover the id there ("bar:track", "bar:mark", "pl:3"); with a picture's size (preview "<w>x<h>", pixels) the
+-- frame of the seek bar's picture too, and where the picture goes as a comment: "; preview <x> <y> <w> <h> <time>"
+mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered, preview)
     read_keys()
     w, h, s = tonumber(w), tonumber(h), tonumber(s) or 1
     local u = drawn(w, h, s, hovered)
+    local pic = nil
     if not bar_never then
         local b = ui.new(s)
         b.hover = hovered
+        local pw, ph = tostring(preview or ""):match("^(%d+)x(%d+)$")
         bar.draw(b, 0, w - width(s), h, bar.snapshot(), { docked = docked(), hover = hovered, keys = keys,
-                 mouse = mx and { x = tonumber(mx), y = tonumber(my) } or nil, remaining = remaining })
+                 mouse = mx and { x = tonumber(mx), y = tonumber(my) } or nil, remaining = remaining,
+                 preview = pw and function(t, px, x0, x1, top)
+                     local x, y = require('scrub').place(px, tonumber(pw), tonumber(ph), x0, x1, top, s)
+                     pic = { x = x, y = y, w = tonumber(pw), h = tonumber(ph), t = t }
+                     return pic
+                 end or nil })
         for _, e in ipairs(u.events) do b.events[#b.events + 1] = e end
         u = b
     end
@@ -2252,6 +2277,7 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered)
     for line in u:render():gmatch("[^\n]+") do
         f:write("Dialogue: 0,0:00:00.00,9:00:00.00,Default,,0,0,0,," .. line .. "\n")
     end
+    if pic then f:write(string.format("; preview %d %d %d %d %.3f\n", pic.x, pic.y, pic.w, pic.h, pic.t)) end
     f:close()
     mp.msg.info("wrote " .. path)
 end)

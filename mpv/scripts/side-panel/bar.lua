@@ -158,7 +158,8 @@ end
 -- Draws the bar into u at the bottom of a window h high, from x0 to x1 (pixels). opts: docked (opaque, below the
 -- video), hover (the id under the mouse), mouse ({ x, y }), dragging, drag_t (the time it's dragged to), remaining (the
 -- time left shown), keys (the commands' keys, for the tips), toggle_time (a function: the time's click), seek (a
--- function(t, exact): the track clicked or dragged)
+-- function(t, exact): the track dragged (exact false), let go or clicked (true)), preview (a function(t, x, x0, x1,
+-- top): the mouse over the track at time t, x; returns the place of the picture shown for it, { x, y, w, h })
 function M.draw(u, x0, x1, h, st, opts)
     local s = u.s
     local top = h - M.HEIGHT * s
@@ -217,6 +218,11 @@ function M.draw(u, x0, x1, h, st, opts)
             local t = snap and snap.t or tl.t_of(opts.mouse.x, tx0, tx1, d)
             local label = tl.clock(t) .. (snap and ("  " .. snap.title) or "")
             local mx = X(t)
+            -- The picture at that time above the bubble (scrub.lua), a frame round it while it's there
+            local pic = opts.preview and opts.preview(t, mx, x0, x1, top)
+            if pic then
+                u:box(pic.x - 2 * s, pic.y - 2 * s, pic.w + 4 * s, pic.h + 4 * s, 5, C.card, { border = 1 * s, border_color = C.line })
+            end
             u:box(mx - 0.75 * s, ty - 9 * s, 1.5 * s, 18 * s, 0, C.text, { alpha = "30" })
             local bw = ui.text_width(label, 12, s) + 16 * s
             local bx = math.min(math.max(mx - bw / 2, x0 + 4 * s), x1 - bw - 4 * s)
@@ -226,7 +232,7 @@ function M.draw(u, x0, x1, h, st, opts)
         end
         -- Held and dragged: keyframes as it moves (fast), the exact frame where it's let go; near a mark, on the mark.
         -- A click alone (the mouse not moved from where it was pressed) is the exact seek only: a keyframe sought on the
-        -- press flashed before the exact frame on a slow clip
+        -- press flashed before the exact frame on a slow clip. The picture (scrub.lua) follows the mouse all along
         if opts.seek then
             local function at(mx)
                 local snap = tl.snap(mx, st.items, st.ab_a, st.ab_b, tx0, tx1, d, M.SNAP * s)

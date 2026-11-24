@@ -113,6 +113,7 @@ install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lu
 install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/scrub.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
 install -m 644 mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
@@ -124,6 +125,14 @@ install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
 # gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
 swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
+# The seek bar's pictures (tools/scrub/afp-scrub.c), on the libav libraries mpv links: with BUNDLE_RUNTIME, that
+# prefix's ffmpeg (bundle_runtime.py copies them in and relinks it), which it must have; else this Mac's, and without
+# them the bar has no pictures
+if [ -n "${BUNDLE_RUNTIME:-}" ]; then
+    FFMPEG_PREFIX="$BUNDLE_RUNTIME/opt/ffmpeg" tools/scrub/build.sh "$gyroflow/afp-scrub"
+else
+    tools/scrub/build.sh "$gyroflow/afp-scrub" || echo "No afp-scrub: the seek bar will have no pictures" >&2
+fi
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -143,5 +152,8 @@ sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signatu
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-gpu-table" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" "$gyroflow/afp-meta" "$gyroflow/afp-catalog" "$gyroflow/gyroflow-optical" \
           "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
     sign "$f"
+done
+for f in "$gyroflow/afp-scrub"; do
+    [ ! -f "$f" ] || sign "$f"
 done
 sign "$app"

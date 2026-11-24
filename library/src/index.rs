@@ -356,16 +356,31 @@ pub fn clip_preview_relative(relative: &str, flat: bool) -> String {
     out.join("/")
 }
 
-/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL<rest>.LRV of a GX<rest>/GH<rest>
-/// clip. An empty or cut-short one (the camera stopped before writing it) isn't one
-pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
-    let dir = clip.parent()?;
-    let stem = clip.file_stem()?.to_string_lossy().into_owned();
-    let mut names: Vec<String> = ["LRF", "lrf", "THM", "thm"].iter().map(|e| format!("{stem}.{e}")).collect();
+/// The names a clip's camera-made low-resolution copy (its sidecar) may have beside it, in the order looked for: DJI's
+/// <stem>.LRF; GoPro HERO5 and later: GL<rest>.LRV of a GX<rest>/GH<rest> clip; GoPro HERO3/4: <stem>.LRV of a
+/// GOPR<n>/GP<ch><n> clip. The player's seek-bar pictures look for the same (mpv/scripts/side-panel/scrub.lua):
+/// tests/scrub_sidecar_cases.txt holds both to it
+pub fn low_res_names(stem: &str) -> Vec<String> {
+    let mut names: Vec<String> = ["LRF", "lrf"].iter().map(|e| format!("{stem}.{e}")).collect();
     if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) {
         names.push(format!("GL{}.LRV", &stem[2..]));
         names.push(format!("GL{}.lrv", &stem[2..]));
     }
+    if stem.starts_with("GOPR") || (stem.len() > 2 && stem.starts_with("GP")) {
+        names.push(format!("{stem}.LRV"));
+        names.push(format!("{stem}.lrv"));
+    }
+    names
+}
+
+/// A clip's camera-made quick-look file beside it: its sidecar (low_res_names), or the camera's .THM before GoPro's
+/// LRV. An empty or cut-short one (the camera stopped before writing it) isn't one
+pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
+    let dir = clip.parent()?;
+    let stem = clip.file_stem()?.to_string_lossy().into_owned();
+    let mut names = low_res_names(&stem);
+    // The .THM (a still) after the .LRF, before GoPro's LRV (a video), as it has been
+    names.splice(2..2, ["THM", "thm"].iter().map(|e| format!("{stem}.{e}")));
     names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::size(p).is_some_and(|s| s >= 1024))
 }
 
@@ -1038,6 +1053,41 @@ pub fn thumb_bytes(path: &Path, cache: &Path) -> Option<Vec<u8>> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    // The sidecar's names, as the player's seek bar has them (tests/scrub_sidecar_cases.txt, also read by
+    // tests/scrub_test.lua)
+    #[test]
+    fn sidecar_names_as_the_player_has_them() {
+        let cases = include_str!("../../tests/scrub_sidecar_cases.txt");
+        let mut n = 0;
+        for line in cases.lines().filter(|l| !l.starts_with('#') && l.contains(" -> ")) {
+            let (clip, want) = line.split_once(" -> ").unwrap();
+            let stem = clip.rsplit_once('.').unwrap().0;
+            let want: Vec<String> = if want == "-" { vec![] } else { want.split('|').map(String::from).collect() };
+            assert_eq!(low_res_names(stem), want, "{clip}");
+            n += 1;
+        }
+        assert!(n >= 5);
+    }
+
+    // The quick-look file: the .LRF, else the .THM, else GoPro's LRV (HERO3/4's too)
+    #[test]
+    fn camera_thumb_order() {
+        let dir = std::env::temp_dir().join(format!("afl-camera-thumb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = vec![b'x'; 2048];
+        std::fs::write(dir.join("GOPR1030.LRV"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GOPR1030.MP4")).unwrap().file_name().unwrap(), "GOPR1030.LRV");
+        std::fs::write(dir.join("GOPR1030.THM"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GOPR1030.MP4")).unwrap().file_name().unwrap(), "GOPR1030.THM");
+        std::fs::write(dir.join("GL010057.LRV"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GX010057.MP4")).unwrap().file_name().unwrap(), "GL010057.LRV");
+        // Cut short: not one
+        std::fs::write(dir.join("DJI_1_D.LRF"), b"x").unwrap();
+        assert!(camera_thumb(&dir.join("DJI_1_D.MP4")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // A folder renamed (an album, an album in it) or a file moved: the pictures kept for what's in it are found at the
     // new paths, not made again (Anton, 2026-11-18: a renamed album's previews grey for a long time)

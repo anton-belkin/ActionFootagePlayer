@@ -256,6 +256,14 @@ for f in $BINARIES; do
     [ -f "$BIN/$f" ] || { echo "$BIN/$f is missing: a release for another system? (tools/make_release.sh, tools/make_plugin_zip.sh)" >&2; exit 1; }
     put "$BIN/$f" "$GYROFLOW/$f" 755
 done
+# The seek bar's pictures (afp-scrub, tools/scrub/afp-scrub.c): built here on the libav libraries this computer's mpv
+# links, when their development files are there; without it the bar has no pictures, nothing else changes. Not for a
+# Flatpak or Snap mpv (its own libraries): the bar then has none
+if tools/scrub/build.sh "$BUILD/afp-scrub" 2>"$BUILD/afp-scrub.log"; then
+    put "$BUILD/afp-scrub" "$GYROFLOW/afp-scrub" 755
+else
+    echo "   No pictures over the seek bar: $(tail -1 "$BUILD/afp-scrub.log")"
+fi
 # Up to 0.6.4 gyroflow-embed, which also stored projects inside the videos; gyroflow-project writes them next to them
 rm -f "$GYROFLOW/gyroflow-embed" "$GYROFLOW/gyroflow-embed".bak-*
 
@@ -280,6 +288,7 @@ put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
 put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
 put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
+put mpv/scripts/side-panel/scrub.lua "$PANEL/scrub.lua" 644
 
 # Notes for an AI agent, and the player's IPC for it
 put mpv/scripts/agent/main.lua "$AGENT/main.lua" 644

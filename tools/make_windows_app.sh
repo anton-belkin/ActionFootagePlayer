@@ -229,6 +229,10 @@ cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highligh
 cp mpv/scripts/side-panel/navkeys.lua "$panel/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+# The seek bar's pictures: scrub.lua, without its helper here yet. afp-scrub (tools/scrub/afp-scrub.c) needs libav's
+# DLLs, which this mpv (built statically) doesn't have beside it, and its IPC over mpv's named pipe; until then the bar
+# has no pictures on Windows
+cp mpv/scripts/side-panel/scrub.lua "$panel/"
 cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
 cp mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
