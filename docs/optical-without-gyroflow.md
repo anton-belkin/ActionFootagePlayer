@@ -31,8 +31,9 @@ This is analysis and a proposal. Nothing here is built yet.
    - **Estimate lens:** one clip at a time. The new profile goes into the local database; Find is then run again on the
      rest.
    - **Stabilize optically:** the existing batch, writing `.afp-motion` instead of a project.
-6. **Water** becomes a first-class flag in the Library, like accept/reject and stars: one key, a badge, a filter, set by
-   clicking through a folder's tiles. It is not a custom tag, and not the old "Lens: water" tags.
+6. **Water** is a property of the source, not a sorting mark. It is set in the Library's existing **Batch set Source
+   settings** panel ("Lens under water": Auto / Yes / No, for one clip or many, written to `source.underwater`), not as a
+   flag beside pick and stars. Anton corrected his first idea the same day.
 7. **Reuse Gyroflow's code, don't write it twice.** One path, the same code as Gyroflow's (Anton has improved it with
    Adrian's review, #1296). If that means a PR to Gyroflow to move code from the app to its core, so be it.
 8. **Testing:** on a small sample of clips from different cameras, in and out of water, from the NAS. Writing there is
@@ -442,18 +443,17 @@ camera. Its row gets fixed then.
 Archive-wide workflows (grouping by mode, picking good clips, voting on water) are **not** product features. A separate
 Claude session does them with these commands and `gyroflow-probe`.
 
-### 5.4 Water as a first-class flag
+### 5.4 Water and lens in the source settings panel
 
-- **Stored** where it is now: `source.underwater` yes/no (auto stays for cameras that record it, Action 6). The player,
-  Find lens and Stabilize optically read it there.
-- **In the Library grid**, like pick and stars:
-  - a key that toggles it on the selected tiles;
-  - a badge on the tile;
-  - a filter "In water / In air / Not set";
-  - multi-select across a folder.
-- The old "Lens: water" / "Lens: air" custom tags from `stabilize_all` stay as they are. A one-off script can turn them
-  into the flag on Anton's word.
-- This step is independent of the rest and can be built in parallel.
+- **Water is already there.** The Library's **Batch set Source settings** panel (`library/ui/app.js` `sourceBody`) sets
+  "Lens under water" (Auto / Yes / No) for the selected clips. It writes `source.underwater` into each clip's own file
+  through `src/tags.rs` `set_source`, and the player's Source tab shows the same value. Find lens and Stabilize
+  optically read it from there. Nothing new is needed for water.
+- **The lens goes into the same panel.** Its "Lens type" field (curated types only today) grows into a lens field over
+  the local database and Gyroflow's: "As found / taken by itself" or a chosen profile, written as `source.lens`.
+  Find lens' Assign writes the same key.
+- The old "Lens: water" / "Lens: air" custom tags from `stabilize_all` stay as they are. A one-off script can copy them
+  into `source.underwater` on Anton's word.
 
 ### 5.5 Reusing Gyroflow's code
 
@@ -514,7 +514,6 @@ Each step is its own PR, UI ones with before/after screenshots.
    - a lens picker over local + Gyroflow profiles in panel Source and Library Info;
    - Gyroflow DB refreshed to v43.
 4. **Find lens / Estimate lens:** #1296's core on our fork branch, Library commands, result list with Assign / Keep.
-5. **Water flag in the Library grid:** independent, can run beside 1–4.
 
 **Test sample** (NAS, writes allowed for these clips only), about a dozen clips:
 - HERO4 Black Wide and Medium, in air and in water;
