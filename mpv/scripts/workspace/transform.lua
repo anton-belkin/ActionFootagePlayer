@@ -214,6 +214,9 @@ function M.render_settings(doc, own, defaults)
     for k, v in pairs(bundle) do rendered[k] = v end
     if type(doc) == "table" then M.migrate_source(doc) end
     for k, v in pairs(type(doc) == "table" and type(doc.source) == "table" and doc.source or {}) do rendered[k] = v end
+    -- The underwater colour only where it's on: a source saved with it off (the Source tab's Save writes it whole)
+    -- renders as one without it, its hash as before (library/src/renders.rs settings, the same)
+    if rendered.uw ~= true then for _, k in ipairs(M.UW_KEYS) do rendered[k] = nil end end
     return bundle, rendered
 end
 

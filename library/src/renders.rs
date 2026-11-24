@@ -335,6 +335,9 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
     let bundle = pick(own).or_else(|| pick(&doc["view"])).unwrap_or_else(|| defaults.clone());
     let mut out = complete(&bundle, defaults);
     if doc.is_object() { for (k, v) in migrated_source(doc) { out.insert(k, v); } }
+    // The underwater colour only where it's on (the source's input: transform.render_settings, the same): a source
+    // saved with it off renders, and hashes, as one without it
+    if out.get("uw") != Some(&json!(true)) { for k in ["uw", "uw_highlights", "uw_strength"] { out.remove(k); } }
     Value::Object(out)
 }
 
