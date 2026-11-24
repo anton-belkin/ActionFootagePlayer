@@ -7,6 +7,37 @@ precondition. Later, on his word only, a one-off script removes the projects tha
 
 This is analysis and a proposal. Nothing here is built yet.
 
+## 0. Decided (Anton, 2026-11-24, after the first version of this document)
+
+1. **The point** is that a lens can be chosen, and optical motion recorded, **without a Gyroflow project**. That holds for
+   every GoPro and every clip without gyro. Finding lenses is secondary, and only for the simplest case.
+2. **Storage:** option (b). `<stem>.afp-motion` sits beside the clip's own `.afp.json`, wherever the main sidecar rule
+   puts that. The player reads it **in portions** (streaming), so the clip doesn't wait for the whole file; measure what
+   is fastest. Places with no `.afp.json` handling (read-only) are ignored for now.
+3. **Horizon:** for clips on optical motion, the horizon lock is **off and not available**. There is no horizon in the
+   data, so locking would give a random one.
+4. **Lens layers:**
+   - the file's own lens;
+   - **our local lens database** (profiles we estimated or accepted, as files, searched like Gyroflow's even before
+     Gyroflow has them);
+   - Gyroflow's database.
+
+   A lens is taken by itself when the camera's metadata names the mode unambiguously and a reliable profile with
+   readout exists for that mode. Otherwise it is found or estimated from the picture.
+5. **No archive automation in the product.** Big archive workflows are done by a separate Claude session using these
+   tools. The product gets three plain commands on the selected clips, run by hand and iterated:
+   - **Find lens:** tries the known profiles, local first, and says which clips one fits and which have none. The user
+     assigns.
+   - **Estimate lens:** one clip at a time. The new profile goes into the local database; Find is then run again on the
+     rest.
+   - **Stabilize optically:** the existing batch, writing `.afp-motion` instead of a project.
+6. **Water** becomes a first-class flag in the Library, like accept/reject and stars: one key, a badge, a filter, set by
+   clicking through a folder's tiles. It is not a custom tag, and not the old "Lens: water" tags.
+7. **Reuse Gyroflow's code, don't write it twice.** One path, the same code as Gyroflow's (Anton has improved it with
+   Adrian's review, #1296). If that means a PR to Gyroflow to move code from the app to its core, so be it.
+8. **Testing:** on a small sample of clips from different cameras, in and out of water, from the NAS. Writing there is
+   allowed for the sample. No big runs: Anton runs the whole archive himself once it works.
+
 ## 1. How it works today
 
 ### Where the motion comes from
@@ -48,8 +79,16 @@ What a user can choose today is limited to the **curated types of cameras that h
 HERO3 White, drones). A HERO7 has no types, so the only way to give it another lens is a Gyroflow project. Nothing in
 the player or the Library picks a profile from the whole DB, or an estimated one.
 
-The bundled DB comes from gyroflow/lens_profiles *latest* at build time. v43 (2026-11-13) already holds Anton's
-estimated-from-footage profiles (lens_profiles#41: HERO4 Black modes, HERO3 White, HERO7 EIS modes, Action 6).
+The bundled DB comes from gyroflow/lens_profiles *latest*, downloaded into gyroflow-core's cargo checkout once. Ours
+(rev 990772f) was fetched on **2026-11-11, before v43** (2026-11-13). v43 holds Anton's 11 estimated-from-footage
+profiles (lens_profiles#41, all with readout):
+- HERO4 Black: 1080 Wide, 2.7K Wide, 2.7K Medium at 24/30/60, 4K Wide;
+- HERO3 White 1080;
+- HERO7 Black: 2.7K Linear and Wide HS EIS, 4K Wide HS EIS;
+- Action 6 Standard FOV 4K.
+
+The installed player therefore doesn't have them. The local database (§5) holds them in any case, and the next build
+should fetch v43.
 
 ### "Stabilize optically" today
 
@@ -168,9 +207,8 @@ So the player's default mode serves about a tenth of the footage today. The rest
    - Optical motion has no gravity: it starts at identity.
    - The player's default horizon lock (`horizon_lock=yes`) spins optical-only clips. That was the PR #88 issue with
      projects.
-   - In the default mode an optical clip needs horizon **off**, or "level as at the first frame", or a horizon from the
-     picture (not available).
-   - Gyro clips with HyperSmooth have accelerometer data and could level.
+   - **Decided:** for optical clips the horizon lock is off and not offered (panel, key, levels' presets).
+   - Gyro clips with HyperSmooth have accelerometer data and keep it.
 5. **Rolling shutter is only half solved.**
    - The readout time is now estimated per mode, and the optical analysis uses it (band rows).
    - Jelly of moving objects and of translation stays. That is the separate per-pixel repair idea
@@ -242,6 +280,15 @@ Cons:
   - writing a project from it for Gyroflow (Ctrl+e) is a copy.
 - **Size:** about 60 B per frame, so ~2 MB for 10 min at 60 fps. That is too large and too binary for `.afp.json`, which
   is small, JSON and rewritten often.
+- **Where:** beside the clip's main `.afp.json`, as chosen by the main sidecar rule (`library/src/tags.rs` `clip_own`,
+  `workspace.lua` `own_path`): the first copy over the project's locations that has one. Same stem, other extension.
+- **Read in portions:** the body is laid out in blocks of a few seconds (video_base and spline points of those frames),
+  with an index after the header.
+  - The player reads the header, the index and the first ~20 s (a moment: its own range) before the first frame, then
+    the rest in the background. This is the same "partial, then full" protocol the GPU table already has for gyro
+    (#193).
+  - First measure it: if a cold read of the whole file from the NAS is under ~50 ms (one sequential 2 MB read, unlike
+    GPMF's scattered samples), reading it whole is simpler and the blocks only keep the option open.
 - **Player:**
   - In `load_manager`, the "own file" branch: after `load_video_file` and the lens, if `<stem>.afp-motion` exists and its
     clip identity matches, call `stab.set_optical_correction(...)` (and set `ignore_file_motion` for in-camera-stabilized
@@ -264,7 +311,8 @@ Cons:
 - **`<clip>.afp.json`:**
   - `source.lens_type` (exists); new `source.lens` for a specific profile (DB key, file, or estimated) chosen by hand or
     by the lens command, with `source.lens_confidence`.
-  - `source.water` with Auto/Yes/No (exists in the panel).
+  - `source.underwater` yes/no/auto (exists: panel Source, Library Info's batch field). It becomes a first-class flag in
+    the Library's grid (§5.4).
   - The "Lens: …" tags from `stabilize_all` stay as tags for review. The motion itself is not in `.afp.json`.
 - **Panel, Source:**
   - Lens block: Type / Profile (picker over curated + saved + DB + estimated, with stars or "estimated from footage"),
@@ -276,123 +324,177 @@ Cons:
 - **Panel, Transform:**
   - Unchanged for gyro clips.
   - For optical clips, the "In the Gyroflow project" block disappears: levels, frame and projection become the
-    player's, and horizon defaults to off (§2.4).
+    player's, and the horizon lock is off and greyed out ("No horizon in motion measured from the picture").
 - **Output:** unchanged.
 - **Library:**
   - Info: Lens (with confidence), Water, Motion.
-  - The batch "Stabilize optically" becomes **"Prepare for stabilization"**: lens and water check first, then the motion
-    measurement, writing `.afp-motion` instead of a project. "Redo" re-measures.
+  - Commands on the selected clips: **Find lens**, **Estimate lens**, and **Stabilize optically**, which now writes
+    `.afp-motion` instead of a project (§5). "Redo" re-measures.
   - Filters "Motion: from the picture / stale / none".
   - #231's "Save as the default for <camera> · <mode>" also takes a lens found from the picture.
 - **Translation (#170), denoise, export, GPU table:** they read the same manager, so nothing changes. The GPU table's
   disk-cache key must include the motion file's stamp, as it does the project's.
 
-## 5. The lens and rolling shutter from the picture
 
-What the earlier work showed, turned into a command (`gyroflow-probe --find-lens` or a new `afp-lens`; batch over
-selected clips):
+## 5. The lens: layers, commands, water
 
-1. **Per mode, not per clip.**
-   - Group clips by camera + recorded mode + size + EIS.
-   - For each group, fit a few clips with enough motion (3–5, from different days) and keep the profile only when they
-     agree (the "consensus" filter of the archive pass).
-   - Save it to the user's list as that mode's lens, marked "estimated from footage", readout included.
-   - Cost: ~1–2 min a clip at nice 15. The 30 modes of the archive are already done (`archive/profiles`), and most are in
-     DB v43.
-2. **Per clip, a check, not an estimate.**
-   - Try the mode's profile and its neighbours on three fragments (start, middle, ~80 %), in air and in water.
-   - This gives "lens fits / loosely / off" and the medium with a margin. ~10–30 s a clip.
-   - The clip gets `source.lens` and `source.water`, or "unsure" when fragments disagree or the margin is small.
-3. **A full per-clip estimate only for cameras that don't record a trustworthy mode** (HERO3 White), then clustered.
-4. **Dynamic-crop modes:** no estimate. The nearest static lens, labelled "approximate".
-5. **Gyro clips (idea, not tried):** with the gyro synced, the rotation is known, so a lens + readout fit needs no scene
-   reconstruction at all. Gyroflow's rs_sync already fits pixel motion against gyro. This could be the cheap check for
-   "gyro but lens unsure" clips.
-6. **Engine:** the Rust `lens_from_video` port, put on our gyroflow-core rev as a fork branch on top of `afp-v1.7.0`
-   (no Python in the product).
-   - Tracking at ≥ 1920 px; the optical analysis' own 960 px is too coarse.
-   - Offering it upstream to Adrian is Anton's call.
+### 5.1 Our local lens database
 
-## 6. Cost and time
+- **What it is:** a folder of profile files in Gyroflow's own JSON format, `<App Support>/ActionFootagePlayer/lenses/`.
+  The folder #231 already writes `lenses/<name>-<crc>.json` into.
+- **How it is searched:** like Gyroflow's database, by camera, lens mode, size, fps and EIS. `lens_pick`'s ranking runs
+  over local ∪ Gyroflow, and **local comes first**.
+- **What every file records:** where it came from (estimated from footage on clip X; accepted by hand; saved from a
+  Gyroflow project), the medium it was estimated in (always stored as the air lens), and its readout.
+- **Its role:** a profile Gyroflow already has works the same either way. One it doesn't have yet (not submitted,
+  under review, or not in this build's DB) still counts.
+- **The curated list** (`curated_lenses.json`, built-in + user) stays what it is: the map from a camera's recorded mode
+  codes to lens types, for cameras whose modes Gyroflow doesn't name (HERO4 SETT, DJI fov_type). A type can now name a
+  local profile.
+- **Seed:** Anton's 11 profiles from lens_profiles#41, which this build's Gyroflow DB lacks, plus whichever of the other
+  archive profiles he wants (`research_notes/lens_refine/archive/profiles`: drones, Action 6 1080 EIS).
 
-M1 Pro, measured earlier:
+### 5.2 When the lens is taken by itself
 
-| Step | Per clip | Archive (no-gyro + in-camera-stabilized, minus drones) |
-|---|---|---|
-| Lens per mode (consensus) | 1–2 min × 3–5 clips per mode | done for 30 modes; new modes only |
-| Lens + water check (3 fragments) | 10–30 s | ~3000 clips → ~10–25 h at nice 15, 3 jobs |
-| Motion measurement (decode + KLT at 960 px) | ≈ clip length (4K30), ≈ 1.4× (4K60) | ~45–55 h of footage → ~50–70 h compute, 2 jobs → ~1.5–2 days wall |
-| Converting an existing `.gyroflow` | seconds | 1911 projects → minutes |
+Without any command, in this order:
 
-- Reads come from the NAS: run during idle time and check that the share is mounted.
-- Writing `.afp-motion` on the NAS needs Anton's word.
-- Converting instead of re-measuring saves most of the motion step, but only for clips whose lens and water were right.
-  Clips marked "wrong water", "Lens: off" or "nearest known" must be re-measured.
+1. **A hand choice:** `source.lens` (a profile) or `source.lens_type`.
+2. **The lens in the file:** DJI with EIS off, HERO12+, Insta360.
+3. **A reliable profile for the clip's mode**, when the camera's metadata names that mode **unambiguously**:
+   - "Unambiguously" is a per-camera mark in the curated list. Proposed yes for GoPro HERO5+ (GPMF lens mode + EIS), DJI
+     fov_type for named modes, one-lens drones, and HERO4 SETT codes once their meaning is confirmed. Proposed no for
+     HERO3 White (its codes proved untrustworthy) and for dynamic-crop EIS.
+   - "Reliable": see question 1.
+4. Otherwise **lens unknown**. The clip plays as it does today without a lens, and Find lens is the way out.
+
+### 5.3 The three commands (Library, on the selected clips; no automation beyond them)
+
+**Find lens** (also for gyro clips; for them it's the only step):
+
+- Per clip: candidates of the same camera, local first, then Gyroflow's, nearest first, up to 8.
+- Checked on three fragments (start, middle, ~80 %), in air and in water. This is #1296's `find_known`.
+- About 10–30 s a clip.
+- The result is a list: clip → the profile that fits (Good / Loose / none), the medium it saw, and its readout.
+- **Assign** writes `source.lens` for the clips the user ticks. Clips with none stay selected for the next step.
+- The medium found never overwrites a water flag set by hand; it only shows where it disagrees.
+
+**Estimate lens** (one clip):
+
+- From a stretch of the clip: three automatic fragments, or the player's current position when started from there.
+- #1296's `estimate` gives lens + readout in under a minute, checked on the fragments it wasn't made from, with the
+  same Good / Loose / Poor card.
+- **Keep** saves it into the local database (camera, mode, size; air lens) and assigns it to the clip.
+- Then Find lens again on the rest: clips it fits drop out of the list.
+
+**Stabilize optically** (the existing batch):
+
+- Same selection, same Redo.
+- It needs each clip's lens to be known (by itself or assigned), and its water flag.
+- It writes `.afp-motion` beside the main `.afp.json` instead of a project. No Gyroflow app is needed.
+
+Archive-wide workflows (grouping by mode, picking good clips, voting on water) are **not** product features. A separate
+Claude session does them with these commands and `gyroflow-probe`.
+
+### 5.4 Water as a first-class flag
+
+- **Stored** where it is now: `source.underwater` yes/no (auto stays for cameras that record it, Action 6). The player,
+  Find lens and Stabilize optically read it there.
+- **In the Library grid**, like pick and stars:
+  - a key that toggles it on the selected tiles;
+  - a badge on the tile;
+  - a filter "In water / In air / Not set";
+  - multi-select across a folder.
+- The old "Lens: water" / "Lens: air" custom tags from `stabilize_all` stay as they are. A one-off script can turn them
+  into the flag on Anton's word.
+- This step is independent of the rest and can be built in parallel.
+
+### 5.5 Reusing Gyroflow's code
+
+The math is already in **gyroflow-core**, which the player links:
+
+- the optical analysis: `OpticalMotionAnalysis` in v1.7.0;
+- the lens from the picture: `lens_from_video::{find_known, check_lens, estimate, profile}` in #1296, on the fork branch
+  `lens-from-video`, with Adrian's review addressed.
+
+Only **decoding the frames** sits in Gyroflow's app (`src/rendering`, ffmpeg). Core is ffmpeg-free on purpose: it builds
+for Android and iOS, so decoding can't move there.
+
+**Proposal: link core, decode ourselves.**
+- The tracking, solving, candidate search, verdicts and file formats are Gyroflow's own code, and Anton's upstream fixes
+  reach us with the next rev bump.
+- Ours is a thin frame loop: gray frames at 960 px for motion and ≥ 1920 px for the lens, real PTS as the app uses.
+  vs-gyroflow already decodes (gyroflow-export, the #170 measure).
+- Our gyroflow-core goes to a fork branch `afp-v1.7.0` + #1296's three commits, until upstream merges and releases them.
+
+The alternative is Gyroflow's command line, new flags upstream (`--find-lens`, `--estimate-lens`, motion export). It
+needs the Gyroflow app installed, an upstream release, and the preset quirks. Results still arrive as a project to
+convert. It is one more dependency for the same code, so not recommended.
+
+## 6. Cost and time (M1 Pro, measured earlier)
+
+| Step | Per clip |
+|---|---|
+| Find lens (≤ 8 candidates × 3 fragments × air/water) | 10–30 s |
+| Estimate lens | under a minute |
+| Stabilize optically (decode + KLT at 960 px) | ≈ clip length at 4K30, ≈ 1.4× at 4K60 |
+| Converting an existing `.gyroflow` to `.afp-motion` | seconds |
+| Opening a clip: reading `.afp-motion` (~2 MB per 10 min at 60 fps) | to be measured cold from the NAS (§3) |
+
+The test sample (§8) is about a dozen clips, an hour or two of compute.
 
 ## 7. Existing `.gyroflow` projects
 
-Three kinds, to tell apart by a read-only scan first:
-
-1. **Made by `stabilize_all` or the Library batch (2026-11-10 and later):** recognised by the batch preset's settings,
-   and the "Lens: …" tags in `.afp.json`.
-   - Convert to `.afp-motion` when lens and water are still right.
-   - Re-measure the rest, after the lens and water check.
-   - Then the project is redundant.
-2. **Gyro clips with a project made only for the lens:** the lens is now in the user's list (#231). Check that the list
-   gives the same lens; then the project is redundant.
-3. **Hand-made** (older than 2026-10-29, or edited after the batch: trims, keyframes, own smoothing, removed tracks):
-   keep. They keep winning over everything.
-
-The one-off script lists all three with what it would do. It runs only on Anton's word. Deleted projects go to the NAS
-recycle bin anyway. Never open a project from `#recycle`.
+- Nothing is removed by the product. A `.gyroflow` beside a clip keeps winning over `.afp-motion` (hand work).
+- A converter (`gyroflow-probe --motion-from-project` or similar) writes `.afp-motion` from a project's
+  `optical_correction`, with the project's lens, readout and water in its header. Then the clip plays in the default
+  mode once the project is gone.
+- Which projects to convert, re-measure or delete is a one-off decision on Anton's word, later. The ~1911 from
+  `stabilize_all` are recognised by their preset; hand-made ones by trims, keyframes, own smoothing or removed tracks.
 
 ## 8. Order of steps
 
-1. **Motion file + player reads it + converter.**
-   - Format, `load_manager` branch, Source "Motion" line, horizon default for optical clips.
-   - Check: the same clip played from its `.gyroflow` and from the converted `.afp-motion` gives the same frames (SSIM, as
-     done for gyroflow-core vs Gyroflow).
-   - Biggest effect soonest: the 1911 batch clips play in the default mode.
-2. **The lens layer:**
-   - the "unambiguous" rule and its confidence;
-   - a picker over all profiles (panel Source + Library), including estimated ones;
-   - `source.lens`;
-   - gyro clips stop needing a project for the lens.
-3. **Own measuring command:**
-   - gyroflow-core's `OpticalMotionAnalysis` inside vs-gyroflow, decoding with our ffmpeg, writing `.afp-motion`;
-   - the Library batch switches to it;
-   - a player key "Measure motion" (#208);
-   - the Gyroflow app is no longer needed.
-4. **Lens + readout + water from the picture:** the `lens_from_video` port on our gyroflow-core branch; per-mode
-   consensus, then the per-clip 3-fragment check.
-5. **Batch over the archive** (NAS writes on Anton's word): lens check, then convert or re-measure.
-6. **One-off cleanup of redundant projects** (Anton's word).
+Each step is its own PR, UI ones with before/after screenshots.
 
-Later, apart:
-- keeping tracks for instant re-solve;
-- horizon from the picture;
-- the gyro-based lens check;
-- rolling-shutter jelly repair.
+1. **`.afp-motion` + the player reads it:**
+   - the format, a reader in portions (measured), and a `load_manager` branch;
+   - the Source "Motion" line, the horizon lock unavailable for optical clips;
+   - the converter from `.gyroflow`.
+   - Test on the sample: the same clip from its project and from the converted file gives the same frames (SSIM).
+2. **Stabilize optically writes `.afp-motion`:** gyroflow-core's analysis in vs-gyroflow, our decode loop, the Gyroflow
+   app no longer needed.
+3. **The lens layer:**
+   - the local database, the "taken by itself" rule (§5.2) and `source.lens`;
+   - a lens picker over local + Gyroflow profiles in panel Source and Library Info;
+   - Gyroflow DB refreshed to v43.
+4. **Find lens / Estimate lens:** #1296's core on our fork branch, Library commands, result list with Assign / Keep.
+5. **Water flag in the Library grid:** independent, can run beside 1–4.
+
+**Test sample** (NAS, writes allowed for these clips only), about a dozen clips:
+- HERO4 Black Wide and Medium, in air and in water;
+- HERO3 White;
+- HERO7 with HyperSmooth, in air and in water;
+- HERO12 with AutoBoost;
+- Action 6 Normal and Action 6 EIS on;
+- at least two clips Anton marked "wrong water", and two with a hand-made project, to check they still win.
+
+The exact list goes into the first PR.
 
 ## 9. Questions for Anton
 
-1. **Gyro but no lens:**
-   - Which clips did you mean?
-   - By the probe cache almost no gyro clip is refused only for the lens now. The candidates are in-camera-stabilized
-     HERO7/HERO12/Action 6, wrong "nearest" DB picks, and new modes.
-   - A folder or two to look at would settle it.
-2. **Storage:** agree with (b), our own `<stem>.afp-motion` beside the clip with Gyroflow's data inside, and `.gyroflow`
-   (hand work) still winning over it?
-3. **Horizon for optical clips in the default mode:** off, or "level as at the first frame" (needs a first frame with a
-   level horizon), or something else?
-4. **"Unambiguous" lens:** auto-apply only exact, curated, saved and estimated profiles, and treat DB "nearest" picks as
-   "unsure"? For an unsure lens:
-   - play with the best guess, marked; or
-   - play lens-only until checked?
-5. **Water:** let the lens check set it per clip when it is sure (~95 %) and mark the rest "unsure" for you, or always
-   decide by hand or by dive?
-6. **Read-only places** (SD card, someone else's share): keep the motion in the local cache there, or not measure at all
-   until the clip is taken in?
-7. **Gyroflow app:** once our own command measures, drop the CLI path, or keep it as a fallback?
-8. **Archive run:** which folders first? And may it write `.afp-motion` files on the NAS (photo, DJI_Inbox) when it
-   runs? Converting the 1911 batch projects is minutes; re-measuring the doubtful ones is days.
+1. **When is a lens "reliable" enough to be taken without Find lens?** It is always taken when it's in the file, chosen
+   by hand, or in our local database for a mode the camera names unambiguously. For Gyroflow's database, which of these
+   count:
+   - a. only official profiles and our estimated ones (with readout);
+   - b. a. plus community profiles whose identifier matches the clip exactly and aren't voted down;
+   - c. b. plus "nearest" picks (another resolution, fps or EIS), as today.
+
+   With a. or b., some GoPro clips that stabilize today (HERO7 on a "nearest" pick) would show "lens unknown" until
+   Find lens has run on them. Is that what you want?
+2. **Which cameras name their mode unambiguously?** Proposed yes: GoPro HERO5+, DJI fov_type (named modes), one-lens
+   drones, HERO4 SETT. Proposed no: HERO3 White, dynamic-crop EIS. Is the HERO4 SETT meaning settled for you
+   (0 = Wide, 2 = Medium, 4 = Narrow)?
+3. **Assign on a clip of an unambiguous mode:** only the ticked clips, or also as that mode's default for all its clips
+   (as #231 does from a project)?
+4. **Gyroflow reuse:** OK with "link gyroflow-core, decode ourselves" (§5.5), instead of Gyroflow's command line?
+5. **Local database seed:** besides the 11 profiles in Gyroflow v43, add the other archive profiles (Mavic Pro, Mavic
+   Air 2, Mini 4 Pro, Action 6 1080 EIS)?
