@@ -172,5 +172,15 @@ expect("short stays",tl.cut_middle("DJI_0068_D", 20), "DJI_0068_D")
 expect("cut", tl.cut_middle("DJI_20261021161350_0023_D", 15), "DJI_202…_0023_D")
 expect("cut utf-8", tl.cut_middle("Тюлень у рифа, утро", 9), "Тюле…утро")
 
+-- The frame on screen with the GPU denoise (gyroflow's gpu_delay): delay behind time-pos, not before the last seek;
+-- the frame asked for while paused; time-pos without it
+local F = 1 / 60
+expect("shown: no denoise", tl.shown_time(10.0, nil), 10.0)
+expect("shown: delay 0", tl.shown_time(10.0, { delay = 0, restart = -1, show = -1 }), 10.0)
+expect("shown: 5 frames behind", tl.shown_time(10.0, { delay = 5 * F, restart = 2.0, show = -1 }), 10.0 - 5 * F)
+expect("shown: just after a seek", tl.shown_time(2.0 + 2 * F, { delay = 5 * F, restart = 2.0, show = -1 }), 2.0)
+expect("shown: asked for", tl.shown_time(10.0, { delay = 5 * F, restart = 2.0, show = 9.5 }), 9.5)
+expect("shown: no time", tl.shown_time(nil, { delay = 5 * F }), nil)
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

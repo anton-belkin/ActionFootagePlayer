@@ -21,6 +21,18 @@
 -- it), ok (the clip can have it), stats = { what the last frame measured } }
 
 local mp = require 'mp'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
 local E = require 'uw_estimate'
@@ -106,7 +118,7 @@ local function measure(jump)
         return
     end
     local path = mp.get_property("path")
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if not path or path:find("://", 1, true) or not t then return end
     local playing = not mp.get_property_native("pause")
     local at = playing and t + LEAD or t

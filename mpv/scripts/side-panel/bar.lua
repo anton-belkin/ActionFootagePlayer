@@ -18,7 +18,7 @@ local TRACK = 21
 local ROW = 47
 local BUTTON = 30
 -- The buttons whose key is written under them (navkeys.lua's: the arrows with a modifier), as a reminder
-local HINTED = { ["playlist-prev"] = true, ["playlist-next"] = true, ["frame-back-step"] = true, ["frame-step"] = true }
+local HINTED = { ["playlist-prev"] = true, ["playlist-next"] = true, ["script-binding gyroflow/frame-back"] = true, ["script-binding gyroflow/frame-on"] = true }
 local MAC = (mp.get_property("platform") or "") == "darwin"
 local HINT_SIZE = 10
 -- How near (points) a click must be to a mark to land on it
@@ -27,7 +27,7 @@ M.SNAP = 7
 -- What it shows, read from the player and the plugins
 function M.snapshot()
     local st = {
-        pos = mp.get_property_number("time-pos"),
+        pos = tl.shown_time(mp.get_property_number("time-pos"), mp.get_property_native("user-data/gyroflow/gpu_delay")),
         duration = mp.get_property_number("duration"),
         pause = mp.get_property_native("pause"),
         speed = mp.get_property_number("speed", 1),
@@ -121,10 +121,10 @@ local function buttons(st, remaining)
         { id = "prev", icon = "prev", tip = "Previous clip", cmd = "playlist-prev", disabled = st.n <= 0, keep = 3, group = "left" },
         { id = "play", icon = st.pause and "play" or "pause", tip = st.pause and "Play" or "Pause", cmd = "cycle pause", keep = inf, group = "left" },
         { id = "next", icon = "next", tip = "Next clip", cmd = "playlist-next", disabled = st.n >= st.count - 1, keep = 3, group = "left", gap = 10 },
-        { id = "fback", icon = "fback", tip = "A frame back", cmd = "frame-back-step", keep = 4, group = "left", small = true },
+        { id = "fback", icon = "fback", tip = "A frame back", cmd = "script-binding gyroflow/frame-back", keep = 4, group = "left", small = true },
         { id = "time", text = time, tip = remaining and "Time left: click for the time" or "Click for the time left",
           cmd = "time", keep = inf, group = "left", wide = "-" .. tl.clock(d or 0) .. (d and (" / " .. tl.clock(d, 0)) or "") },
-        { id = "ffwd", icon = "ffwd", tip = "A frame on", cmd = "frame-step", keep = 4, group = "left", small = true },
+        { id = "ffwd", icon = "ffwd", tip = "A frame on", cmd = "script-binding gyroflow/frame-on", keep = 4, group = "left", small = true },
         { id = "mprev", icon = "mprev", tip = "Previous mark", cmd = "script-binding highlights/prev", keep = 5, group = "right" },
         { id = "mark", icon = "mark", tip = "Mark here (on a mark: remove it)", cmd = "script-binding highlights/mark", keep = 5, group = "right" },
         { id = "mnext", icon = "mnext", tip = "Next mark", cmd = "script-binding highlights/next", keep = 5, group = "right", gap = 10 },

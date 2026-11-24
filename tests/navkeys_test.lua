@@ -19,13 +19,13 @@ end
 
 -- Option a frame, Cmd the playlist on a Mac; Ctrl elsewhere
 local mac, win = nk.bindings(true), nk.bindings(false)
-expect("mac: frame on", cmd_of(mac, "Alt+RIGHT"), "frame-step")
-expect("mac: frame back", cmd_of(mac, "Alt+LEFT"), "frame-back-step")
+expect("mac: frame on", cmd_of(mac, "Alt+RIGHT"), "script-binding gyroflow/frame-on")
+expect("mac: frame back", cmd_of(mac, "Alt+LEFT"), "script-binding gyroflow/frame-back")
 expect("mac: next", cmd_of(mac, "Meta+RIGHT"), "playlist-next")
 expect("mac: previous", cmd_of(mac, "Meta+LEFT"), "playlist-prev")
 expect("mac: Ctrl+arrows left to the system", cmd_of(mac, "Ctrl+RIGHT"), nil)
 expect("windows: next", cmd_of(win, "Ctrl+RIGHT"), "playlist-next")
-expect("windows: frame", cmd_of(win, "Alt+LEFT"), "frame-back-step")
+expect("windows: frame", cmd_of(win, "Alt+LEFT"), "script-binding gyroflow/frame-back")
 expect("windows: no Win key", cmd_of(win, "Meta+RIGHT"), nil)
 
 -- Written as people read them
@@ -52,7 +52,7 @@ local fake = {
 }
 nk.install(fake, true)
 expect("bound: three", #ran, 3)
-expect("over mpv's own", ran[1], "keybind Alt+LEFT frame-back-step")
+expect("over mpv's own", ran[1], "keybind Alt+LEFT script-binding gyroflow/frame-back")
 local yours = false
 for _, r in ipairs(ran) do if r:find("Meta+RIGHT", 1, true) then yours = true end end
 expect("your input.conf's left as it is", yours, false)

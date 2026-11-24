@@ -96,6 +96,18 @@
 -- characters, here and in the plugins that read or write beside the clip (gyroflow, dlogm, highlights, dji-telemetry).
 
 local mp = require 'mp'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 -- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
 pcall(function()
     package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
@@ -2456,7 +2468,7 @@ local function cut_out(a, b)
     local snapshot = {
         clip = state.clip, name = name, stem = stem, ext = ext, dir = ws.parent(state.clip), exe = exe, lrf = lrf,
         size = info and info.size, created = state.created, project = state.project, relative = state.relative,
-        moments = state.moments or {}, pos = mp.get_property_number("time-pos"), parts = parts,
+        moments = state.moments or {}, pos = shown_time(), parts = parts,
     }
     input.select({
         prompt = "Cut " .. clock(a) .. "–" .. (b >= duration - 0.001 and "end" or clock(b)) .. " out of " .. name .. "? Kept: "
@@ -2481,11 +2493,11 @@ mp.add_key_binding("Ctrl+x", "cut-out", function()
     cut_out(a, b)
 end)
 mp.register_script_message("cut-before", function()
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if t then cut_out(0, t) end
 end)
 mp.register_script_message("cut-after", function()
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if t then cut_out(t, mp.get_property_number("duration") or t) end
 end)
 
@@ -3601,7 +3613,7 @@ local function heard(msg)
                 lens_loaded = now
                 if not state.moment and not state.offset and state.clip then
                     mp.msg.info("lens type " .. tostring(now) .. " from the Library: the clip loaded again")
-                    wanted = { file = state.clip, ["in"] = mp.get_property_number("time-pos") }
+                    wanted = { file = state.clip, ["in"] = shown_time() }
                     mp.commandv("loadfile", state.clip, "replace")
                 else
                     mp.msg.info("lens type changed in the Library: the clip plays with it when opened again")

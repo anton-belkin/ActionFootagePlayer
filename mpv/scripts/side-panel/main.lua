@@ -417,7 +417,7 @@ local function source_part(u, x, w, y)
 
     if h and h.times and #h.times > 0 then
         y = u:heading(x, w, y + 10 * s, "Marks", keys["script-binding highlights/next"])
-        local pos = mp.get_property_number("time-pos", 0)
+        local pos = tl.shown_time(mp.get_property_number("time-pos"), mp.get_property_native("user-data/gyroflow/gpu_delay")) or 0
         for i, time in ipairs(h.times) do
             local m = h.marks and h.marks[i] or {}
             local label = (m.name and m.name ~= "") and m.name or (m.camera and ("Highlight " .. i) or ("Mark " .. i))
@@ -677,7 +677,7 @@ local function project_part(u, x, w, y)
 
     -- A photo: no marks, moments or part of its own (those are its clip's: Open the whole clip)
     if ph then return y + 8 * s end
-    local pos = mp.get_property_number("time-pos", 0)
+    local pos = tl.shown_time(mp.get_property_number("time-pos"), mp.get_property_native("user-data/gyroflow/gpu_delay")) or 0
     y = u:heading(x, w, y + (mo and 6 * s or 0), mo and "Marks in this moment" or "Marks of this clip", keys["script-binding highlights/mark"])
     local near = nil
     local times = h.times or {}
@@ -733,8 +733,8 @@ local function project_part(u, x, w, y)
     y = u:heading(ix, iw, y, "Selected part", keys["ab-loop"])
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local ihalf = (iw - 8 * s) / 2
-    u:button(ix, ihalf, y, "part-a", a and ("Start " .. clock(a)) or "Mark start", "set ab-loop-a ${=time-pos}")
-    y = u:button(ix + ihalf + 8 * s, ihalf, y, "part-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
+    u:button(ix, ihalf, y, "part-a", a and ("Start " .. clock(a)) or "Mark start", "script-message-to side_panel part-a")
+    y = u:button(ix + ihalf + 8 * s, ihalf, y, "part-b", b and ("End " .. clock(b)) or "Mark end", "script-message-to side_panel part-b", { disabled = not a })
     local k = keys["script-binding workspace/moment"]
     local m = ws.moment or ws.editing
     -- The part in the clip's time (a moment playing starts at its in)
@@ -950,8 +950,8 @@ local function output_part(u, x, w, y)
         y = u:caption(x, w, y - 2 * s, "A file of what plays: its source, its transform, in this look")
         local half = (w - 8 * s) / 2
         local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
-        u:button(x, half, y, "mark-a", a and ("Start " .. clock(a)) or "Mark start", "set ab-loop-a ${=time-pos}")
-        y = u:button(x + half + 8 * s, half, y, "mark-b", b and ("End " .. clock(b)) or "Mark end", "set ab-loop-b ${=time-pos}", { disabled = not a })
+        u:button(x, half, y, "mark-a", a and ("Start " .. clock(a)) or "Mark start", "script-message-to side_panel part-a")
+        y = u:button(x + half + 8 * s, half, y, "mark-b", b and ("End " .. clock(b)) or "Mark end", "script-message-to side_panel part-b", { disabled = not a })
         if a or b then y = u:button(x, w, y, "clear", "Clear the part", "set ab-loop-a no; set ab-loop-b no") end
         if g.exporting then
             y = u:button(x, w, y, "export", "Cancel export", "script-message-to gyroflow cancel-export")
@@ -2038,7 +2038,7 @@ local function wheel(dir)
         end
         if over_bar then
             -- Over the bar: a frame on (up, right) or back (down, left), as mpv's wheel seeks forward going up
-            mp.command(dir < 0 and "frame-step" or "frame-back-step")
+            mp.command(dir < 0 and "script-binding gyroflow/frame-on" or "script-binding gyroflow/frame-back")
             return
         end
         if dir == 2 or dir == -2 then return end
@@ -2190,6 +2190,14 @@ mp.add_key_binding("TAB", "toggle", function()
     capture(false)
     update()
 end)
+
+-- The A–B part's ends at the frame on screen (with the GPU denoise, time-pos is a few frames ahead of it)
+for _, e in ipairs({ "a", "b" }) do
+    mp.register_script_message("part-" .. e, function()
+        local t = tl.shown_time(mp.get_property_number("time-pos"), mp.get_property_native("user-data/gyroflow/gpu_delay"))
+        if t then mp.set_property_number("ab-loop-" .. e, t) end
+    end)
+end
 
 mp.register_script_message("tab", function(name)
     name = RENAMED[name] or name
