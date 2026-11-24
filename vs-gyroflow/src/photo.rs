@@ -101,6 +101,13 @@ fn kr_kb(matrix: &str) -> (f32, f32) {
 /// height in pixels): the matrix and range the video has, chroma interpolated between its samples (MPEG-2's siting:
 /// with the luma's left column, between its rows)
 pub fn yuv420p10_to_rgb(planes: [&[u16]; 3], width: usize, height: usize, rect: (usize, usize, usize, usize), matrix: &str, full_range: bool) -> Image {
+    yuv420p10_to_rgb_as(planes, width, height, rect, matrix, full_range, true)
+}
+
+/// The same, `clamp_top` false: values over 1 (bright saturated colours outside the matrix's cube) kept, as mpv hands
+/// MAIN to a shader (the underwater colour's)
+pub fn yuv420p10_to_rgb_as(planes: [&[u16]; 3], width: usize, height: usize, rect: (usize, usize, usize, usize), matrix: &str, full_range: bool, clamp_top: bool) -> Image {
+    let top = if clamp_top { 1.0 } else { f32::MAX };
     let (cw, ch) = (width / 2, height / 2);
     let (kr, kb) = kr_kb(matrix);
     let kg = 1.0 - kr - kb;
@@ -126,7 +133,7 @@ pub fn yuv420p10_to_rgb(planes: [&[u16]; 3], width: usize, height: usize, rect: 
             let r = yy + 2.0 * (1.0 - kr) * cr;
             let b = yy + 2.0 * (1.0 - kb) * cb;
             let g = (yy - kr * r - kb * b) / kg;
-            pixels.push([r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]);
+            pixels.push([r.clamp(0.0, top), g.clamp(0.0, top), b.clamp(0.0, top)]);
         }
     }
     Image { width: rw, height: rh, pixels }

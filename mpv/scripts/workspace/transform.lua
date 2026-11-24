@@ -42,8 +42,8 @@ local M = {}
 
 M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong",
            "uw", "uw_highlights", "uw_strength" }
--- The underwater colour's (the dlogm plugin's uwcolor.lua): the clip's or moment's like the rest, but not in what a
--- render is made with yet (render_settings leaves them out: exports don't do it, and renders' recipes keep their hashes)
+-- The underwater colour's (the dlogm plugin's uwcolor.lua): the clip's or moment's like the rest. In what a render is
+-- made with only when it's on (render_settings: with it off, the recipes of renders made before keep their hashes)
 M.COLOR_KEYS = { uw = true, uw_highlights = true, uw_strength = true }
 M.INPUT_KEYS = { "curve", "rotation", "underwater" }
 -- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not
@@ -82,10 +82,12 @@ end
 M.valid = valid
 
 -- What a key missing from a bundle plays with: the session's of the plugin it belongs to (the gyroflow plugin's, the
--- dlogm plugin's underwater colour). get: mp.get_property_native
-function M.session(get)
+-- dlogm plugin's underwater colour). get: mp.get_property_native. M.defaults: the same of the app's defaults
+function M.defaults(get) return M.session(get, "defaults") end
+function M.session(get, which)
     local out = {}
-    for _, name in ipairs({ "user-data/gyroflow/session", "user-data/uwcolor/session" }) do
+    which = which or "session"
+    for _, name in ipairs({ "user-data/gyroflow/" .. which, "user-data/uwcolor/" .. which }) do
         local t = get(name)
         if type(t) == "table" then for k, v in pairs(t) do out[k] = v end end
     end
@@ -210,7 +212,7 @@ end
 -- against the same cases (tests/render_settings.json): the recipe it hashes is what the player renders with
 function M.render_settings(doc, own, defaults)
     local bundle = M.complete(M.pick(own) or M.pick(type(doc) == "table" and doc.view or nil) or defaults, defaults)
-    for k in pairs(M.COLOR_KEYS) do bundle[k] = nil end
+    if bundle.uw ~= true then for k in pairs(M.COLOR_KEYS) do bundle[k] = nil end end
     local rendered = {}
     for k, v in pairs(bundle) do rendered[k] = v end
     if type(doc) == "table" then M.migrate_source(doc) end

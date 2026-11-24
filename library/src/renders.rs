@@ -242,7 +242,10 @@ fn defaults_of(conf: &str) -> Value {
 // ---------- What a render is made with: the player's transform.render_settings, the same way ----------
 // (mpv/scripts/workspace/transform.lua; both are checked against tests/render_settings.json)
 
-const BUNDLE_KEYS: [&str; 10] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong"];
+const BUNDLE_KEYS: [&str; 13] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong",
+                                  "uw", "uw_highlights", "uw_strength"];
+/// The underwater colour's keys (transform.COLOR_KEYS): in the settings only when it's on
+const COLOR_KEYS: [&str; 3] = ["uw", "uw_highlights", "uw_strength"];
 
 fn valid(k: &str, v: &Value) -> bool {
     let s = v.as_str().unwrap_or("");
@@ -250,7 +253,9 @@ fn valid(k: &str, v: &Value) -> bool {
         "view" => matches!(s, "normal" | "wide" | "off"),
         "level" => matches!(s, "weak" | "medium" | "strong"),
         "horizon_lock" => matches!(s, "yes" | "no"),
-        "chromatic" | "denoise" | "denoise_strong" => v.is_boolean(),
+        "chromatic" | "denoise" | "denoise_strong" | "uw" | "uw_highlights" => v.is_boolean(),
+        // Between the camera's colour (0) and the correction (1)
+        "uw_strength" => v.as_f64().is_some_and(|x| (0.0..=1.0).contains(&x)),
         // Any ratio landscape-wise (W >= H), "original"
         "aspect" => match s.split_once(':') {
             Some((w, h)) if !w.is_empty() && !h.is_empty() && w.chars().chain(h.chars()).all(|c| c.is_ascii_digit()) => {
@@ -334,6 +339,7 @@ fn migrated_source(doc: &Value) -> serde_json::Map<String, Value> {
 pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
     let bundle = pick(own).or_else(|| pick(&doc["view"])).unwrap_or_else(|| defaults.clone());
     let mut out = complete(&bundle, defaults);
+    if out.get("uw") != Some(&json!(true)) { for k in COLOR_KEYS { out.remove(k); } }
     if doc.is_object() { for (k, v) in migrated_source(doc) { out.insert(k, v); } }
     Value::Object(out)
 }
@@ -496,13 +502,21 @@ pub struct Found {
 
 /// The profile an item is rendered in when `profile` is asked for: an SDR clip's HDR is its SDR render (gyroflow-export
 /// keeps an SDR clip's colors as they are in both: one file, not two of the same pixels). A log clip, an HLG or PQ one,
-/// or one that can't be read keeps its HDR. Reads the clip's MP4 once per Ctx (afp_catalog::range)
+/// one with the underwater colour on (made HLG by it), or one that can't be read keeps its HDR. Reads the clip's MP4
+/// once per Ctx (afp_catalog::range)
 pub fn resolve(ctx: &Ctx, item: &Item, profile: &'static Profile) -> &'static Profile {
-    if profile.name != "HDR" || ctx.is_sdr(item) != Some(true) { return profile; }
+    if profile.name != "HDR" || ctx.is_sdr(item) != Some(true) || ctx.underwater_colour(item) { return profile; }
     self::profile("SDR").unwrap()
 }
 
 impl Ctx {
+    /// Whether the item is rendered with the underwater colour (its settings' uw: the clip's or moment's transform)
+    pub fn underwater_colour(&self, item: &Item) -> bool {
+        let Some(tree) = item.tree() else { return false };
+        let own = if item.kind == Kind::Moment { item.link["stab"].clone() } else { Value::Null };
+        settings(&self.clip(tree).doc, &own, &self.defaults["defaults"])["uw"] == json!(true)
+    }
+
     /// Whether the clip an item is of is SDR (not log, not HLG or PQ): None where it can't be told
     pub fn is_sdr(&self, item: &Item) -> Option<bool> {
         let tree = item.tree()?;
@@ -524,7 +538,7 @@ pub fn find_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> F
     if profile.name == "HDR" && found.file.is_none() && !profile.photo {
         let sdr = self::profile("SDR").unwrap();
         let other = find_as(ctx, item, sdr, export);
-        if other.file.is_some() && ctx.is_sdr(item) == Some(true) { return other; }
+        if other.file.is_some() && ctx.is_sdr(item) == Some(true) && !ctx.underwater_colour(item) { return other; }
     }
     found
 }
@@ -725,6 +739,10 @@ mod tests {
             assert_eq!(find(&look(&root, true), item, hdr).file, find(&look(&root, true), item, sdr).file);
             assert_eq!(states(&look(&root, false), item), json!({ "HDR": "current", "SDR": "current" }));
         }
+        // The underwater colour on: made HLG by it, its HDR is HDR (a moment with its own bundle without it: SDR)
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium","uw":true}}"#).unwrap();
+        assert_eq!(resolve(&look(&root, true), &clip, hdr).name, "HDR");
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "SDR");
         // Its own log curve: HDR is HDR
         std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
         assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");

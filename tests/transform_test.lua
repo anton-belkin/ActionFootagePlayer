@@ -165,7 +165,7 @@ expect("denoise: an old bundle plays as the session", t.complete({ view = "wide"
 expect("denoise: not a boolean", t.complete({ denoise = "no" }, { denoise = true }).denoise, true)
 expect("denoise: a change is a change", t.status({ denoise = true }, { denoise = false }, false), "changed")
 -- The underwater colour (uw, uw_highlights, uw_strength): a clip's own kept; an old bundle plays as the session; a
--- change is a change; not in what a render is made with
+-- change is a change; in what a render is made with only when on
 b = t.complete({ view = "wide", uw = true, uw_strength = 0.4 }, { uw = false, uw_highlights = true, uw_strength = 1 })
 expect("uw: its own kept", b.uw, true)
 expect("uw: its strength kept", b.uw_strength, 0.4)
@@ -175,9 +175,19 @@ expect("uw: strength out of range", t.complete({ uw_strength = 1.5 }, { uw_stren
 expect("uw: strength not a number", t.complete({ uw_strength = "0.5" }, { uw_strength = 1 }).uw_strength, 1)
 expect("uw: a change is a change", t.status({ uw = false }, { uw = true }, false), "changed")
 expect("uw: strength changed", t.status({ uw_strength = 1 }, { uw_strength = 0.5 }, false), "changed")
-local bundle, rendered = t.render_settings({ view = { view = "wide", uw = true, uw_strength = 0.5 } }, nil, { view = "normal" })
-expect("uw: not in a render's bundle", bundle.uw == nil and bundle.uw_strength == nil, true)
-expect("uw: not in a render's recipe", rendered.uw == nil and rendered.uw_highlights == nil, true)
+local bundle, rendered = t.render_settings({ view = { view = "wide", uw = true, uw_strength = 0.5 } }, nil, { view = "normal", uw_highlights = false })
+expect("uw on: in a render's bundle", bundle.uw == true and bundle.uw_strength == 0.5, true)
+expect("uw on: in a render's recipe, highlights from the defaults", rendered.uw == true and rendered.uw_highlights == false and rendered.uw_strength == 0.5, true)
+bundle, rendered = t.render_settings({ view = { view = "wide", uw = false, uw_strength = 0.5 } }, nil, { view = "normal" })
+expect("uw off: not in a render's bundle", bundle.uw == nil and bundle.uw_strength == nil, true)
+expect("uw off: not in a render's recipe (its hash as before)", rendered.uw == nil and rendered.uw_highlights == nil and rendered.uw_strength == nil, true)
+bundle, rendered = t.render_settings(nil, nil, { view = "normal", uw = true, uw_strength = 0.8, uw_highlights = true })
+expect("uw: nothing saved, the defaults' on", rendered.uw == true and rendered.uw_strength == 0.8 and rendered.uw_highlights == true, true)
+local d = t.defaults(function(name)
+    if name == "user-data/gyroflow/defaults" then return { view = "normal" } end
+    if name == "user-data/uwcolor/defaults" then return { uw = true, uw_strength = 1 } end
+end)
+expect("defaults: both plugins'", d.view == "normal" and d.uw == true, true)
 local got = t.session(function(name)
     if name == "user-data/gyroflow/session" then return { view = "wide", uw = "theirs" } end
     if name == "user-data/uwcolor/session" then return { uw = true } end
