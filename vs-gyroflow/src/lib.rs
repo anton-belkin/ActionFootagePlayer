@@ -439,7 +439,7 @@ pub struct Engine {
 /// `lens_only`: the lens alone (LensMode::Only): a video with no motion data is loaded too when it has a lens profile,
 /// and its motion data isn't streamed (nothing is smoothed)
 pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f64>, underwater: Underwater, lookahead: f64, lens_only: bool, range: Option<(f64, f64)>) -> Result<(StabilizationManager, Option<serde_json::Value>, Option<Arc<motion::Motion>>), String> {
-    let stab = StabilizationManager::default();
+    let stab = lens_pick::manager();
     let url = filesystem::path_to_url(project);
     let mut motion = None;
     let project_json = if is_project_file(project) {
@@ -925,7 +925,7 @@ fn add_motion_data(json: &mut serde_json::Value, project: &str) {
         if c.parent().map(|d| std::fs::create_dir_all(d).is_ok()).unwrap_or(false) && std::fs::write(&tmp, data).is_ok() { let _ = std::fs::rename(&tmp, c); }
     };
     let Ok((m, size)) = motion::Motion::open(&video, &url, 0.0) else { return };
-    let stab = StabilizationManager::default();
+    let stab = lens_pick::manager();
     if m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).is_err() { return; }
     let Some(data) = gyroflow_core::util::compress_to_base91_cbor(&*stab.gyro.read().file_metadata.read()) else { return };
     keep(&data);

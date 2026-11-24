@@ -55,12 +55,37 @@ impl Pick {
     }
 }
 
+/// The manager whose lens database every manager made here shares (`manager`)
+fn shared() -> &'static StabilizationManager {
+    static SHARED: OnceLock<StabilizationManager> = OnceLock::new();
+    SHARED.get_or_init(StabilizationManager::default)
+}
+
+/// A StabilizationManager with this process's one lens database. gyroflow-core gives each manager its own, loaded when a
+/// clip's camera is looked up: 12409 profiles, 0.35-0.55 s each time, which the player's table server paid for every
+/// clip it loaded (a clip without a project twice, with `db`'s), before its first frame (2026-11-24). Its own clones
+/// share theirs the same way (get_cloned), and it writes to it only to load it
+pub fn manager() -> StabilizationManager {
+    let mut stab = StabilizationManager::default();
+    stab.lens_profile_db = shared().lens_profile_db.clone();
+    stab
+}
+
+/// The shared database loaded, and `db`'s list made: ahead of the first clip (the table server, as it starts)
+pub fn warm() {
+    let _ = db();
+}
+
 /// Gyroflow's database, loaded once, with its list (what its lens profile search shows) made
 fn db() -> &'static LensProfileDatabase {
     static DB: OnceLock<LensProfileDatabase> = OnceLock::new();
     DB.get_or_init(|| {
-        let mut db = LensProfileDatabase::default();
-        db.load_all();
+        let shared = &shared().lens_profile_db;
+        if !shared.read().loaded {
+            let mut w = shared.write();
+            if !w.loaded { w.load_all(); }
+        }
+        let mut db = shared.read().clone();
         db.prepare_list_for_ui();
         db
     })

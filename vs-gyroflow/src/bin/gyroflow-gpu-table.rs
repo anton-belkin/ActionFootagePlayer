@@ -75,7 +75,7 @@ fn player(json: &str, out: &str, server: Option<&str>) {
     }
     // AFP_TIMES: each step's time and gyroflow-core's log, on stderr
     let times = std::env::var_os("AFP_TIMES").is_some();
-    if times { let _ = simplelog::TermLogger::init(log::LevelFilter::Debug, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never); }
+    if times { let _ = simplelog::TermLogger::init(log::LevelFilter::Debug, simplelog::ConfigBuilder::new().set_time_format_rfc3339().build(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never); }
     let reply = match serde_json::from_str::<serde_json::Value>(json) {
         Ok(j) => match gpu_table::PlayerClip::load(&j) {
             Ok(loaded) => {
@@ -214,6 +214,9 @@ fn serve(sock: &str) {
     }
     let _ = std::fs::remove_file(sock);
     let listener = match std::os::unix::net::UnixListener::bind(sock) { Ok(l) => l, Err(e) => { eprintln!("{sock}: {e}"); std::process::exit(1) } };
+    // Gyroflow's lens database (0.35-0.55 s to load) while the player opens its first clip: the server starts with the
+    // player, its first request comes after the clip's lookups and mpv's open; one that comes sooner waits for it
+    std::thread::spawn(vs_gyroflow::lens_pick::warm);
     let parent = unsafe { libc::getppid() };
     let last = Arc::new(Mutex::new(Instant::now()));
     {

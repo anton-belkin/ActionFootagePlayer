@@ -176,10 +176,12 @@ fs.read_json = function(p)
     local v = utils.parse_json(t)
     return type(v) == "table" and v or nil
 end
--- A folder's files, for the project lookup (its .afplocation files: workspace.lua's projects_in, in every folder
--- from the clip's up to its project's). On a NAS a big folder takes a second or more to list, and a clip's
--- lookup runs a few times as it opens (twice for a clip preview), and again for the next clip: kept while the
--- folder's modification time stays the same (it changes as a file is added or removed), a few minutes at most
+-- A folder's names, for the project lookup (its .afplocation files: workspace.lua's projects_in, in every folder
+-- from the clip's up to its project's). Its names only ("all": readdir "files" stats each entry, 2-4 ms each on the
+-- NAS, 5.6 s for a GoPro folder of 1689 files; a folder named .afplocation reads as no JSON). A clip's lookup runs a
+-- few times as it opens (twice for a clip preview), and again for the next clip: kept while the folder's
+-- modification time stays the same (it changes as a file is added or removed), a few minutes at most; between runs
+-- the lookup's answer is kept (projectcache.lua, below)
 local listed = {}
 local LISTED_SECONDS = 300
 fs.files = function(p)
@@ -187,7 +189,7 @@ fs.files = function(p)
     local info = utils.file_info(p)
     local c = listed[p]
     if c and info and c.mtime == info.mtime and mp.get_time() - c.at < LISTED_SECONDS then return c.names end
-    local names = utils.readdir(p, "files")
+    local names = utils.readdir(p, "all")
     listed[p] = info and names and { names = names, mtime = info.mtime, at = mp.get_time() } or nil
     return names
 end
@@ -213,6 +215,28 @@ fs.mounts = function()
     return out
 end
 local ws = workspace.new(fs)
+-- The project a clip's folder is in, kept between the player's runs (each Library double click is a new one) while the
+-- folders and files it was found from are as they were: a stat each instead of the lookup (no local: 200 is the limit)
+require('projectcache').new({
+    info = utils.file_info, parent = ws.parent, now = os.time, clock = mp.get_time,
+    load = function()
+        local path = mp.command_native({ "expand-path", "~~cache/actionfootageplayer-projects.json" })
+        local f = path and io.open(path, "r")
+        if not f then return nil end
+        local t = utils.parse_json(f:read("*a") or "")
+        f:close()
+        return t
+    end,
+    save = function(t)
+        local path = mp.command_native({ "expand-path", "~~cache/actionfootageplayer-projects.json" })
+        local f = path and io.open(path .. ".tmp", "w")
+        if not f then return end
+        f:write(utils.format_json(t) or "{}")
+        f:close()
+        os.remove(path)
+        os.rename(path .. ".tmp", path)
+    end,
+}).install(fs, ws)
 -- A path in a project ("Day 1/A.MP4") with this system's separators
 local function native(rel) return windows and (rel:gsub("/", "\\")) or rel end
 -- A project's locations, read again when its file changes

@@ -111,6 +111,40 @@ runs once a project in a run. The player no longer runs `look` by itself (the ca
 watches the shares, the Library looks after its roots), only when `derived` says a moment isn't where it was; `derived`
 is asked every 30 s.
 
+## A clip with a Gyroflow project, opened cold (2026-11-24)
+
+A clip with a project gets the whole clip's table at once (the project's smoothing is the whole clip's). The journal of
+19–24 Nov showed its first frame waiting for it in proportion to the file's size, ~15 ms a MB from the NAS (200 MB →
+3 s, 469 MB → 8 s), for GoPro clips with Gyroflow's own (Simple) projects, whose motion data `add_motion_data` reads
+from the video. Two causes, measured with the table tool alone (`gyroflow-gpu-table --player`, the clip out of the
+Mac's cache; locally the same table took 0.4 s at any size):
+
+- **A GoPro's second metadata track.** HERO cameras write `gpmd` (the telemetry, a sample a second) and `fdsc`
+  ("GoPro SOS", ~80 samples a second). telemetry-parser's GoPro reader reads only the first; `prefetch.rs` read both,
+  which put a sample every ~95 KB, so on a share the whole file was read in 8 MB stretches. Now a GoPro file (its first
+  metadata sample starts with GPMF's `DEVC`) has its first track alone read: 16 samples instead of ~1250 for a 16 s
+  clip. Other cameras keep every metadata track (water.rs and translation.rs read them all).
+- **Gyroflow's lens database, loaded for every clip.** gyroflow-core gives each `StabilizationManager` its own and loads
+  it (12 409 profiles, 0.35–0.55 s of CPU) when a clip's camera is looked up: the table server paid that for every clip,
+  a clip without a project twice. Now every manager made in vs-gyroflow shares one (`lens_pick::manager`; gyroflow-core's
+  own clones share theirs the same way), and the server loads it as it starts, while the player opens its first clip.
+
+Measured 2026-11-24 on the NAS (the shares mounted over the LAN; over Tailscale, earlier that morning, a 300 MB clip's table took 7.8 s before), each clip out of the Mac's cache, as a new player gets its first table
+(the server started, the request 0.3 s later), the new build first and then the one before on the same clips:
+
+| GoPro HERO7 clip | before | after |
+|---|---|---|
+| with a project, 53–203 MB | 0.58–1.26 s | 0.25–0.58 s |
+| with a project, 299–549 MB | 2.25–3.14 s | 0.67–0.93 s |
+| with a project, 837 MB / 1.56 GB | 5.47 / 8.55 s | 1.13 / 1.91 s |
+| without a project (its first 20 s), 111–403 MB | 1.16–2.83 s | 0.26–0.38 s |
+
+A clip with a project gets the same shader byte for byte. A GoPro clip without one gets what its first stretch asks for:
+before, its GPMF samples were read along with the `fdsc` ones next to them, so the first "20 s" table had the whole
+clip's motion in it (and the whole file read for it); now it has the first 20 s, extended as it plays like any other
+camera's. So that first table differs a little from before: its smoothing and its gyro bias (from the accelerometer)
+see 20 s of motion, not all of it, until the next step comes.
+
 ## Tests
 
 - `luajit tests/gpu_ahead_test.lua`: the policy against a model of the server at share speeds from faster than the NAS
