@@ -134,6 +134,9 @@ def main():
         size = (info["width"], info["height"])
         num, den = map(int, info["r_frame_rate"].split("/"))
         fps = num / den
+        # A quarter of a frame before frame n: the exporter's frame (round(t * fps)) and ffmpeg's -ss (the first at or
+        # after it) are the same one
+        t = (round(t * fps) - 0.25) / fps
 
         # 1. the numbers
         bgr0 = os.path.join(work, f"{name}.bgr0")
@@ -157,7 +160,7 @@ def main():
 
         # 3. a video export of the same numbers, at that frame
         n = round(t * fps)
-        frm = max(0.0, (n - 3) / fps)
+        frm = max(0.0, (n - 3.25) / fps)
         video = os.path.join(work, f"{name}_hlg.mov")
         run([a.exporter, "--force", "--output", video, "--from", f"{frm:.4f}", "--to", f"{frm + 0.5:.4f}", "--prores",
              "--uw-params", ",".join(f"{x:.4f}" for x in params), "--gpu", "off"] + uw + [clip], env=env)
