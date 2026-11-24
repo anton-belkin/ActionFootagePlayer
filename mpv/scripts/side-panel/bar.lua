@@ -23,6 +23,10 @@ local MAC = (mp.get_property("platform") or "") == "darwin"
 local HINT_SIZE = 10
 -- How near (points) a click must be to a mark to land on it
 M.SNAP = 7
+-- How far (points) the mouse moves, held on the track, before it's a drag (keyframes as it moves) and not a click
+M.MOVED = 3
+-- The track held: where it was pressed, and whether it has moved since (a drag)
+M.press_x, M.moved = nil, false
 
 -- What it shows, read from the player and the plugins
 function M.snapshot()
@@ -220,15 +224,25 @@ function M.draw(u, x0, x1, h, st, opts)
             u:box(bx, by, bw, 24 * s, 6, C.card, { border = 1 * s, border_color = C.line })
             u:text(bx + bw / 2, by + 12 * s, label, { align = 5, size = 12, color = C.text })
         end
-        -- Held and dragged: keyframes as it moves (fast), the exact frame where it's let go; near a mark, on the mark
+        -- Held and dragged: keyframes as it moves (fast), the exact frame where it's let go; near a mark, on the mark.
+        -- A click alone (the mouse not moved from where it was pressed) is the exact seek only: a keyframe sought on the
+        -- press flashed before the exact frame on a slow clip
         if opts.seek then
             local function at(mx)
                 local snap = tl.snap(mx, st.items, st.ab_a, st.ab_b, tx0, tx1, d, M.SNAP * s)
                 return snap and snap.t or tl.t_of(mx, tx0, tx1, d)
             end
             u:hit(tx0 - 8 * s, ty - 14 * s, tx1 - tx0 + 16 * s, 26 * s, "bar:track", {
-                drag = function(mx) opts.seek(at(mx), false) end,
-                release = function(mx) opts.seek(at(mx), true) end,
+                drag = function(mx)
+                    if M.press_x == nil then M.press_x = mx return end
+                    if not M.moved and math.abs(mx - M.press_x) < M.MOVED * s then return end
+                    M.moved = true
+                    opts.seek(at(mx), false)
+                end,
+                release = function(mx)
+                    M.press_x, M.moved = nil, false
+                    opts.seek(at(mx), true)
+                end,
             })
         end
     end

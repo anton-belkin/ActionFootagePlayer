@@ -23,7 +23,9 @@ Rigs used here are in `tools/scrub/`: `dnrepro.py` (problem 1 without a window) 
   - With an LRF/LRV beside the clip, the picture is that exact frame (any frame, not only keyframes: measured fast
     enough, below). Without one, the picture is the clip's keyframe at or before the cursor (the last one that has
     already happened), and the click still lands at the cursor's time.
-  - The picture shows on plain hover, and while dragging; dragging doesn't seek: one exact seek on release.
+  - The picture shows on plain hover, and while dragging. Dragging keeps seeking the video by keyframes as it moves
+    (Anton, after trying the build: where the clip is cached it follows fast, he judges it himself), the exact frame
+    on release; a click without moving is the exact seek alone (no keyframe flashed first).
   - Nothing is built ahead or in the background: every picture is made when the mouse asks for it (~15-50 ms).
     Pictures already made may be kept, in memory and on this computer's disk only (never beside the clips).
   - Size: about twice the height of the bar (the bar is 66 pt, so ~130 pt high, ~230 pt wide for 16:9).
@@ -160,6 +162,11 @@ Checked (2026-11-24):
   frames 0.14 s (no drops), so the clean frame 0.64 s after the click (Full: 4 more frames, ~+0.07 s). A fill
   timed to the same millisecond as a click no longer swallows the click (seen in the first live run; fixed: no fill
   over a seek under way, a seek of ours told apart by where it lands).
+- After Anton tried the build: a click flashed the keyframe full-screen before the exact frame (the bar's drag ran on
+  the press: now only once the mouse moved 3 pt), and a drag over the bar while paused went on playing once it
+  stopped (each seek cut the fill's `frame-step` short, mpv kept the steps not played and added the next fill's:
+  now a seek pauses a cut step, and the fill after a seek waits 0.15 s for the next one). Space during a fill's
+  frames plays (it used to pause: the frame-step had it playing). `tests/dnstep_ipc.py` covers the drag and Space.
 - Not checkable by screenshots: mpv's `screenshot-to-file … window` renders at 1581×889 where the window renders
   1580×888, so the shader takes the ring as stale (its size differs) and the screenshot is the newest frame, raw.
   k's moment picture (`export.lua`, a screenshot with the denoise on) is therefore the newest decoded frame, not the
@@ -308,8 +315,8 @@ same pictures as small JPEGs in `~/Library/Caches/ActionFootage/scrub/<file iden
 Library's identity), so a clip opened again scrubs from its cache at once. Never beside the clips. Disk cache can
 come second: it's not needed for speed.
 
-**Drag.** The picture follows the mouse; the video doesn't seek while dragging (today's keyframe seek on each move is
-what makes dragging lag on the NAS); one exact seek on release.
+**Drag.** The picture follows the mouse, and the video too (keyframe seeks as it moves, as before: kept by Anton's
+call); the exact frame on release. A click without moving seeks once, exactly.
 
 **Sidecar rules.** One rule shared with the Library (`index.rs:359`, `camera_thumb()`), extended with HERO3/4's
 `GOPR<n>.LRV` / `GP<ch><n>.LRV`; a sidecar is used only when its duration matches the clip's (±0.1 s). A moment

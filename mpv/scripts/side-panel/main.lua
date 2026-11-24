@@ -2074,6 +2074,8 @@ local function click(info)
     -- Journal: the click is the button's action
     J.label("panel/" .. tostring(h.id))
     if type(h.cmd) == "table" and h.cmd.drag then
+        -- A new press (bar.lua tells a click from a drag by where it was pressed)
+        bar.press_x, bar.moved = nil, false
         h.cmd.drag(pos.x, pos.y)
         if info.event == "down" then dragging, released, drag_redraw = h.cmd.drag, h.cmd.release, h.cmd.redraw == true
         elseif h.cmd.release then h.cmd.release(pos.x) end

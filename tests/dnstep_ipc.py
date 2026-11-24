@@ -11,6 +11,7 @@ gyroflow plugin's user-data/gyroflow/gpu_delay, what the seek bar shows), the fr
   - stopped for a moment: the ring filled again around it (time-pos 5 after it, the frame the same);
   - a click on the bar (an exact seek) while paused: that frame on screen, then filled, the frame the same;
   - `,` seven times quickly: past the ring, a seek, then filled; the frame 7 back;
+  - a drag over the bar while paused (keyframe seeks): once it stops, still paused, the frame filled and staying;
   - playing on: from the frame on screen.
 
   tests/dnstep_ipc.py [--keep] <ActionFootagePlayer.app built from this checkout> <clip with motion data, DJI .MP4>
@@ -135,17 +136,31 @@ def main():
         s = r.settle(quiet=1.0)
         check("7 ,: on screen", s["shown"], clicked + 1 - 7)
         check("7 ,: filled, time-pos 5 after it", s["t"], clicked + 1 - 7 + 5)
+        # A drag over the bar while paused (keyframe seeks as the mouse moves), then the mouse stops: still paused,
+        # the frame stays (the fill's frame-steps used to pile up in mpv and play on)
+        for i in range(25):
+            pl.cmd("seek", "%.3f" % (30 + i * 0.4), "absolute+keyframes")
+            time.sleep(0.04)
+        time.sleep(1.5)
+        a = r.now()
+        time.sleep(0.8)
+        b = r.now()
+        check("drag while paused: still paused", pl.prop("pause"), True)
+        check("drag while paused: the frame stays", b["shown"], a["shown"])
+        check("drag while paused: filled once it stopped", b["t"] - b["shown"], b["delay"])
         # Two back from the ring, then playing on: from the frame on screen
         r.key(",")
         r.key(",")
         s = r.settle(quiet=0.2)
         here = s["shown"]
-        pl.cmd("set_property", "pause", False)
-        time.sleep(0.6)
-        pl.cmd("set_property", "pause", True)
+        # Space as the fill may be playing its frames (frame-step unpauses): it plays, as Space on a paused picture
+        time.sleep(0.45)
+        r.key("SPACE")
+        time.sleep(0.8)
+        r.key("SPACE")
         s = r.settle(quiet=1.0)
         played = s["shown"] - here
-        check(f"played on from the frame on screen ({played} frames in ~0.6 s)", 0 < played < 0.9 * r.fps, True)
+        check(f"played on from the frame on screen ({played} frames in ~0.8 s)", 0 < played < 0.9 * r.fps, True)
         check("played on: nothing asked of the shader", s["asked"], None)
     finally:
         if pl:

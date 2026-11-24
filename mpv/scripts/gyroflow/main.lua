@@ -1464,6 +1464,8 @@ end
 -- (a block of its own: main.lua's chunk is near Lua's 200 locals)
 do
     local DN_AFTER = 5
+    -- After a seek of someone else's, the fill waits this long for the next one (a drag over the bar)
+    local DN_FILL_AFTER_SEEK = 0.15
     local dnstep = require 'dnstep'
     local dn = { after = DN_AFTER, epoch = 0, delay = 0, restart = nil, show = nil }
     -- Paused work under way: { kind = "frames" (frame-step N, until_ the newest frame it ends on), "fill-seek" (the
@@ -1621,8 +1623,12 @@ do
         -- Ours: told apart once it's there (playback-restart)
         if dn_own_seek then return end
         -- A seek of someone else's (the bar, a mark, the keys): what was under way stops; the frame asked of the shader
-        -- goes once the new one is there (until then the shader keeps the old one on screen, no flash of another)
+        -- goes once the new one is there (until then the shader keeps the old one on screen, no flash of another).
+        -- Frames being played (frame-step N, which unpauses) stop too: mpv keeps the steps not played through a seek
+        -- and adds the next ones to them, so a drag over the bar while paused went on playing them once it stopped
+        local stepping = dn_busy and dn_busy.kind == "frames"
         dn_cancel()
+        if stepping then mp.set_property_native("pause", true) end
         dn.clear_show = true
     end)
     mp.register_event("playback-restart", function()
@@ -1640,8 +1646,9 @@ do
         if dn.clear_show then
             dn.clear_show = false
             dn_set_show(nil)
-            -- Paused there: filled at once (its frame is on screen as decoded)
-            dn_schedule_fill(0)
+            -- Paused there: filled as soon as the seeks stop (its frame is on screen as decoded; a drag over the bar
+            -- seeks on as the mouse moves, and each seek puts the fill off)
+            dn_schedule_fill(DN_FILL_AFTER_SEEK)
             return dn_publish()
         end
         dn_publish()
@@ -1666,11 +1673,15 @@ do
         local b = dn_busy
         if b and b.kind == "frames" then
             if not paused then b.started = true return end
-            -- Paused again: the steps done (time-pos says so), or cut short (a key pausing it): what's there stays
+            -- Paused again: the steps done (time-pos says so), or cut short. Cut short by Space (mpv's cycle: the
+            -- frame-step had it playing), which on a paused picture means play: it plays on, from the frame on screen
             local t = mp.get_property_number("time-pos")
             local fps = current_source and tonumber(current_source.fps)
             if b.started and t and fps and t >= b.until_ - 0.5 / fps then return dn_done() end
-            if b.started then dn_busy = nil; dn_schedule_fill(o.still_delay) end
+            if b.started then
+                dn_busy = nil
+                mp.set_property_native("pause", false)
+            end
             return
         end
         if paused then
