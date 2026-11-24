@@ -45,20 +45,27 @@ const HOLE_US: i64 = 500_000;
 const FADE_IN_US: i64 = 500_000;
 
 /// What a level's stabilization is made of: the frame's geometry for its margin (levels.rs). `projection`: the
-/// output's (Gyroflow's OutputProjection, "Automatic" resolved for the lens)
+/// output's (Gyroflow's OutputProjection, "Automatic" resolved for the lens). `crop_share`: of the levels' crop, the
+/// clip's (in_camera.rs: less on top of HyperSmooth)
 #[derive(Clone, Copy)]
-pub struct Geometry { pub still_fov: f64, pub fx: f64, pub output_aspect: f64, pub width: f64, pub projection: i32 }
+pub struct Geometry { pub still_fov: f64, pub fx: f64, pub output_aspect: f64, pub width: f64, pub projection: i32, pub crop_share: f64 }
 
 impl Geometry {
     pub fn of(stab: &StabilizationManager, still_fov: f64) -> Geometry {
         let projection = ComputeParams::from_manager(stab).output_projection;
+        let crop_share = crate::in_camera::crop_share(stab);
         let p = stab.params.read();
         let fx = stab.lens.read().get_camera_matrix(p.size)[(0, 0)];
-        Geometry { still_fov, fx, output_aspect: p.output_size.0 as f64 / p.output_size.1.max(1) as f64, width: p.size.0 as f64, projection }
+        Geometry { still_fov, fx, output_aspect: p.output_size.0 as f64 / p.output_size.1.max(1) as f64, width: p.size.0 as f64, projection, crop_share }
     }
 
     pub fn smoothing(&self, level: Level) -> Predictive {
-        Predictive { smoothness: level.smoothness(), margin: levels::margin(level, self.still_fov, self.fx, self.output_aspect, self.width, self.projection) }
+        Predictive { smoothness: level.smoothness(), margin: levels::margin(level.crop() * self.crop_share, self.still_fov, self.fx, self.output_aspect, self.width, self.projection) }
+    }
+
+    /// The FOV `level` renders the clip at
+    pub fn fov(&self, level: Level) -> f64 {
+        level.fov(self.still_fov, self.crop_share)
     }
 }
 

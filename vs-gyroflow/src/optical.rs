@@ -17,8 +17,9 @@
 //   camera's. Known: the lens the file has (DJI, newer GoPros), else the profile Gyroflow's database has for the camera,
 //   lens mode in Gyroflow's database (lens_pick.rs: as the player picks it);
 // - the rest are measured: no motion data (DJI with EIS on, older cameras), or motion data the camera already
-//   stabilized the picture with (GoPro's HyperSmooth, DJI's RockSteady): that motion data is set aside, since the
-//   picture no longer moves as the camera did.
+//   stabilized the picture with (HyperSmooth on a HERO11 or older, DJI's RockSteady): that motion data is set aside,
+//   since the picture no longer moves as the camera did. (A HERO12 or later records how HyperSmooth turned the picture,
+//   so the player stabilizes it from its own motion data: in_camera.rs.)
 
 use std::path::{ Path, PathBuf };
 use gyroflow_core::{ filesystem, util };

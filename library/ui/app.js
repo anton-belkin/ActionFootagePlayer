@@ -263,7 +263,8 @@ function deriveSource(it, probe) {
   // Its motion measured from the picture (<clip>.afp-motion beside it, gyroflow-probe's "motion": "optical")
   it.measured = !!(probe && probe.motion === "optical");
   // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
-  // "EIS: RockSteady", "FlowState"); null: off, or not said
+  // "EIS: RockSteady", "FlowState"); null: off, or not said. With motion data (a GoPro HERO12+ with HyperSmooth on), the
+  // player stabilizes on top of it
   it.camStab = probe && typeof probe.stabilized_in_camera === "string" ? probe.stabilized_in_camera : null;
   it.is360 = !!(probe && (probe.spherical || probe.rig360));
 }
@@ -2131,7 +2132,7 @@ function itemInfo(it) {
     const probe = PROBES[it.path];
     h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens", it.is360 ? "" : (lensName(it) || (probe ? "" : "Reading…")) + (lensFrom(it) && lensFrom(it) !== "file" && lensFrom(it) !== "project" ? " · " + LENS_FROM[lensFrom(it)].toLowerCase() : "")],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
-      ["Motion data", it.measured ? "Measured from the picture" + (probe.measured && probe.measured.in_water ? ", in water" : ", in air") : it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
+      ["Motion data", it.measured ? "Measured from the picture" + (probe.measured && probe.measured.in_water ? ", in water" : ", in air") : it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") + (it.camStab ? ", stabilized on top of the camera's " + it.camStab : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
     h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
