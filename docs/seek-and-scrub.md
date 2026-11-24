@@ -129,6 +129,24 @@ Edge cases to handle: the last 5 frames of a clip (no frames after: show what th
 already), `fps_limit` (frames every 2nd/4th: steps are in played frames), a moment link (its own time offset),
 Light (3+3).
 
+### As built (A1–A3)
+
+- `mpv/scripts/gyroflow/dnstep.lua` (plain Lua): the frame on screen, the ring's row, a step (from the ring, a few
+  frames played on, or a seek), the fill (seek to the frame − radius, play radius + after frames), playing on from the
+  shown frame. `tests/dnstep_test.lua` runs it against a model of the shader's ring.
+- `main.lua` (the dn block): `,` `.` are the plugin's `frame-back` / `frame-on`; Option+arrows (`navkeys.lua`), the
+  bar's buttons and the wheel over it call them. Without the delay (no denoise, crop mode, the VapourSynth path)
+  they run mpv's own `frame-back-step` / `frame-step`. The fill: after a seek of someone else's at once, after steps
+  once they stop for `still_delay`, after pausing when it played less than the ring since a seek. A step pressed
+  during a fill or frames being played waits its turn. A seek of someone else's clears the frame asked for only
+  once its frame is there (the shader keeps the old one meanwhile: no flash).
+- `user-data/gyroflow/gpu_delay` = `{ delay, restart, show }`; the readers' `shown_time()` (side panel:
+  `timeline.lua`'s, tested) for the bar's knob and time, marks (add, next/previous, the panel's), the panel's A–B
+  buttons (`script-message-to side_panel part-a|b`), cut before/after, the menu, telemetry, uwcolor, export.
+- `warp.glsl`: `gyroflow_dn_show` (−1: none); `dn_window()` looks the frame up by its time in the ring.
+- Not changed: mpv's own `l` (A–B with the key) still takes `time-pos`; mpv's A–B loop runs on `time-pos`, so the
+  loop's last 5 frames aren't shown before it jumps back.
+
 ### Simpler alternative (proposal B, not chosen)
 
 Paused, use no frames after the shown one (after = 0, as crop mode does) — then the newest decoded frame *is* the
