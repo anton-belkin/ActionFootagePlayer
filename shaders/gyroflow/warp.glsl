@@ -476,10 +476,7 @@ bool frame_setup()
 // False where output_ray's pixel has no ray (a lens correction below 100 %: past the lens's own image)
 bool ray_ok = true;
 
-#if LENS_BLEND
-// A lens correction below 100 % (Gyroflow's output_ray in the fork, its wgpu_undistort.wgsl): a ray of angle theta lands
-// at (1 - a) R(theta) + a P(theta) of the output plane, where the source lens images it mixed with where the output
-// projection wants it. Inverted per pixel by regula falsi (Illinois), bracketed by the two maps' own answers.
+// The output projection's radius on the plane for a ray of angle theta, and back (projection::project's)
 float proj_radius(float theta)
 {
 #if PROJ == 1
@@ -510,6 +507,10 @@ float proj_theta(float r)
 #endif
 }
 
+#if LENS_BLEND
+// A lens correction below 100 % (Gyroflow's output_ray in the fork, its wgpu_undistort.wgsl): a ray of angle theta lands
+// at (1 - a) R(theta) + a P(theta) of the output plane, where the source lens images it mixed with where the output
+// projection wants it. Inverted per pixel by regula falsi (Illinois), bracketed by the two maps' own answers.
 // Green's index under water (Gyroflow's own coefficient): the blend is where the picture goes, the same for each
 // color; each color's own index is applied after, in rotate_and_distort
 bool refracts() { return lens.z != 1.0 && lens.z > 0.0; }
@@ -1622,22 +1623,44 @@ void hook()
 float cur4(ivec2 p) { return texelFetch(GDN_CUR4_raw, clamp(p, ivec2(0), ivec2(GDN_CUR4_size) - 1), 0).x * GDN_CUR4_mul; }
 float cur1(ivec2 p) { return lum(HOOKED_mul * texelFetch(HOOKED_raw, clamp(p, ivec2(0), ivec2(HOOKED_size) - 1), 0).rgb); }
 
-// Where output pixel j was in the frame before (its camera q; crop mode's camera cam and zoom as it was rendered) by
-// the gyro alone: its ray turned into the world by this frame's camera, out of it by that one's
-vec2 predict(vec2 j, vec4 qp, vec4 cam, float zoom)
+// Where direction d of the output camera (crop mode's camera and zoom left out) is on the output, in this render's
+// pixels: output_ray's map the other way
+vec2 plane_point(vec3 d, float zoom)
 {
-    vec3 w = qrot(table(15), output_ray(j));
-    vec3 d = qrot(vec4(-cam.xyz, cam.w), qrot(vec4(-qp.xyz, qp.w), w));
-    if (d.z < 1e-3) return j;
     vec2 size = vec2(OUT_W, OUT_H);
     vec2 out_f = fc.xy * vec2(stretch.x > 0.01 ? 1.0 / stretch.x : 1.0, 1.0) / (lens.x * zoom);
     float rxy = max(length(d.xy), 1e-9);
-#if PROJ == 0
-    vec2 n = d.xy / d.z;
-#else
-    vec2 n = d.xy / rxy * atan(rxy, d.z);
+    float theta = atan(rxy, d.z);
+    vec2 u = d.xy / rxy;
+    vec2 n = u * proj_radius(theta);
+#if LENS_BLEND
+    // A lens correction below 100 %: where output_ray's blend puts the ray, (1 - a) of the way to where the source lens
+    // images it (under water, refracted first)
+    float a = lens.y;
+    if (a < 0.999) {
+        float th = refracts() ? asin(clamp(sin(theta) * lens.z, -1.0, 1.0)) : theta;
+        vec2 src = distort_point(u.x * sin(th), u.y * sin(th), cos(th));
+        if (src.x > -9999.0 && src.y > -9999.0) n = a > 0.0 ? (1.0 - a) * src + a * n : src;
+    }
 #endif
     return (n * out_f + 0.5 * size - t2.xy) * RT / size;
+}
+
+// Where output pixel j was in the frame before (its camera q; crop mode's camera cam and zoom as it was rendered) by
+// the gyro alone: its ray turned into the world by this frame's camera, out of it by that one's. As a move from j, both
+// ends through plane_point, so what it leaves out (a digital lens; output_ray's solve, within its tolerance) is about the
+// same at both and cancels. It used to be the rectilinear map alone, wrong wherever the lens correction is below 100 %
+// (old GoPro clips, Action 6 at 0 %): at 0 % on 1080p up to 180 px at the sides (GoPro HERO3 clip GOPR0605), and the
+// search (8 pixels around) never found the motion. Textured places then kept their own frame (no denoise); smooth
+// open water took in other places' water, several codes brighter or darker, in rectangles of the blocks (the banding
+// and ghosts seen there)
+vec2 predict(vec2 j, vec4 qp, vec4 cam, float zoom)
+{
+    vec3 r = output_ray(j);
+    vec3 d0 = qrot(vec4(-gyroflow_cam_x, -gyroflow_cam_y, -gyroflow_cam_z, gyroflow_cam_w), r);
+    vec3 d = qrot(vec4(-cam.xyz, cam.w), qrot(vec4(-qp.xyz, qp.w), qrot(table(15), r)));
+    if (d.z < 1e-3 || d0.z < 1e-3) return j;
+    return j + plane_point(d, zoom) - plane_point(d0, gyroflow_cam_zoom);
 }
 
 void hook()
