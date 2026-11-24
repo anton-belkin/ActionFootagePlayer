@@ -147,6 +147,24 @@ Light (3+3).
 - Not changed: mpv's own `l` (A–B with the key) still takes `time-pos`; mpv's A–B loop runs on `time-pos`, so the
   loop's last 5 frames aren't shown before it jumps back.
 
+Checked (2026-11-24):
+
+- `luajit tests/dnstep_test.lua` (the logic against the ring's model), `tests/dnstep_ipc.py` (the app's mpv
+  headless: steps, the fill, a click, seven steps back, playing on; 26 checks).
+- The shader's `gyroflow_dn_show` by export (`AFP_GPU_KEEP`, the kept shader with its default set to frame 30):
+  output frames whose newest is 30…40 all show frame 30 (PSNR 58–63 dB against the normal output's frame 30), the
+  next one falls back to the shader's own choice; with −1 the output is bit for bit the old shader's.
+- Live, 0068 in the installed build (Light, 3+3): paused after playing the picture is 3 behind time-pos; `,` and
+  `.` from the ring change the frame on screen at once (the per-frame Dolby Vision L1 measure changes with them),
+  time-pos stays; a click at 25 s: its frame on screen 0.24 s after the click, the fill's seek 0.25 s more, its 6
+  frames 0.14 s (no drops), so the clean frame 0.64 s after the click (Full: 4 more frames, ~+0.07 s). A fill
+  timed to the same millisecond as a click no longer swallows the click (seen in the first live run; fixed: no fill
+  over a seek under way, a seek of ours told apart by where it lands).
+- Not checkable by screenshots: mpv's `screenshot-to-file … window` renders at 1581×889 where the window renders
+  1580×888, so the shader takes the ring as stale (its size differs) and the screenshot is the newest frame, raw.
+  k's moment picture (`export.lua`, a screenshot with the denoise on) is therefore the newest decoded frame, not the
+  one on screen: a follow-up.
+
 ### Simpler alternative (proposal B, not chosen)
 
 Paused, use no frames after the shown one (after = 0, as crop mode does) — then the newest decoded frame *is* the
