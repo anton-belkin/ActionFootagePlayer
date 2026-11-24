@@ -120,10 +120,14 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
             Err(e) => eprintln!("afp-catalog: {} not watched ({e}): looked at every {every} s", r.dir.display()),
         } }
     }
-    // Every folder listed at the start (what changed while this wasn't running, in place too), and again only when
-    // the system lost count or this was held up longer than its watch can vouch for: while it watches, the system
-    // tells it of every change, and nothing more is needed (no deep look on a schedule)
+    // Every folder listed at the start (what changed while this wasn't running, in place too) unless it was a short
+    // break (care::to_look_at_start), and again only when the system lost count or this was held up longer than its
+    // watch can vouch for: while it watches, the system tells it of every change, and nothing more is needed (no deep
+    // look on a schedule)
     let mut deep = true;
+    // At the start: decided once the catalog is loaded; the roots to look at deep, when not all of them
+    let mut starting = true;
+    let mut deep_only: Option<Vec<crate::Root>> = None;
     let mut last_beat = Instant::now();
     // A deep look that failed (the disk away) tried again only after a while
     let mut deep_tried: Option<Instant> = None;
@@ -146,6 +150,17 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
                 // A newer program's project: this one stops (Docker's restart brings it back, to stop again)
                 Err(Error::TooNew(e)) => { eprintln!("afp-catalog: {e}"); std::process::exit(3) }
                 Err(e) => { eprintln!("afp-catalog: {e}"); std::thread::sleep(Duration::from_secs(10)); continue }
+            }
+        }
+        if starting {
+            starting = false;
+            let todo = crate::care::to_look_at_start(&cat, roots);
+            if todo.is_empty() {
+                eprintln!("afp-catalog: watched until minutes ago and looked at in full within a day: folders' times only");
+                deep = false;
+                crate::care::watching(&cat, &watched, false);
+            } else if todo.len() < roots.len() {
+                deep_only = Some(todo);
             }
         }
         // What the system said: the folders it named (ours, in .afp, aside)
@@ -176,16 +191,23 @@ fn watch(proj: &Path, mut cat: Catalog, roots: &[crate::Root], ours: &Ours, ever
         if last_beat.elapsed() >= Duration::from_nanos(crate::care::BEAT_FRESH_NS as u64) && !watched.is_empty() { deep = true; }
         let r = if deep && deep_tried.is_none_or(|t| t.elapsed() >= Duration::from_secs(30)) {
             deep_tried = Some(Instant::now());
-            eprintln!("afp-catalog: every folder looked at (deep)");
-            let r = cat.sweep(roots, ours, &Sweep { deep: true, ..Default::default() });
+            let these = deep_only.clone().unwrap_or_else(|| roots.to_vec());
+            eprintln!("afp-catalog: every folder looked at (deep){}", if these.len() < roots.len() { format!(", in {} of {} roots", these.len(), roots.len()) } else { String::new() });
+            let r = cat.sweep(&these, ours, &Sweep { deep: true, ..Default::default() });
             if let Ok(rep) = &r {
-                let looked: Vec<crate::Root> = roots.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect();
+                let looked: Vec<crate::Root> = these.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect();
                 crate::care::mark_deep(&cat, &looked);
-                let vouched: Vec<crate::Root> = watched.iter().filter(|x| !rep.skipped_roots.contains(&x.id)).cloned().collect();
+                let ids: Vec<&str> = these.iter().map(|x| x.id.as_str()).collect();
+                let vouched: Vec<crate::Root> = watched.iter().filter(|x| ids.contains(&x.id.as_str()) && !rep.skipped_roots.contains(&x.id)).cloned().collect();
                 crate::care::watching(&cat, &vouched, true);
+                // The others were watched until moments ago: still vouched for
+                let rest: Vec<crate::Root> = watched.iter().filter(|x| !ids.contains(&x.id.as_str())).cloned().collect();
+                if !rest.is_empty() { crate::care::watching(&cat, &rest, false); }
+                // A deep look of some roots only: the rest's folders' times looked at next
+                everything = these.len() < roots.len();
+                deep_only = None;
                 deep = false;
                 deep_tried = None;
-                everything = false;
                 last_all = Instant::now();
                 last_beat = Instant::now();
                 pending.clear();

@@ -8,6 +8,7 @@
 # into:
 #
 #   <out>/Moments/<trip>/<moment>.strm        a moment: its subfolder in _Moments/, else its clip's trip, else "No trip"
+#                                             (only once afp-stream has listed every clip preview: nothing pending)
 #   <out>/Clips/<trip>/<clip>.strm            a clip preview (the whole clip): its folder in _Clips/
 #
 # --scope says which of the two (moments, clips or all); what was written outside it is removed.
@@ -28,6 +29,8 @@ NAMES = {
            "clip": "Весь клип {clip}, {d}.", "stab": "Стабилизирован", "nostab": "Без стабилизации", "hdr": "HDR (HLG)", "s": "с"},
 }
 MANIFEST = ".afp-jellyfin.json"
+# Which file each cover was fetched for ({poster: the stamp afp-stream gave}): a cover is asked again only when that changed
+POSTERS = ".afp-jellyfin-posters.json"
 
 
 def log(*a):
@@ -82,9 +85,11 @@ def label(item):
 SCOPES = {"moments": ("moment",), "clips": ("preview",), "all": ("moment", "preview")}
 
 
-def tree(items, t, scope="all"):
+def tree(items, t, scope="all", pending=0):
     """{relative path: item} for each .strm: moments in their folder or their clip's trip, clips in theirs; only the
-    kinds in scope (a moment still finds its trip from its clip's preview)"""
+    kinds in scope (a moment still finds its trip from its clip's preview). While afp-stream still has items pending
+    (it just started), a clip's preview may only be waiting: a moment whose trip isn't known yet is left out this time
+    (what was written for it before stays, run() keeps it), not put into "No trip" beside its old place"""
     trip_of = {}
     for it in items:
         if it["kind"] == "preview":
@@ -94,7 +99,11 @@ def tree(items, t, scope="all"):
         if it["kind"] not in SCOPES[scope]:
             continue
         if it["kind"] == "moment":
-            folder = it["folder"] or trip_of.get((it["project"], it["clip"])) or t["none"]
+            folder = it["folder"] or trip_of.get((it["project"], it["clip"]))
+            if not folder:
+                if pending:
+                    continue
+                folder = t["none"]
             top = t["moments"]
         else:
             folder = it["folder"] or t["none"]
@@ -130,23 +139,38 @@ def run(a):
     t = NAMES[a.names]
     cat = json.loads(fetch(a.catalog))
     items = cat["items"]
-    if cat.get("pending"):
-        log(f"{cat['pending']} items not ready yet in afp-stream: next time")
+    pending = cat.get("pending") or 0
+    if pending:
+        log(f"{pending} items not ready yet in afp-stream: next time")
     stream = a.stream.rstrip("/")
     changed = 0
     wanted = set()
     folders = {}
-    for rel, it in tree(items, t, a.scope).items():
+    try:
+        with open(os.path.join(a.out, POSTERS)) as f:
+            stamps = json.load(f)
+    except (OSError, ValueError):
+        stamps = {}
+    kept = {}
+    for rel, it in tree(items, t, a.scope, pending).items():
         base = os.path.join(a.out, rel[:-5])
         url = f"{stream}/clip/{it['id']}/index.m3u8"
         changed += write(base + ".strm", url + "\n")
         changed += write(base + ".nfo", nfo(it, t))
         wanted.update([base + ".strm", base + ".nfo"])
         poster = base + "-poster.jpg"
-        try:
-            changed += write(poster, fetch(f"{a.stream_local.rstrip('/')}/poster/{it['id']}.jpg"))
-        except Exception as e:
-            log("no poster for", rel, e)
+        # The cover asked for only when it's missing or its file changed (afp-stream's stamp): with the whole library in
+        # scope that's a thousand requests every round otherwise, for covers that don't change
+        prel, stamp = os.path.relpath(poster, a.out), it.get("poster_stamp")
+        if stamp and stamps.get(prel) == stamp and os.path.exists(poster):
+            kept[prel] = stamp
+        else:
+            try:
+                changed += write(poster, fetch(f"{a.stream_local.rstrip('/')}/poster/{it['id']}.jpg"))
+                if stamp:
+                    kept[prel] = stamp
+            except Exception as e:
+                log("no poster for", rel, e)
         if os.path.exists(poster):
             wanted.add(poster)
             # A folder's picture: its first item's (the earliest)
@@ -166,7 +190,6 @@ def run(a):
         before = set()
     # While afp-stream hasn't asked the player about every item yet (it just started), what it hasn't listed may only be
     # waiting: nothing written before goes until it has
-    pending = cat.get("pending") or 0
     if pending:
         wanted |= before & set(p for p in before if os.path.exists(p))
     for p in sorted(before - wanted):
@@ -178,6 +201,7 @@ def run(a):
     for d, _, _ in sorted(os.walk(a.out), key=lambda w: -len(w[0])):
         if d != a.out and not os.listdir(d):
             os.rmdir(d)
+    write(os.path.join(a.out, POSTERS), json.dumps(kept, ensure_ascii=False, indent=0, sort_keys=True))
     write(os.path.join(a.out, MANIFEST), json.dumps(sorted(os.path.relpath(p, a.out) for p in wanted), ensure_ascii=False, indent=0))
     log(f"{len(items)} items, {a.scope} in Jellyfin, {changed} files changed")
     if changed and a.jellyfin and a.key_file:

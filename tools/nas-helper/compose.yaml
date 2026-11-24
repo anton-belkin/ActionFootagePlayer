@@ -17,6 +17,12 @@ services:
       - /dev/dri:/dev/dri
     # Leaves room for whatever else runs on the NAS (a VM, Jellyfin): the stream's renders take ~1 GB
     mem_limit: 2g
+    # Its log kept small: Docker's default keeps every line forever (the stream logs each request)
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
     environment:
       AFP_COLLABORATION: "on"
       AFP_STREAM: "on"

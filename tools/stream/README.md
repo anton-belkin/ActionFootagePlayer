@@ -169,6 +169,27 @@ stops. Measured after (clip 0127, opening pre-rendered): only the TV's render ru
 was rendered stays in the cache (`AFP_CACHE_GB`): played again or sought back, it's served from there with nothing
 rendered.
 
+Since Jellyfin 10.11 (UGREEN's "12.2", on the NAS since 2026-11-20) the TV no longer got our URL: Jellyfin probes a
+`.strm`'s stream when it's first played, then remuxes it for the Samsung TV itself (its ffmpeg, User-Agent `Lavf`,
+`-f hls -i <our playlist> -c copy -f hls -hls_time 6`, MPEG-TS out). Clips never started (Anton gave up after 40 s;
+in a test, not one of Jellyfin's segments in 90 s), for three reasons, fixed 2026-11-24:
+
+- Every render's segments started at time 0: ffmpeg's HLS muxer keeps where a render starts only in its init.mp4 (an
+  empty edit per track), and the next render writes init.mp4 again. A player reading init.mp4 once and segments of two
+  renders saw time go back at the second's first segment, and ffmpeg's output never got past its first second.
+  `fmp4time.py`: segments are served on the clip's timeline (each track's tfdt plus its render's start, kept per render
+  in the clip's `edits.json` from its own init.mp4) and init.mp4 without the empty edits. The TS made from them too.
+- `Lavf` was taken for a probe and rendered 2 segments at a time, a new render every 2 s, slower than real time.
+  Jellyfin's ffmpeg now gets the TV's look (`AFP_TV_LOOK`), as the TV would, and its renders run on: the probe's is the
+  one the TV then plays. A render nobody asks anything of for 30 s stops (the TV turned off, Jellyfin's remux killed),
+  so the original isn't read on to the clip's end for no one.
+- A segment whose render had ended without it waited out a minute before a 503; now a render starts from it.
+
+Measured with Jellyfin's own ffprobe and ffmpeg arguments against the NAS (2026-11-24): a D-Log M clip never played
+before, 10-12.5 s from play to Jellyfin's first segment (the probe ~5 s: a render starting and its first segments;
+then 6 s of video at ~1.1x real time); a GoPro clip ~8 s; one played before, 0.5 s. Jellyfin's 6 s segments are what
+it needs before the TV gets anything (the old way, the TV's own 1 s TS segments, started in ~4.5 s).
+
 It renders one clip at a time at low priority, only while nobody watches; `/status` shows it. Per folder, the index page
 has "openings for the TV". Run 2026-11-09: 337 openings in 43 min, 9 GB.
 
