@@ -126,7 +126,7 @@ picture. I recommend A.
 ### How it works now
 
 - Drawn as ASS by the side panel's `bar.lua` (`docs/navigation-bar.md`), redrawn every 0.1 s while playing and on
-  each mouse move over it. Hover shows only a time bubble (`bar.lua:206-218`).
+  each mouse move over it. Hover shows only a time bubble (`bar.lua:211-221`).
 - Click: `seek <t> absolute+exact`. Drag: `seek <t> absolute+keyframes` on every mouse move, exact on release
   (`bar.lua:223-231`, `side-panel/main.lua:1962-1965`).
 
