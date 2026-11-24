@@ -104,7 +104,8 @@ impl LocalLens {
             .map_err(|e| format!("{name}: its \"afp\" block: {e}"))?;
         let profile = LensProfile::from_json(text).map_err(|e| format!("{name}: {e}"))?;
         if profile.fisheye_params.camera_matrix.len() != 3 { return Err(format!("{name}: no calibration in it")); }
-        let how = v.pointer("/afp/how").and_then(|h| h.as_str()).unwrap_or_default().to_string();
+        // The built-in ones (lens_profiles#41) say "built in", so they don't look chosen by the user
+        let how = if own { v.pointer("/afp/how").and_then(|h| h.as_str()).unwrap_or_default().to_string() } else { "built in".to_string() };
         let shown = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).unwrap_or(name.trim_end_matches(".json"))
             .replace(" - estimated from footage", "");
         Ok(LocalLens { name: name.to_string(), own, profile, key, how, shown })
@@ -195,6 +196,8 @@ fn assign_in(dir: &std::path::Path, key: &ModeKey, profile: &LensProfile, how: &
     std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     forget_in(dir, key)?;
     let mut v: serde_json::Value = serde_json::from_str(&profile.get_json().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    // gyroflow-core calls a profile without one InvalidData (GOPR1585: its readout went unused)
+    if v["calibrator_version"].as_str().unwrap_or_default().is_empty() { v["calibrator_version"] = format!("Action Footage Player, {how}").into(); }
     let mut afp = serde_json::to_value(key).map_err(|e| e.to_string())?;
     afp["how"] = how.into();
     afp["from"] = from.into();
@@ -225,13 +228,45 @@ fn forget_in(dir: &std::path::Path, key: &ModeKey) -> Result<usize, String> {
 mod tests {
     use super::*;
 
+    // GOPR1585: a built-in lens loaded without its readout (an empty calibrator_version made gyroflow-core say
+    // InvalidData, and the readout wasn't set), so the clip was measured and played with no rolling shutter
+    #[test]
+    fn built_in_lenses_load_with_their_readout() {
+        let pick = |p: &LensProfile, n: &str| crate::lens_pick::Pick { profile: p.clone(), name: n.into(), official: false, votes: (0, 0), exact: true,
+                                                                     curated: None, focal_only: false, local: Some("built in".into()) };
+        for (name, text) in BUILT_IN {
+            let l = LocalLens::parse(name, text, false).unwrap();
+            assert!(!l.profile.calibrator_version.is_empty(), "{name}: no calibrator_version");
+            let stab = crate::lens_pick::manager();
+            assert!(stab.load_lens_profile(&l.profile.get_json().unwrap()).is_ok(), "{name}: gyroflow-core doesn't load it");
+            let stab = crate::lens_pick::manager();
+            assert!(crate::lens_pick::load_into(&stab, &pick(&l.profile, name)));
+            assert_eq!(stab.params.read().frame_readout_time, l.profile.frame_readout_time.unwrap_or(0.0).abs(), "{name}: its readout isn't set");
+        }
+        // One that gyroflow-core calls InvalidData all the same keeps its readout
+        let mut l = LocalLens::parse(BUILT_IN[2].0, BUILT_IN[2].1, false).unwrap();
+        l.profile.calibrator_version.clear();
+        let stab = crate::lens_pick::manager();
+        assert!(crate::lens_pick::load_into(&stab, &pick(&l.profile, "empty")));
+        assert_eq!(stab.params.read().frame_readout_time, 30.6);
+    }
+
+    #[test]
+    fn built_in_ones_are_named_so() {
+        for (name, text) in BUILT_IN {
+            let l = LocalLens::parse(name, text, false).unwrap();
+            assert_eq!(l.how, "built in", "{name}");
+            assert!(l.label().ends_with(", built in"), "{}", l.label());
+        }
+    }
+
     #[test]
     fn built_in_profiles_read() {
         let all: Vec<LocalLens> = BUILT_IN.iter().map(|(n, t)| LocalLens::parse(n, t, false).unwrap()).collect();
         assert_eq!(all.len(), 11);
         for l in &all {
             assert!(l.profile.frame_readout_time.is_some() || l.key.eis == "hseis", "{}: no readout", l.name);
-            assert!(l.how == "estimated from footage");
+            assert!(l.how == "built in");
         }
     }
 
@@ -263,6 +298,12 @@ mod tests {
         assert!(file.starts_with(&dir));
         let found = find_in(&key).unwrap();
         assert!(found.own && found.how == "assigned");
+        // One found in the footage with no calibrator_version (Find's pick of a built-in-like profile): written with one
+        let mut bare = profile.clone();
+        bare.calibrator_version.clear();
+        let file = assign_in(&dir, &key, &bare, "found in the footage", "test").unwrap();
+        let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert!(!written["calibrator_version"].as_str().unwrap().is_empty());
         // Assigned again: one file for the mode, the new one
         assign_in(&dir, &key, &profile, "assigned", "again").unwrap();
         assert_eq!(read_all(Some(&dir)).iter().filter(|l| l.own).count(), 1);

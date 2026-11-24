@@ -58,7 +58,9 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
         l.resolve_interpolations(&stab.lens_profile_db.read());
         pick = lens.get("name").and_then(|v| v.as_str()).map(String::from);
     }
-    if let Some(r) = settings.readout_ms {
+    // A lens given without a readout of its own to measure with: the lens's (lens_pick::apply sets it for the one picked)
+    let readout = settings.readout_ms.or_else(|| settings.lens.as_ref().and_then(|_| stab.lens.read().frame_readout_time));
+    if let Some(r) = readout {
         use gyroflow_core::stabilization_params::ReadoutDirection;
         let mut p = stab.params.write();
         p.frame_readout_time = r;

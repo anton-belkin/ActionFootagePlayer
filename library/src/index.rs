@@ -743,7 +743,7 @@ fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 8;
+pub const GEOTAG: u64 = 9;
 
 #[derive(Default)]
 pub struct Probes {

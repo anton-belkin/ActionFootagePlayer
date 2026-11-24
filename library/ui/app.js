@@ -262,6 +262,8 @@ function deriveSource(it, probe) {
   it.motion = probe ? probe.mode != null : null;
   // Its motion measured from the picture (<clip>.afp-motion beside it, gyroflow-probe's "motion": "optical")
   it.measured = !!(probe && probe.motion === "optical");
+  // Measured with the rolling shutter left out though its lens has a readout (gyroflow-probe's readout_left_out, ms)
+  it.readoutLeftOut = it.measured && probe.measured && probe.measured.readout_left_out || null;
   // What the camera stabilized itself (gyroflow-probe's stabilized_in_camera: "HyperSmooth (HS EIS)", "EIS (status 4)",
   // "EIS: RockSteady", "FlowState"); null: off, or not said. With motion data (a GoPro HERO12+ with HyperSmooth on), the
   // player stabilizes on top of it
@@ -441,7 +443,7 @@ function buildFacets() {
         .concat([L("lnt:no", "No lens types", (it) => !!lensOf(it) && !lensTypesOf(it).length)]) },
       { id: "uwl", title: "Under water", opts: [L("uwl:auto", "Auto", (it) => srcOf(it).underwater === "auto"), L("uwl:yes", "Yes (a flat port)", (it) => srcOf(it).underwater === "yes"),
         L("uwl:no", "No", (it) => srcOf(it).underwater === "no"), L("uwl:unset", "Not set", (it) => it.probed && !srcOf(it).underwater)] },
-      { id: "mot", title: "Motion data", opts: ["gyro", "pic", "project", "cam", "none"].map((k) => L("mot:" + k, MOTION_TEXT[k], (it) => motionKey(it) === k)) },
+      { id: "mot", title: "Motion data", opts: ["gyro", "pic", "picro", "project", "cam", "none"].map((k) => L("mot:" + k, MOTION_TEXT[k], (it) => motionKey(it) === k)) },
       { id: "shp", title: "Shape", opts: [L("shp:flat", "Flat", (it) => it.probed && !it.is360), L("shp:360", "360°", (it) => it.is360)] },
     ] });
     const frames = distinct(items.filter((i) => i.frame && i.frame !== "As recorded"), (i) => i.frame);
@@ -991,7 +993,8 @@ function queueHtml() {
       const other = j.project !== S.root ? " · " + j.project_name : "";
       h += '<div class="job"><div class="t"><b>' + esc(j.title + other) + '</b><span class="pill">' + esc(j.state) + '</span></div><span class="sub wrap' + (j.state === "failed" ? " err" : "") + '">' + esc(parts.join(" · ")) + '</span>' +
         ((j.failures || []).length && !j.share ? '<details><summary>' + j.failures.length + " failure" + (j.failures.length > 1 ? "s" : "") + '</summary><ul>' + j.failures.map((f) => "<li><code>" + esc(f[0]) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
-        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") + shareJobDetails(j) + '</div>';
+        ((j.left_out || []).length ? '<details><summary>' + j.left_out.length + " left out" + '</summary><ul>' + j.left_out.map((f) => "<li><code>" + esc(f[0].split(/[\\/]/).pop()) + "</code>: " + esc(f[1]) + "</li>").join("") + "</ul></details>" : "") +
+        ((j.kind === "lens-find" || j.kind === "lens-estimate") ? lensFindResults(j) : "") + shareJobDetails(j) + '</div>';
     }
   }
   h += '<p class="sub wrap">One job at a time, by ActionFootagePlayer without a window. Closing the Library asks first.</p></div>';
@@ -1146,7 +1149,7 @@ function lensFrom(it) {
   if (l.lens === "in the file") return "file";
   return l.from === "file" ? "file" : (l.lens ? l.from || "database" : "");
 }
-const LENS_FROM = { project: "The Gyroflow project’s", file: "In the file", own: "The player’s own, for its mode", list: "From the curated list", database: "Gyroflow’s database", "": "No ready lens" };
+const LENS_FROM = { project: "The Gyroflow project’s", file: "In the file", own: "The player’s own, for its mode", builtin: "Built into the player, for its mode", list: "From the curated list", database: "Gyroflow’s database", "": "No ready lens" };
 function lensName(it) {
   const l = lensOf(it);
   if (it.gyroflow) return l && l.project && l.project.lens ? String(l.project.lens).replace(/_/g, " ") : "The Gyroflow project’s";
@@ -1165,12 +1168,13 @@ function uwKey(it) { const s = srcOf(it); return s.uw === true ? (s.uw_highlight
 // project), cam (none: the camera stabilized it itself), none; null: not read yet
 function motionKey(it) {
   if (it.gyroflow) return "project";
-  if (it.measured) return "pic";
+  // Measured without its lens's rolling shutter (a built-in lens's readout went unused before): to be measured again
+  if (it.measured) return it.readoutLeftOut ? "picro" : "pic";
   if (it.motion === true) return "gyro";
   if (it.motion === false) return it.camStab ? "cam" : "none";
   return null;
 }
-const MOTION_TEXT = { gyro: "Gyro in the file", pic: "Measured from the picture", project: "A Gyroflow project", cam: "None: stabilized in the camera", none: "None" };
+const MOTION_TEXT = { gyro: "Gyro in the file", pic: "Measured from the picture", picro: "Measured without the rolling shutter: measure again", project: "A Gyroflow project", cam: "None: stabilized in the camera", none: "None" };
 function tally(clips, f) { const m = new Map(); clips.forEach((it) => { const v = f(it); if (v == null) return; m.set(v, (m.get(v) || 0) + 1); }); return m; }
 // A label inside a sentence: its first letter small, not a name's ("D-Log M", "Gyroflow’s database")
 function lc(t) { t = String(t); return /^(Gyroflow|[A-Z][^a-z])/.test(t) ? t : t.charAt(0).toLowerCase() + t.slice(1); }
@@ -1330,6 +1334,7 @@ function sourceBody(c) {
   if (one) {
     const p = probeOf(one) || {};
     mprov = one.measured ? "In " + esc(one.name.replace(/\.[^.]+$/, "")) + ".afp-motion" + (p.measured && p.measured.in_water ? ", measured in water" : ", measured in air") : "";
+    if (one.readoutLeftOut) mprov += esc(" · measured without its lens’s rolling shutter (" + Number(one.readoutLeftOut).toFixed(1) + " ms): the edges wobble. Measure again");
     if (one.camStab) mprov += (mprov ? " · " : "") + esc("the camera stabilized it itself (" + one.camStab + ")" + (one.motion === false ? ": its gyro can’t be used" : ""));
     // Its own motion data plays (a HERO12+ with HyperSmooth on): a motion file measured before is left aside
     if (p.measured_aside) mprov += (mprov ? " · " : "") + esc(one.name.replace(/\.[^.]+$/, "") + ".afp-motion beside it is left aside: its own motion data plays");
@@ -1477,16 +1482,17 @@ async function saveProjectLens(path, cam) {
 // lens_from_video), from the latest of these tasks of the project, with a button that keeps one for the clip's whole
 // mode (the player's own lens database: every clip of the same camera, mode, size and frame rate takes it)
 const LENS_KEEPING = {};
-function lensFindResults() {
-  const job = (S.jobs || []).filter((j) => (j.kind === "lens-find" || j.kind === "lens-estimate") && j.results).slice(-1)[0];
-  if (!job) return "";
+function lensFindResults(only) {
+  const job = only || (S.jobs || []).filter((j) => (j.kind === "lens-find" || j.kind === "lens-estimate") && j.results).slice(-1)[0];
+  if (!job || !job.results) return "";
   const name = (p) => String(p || "").split("/").pop();
   const verdictText = { good: "fits", single: "fits (one part could tell)", loose: "not reliable: fits only loosely", poor: "doesn’t fit", unchecked: "not checked on another part" };
   // Kept only when it fits (or an estimate no other part of a short clip could judge): a loose fit isn't reliable
   const keepBtn = (r, t) => {
     if (!(t.fits || t.verdict === "unchecked")) return "";
     const k = r.path + "#" + t.n;
-    return '<button type="button" class="btn sm" data-a="keepfound" data-v="' + esc(r.path) + '" data-n="' + esc(t.n) + '"' + (LENS_KEEPING[k] ? " disabled" : "") + '>' + (LENS_KEEPING[k] ? "Keeping…" : "Keep for this mode") + '</button>';
+    // Kept and the clips measured again with it, in one go (GOPR1585: kept, then Measure again forgotten)
+    return '<button type="button" class="btn sm pri" data-a="keepfound" data-v="' + esc(r.path) + '" data-n="' + esc(t.n) + '" data-m="' + esc(r.mode || "") + '"' + (LENS_KEEPING[k] ? " disabled" : "") + '>' + (LENS_KEEPING[k] ? "Keeping…" : "Use for this mode and measure again") + '</button>';
   };
   const lensLine = (r, t) => '<div class="lensfound"><span class="blk">' + esc(String(t.name).replace(/_/g, " ")) + '</span><span class="sub wrap blk">' +
     esc([verdictText[t.verdict] || t.verdict, t.refraction > 1 ? "under water" + (t.medium_sure ? "" : "?") : "in air" + (t.medium_sure ? "" : "?"),
@@ -1507,7 +1513,7 @@ function lensFindResults() {
   }
   return h + '</div>';
 }
-async function keepFoundLens(path, n) {
+async function keepFoundLens(path, n, mode) {
   const k = path + "#" + n;
   if (LENS_KEEPING[k]) return;
   LENS_KEEPING[k] = true; renderSide();
@@ -1515,8 +1521,26 @@ async function keepFoundLens(path, n) {
     const r = await invoke("keep_found_lens", { path, n });
     for (const x of Object.keys(LENS_CANDIDATES)) delete LENS_CANDIDATES[x];
     toast(String(r.lens || "The lens").replace(/_/g, " ") + " kept for " + (r.mode || "the mode") + (r.again ? ": " + r.again + (r.again === 1 ? " clip" : " clips") + " of the camera read again" : ""));
+    await measureWithKept(path, r.mode || mode);
   } catch (e) { showError("The lens couldn’t be kept: " + e); }
   finally { delete LENS_KEEPING[k]; renderSide(); }
+}
+// The clips of the mode a lens was just kept for, measured again with it: the selected ones of that mode (else the one
+// it was found on) that are measured from the picture, or have no motion data at all. Not clips with gyro (waiting for
+// a ready lens: they play from their gyro now), 360° ones or ones with a Gyroflow project
+function keptLensClips(path, mode) {
+  const all = (DATA.footage && DATA.footage.items) || [];
+  const ofMode = (it) => it.kind === "clip" && !it.is360 && !it.gyroflow && (lensOf(it) || {}).mode_key === mode;
+  const measurable = (it) => { const p = PROBES[it.path] || {}; return it.measured || (p.mode == null && !/no ready lens/.test(String(p.reason || ""))); };
+  const sel = ctx().selItems.filter(ofMode);
+  return (sel.length ? sel : all.filter((it) => it.path === path)).filter(measurable);
+}
+async function measureWithKept(path, mode) {
+  const clips = keptLensClips(path, mode);
+  if (!clips.length) return;
+  const label = (clips.length === 1 ? clips[0].name : clips.length + " clips") + ", with the lens kept";
+  await invoke("add_job", { kind: "optical", options: { clips: clips.map((it) => it.id), redo: true }, only: clips.map((it) => it.id), label });
+  toast("Measuring again: " + label);
 }
 
 // Check and Find moved files, on the selection (library/src/checks.rs)
@@ -2145,7 +2169,7 @@ function itemInfo(it) {
     const probe = PROBES[it.path];
     h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens", it.is360 ? "" : (lensName(it) || (probe ? "" : "Reading…")) + (lensFrom(it) && lensFrom(it) !== "file" && lensFrom(it) !== "project" ? " · " + LENS_FROM[lensFrom(it)].toLowerCase() : "")],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
-      ["Motion data", it.measured ? "Measured from the picture" + (probe.measured && probe.measured.in_water ? ", in water" : ", in air") : it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") + (it.camStab ? ", stabilized on top of the camera's " + it.camStab : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
+      ["Motion data", it.measured ? "Measured from the picture" + (probe.measured && probe.measured.in_water ? ", in water" : ", in air") + (it.readoutLeftOut ? ", without the rolling shutter: measure again" : "") : it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") + (it.camStab ? ", stabilized on top of the camera's " + it.camStab : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
     h += locationInfo(it);
     h += infoSec("Marks and moments", kv([["Marks", it.marks ? it.marks + (marksList(it, probe) ? ": " + marksList(it, probe) : "") : "None"], ["Moments", it.moments || "None"]]));
@@ -2963,7 +2987,7 @@ document.addEventListener("click", async (e) => {
   if (el.tagName === "INPUT" || el.tagName === "SELECT") return;
   if (a.startsWith("geo")) return geoAct(a, v, el);
   if (a === "savelens") return saveProjectLens(v, el.dataset.cam);
-  if (a === "keepfound") return keepFoundLens(v, el.dataset.n);
+  if (a === "keepfound") return keepFoundLens(v, el.dataset.n, el.dataset.m);
   switch (a) {
     case "menu": S.menu = !S.menu; if (S.menu) S.recent = await invoke("recent").catch(() => S.recent); break;
     case "closemenu": S.menu = false; break;

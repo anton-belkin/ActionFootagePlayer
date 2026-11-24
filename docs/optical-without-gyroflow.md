@@ -555,6 +555,20 @@ Each step is its own PR, UI ones with before/after screenshots.
      - Find leaves out GoPro Max Lens Mod profiles for clips without the mod;
      - Estimate never starts from a lens Find found poor; a loose fit is "not reliable" and has no Keep.
 
+6. **GOPR1585 (HERO4 Medium, 2.7K 23.98, a water slide), 2026-11-25:**
+   - The edges wobbled while the centre stayed still. The built-in lens was right (Find: fits; Estimate: f 1763,
+     readout 31.1), but the 11 built-in profiles had an empty calibrator_version. gyroflow-core loads such a profile
+     and returns InvalidData, so lens_pick::apply skipped its readout: measured and played with readout 0.
+   - Rendered: fast shake at the edges 1.8 / 2.3 px a frame with readout 0, 1.7 / 0.7 with it; the centre 0.85 / 0.45.
+   - Fixed (Anton's 1-5, no re-measuring on the NAS):
+     - the readout comes with the lens whatever gyroflow-core says, the built-in profiles have a calibrator_version,
+       and Keep writes one;
+     - gyroflow-export stabilizes a measured clip (it had the lens alone);
+     - a motion file measured without the readout is told (probe `readout_left_out`, the Library's Motion data);
+       `tools/list_readout_left_out.py` lists them, reading only;
+     - Find/Estimate results have "Use for this mode and measure again", in Source and in Tasks;
+     - built-in lenses are named "built in" (`from: "builtin"`).
+
 **Test sample** (NAS, writes allowed for these clips only), about a dozen clips:
 - HERO4 Black Wide and Medium, in air and in water;
 - HERO3 White;

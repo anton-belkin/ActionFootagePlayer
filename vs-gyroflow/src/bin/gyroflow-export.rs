@@ -863,8 +863,16 @@ fn find_source(path: &Path, project: Option<&Path>, lens: vs_gyroflow::LensMode)
             Err(why)
         }
     };
+    // Motion measured from the picture beside it (afp_motion.rs) and none of its own the player uses: stabilized with
+    // it, as the player plays it (load_manager reads it; no horizon lock). Before, exports, moments and photos of such
+    // a clip had the lens alone corrected (GOPR1585)
+    let measured = vs_gyroflow::afp_motion::header_for(path).is_some_and(|h| h.is_ok());
     let info = match probe::probe(&s) {
         Ok(info) => info,
+        Err(_) if measured => {
+            let preset = plugin_file("gyroflow", "default.gyroflow");
+            return Ok(Source { project: s.clone(), preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "motion measured from the picture", lens });
+        }
         Err(e) => return lens_alone(e),
     };
     match info["mode"].as_str() {
@@ -3421,6 +3429,27 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // GOPR1585: a clip with no motion data of its own and its motion measured from the picture beside it is exported
+    // stabilized with that, not with the lens alone
+    #[test]
+    fn measured_motion_is_exported_stabilized() {
+        let dir = std::env::temp_dir().join(format!("afp-export-measured-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let video = dir.join("GOPR0001.MP4");
+        std::fs::write(&video, vec![0u8; 4321]).unwrap();
+        // Nothing to stabilize it with, no lens: not exported
+        assert!(find_source(&video, None, vs_gyroflow::LensMode::Stabilized).is_err());
+        let header = vs_gyroflow::afp_motion::Header { clip: vs_gyroflow::afp_motion::ClipId::of(&video).unwrap(), ..Default::default() };
+        let correction = gyroflow_core::gyro_source::OpticalCorrection { enabled: true, frames: 2, measured_frames: 1,
+            video_base: vec![(0, [1.0, 0.0, 0.0, 0.0]), (33_366, [1.0, 0.0, 0.0, 0.0])], ..Default::default() };
+        vs_gyroflow::afp_motion::MotionFile::new(header, correction).unwrap().write(&vs_gyroflow::afp_motion::path_for(&video)).unwrap();
+        let source = find_source(&video, None, vs_gyroflow::LensMode::Stabilized).expect("stabilized with its measured motion");
+        assert_eq!(source.label, "motion measured from the picture");
+        assert!(source.lens != vs_gyroflow::LensMode::Only);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     // docs/export-settings.md: the export's settings (--resolution, --encode, the quality preset's --interpolation) on
     // each path's command line

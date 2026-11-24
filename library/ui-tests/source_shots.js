@@ -9,7 +9,9 @@
 // camera with a lens from Gyroflow's database, and a HERO4 clip with no gyro and no ready lens.
 // States: one (the HERO7 clip, a change waiting for Save), many (all seven), none (nothing selected), filters (the
 // Source filters, the clips with no motion data shown and selected), stabilize (the Stabilize part, before it moved),
-// filelens (a HERO12 clip with its lens in the file), aside (the same once its own gyro plays), estimate (an estimate that fits only loosely).
+// filelens (a HERO12 clip with its lens in the file), aside (the same once its own gyro plays), ro (GOPR1585 measured
+// without its built-in lens's readout; SHOT_BEFORE=1: as the probe answered before), usequeue / use (an estimate done,
+// with Use for this mode and measure again, in the queue / in Source), estimate (an estimate that fits only loosely).
 
 const fs = require("fs");
 const os = require("os");
@@ -17,7 +19,7 @@ const path = require("path");
 const { execFileSync } = require("child_process");
 
 const ROOT = "/P";
-function views(aside) {
+function views(aside, variant) {
   const mk = (dir, name, extra) => Object.assign({ id: dir + "/" + name, dir, name, path: "/F/" + dir + "/" + name, size: 4.2e9, mtime: 1730000000, kind: "clip", loc: "Archive",
     copies: [{ loc: "Archive", li: 0, rel: dir + "/" + name, path: "/F/" + dir + "/" + name, offline: false }], own_files: [], gyroflow: false,
     pdir: "_Clips/" + dir, preview: ROOT + "/_Clips/" + dir + "/" + name.replace(/\.MP4$/, ".afplink.mp4"), tags: [] }, extra || {});
@@ -34,6 +36,11 @@ function views(aside) {
   for (const it of items) {
     let p;
     if (it.name.startsWith("DJI")) p = { camera: "DJI OsmoAction6", color: "dlogm", mode: "default", water: true, stabilized_in_camera: false, width: 3840, height: 2160, fps: 50, lens_info: djiLens };
+    // GOPR1585 measured with a built-in lens whose readout went unused (as the probe answers it now, or did before: SHOT_BEFORE)
+    else if (it.name.startsWith("GOPR") && variant === "ro") p = { camera: "GoPro HERO4 Black", color: "normal", mode: "default", motion: "optical", water: false, stabilized_in_camera: null,
+      width: 2704, height: 1520, fps: 23.98, measured: process.env.SHOT_BEFORE ? { in_water: false, readout_ms: 0 } : { in_water: false, readout_ms: 0, readout_left_out: 30.6 },
+      lens_info: process.env.SHOT_BEFORE ? { camera: "GoPro HERO4 Black", lens: "GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps, estimated from footage", from: "own", types: [], mode_key: "GoPro HERO4 Black · medium · 2704x1520 · 23.98 fps" }
+        : { camera: "GoPro HERO4 Black", lens: "GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps, built in", from: "builtin", types: [], mode_key: "GoPro HERO4 Black · medium · 2704x1520 · 23.98 fps" } };
     else if (it.name.startsWith("GOPR")) p = { camera: "GoPro HERO4 Black", color: "normal", mode: null, lens: "", water: false, stabilized_in_camera: null, width: 2704, height: 1520, fps: 29.97,
       lens_info: { camera: "GoPro HERO4 Black", lens: "", from: "", types: [], mode_key: "GoPro HERO4 Black · medium · 2704x1520 · 29.97 fps" } };
     else if (it.name === "GX010977.MP4") p = { camera: "GoPro HERO7 Black", color: "normal", mode: "default", motion: "optical", measured: { in_water: true }, water: false, stabilized_in_camera: "HyperSmooth (HS EIS)",
@@ -45,7 +52,7 @@ function views(aside) {
       lens_info: { camera: "GoPro HERO12 Black", lens: "in the file", from: "file", types: [], mode_key: "GoPro HERO12 Black · linear · hsautoboost · 3840x2160 · 29.97 fps" } };
     else p = { camera: "GoPro HERO7 Black", color: "normal", mode: null, lens: "GoPro HERO7 Black 4k Wide HS EIS", water: false, stabilized_in_camera: "HyperSmooth (HS EIS)", width: 3840, height: 2160, fps: 29.97,
       lens_info: { camera: "GoPro HERO7 Black", lens: "GoPro HERO7 Black 4k 16:9 Wide HS EIS 3840x2160 29.97fps", from: "database", types: [], mode_key: h7Key } };
-    probes[it.path] = Object.assign(p, { geotag: 8, movie: { duration: it.name.startsWith("DJI") ? 62 : 48, created: 1730000000 }, marks: { times: [] } });
+    probes[it.path] = Object.assign(p, { geotag: 9, movie: { duration: it.name.startsWith("DJI") ? 62 : 48, created: 1730000000 }, marks: { times: [] } });
   }
   const footage = { root: ROOT, view: "footage", dirs: ["Day 1"], clips_dirs: ["_Clips", "_Clips/Day 1"],
     locations: [{ name: "Archive", at: "", path: "../F", dir: "/F", copies: false, local: false, dirs: ["Day 1"], offline: false, connect: false, names: [] }],
@@ -73,8 +80,19 @@ const STATES = {
   // The same clip once its own gyro plays (with #201: a HERO12+ with HyperSmooth on): its .afp-motion left aside
   aside: DAY + "showTab('source'); renderAll(); sel(['Day 1/GX010020.MP4']);",
   // An estimate that fits only loosely (GX010020's before the fix): not reliable, not kept
+  // GOPR1585 measured with a built-in lens without its readout: the Motion data says so (measure again)
+  ro: DAY + "showTab('source'); renderAll(); sel(['Day 1/GOPR1585.MP4']);",
+  // Estimate done, as the queue shows it: the lens with Use for this mode and measure again
+  usequeue: DAY + "window.SHOT_JOBS = [window.ESTIMATE2]; S.jobs = window.SHOT_JOBS; renderAll(); sel(['Day 1/GOPR1585.MP4']); showTab('queue');",
+  // The same in Source › Lens
+  use: DAY + "window.SHOT_JOBS = [window.ESTIMATE2]; S.jobs = window.SHOT_JOBS; showTab('source'); renderAll(); sel(['Day 1/GOPR1585.MP4']);",
   estimate: DAY + "window.SHOT_JOBS = [window.ESTIMATE]; S.jobs = window.SHOT_JOBS; showTab('source'); renderAll(); sel(['Day 1/GOPR1585.MP4']);",
 };
+// What Estimate lens found for GOPR1585 (its lensfind cache): f 1763, readout 31.1 ms, too short a clip to judge apart
+const ESTIMATE2 = { id: 8, kind: "lens-estimate", title: "Estimate lens · GOPR1585.MP4", project: ROOT, project_name: "Red Sea 2025", state: "done", fraction: 1,
+  results: [{ path: "/F/Day 1/GOPR1585.MP4", mode: "GoPro HERO4 Black · medium · 2704x1520 · 23.98 fps", tried: [], accepted: null, doubts: [],
+    estimate: { n: "estimate", name: "Estimated from this clip (started from GoPro_HERO4 Black_Medium__2.7k_16by9_2704x1520-23.98fps)", verdict: "unchecked", fits: false,
+      refraction: 1, medium_sure: false, readout_ms: 31.1, readout_measured: true, moved: 0, limit: 0 } }] };
 // What Estimate lens found for GX010020 (its lensfind cache): started from a Max Lens Mod fisheye, fits loosely
 const ESTIMATE = { id: 7, kind: "lens-estimate", title: "Estimate lens · GOPR1585.MP4", project: ROOT, project_name: "Red Sea 2025", state: "done", fraction: 1,
   results: [{ path: "/F/Day 1/GOPR1585.MP4", mode: "GoPro HERO4 Black · medium · 2704x1520 · 29.97 fps", tried: [], accepted: null, doubts: [],
@@ -84,8 +102,8 @@ const ESTIMATE = { id: 7, kind: "lens-estimate", title: "Estimate lens · GOPR15
 function page(ui, does, name) {
   const mock = `
     window.onerror = (m, f, l) => { if (!document.title.startsWith("ERR")) document.title = "ERR " + m + " " + f + ":" + l; };
-    const VIEWS = ${JSON.stringify(views(name === "aside"))}, ROOT = "${ROOT}";
-    window.ESTIMATE = ${JSON.stringify(ESTIMATE)};
+    const VIEWS = ${JSON.stringify(views(name === "aside", ["ro", "usequeue", "use"].includes(name) ? "ro" : ""))}, ROOT = "${ROOT}";
+    window.ESTIMATE = ${JSON.stringify(ESTIMATE)}; window.ESTIMATE2 = ${JSON.stringify(ESTIMATE2)};
     const LT = ${LENS_TYPES.toString()}, LI = ${LENS_INFO.toString()};
     const answers = {
       snapshot: () => ({ project: ROOT, jobs: window.SHOT_JOBS || [], close_asked: false, close_waits: false, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),

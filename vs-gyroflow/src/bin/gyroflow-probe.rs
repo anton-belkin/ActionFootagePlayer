@@ -9,7 +9,8 @@
 //                                                       or of the picture the camera stabilized (GoPro HERO12
 //                                                       and later with HyperSmooth on: "stabilized_in_camera" says so,
 //                                                       in_camera.rs): stabilize it with the default preset
-//   {"mode":"default","motion":"optical","measured":{how, at, lens, in_water, readout_ms, frames, measured_frames},...}
+//   {"mode":"default","motion":"optical","measured":{how, at, lens, in_water, readout_ms, frames, measured_frames,
+//    readout_left_out},...}  (readout_left_out: the lens's readout, ms, when it was measured without it: measure again)
 //                                                       motion measured from the picture beside it (<stem>.afp-motion,
 //                                                       afp_motion.rs): stabilized with it, no horizon lock;
 //                                                       "measured_error" instead when that file is broken or of another clip;
@@ -201,9 +202,10 @@ fn main() {
         // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed, 4 = an older
         // GoPro (HERO3) named by its firmware, 5 = a lens only when one is made for exactly the clip's mode (lens_pick.rs),
         // 6 = the lens as the player takes it ("lens_info", below), 7 = GoPro HERO12+ with HyperSmooth on stabilized (in_camera.rs),
-        // 8 = the clip's own motion data over its .afp-motion ("measured_aside")
+        // 8 = the clip's own motion data over its .afp-motion ("measured_aside"), 9 = "builtin" lenses and
+        // measured.readout_left_out
         // (the Library asks again for older answers: raise it with what's new here)
-        out["geotag"] = 8.into();
+        out["geotag"] = 9.into();
         // The lens as the player takes it (probe::lens_info: the profile and where it comes from, the mode a lens is kept
         // for, the camera's lens types, the Gyroflow project's lens), for the Library's Source Settings and its filters
         // without reading the clip again; the lenses to choose from (candidates) are the mode's, asked when chosen
@@ -248,7 +250,8 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
             out["motion"] = "optical".into();
             out["width"] = w.into(); out["height"] = hh.into(); out["fps"] = fps.into();
             out["measured"] = serde_json::json!({ "how": h.measured.how, "at": h.measured.at, "lens": h.lens_name, "in_water": h.in_water(),
-                                                  "readout_ms": h.readout_ms, "frames": h.measured.frames, "measured_frames": h.measured.measured_frames });
+                                                  "readout_ms": h.readout_ms, "frames": h.measured.frames, "measured_frames": h.measured.measured_frames,
+                                                  "readout_left_out": h.readout_left_out() });
             if let Some(o) = out.as_object_mut() { o.remove("reason"); }
         }
         Some(Err(e)) => { out["measured_error"] = e.into(); }

@@ -122,6 +122,14 @@ pub struct Header {
 
 impl Header {
     pub fn in_water(&self) -> bool { self.refraction > 1.0 }
+
+    /// The lens's own readout (ms) when the motion was measured without it: readout 0 while the lens has one. A
+    /// built-in lens's readout went unused before (GOPR1585: its rolling shutter left in, the edges wobbled); measured
+    /// again, it's in
+    pub fn readout_left_out(&self) -> Option<f64> {
+        if self.readout_ms != 0.0 { return None; }
+        self.lens.get("frame_readout_time").and_then(|v| v.as_f64()).filter(|r| *r != 0.0).map(f64::abs)
+    }
 }
 
 /// A file of measured motion: its header and the correction
@@ -336,6 +344,17 @@ mod tests {
             frames: 10, measured_frames: 9, rms_deg: 0.05,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn readout_left_out_is_told() {
+        let mut h = Header { lens: serde_json::json!({ "frame_readout_time": 30.6 }), ..Default::default() };
+        assert_eq!(h.readout_left_out(), Some(30.6));
+        h.readout_ms = 30.6;
+        assert_eq!(h.readout_left_out(), None);
+        h.readout_ms = 0.0;
+        h.lens = serde_json::json!({ "frame_readout_time": null });
+        assert_eq!(h.readout_left_out(), None);
     }
 
     #[test]

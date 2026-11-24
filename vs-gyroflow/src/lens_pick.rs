@@ -669,19 +669,31 @@ fn voted_down((good, bad): (u32, u32)) -> bool {
 pub fn apply(stab: &StabilizationManager, video: &str) -> Option<Pick> {
     let id = stab.camera_id.read().clone()?;
     let pick = for_video(video, &id, lens_in_file(stab))?;
-    let json = pick.profile.get_json().ok()?;
+    if !load_into(stab, &pick) { return None; }
+    log::info!("Lens profile: {}", pick.label());
+    Some(pick)
+}
+
+/// `pick` loaded into `stab` with its readout (params.frame_readout_time): false when it couldn't be
+pub(crate) fn load_into(stab: &StabilizationManager, pick: &Pick) -> bool {
+    let Ok(json) = pick.profile.get_json() else { return false };
+    // gyroflow-core loads a profile and then calls it InvalidData when its calibrator_version is empty (the built-in
+    // ones were, GOPR1585): loaded all the same, it's used, with its readout. Given up only when nothing loaded
     if let Err(e) = stab.load_lens_profile(&json) {
-        log::warn!("Lens profile {}: {e:?}", pick.name);
-        return None;
+        if stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
+            log::warn!("Lens profile {}: {e:?}", pick.name);
+            return false;
+        }
+        log::info!("Lens profile {}: loaded, though gyroflow-core said {e:?}", pick.name);
     }
-    let (fr, frd) = { let lens = stab.lens.read(); (lens.frame_readout_time, lens.frame_readout_direction) };
+    // The readout the profile has, as picked (the loaded lens has it too, unless the load stopped short)
+    let (fr, frd) = { let lens = stab.lens.read(); (pick.profile.frame_readout_time.or(lens.frame_readout_time), pick.profile.frame_readout_direction.or(lens.frame_readout_direction)) };
     if let Some(fr) = fr {
         let mut params = stab.params.write();
         params.frame_readout_time = fr.abs();
         params.frame_readout_direction = frd.unwrap_or(if fr < 0.0 { gyroflow_core::stabilization_params::ReadoutDirection::BottomToTop } else { gyroflow_core::stabilization_params::ReadoutDirection::TopToBottom });
     }
-    log::info!("Lens profile: {}", pick.label());
-    Some(pick)
+    true
 }
 
 // ---- A Gyroflow project's lens kept in the user's list, for every clip of its camera, mode and size ----
@@ -1140,7 +1152,7 @@ mod tests {
         let path = "/nowhere/GX010001.MP4";
         // HERO7 4K 59.94 Wide with HyperSmooth: the player's own (estimated from Anton's footage)
         let p = for_clip(path, &Clip::from_id(path, &camera("HERO7 Black", "Wide", 3840, 2160, 59940, "HS EIS")), false).expect("the built-in one");
-        assert_eq!(p.local.as_deref(), Some("estimated from footage"), "{}", p.label());
+        assert_eq!(p.local.as_deref(), Some("built in"), "{}", p.label());
         // At 23.976 fps there's none made for it: no ready lens, the nearest ones to choose from
         let clip = Clip::from_id(path, &camera("HERO7 Black", "Wide", 1920, 1080, 23976, "HS EIS"));
         assert!(for_clip(path, &clip, false).is_none());

@@ -445,8 +445,8 @@ cameras). Where it looks, in order:
 
 1. a lens type chosen for the clip;
 2. the lens in the file;
-3. **the player's own lens database**: profiles estimated from footage (built in: HERO4 Black, HERO3 White, HERO7
-   Black and Osmo Action 6 modes, Anton's lens_profiles#41) and lenses you assigned to a mode;
+3. **the player's own lens database**: profiles estimated from footage (built in, shown as "built in": HERO4 Black,
+   HERO3 White, HERO7 Black and Osmo Action 6 modes, Anton's lens_profiles#41) and lenses you assigned to a mode;
 4. the curated list's type for the mode;
 5. Gyroflow's database, only a profile whose identifier is exactly the clip's, with a readout, not voted down.
 
@@ -463,7 +463,9 @@ gyroflow/gyroflow#1296):
   has no readout, it measures one on the clip. About 15 s a clip.
 - **Estimate lens** makes a lens and its readout from one clip, then checks it on the other parts of the clip. Under a
   minute.
-- What fits is listed with **Keep for this mode**, which makes it the lens of every clip of that mode. A lens that
+- What fits is listed, in Source → Lens and in the task's entry under Tasks, with **Use for this mode and measure
+  again**: it becomes the lens of every clip of that mode, and the selected clips of that mode measured from the
+  picture (or with no motion data) are measured again with it. A lens that
   fits only loosely is shown as not reliable and isn't kept. Find leaves out a GoPro's Max Lens Mod profiles for a clip
   recorded without the mod, and Estimate doesn't start from a lens Find found not to fit.
 - **Not for a clip with its lens in the file** (a GoPro from the HERO11, a DJI where the player takes the file's): that
@@ -1018,7 +1020,10 @@ Project). Then, as buttons:
   settings saved with it. The horizon lock is off and can't be turned on: motion measured from the picture has no
   gravity in it. A Gyroflow project beside the clip still wins, and so does the clip's own motion data where the
   player uses it (gyro with the camera's stabilization off, or a HERO12+ with HyperSmooth on): the `.afp-motion` is
-  then left aside, and the Library says so. `gyroflow-optical --from-project <clip>...` writes one
+  then left aside, and the Library says so. Exports, moments and photos of such a clip are stabilized with it too.
+  A clip measured without its lens's rolling shutter (readout 0 while the lens has one: a built-in lens's readout
+  went unused before) says **Measured without the rolling shutter: measure again** (Source Settings and the Motion
+  data filter); `tools/list_readout_left_out.py <folder>` lists them without writing anything. `gyroflow-optical --from-project <clip>...` writes one
   from the clip's project (nothing measured again), `gyroflow-optical --show <clip>...` prints what's in it.
   **Ctrl+m** in the player (or the panel's *Measure motion from the picture*) measures the clip playing, and Library's
   *Stabilize optically* the selected ones: Gyroflow's own analysis, run by the player, no Gyroflow app needed, about
