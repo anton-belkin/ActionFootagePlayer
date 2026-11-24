@@ -223,6 +223,62 @@ among 4 settings, then 20 that make new ones (the level, the view, the edges), t
 
 No frame dropped in any sample. With the app's mpv the same run stays at 964-1018 MB, and nothing is made again.
 
+### Pipeline builds (mpv's shader cache)
+
+Every pass libplacebo runs is a Vulkan pipeline: its GLSL compiled to SPIR-V (glslang, "translating SPIR-V" in the
+log), then the pipeline made (MoltenVK turns the SPIR-V into Metal's language, Metal compiles that: "creating
+pipeline"). With the warp, the denoise and the edge fill a start has 41-58 of them. mpv keeps both on disk
+(`~/Library/Caches/io.mpv/shader_*`: the SPIR-V by the GLSL's text, MoltenVK's pipeline cache data by the SPIR-V), and
+macOS keeps Metal's compiled shaders by their source. **Text seen before costs nothing; new text costs seconds.**
+Measured 2026-11-24 on the M1 Pro (tools/pipebench: `pipebench.c` offscreen, `live_starts.py` the real player, each
+pass's source in its debug log):
+
+| The installed 0.14.0-dev.11, a start | SPIR-V compiled | Pipelines | Last build (≈ first stabilized frame) |
+|---|---|---|---|
+| GOPR0605 (1080p 29.97), first start of this build | 37 (813 ms) | 53 (679 ms) | 4.0 s |
+| GOPR0605 again, a new process | 0 | 47 (16 ms) | 1.45 s |
+| GX010009 (4K 25 fps), first | 37 (870 ms) | 58 (459 ms) | 4.6 s |
+| GX010009 again | 0 | 52 (17 ms) | 1.9 s |
+| Underwater colour on, first time for that clip | 37 (733-842 ms) | 44-45 (398-441 ms) | 1.8-3.4 s after the click |
+| Underwater colour on, seen before | 0 | 44-45 (13-15 ms) | 0.6-0.7 s after the click |
+
+Pipelines were cheap there (~10 ms each) because Metal had compiled the same code before. New Metal code (the first
+start of a build whose warp changed, as 0.14.0 at 08:19 that day) is ~3.4 s of pipelines on top: GX010903 with the
+new warp below, 46 SPIR-V (822 ms) + 51 pipelines (3437 ms), its first stabilized frame at 8.1 s, and the same again
+(3.4 s) when the underwater colour was first turned on.
+
+So the cache works, and what costs is text that changes. What changed it, besides a new build:
+
+- **The clip's frame rate** was a `#define FPS` in all 37 of the warp's passes: a 25 fps clip after a 29.97 fps one
+  built them all again (pipebench: 37 SPIR-V + 37 pipelines, 3.1 s). It's a parameter now (`gyroflow_fps`, DYNAMIC,
+  its value written by gyroflow-gpu-table as `gyroflow_time_offset`'s is, #219). Measured in the player: GX010009
+  (25 fps) right after GX010903 (29.97 fps), both 4K: **0 SPIR-V, 51 pipelines in 15 ms**, its first stabilized
+  frame at 1.5 s.
+- **The underwater colour** switches the video's tags (HLG/BT.2020 for the look, BT.709 without), and libplacebo put
+  `linearize`/`delinearize` helpers for the source's transfer into every user shader pass, used or not; their
+  specialization constants stay in the SPIR-V, so all the warp's passes were compiled and their pipelines built again.
+  tools/libplacebo-patches/0001 adds the helpers only to passes whose text names them (none of ours does).
+  pipebench, the warp + view360 + fringes + crop, the source HLG → BT.709 on a new cache: **52 SPIR-V + 40 pipelines,
+  3.9 s → 2 SPIR-V + 1 pipeline, 0.11 s**. In the player with both changes (three starts, one of them cold): the
+  underwater colour turned on compiled nothing, 5-7 pipelines in 2-6 ms, the last **0.22-0.26 s after the click**
+  (before: 1.8-5.8 s the first time, 0.6-0.77 s after).
+
+Not the cause (pipebench, a warm cache): the window's or target's size, the target's peak (the screen's EDR headroom),
+the order of passes in a frame. libplacebo numbers its identifiers per frame, so a shader added before others would
+rename theirs, but the underwater shader (MAIN, last) moved nothing.
+
+Left as it is:
+
+- **A new build is new text**: the first start of each kind of clip (camera mode, lens model, size, the settings
+  that add passes: Ctrl+p, Ctrl+j, the edges) pays 1.5-8 s once, and again for each underwater state. A trial build a
+  day makes most starts that day cold. Warming the cache after an install needs the same text as mpv makes (its
+  render options, the hwdec's planes, the target): not tried.
+- **A new process for each Library open** (55 of 57 in the journal, 19-24.11): the player quits when its window
+  closes, so nothing stays in memory; on a warm cache a start still costs mpv's own ~0.5-1 s and the plugins' cold
+  folder cache. Keeping the player running hidden is the user's call (not done).
+- The lens model's code (`@LENS@`), the source and output sizes are still in the text: one set of passes per camera
+  mode, once per build.
+
 ### Save frame (crop mode and the photo) on the GPU path
 
 **Crop mode's camera** is the warp's own: `gyroflow_cam_x..w` and `gyroflow_cam_zoom` (DYNAMIC parameters, set through
