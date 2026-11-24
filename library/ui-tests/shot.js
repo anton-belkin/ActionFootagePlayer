@@ -6,7 +6,7 @@
 //
 // States: unsaved (a tag that couldn't be written), saving (changes still being written, in Tasks), closing (the
 // window closed with changes waiting), tagged (a tag just added, the app not answered yet), catalog (Checks' catalog part
-// after a check against the files).
+// after a check against the files), histleft / histback / histfwd (a folder, then the mouse's Back, then its Forward).
 
 const fs = require("fs");
 const os = require("os");
@@ -26,6 +26,11 @@ const STATES = {
     does: "S.path = ['Day 1']; showTab('tags'); renderAll(); buildFacets(); S.filters = { 'tag:reef': true }; S.filtersOpen = true; renderAll(); sel(['Day 1/A.MP4']); setTimeout(() => document.querySelector('[data-a=\"untag\"][data-v=\"reef\"]').click(), 200);" },
   tagged: { set_tags: { never: true }, does: "S.path = ['Day 1']; showTab('tags'); renderAll(); sel(['Day 1/A.MP4', 'Day 1/B.MP4']); tag('turtle');" },
   // Checks' catalog part after "Read every file again" corrected two records, with one clip's own file not JSON
+  // Back and Forward (history.js): Day 1 opened, C.MP4 selected in it; then the mouse's side button 3 (Back): Originals'
+  // top, Day 1 selected (the folder come out of); then button 4 (Forward): Day 1 again, C.MP4 selected as it was left
+  histleft: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4');" },
+  histback: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4'); setTimeout(() => side(3), 200);" },
+  histfwd: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4'); setTimeout(() => side(3), 200); setTimeout(() => side(4), 400);" },
   catalog: { set_tags: { never: true }, care: { kind: "check", busy: false, changes: 2, corrected: ["/P/Day 1/A.afp.json", "/P/Generated/2026-11-01 Moments/Day 1/A m.mp4"],
     unreadable_now: ["/P/Day 1/C.afp.json"] }, does: "S.path = ['Day 1']; showTab('checks'); renderAll(); sel(['Day 1/A.MP4']);" },
 };
@@ -55,6 +60,8 @@ function html(ui, state) {
       event: { listen: () => Promise.resolve(() => {}) }, webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) } };`;
   const does = `
     const sel = (ids) => { S.sel = {}; for (const id of ids) S.sel["i:" + id] = true; renderMain(); renderSide(); };
+    const pick = (name) => { const r = Array.from(document.querySelectorAll('#main [data-a="pick"]')).find((e) => e.textContent.includes(name)); if (r) r.click(); };
+    const side = (b) => { for (const t of ["mousedown", "mouseup"]) document.getElementById("main").dispatchEvent(new MouseEvent(t, { bubbles: true, cancelable: true, button: b })); };
     const tag = (t) => { S.tagDraft = t; renderSide(); document.querySelector('[data-a="tag"]').click(); };
     const go = () => { if (!(S.root && DATA.footage && DATA.moments)) return setTimeout(go, 20); ${st.does} };
     setTimeout(go, 50);`;
