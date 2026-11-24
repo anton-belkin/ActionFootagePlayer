@@ -2858,3 +2858,7 @@ if o.render_args ~= "" then
     mp.register_event("playback-restart", function() mp.add_timeout(0.05, dump) end)
     mp.register_event("end-file", function() dump() end)
 end
+
+-- Ctrl+m: the clip's motion measured from its picture into its .afp-motion (measure.lua), then played again with it.
+-- Not a local here: this chunk has as many as Lua allows
+require('measure').setup({ source = function() return current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify })

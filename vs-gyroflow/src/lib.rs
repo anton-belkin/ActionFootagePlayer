@@ -54,6 +54,8 @@ pub mod user_shader;
 pub mod translation;
 pub mod optical;
 pub mod afp_motion;
+pub mod tools;
+pub mod measure;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };

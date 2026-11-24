@@ -482,7 +482,7 @@ convert. It is one more dependency for the same code, so not recommended.
 |---|---|
 | Find lens (≤ 8 candidates × 3 fragments × air/water) | 10–30 s |
 | Estimate lens | under a minute |
-| Stabilize optically (decode + KLT at 960 px) | ≈ clip length at 4K30, ≈ 1.4× at 4K60 |
+| Stabilize optically (decode + KLT at 960 px) | through Gyroflow's app: ≈ clip length at 4K30, ≈ 1.4× at 4K60; measured by the player (step 2): 3–6 s for 9–18 s clips (4K30/60, HERO7, Action 6, HERO3/4), about a third of the clip |
 | Converting an existing `.gyroflow` to `.afp-motion` | seconds |
 | Opening a clip: reading `.afp-motion` (~2 MB per 10 min at 60 fps) | to be measured cold from the NAS (§3) |
 
@@ -508,6 +508,12 @@ Each step is its own PR, UI ones with before/after screenshots.
    - Test on the sample: the same clip from its project and from the converted file gives the same frames (SSIM).
 2. **Stabilize optically writes `.afp-motion`:** gyroflow-core's analysis in vs-gyroflow, our decode loop, the Gyroflow
    app no longer needed.
+   - **Done (2026-11-24):** `vs-gyroflow/src/measure.rs`. The Library batch and the player's Ctrl+m / "Measure motion from
+     the picture" both run it.
+   - Agreement with the motion Gyroflow's app measured on the same clips, same lens: the turn between frames differs
+     by a median of 0.004–0.04° against turns of 0.3–0.5° a frame.
+   - The exception is a clip shot from inside a car. There the still dashboard and the street outside disagree, and the
+     two measurements part ways after a fast turn; neither is trustworthy there.
 3. **The lens layer:**
    - the local database, the "taken by itself" rule (§5.2) and `source.lens`;
    - a lens picker over local + Gyroflow profiles in panel Source and Library Info;

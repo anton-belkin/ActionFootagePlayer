@@ -405,8 +405,15 @@ local function source_part(u, x, w, y)
                            or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
         for _, r in ipairs(rows) do
+            -- A value too long for the row beside its label (a profile's whole name): its end, where the mode is
+            local v = r[2]
+            if #v > 36 then
+                local from = #v - 33
+                while from <= #v and v:byte(from) >= 0x80 and v:byte(from) < 0xC0 do from = from + 1 end
+                v = "…" .. v:sub(from)
+            end
             u:text(x, y + 9 * s, r[1], { size = 13 })
-            u:text(x + w, y + 9 * s, r[2], { align = 6, size = 12, color = r[2]:find("^Unknown") and C.saved or C.dim })
+            u:text(x + w, y + 9 * s, v, { align = 6, size = 12, color = r[2]:find("^Unknown") and C.saved or C.dim })
             y = y + 22 * s
         end
         if not known and g.lens then
@@ -422,6 +429,14 @@ local function source_part(u, x, w, y)
             or not known and "Needs a known lens"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")
                 .. ". For a flat port (the camera's own glass, a flat housing); behind a dome port pick No"))
+        if measured then
+            if type(g.measuring) == "number" then
+                y = u:caption(x, w, y + 2 * s, string.format("Measuring the motion again… %d %%", math.floor(g.measuring * 100)))
+            else
+                y = u:button(x, w, y + 2 * s, "measure-again", "Measure the motion again", "script-binding gyroflow/measure-motion",
+                             { key = keys["script-binding gyroflow/measure-motion"] })
+            end
+        end
         y = u:button(x, w, y + 2 * s, "edit-lens", "Edit in Gyroflow…", "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
     end
 
@@ -1112,7 +1127,13 @@ local function transform_part(u, x, w, y)
     local stab_key = keys["script-binding gyroflow/toggle"]
     if not g.motion then
         y = u:select_row(x, w, y, "view", "Stabilization", views, "off", { disabled = true, key = stab_key })
-        y = u:caption(x, w, y, "No motion data in this clip: Gyroflow can find it in the picture (optical flow)")
+        y = u:caption(x, w, y, "No motion data in this clip: it can be measured in the picture (optical flow)")
+        if type(g.measuring) == "number" then
+            y = u:caption(x, w, y, string.format("Measuring the motion… %d %%", math.floor(g.measuring * 100)))
+        else
+            y = u:button(x, w, y, "measure", "Measure motion from the picture", "script-binding gyroflow/measure-motion",
+                         { key = keys["script-binding gyroflow/measure-motion"] })
+        end
         if g.waiting then y = u:caption(x, w, y, "Waiting for the project from Gyroflow…")
         else y = u:button(x, w, y, "edit", "Stabilize in Gyroflow…", "script-binding gyroflow/edit", { key = edit }) end
     else
@@ -1147,7 +1168,8 @@ local function transform_part(u, x, w, y)
     else
         local l = type(g.lens) == "table" and g.lens or {}
         local what = ((l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or "The lens") .. (l.lens == "in the file" and " (from the file)" or "")
-        local water = g.underwater == "yes" and ", under water" or g.underwater == "auto" and ", under water as the camera says" or ", above water"
+        local water = type(g.optical) == "table" and (g.optical.in_water and ", under water (as measured)" or ", above water (as measured)")
+            or g.underwater == "yes" and ", under water" or g.underwater == "auto" and ", under water as the camera says" or ", above water"
         if project then
             what, water = chosen == "project" and "As the Gyroflow project has it" or "The project's lens correction, in this projection in place of its own", ""
         end

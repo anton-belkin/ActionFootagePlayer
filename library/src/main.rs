@@ -126,6 +126,9 @@ struct Inner {
     moving: Option<Moving>,
     // Moved (its catalog with it): its next watch looks at its folder again before the views read the catalog
     moved_to: Option<PathBuf>,
+    // Clips Stabilize optically measured (their .afp-motion beside them): their probe's answer worked out again (it
+    // says how they're stabilized now), by the worker that has the probes
+    measured: Vec<String>,
 }
 
 // How far a move of the project's files is: bytes copied of all (a move on one disk is a rename: nothing to count),
@@ -712,11 +715,13 @@ fn tick(inner: &mut Inner) {
                     it.state = if it.name == now { "rendering" } else { "waiting" }.into();
                 }
             }
-            // Stabilize optically: each clip's Gyroflow project, told to the catalog as it lands (the views read it: the
-            // clip's motion data and badge change then; gyroflow-optical tells no one)
-            if job.made_paths.len() > had {
+            // Stabilize optically: each clip's motion file, told to the catalog as it lands, and the clip's probe asked
+            // again (the views read them: the clip's motion data and badge change then; gyroflow-optical tells no one)
+            let made_now = job.made_paths.len().saturating_sub(had);
+            if made_now > 0 {
                 let made = job.made_paths[had..].to_vec();
-                std::thread::spawn(move || seen::note_now(&optical_projects(&made)));
+                inner.measured.extend(made.iter().cloned());
+                std::thread::spawn(move || seen::note_now(&optical_files(&made)));
             }
             if let Some(status) = exited {
                 finished = true;
@@ -775,12 +780,9 @@ fn tick(inner: &mut Inner) {
 
 /// The Gyroflow projects gyroflow-optical put beside these clips (<stem>.gyroflow, or <name.ext>.gyroflow when that's
 /// the one it replaced)
-fn optical_projects(clips: &[String]) -> Vec<PathBuf> {
-    clips.iter().flat_map(|c| {
-        let c = Path::new(c);
-        let name = c.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        [c.with_extension("gyroflow"), c.with_file_name(format!("{name}.gyroflow"))]
-    }).filter(|g| g.is_file()).collect()
+/// The motion files Stabilize optically wrote beside these clips (vs-gyroflow's afp_motion.rs: <stem>.afp-motion)
+fn optical_files(clips: &[String]) -> Vec<PathBuf> {
+    clips.iter().map(|c| Path::new(c).with_extension("afp-motion")).filter(|g| g.is_file()).collect()
 }
 
 fn stop_all(inner: &mut Inner) {
@@ -2794,9 +2796,11 @@ fn main() {
     });
     let probes_for_setup = probes.clone();
     let worker = shared.clone();
+    let probes_for_tick = probes.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
-        tick(&mut worker.lock().unwrap());
+        let measured = { let mut inner = worker.lock().unwrap(); tick(&mut inner); std::mem::take(&mut inner.measured) };
+        if !measured.is_empty() { probes_for_tick.lock().unwrap().forget(&measured); }
         share_collect(&worker);
     });
 
@@ -3622,9 +3626,12 @@ mod audit {
         let loc = geo::location_value(27.9, 34.3, None, "manual", Some(&json!({ "country": "Egypt" })), None, None);
         assert!(geo::set_location(&p, &["Day 1/B.MP4".into()], Some(&loc)).is_empty());
         row("Location", item(&p, "footage", "Day 1/B.MP4")["own"]["location"]["lat"].to_string());
-        // Stabilize optically: a Gyroflow project beside the clip, told as the task's status names the clip
+        // A Gyroflow project saved beside the clip, told to the catalog
         std::fs::write(f.join("Day 1/B.gyroflow"), b"{}").unwrap();
-        seen::note_now(&optical_projects(&[fp("Day 1/B.MP4")]));
+        seen::note_now(&[f.join("Day 1/B.gyroflow")]);
+        // Stabilize optically: its motion file, told as the task's status names the clip
+        std::fs::write(f.join("Day 1/B.afp-motion"), b"x").unwrap();
+        assert_eq!(optical_files(&[fp("Day 1/B.MP4")]), vec![f.join("Day 1/B.afp-motion")]);
         row("Stabilize optically (.gyroflow)", item(&p, "footage", "Day 1/B.MP4")["gyroflow"].to_string());
         // Finder moves a clip (the catalog's own look sees it), then Mend: the moment's link follows
         std::fs::create_dir_all(f.join("Day 2")).unwrap();

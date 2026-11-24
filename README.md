@@ -967,25 +967,24 @@ Project). Then, as buttons:
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
 - **Stabilize optically** (Albums, Originals): for the selected clips whose motion the player can't take from the
-  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), Gyroflow
-  measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
-  with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
-  listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
-  whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
-  clips where their camera has types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player uses it too); a
-  lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
-  measured anew. It needs [Gyroflow](https://gyroflow.xyz) 1.7.0 or newer, which has the optical analysis
-  ([its releases](https://github.com/gyroflow/gyroflow/releases)), found where Gyroflow installs itself, or by
-  `AFP_GYROFLOW`. Not the Mac App Store's copy: it's sandboxed and can't read clips another app hands it, so it's
-  passed over (the release's copy can sit beside it, in `~/Applications` say). Lens types of your own: *Your own
-  lens list*.
+  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), the motion is
+  measured from the picture (Gyroflow's own analysis, run by the player: no Gyroflow app needed) and kept beside each
+  clip in `<clip>.afp-motion`, where the player plays with it. One clip at a time, about a third as long as the clip
+  plays. Left out, and listed with why: clips with motion data the player uses, with a Gyroflow project (the project
+  plays), with their motion measured already (unless **Redo**), 360° clips, and clips whose lens isn't known (no lens
+  profile for that camera and mode). **Lens** chooses the lens type for the selected clips where their camera has
+  types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player
+  uses it too); a lens chosen, or **Redo**, measures the motion again. Lens types of your own: *Your own lens list*.
 
   **Motion measured from the picture, without a project:** `<clip>.afp-motion` beside the clip keeps what Gyroflow's
   analysis measured, with the lens, the rolling shutter and the water it was measured with. With one and no Gyroflow
   project, the clip plays stabilized like a clip with gyro: the player's levels, frame and projection, its own
   settings saved with it. The horizon lock is off and can't be turned on: motion measured from the picture has no
   gravity in it. A Gyroflow project beside the clip still wins. `gyroflow-optical --from-project <clip>...` writes one
-  from the clip's project (nothing measured again), `gyroflow-optical --show <clip>...` prints what's in it. Design:
+  from the clip's project (nothing measured again), `gyroflow-optical --show <clip>...` prints what's in it.
+  **Ctrl+m** in the player (or the panel's *Measure motion from the picture*) measures the clip playing, and Library's
+  *Stabilize optically* the selected ones: Gyroflow's own analysis, run by the player, no Gyroflow app needed, about
+  three times faster than the clip plays. Design:
   [docs/optical-without-gyroflow.md](docs/optical-without-gyroflow.md).
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
@@ -1426,6 +1425,7 @@ mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
 mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
 mpv/scripts/gyroflow/projectwatch.lua  Ctrl+e's watch on the Gyroflow project: when a save there is taken up
+mpv/scripts/gyroflow/measure.lua       Ctrl+m: the clip's motion measured from its picture into its .afp-motion
 mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
                               rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
                               ~/.config/mpv/scripts/view360, and in ActionFootagePlayer

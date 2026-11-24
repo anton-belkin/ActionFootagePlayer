@@ -6,6 +6,8 @@ VapourSynth:
   motion    only the .afp-motion beside the clip: stabilized in the player's own mode (kind "default", optical),
             the horizon lock off and refused (no gravity in measured motion)
   project   a Gyroflow project beside it too: the project plays (it wins)
+  measure   neither, then Ctrl+m: the motion measured in the player (gyroflow-optical), the clip played again with
+            it, stabilized as "motion"
   none      neither: not stabilized (a clip without motion data: as recorded, or its lens alone corrected)
 
   tests/afp_motion_ipc.py [--keep] [--shots <dir>] <ActionFootagePlayer.app> <clip with a Gyroflow project of optical motion beside it>
@@ -95,13 +97,15 @@ def case(rig, sock, name, path):
     clips = rig + "/clips"
     project, motion = clips + "/a.gyroflow", clips + "/a.afp-motion"
     # Each case's files beside the clip: the project and motion file moved aside when it has none
+    if name == "measure" and os.path.exists(motion + ".measured"):
+        os.remove(motion + ".measured")
     for f, keep in [(project, name == "project"), (motion, name in ("motion", "project"))]:
         aside = f + ".aside"
         if keep and os.path.exists(aside):
             os.rename(aside, f)
         if not keep and os.path.exists(f):
             os.rename(f, aside)
-    pl = Player(rig, sock, clips + "/a.MP4", path, name != "none")
+    pl = Player(rig, sock, clips + "/a.MP4", path, name not in ("none", "measure"))
     s, g = pl.state(), gyroflow_state(pl)
     log = ["%s/%s: %s %s" % (name, path, s, json.dumps(g))]
     stabilized = bool(s["warp"] or s["vf"])
@@ -114,6 +118,25 @@ def case(rig, sock, name, path):
         ok = ok and g2["horizon_lock"] == "no"
     elif name == "project":
         ok = stabilized and g["kind"] == "project"
+    elif name == "measure":
+        # Not stabilized before: as recorded, or its lens alone
+        before = g["kind"] not in ("", "lens")
+        t = time.time()
+        pl.cmd("keypress", "Ctrl+m")
+        while time.time() - t < 120:
+            time.sleep(0.5)
+            try:
+                g = gyroflow_state(pl)
+                s = pl.state()
+            except OSError:
+                continue
+            if isinstance(g["optical"], dict) and (s["warp"] or s["vf"]):
+                break
+        log.append("  Ctrl+m -> %s %s after %.1f s" % (s, json.dumps(g), time.time() - t))
+        ok = not before and isinstance(g["optical"], dict) and bool(s["warp"] or s["vf"]) and g["optical"].get("how") == "measured"
+        # What it measured stays aside for the cases after (they bring the converted one back)
+        if os.path.exists(motion):
+            os.rename(motion, motion + ".measured")
     else:
         # Not stabilized: played as recorded, or with its lens alone corrected (kind "lens") where its lens is known
         ok = g["kind"] in ("", "lens") and not g["optical"]
@@ -143,7 +166,7 @@ def main():
     failed = 0
     try:
         for path in paths:
-            for name in ["motion", "project", "none"]:
+            for name in ["motion", "project", "none", "measure"]:
                 ok, log = case(rig, sock, name, path)
                 print(("ok    " if ok else "FAIL  ") + "\n".join(log))
                 failed += not ok
