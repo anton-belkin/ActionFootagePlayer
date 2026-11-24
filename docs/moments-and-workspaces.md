@@ -257,7 +257,10 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
   (`as-is`: as the source is, `landscape`, `portrait`; the W:H shown is worked out for each source's shape, so one
   bundle fits a vertical clip and a level one alike), `projection`, `lens` (`corrected`, `as-recorded`: apart from
   the stabilization; `off` with `corrected` is the lens alone, Gyroflow with nothing smoothed, also what a clip with a
-  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected). An `aspect` from before the orientation (9:16:
+  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected),
+  and the underwater colour of a plain SDR clip (`uw` on or off, `uw_highlights`, `uw_strength` 0..1 in hundredths:
+  the dlogm plugin's uwcolor.lua, the panel's Underwater colour tab; its defaults in `uwcolor.conf`; not in a render's
+  recipe yet, exports don't do it). An `aspect` from before the orientation (9:16:
   the ratio as it showed) is that ratio turned, portrait. Kept only as a whole bundle, never a key alone: the
   source's (`.afp.json`'s `view`), or a moment's or clip preview's own (its link's `stab`, with settings of its own:
   `snap` for a moment, `own` for a clip preview, the panel's one switch). Levels, the topmost one there is plays and

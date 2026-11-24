@@ -162,10 +162,8 @@ for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- by its shader, then shown in the looks like a log curve. Not in Ctrl+l's round, never saved as the clip's curve
 local UW = { id = "uw", name = "Underwater colour", hdr = "shaders/underwater_hlg.glsl" }
 CURVE.uw = UW
-local function uw_wanted()
-    local u = mp.get_property_native("user-data/uwcolor")
-    return type(u) == "table" and u.on == true
-end
+local uwcolor = require 'uwcolor'
+
 -- What the cameras' metadata says, as a curve
 local DJI_CURVES = { dlogm = "dlogm", dlog = "dlog" }
 local GOPRO_CURVES = { GPLOG2 = "gplog2", LOG = "gplog" }
@@ -705,6 +703,8 @@ mp.add_hook("on_preloaded", 50, function(hook)
     local path = clip_path()
     if not path then return publish() end
     base = { shaders = mp.get_property_native("glsl-shaders") or {}, target = {} }
+    -- The underwater colour as the clip's (or moment's) transform says, taken before the curve is picked
+    local uw_on = uwcolor.file_start()
     for _, opt in ipairs(TARGET_OPTIONS) do base.target[opt] = mp.get_property(opt) end
     local trc, prim
     if not path:find("://", 1, true) then trc, prim = video_color.read(path) end
@@ -728,7 +728,7 @@ mp.add_hook("on_preloaded", 50, function(hook)
     if not trc then
         recorded = recorded_curve(path)
         curve = (saved and CURVE[saved]) or recorded
-        if not curve and uw_wanted() then curve = UW end
+        if uw_on and not curve then curve = UW end
         if not curve then
             mp.msg.verbose("not log footage it knows")
             if denoise then mp.set_property_native("file-local-options/glsl-shaders", shader_list()) end
@@ -1049,6 +1049,3 @@ mp.register_script_message("remember", function()
                               .. " on SDR screens (dlogm.conf)")
                    or "Couldn't write dlogm.conf", 3)
 end)
-
--- Underwater colour for plain SDR clips: its switches, and each frame's numbers for its shader (uwcolor.lua)
-require 'uwcolor'

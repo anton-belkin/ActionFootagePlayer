@@ -998,17 +998,12 @@ end
 -- The filter makes the frame (stabilized, or the lens alone): else mpv's own crop and turn do
 local function filtering_note(g) return (g.filter or "") ~= "" end
 
-local function transform_part(u, x, w, y)
+-- Where the transform is defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
+-- a moment's or clip preview's own settings: the Transform's, and the underwater colour's (part of the same bundle)
+local function view_card(u, x, w, y, ws)
     local s = u.s
-    local g, ws = state("gyroflow"), state("workspace")
-    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
-    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
-    local edit = keys["script-binding gyroflow/edit"]
-    local project = g.kind == "project"
-    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     local status = ws and ws.view_status
     local target = ws and ws.view_target
-
     -- Where it's defined
     local at = y
     local ix, iw = x + 10 * s, w - 20 * s
@@ -1033,6 +1028,22 @@ local function transform_part(u, x, w, y)
     y = u:switch(ix, iw, y, "view-auto", "Auto save", ws and ws.auto_save == true, "script-message-to workspace view-auto", nil, not target)
     u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
     y = y + 14 * s
+    return y
+end
+
+local function transform_part(u, x, w, y)
+    local s = u.s
+    local g, ws = state("gyroflow"), state("workspace")
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing to transform") end
+    if not g then return u:caption(x, w, y, "Needs the gyroflow plugin") end
+    local edit = keys["script-binding gyroflow/edit"]
+    local project = g.kind == "project"
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
+    local status = ws and ws.view_status
+    local target = ws and ws.view_target
+
+    y = view_card(u, x, w, y, ws)
+    local ix, iw = x + 10 * s, w - 20 * s
 
     -- Stabilization: with motion data (a project, or the clip's own). Over a project too it's saved with the clip: on (the
     -- project as it is), wider (its zoom left out), off (the project kept, not used)
@@ -1220,21 +1231,32 @@ end
 local function signed(v, n) return v and ((v < 0 and "−" or "+") .. string.format("%." .. (n or 2) .. "f", math.abs(v))) or "–" end
 local function water_part(u, x, w, y)
     local s = u.s
-    local c = state("uwcolor")
+    local c, ws = state("uwcolor"), state("workspace")
     if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
+    if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing plays") end
+    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
-                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. For this computer", { color = C.label })
-    y = u:switch(x, w, y + 6 * s, "uw-on", "Correct underwater colour", c.on == true, "script-message-to dlogm uw-set on toggle")
-    if c.on and mp.get_property("path") and not c.active and not c.ok then
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. Part of the clip's transform",
+                  { color = C.label })
+    y = view_card(u, x, w, y + 6 * s, ws)
+    local on = c.uw == true
+    y = u:switch(x, w, y, "uw-on", "Correct underwater colour", on, "script-message-to dlogm uw-set uw toggle", keys["script-binding dlogm/uw-toggle"],
+                 nil, saved and saved.uw)
+    if on and not c.active and not c.ok then
         y = u:caption(x, w, y, "Not this clip: it's log or HDR, or has a curve set by hand")
     end
-    y = u:switch(x, w, y, "uw-hl", "Brighter highlights", c.highlights == true, "script-message-to dlogm uw-set highlights toggle", nil, not c.on)
+    y = u:switch(x, w, y, "uw-hl", "Brighter highlights", c.uw_highlights == true, "script-message-to dlogm uw-set uw_highlights toggle", nil,
+                 not on, saved and saved.uw_highlights)
     y = u:caption(x, w, y, "Sunlit water and sand get more of HDR's room. Careful at night: a torch's spot gets brighter still")
-    u:text(x, y + 10 * s, "Strength", { size = 12, color = C.label, alpha = c.on and "00" or "80" })
-    u:text(x + w, y + 10 * s, string.format("%d %%", math.floor((c.strength or 1) * 100 + 0.5)), { size = 12, color = C.label, align = 6 })
-    y = u:slider(x, w, y + 18 * s, "uw-strength", c.strength or 1, function(p)
-        mp.commandv("script-message-to", "dlogm", "uw-set", "strength", string.format("%.2f", p))
-    end, "Camera's colour", "Corrected", not c.on)
+    local strength = c.uw_strength or 1
+    u:text(x, y + 10 * s, "Strength", { size = 12, color = C.label, alpha = on and "00" or "80" })
+    if saved and saved.uw_strength ~= nil and saved.uw_strength ~= strength then
+        u:shape(ui.circle_path(x + ui.text_width("Strength", 12, s) + 8 * s, y + 10 * s, 2.6 * s), C.saved)
+    end
+    u:text(x + w, y + 10 * s, string.format("%d %%", math.floor(strength * 100 + 0.5)), { size = 12, color = C.label, align = 6 })
+    y = u:slider(x, w, y + 18 * s, "uw-strength", strength, function(p)
+        mp.commandv("script-message-to", "dlogm", "uw-set", "uw_strength", string.format("%.2f", p))
+    end, "Camera's colour", "Corrected", not on)
     local t = c.stats
     if not (c.active and type(t) == "table" and t.under_water) then return y end
     y = u:heading(x, w, y + 10 * s, "This frame")

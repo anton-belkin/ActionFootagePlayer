@@ -739,7 +739,7 @@ local function open_moment(path)
         end
         state.link = { file = file, own = l.own == 1, input = transform.input_of(l.stab), raw = l.stab }
         if l.own == 1 then
-            state.view = transform.complete(l.stab, mp.get_property_native("user-data/gyroflow/session"))
+            state.view = transform.complete(l.stab, transform.session(mp.get_property_native))
             state.saved = copy(state.view)
             state.view_target = "preview"
         end
@@ -782,7 +782,7 @@ local function open_moment(path)
         local own = own_project(file)
         state.snap = true
         state.alone = l.alone == true
-        state.view = transform.complete(l.stab, mp.get_property_native("user-data/gyroflow/session"))
+        state.view = transform.complete(l.stab, transform.session(mp.get_property_native))
         state.saved = copy(state.view)
         state.view_target = "moment"
         state.gyroflow_projects, state.gyroflow_new = { own }, own
@@ -878,7 +878,7 @@ mp.add_hook("on_load", 10, function()
             local raw = doc and transform.pick(doc.view)
             state.source_raw = raw
             if raw then
-                state.view = transform.complete(raw, mp.get_property_native("user-data/gyroflow/session"))
+                state.view = transform.complete(raw, transform.session(mp.get_property_native))
                 state.saved = copy(state.view)
             end
         end
@@ -1027,15 +1027,19 @@ end
 local function current_view()
     local g = mp.get_property_native("user-data/gyroflow")
     if type(g) ~= "table" then return copy(state.saved) end
+    local u = mp.get_property_native("user-data/uwcolor")
+    u = type(u) == "table" and u or {}
     local v = {}
-    for _, k in ipairs(transform.KEYS) do v[k] = g[k] end
+    for _, k in ipairs(transform.KEYS) do
+        if transform.COLOR_KEYS[k] then v[k] = u[k] else v[k] = g[k] end
+    end
     -- The gyroflow plugin's `lens` is the lens profile; the bundle's lens (corrected, as recorded) is its lens_mode
     v.lens = g.lens_mode
     if g.kind == "project" then
         local keep = state.saved or g.session or {}
         for k in pairs(transform.PROJECT_KEYS) do v[k] = keep[k] end
     end
-    return (transform.complete(v, g.session))
+    return (transform.complete(v, transform.session(mp.get_property_native)))
 end
 
 -- The clip's project, for what needs one (moments, exports, clip previews). None is made by itself: the side panel's
@@ -2376,7 +2380,7 @@ local function settle_bundle()
     if state.view_target == "source" then raw = state.source_raw
     elseif state.link and state.link.own then raw = state.link.raw end
     if raw == nil then return end
-    local full, added = transform.complete(raw, mp.get_property_native("user-data/gyroflow/session"))
+    local full, added = transform.complete(raw, transform.session(mp.get_property_native))
     local input = state.view_target ~= "source" and transform.input_of(raw) ~= nil
     if (added or input) and write_bundle(full, true) then
         mp.msg.info("transform completed and written: " .. utils.format_json(full))
@@ -2401,6 +2405,7 @@ end)
 mp.register_script_message("view-revert", function()
     if not state.saved then return end
     mp.commandv("script-message-to", "gyroflow", "apply-view", utils.format_json(state.saved))
+    mp.commandv("script-message-to", "dlogm", "uw-apply-view", utils.format_json(state.saved))
     mp.osd_message("Transform as saved", 1.5)
 end)
 
@@ -2550,6 +2555,7 @@ local function view_changed()
     publish_view()
 end
 mp.observe_property("user-data/gyroflow", "native", view_changed)
+mp.observe_property("user-data/uwcolor", "native", view_changed)
 mp.register_event("file-loaded", function()
     settle_bundle()
     autosave_fresh()

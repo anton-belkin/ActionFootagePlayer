@@ -7,14 +7,19 @@
 -- numbers from a 320x180 grid of it, eases them in over a second or two and hands them to the shader
 -- (glsl-shader-opts uw_*).
 --
--- Settings, for this computer (~~/script-opts/uwcolor.conf):
---   on=no          the correction for plain SDR clips
---   highlights=no  the light end stretched into HDR's room (2.5x SDR white for the camera's white); helps sunlit
+-- Its three settings are part of the transform bundle (docs/moments-and-workspaces.md, "Source and transform";
+-- mpv/scripts/workspace/transform.lua), the clip's or moment's like the stabilization's:
+--   uw             the correction on (true) or off
+--   uw_highlights  the light end stretched into HDR's room (2.5x SDR white for the camera's white); helps sunlit
 --                  water and sand, can blow out a torch's spot at night
---   strength=1     between the camera's colour (0) and the correction (1)
--- Messages: script-message-to dlogm uw-set on|highlights yes|no|toggle, uw-set strength <0..1>; key dlogm/uw-toggle
--- State: user-data/uwcolor = { on, highlights, strength, active (dlogm shows the clip through it), ok (the clip can
--- have it), stats = { what the last frame measured } }
+--   uw_strength    between the camera's colour (0) and the correction (1), in hundredths
+-- As the gyroflow plugin's: the defaults are uwcolor.conf's (on=, highlights=, strength=; Transform's Use as default
+-- writes them); the session's start as them and change by hand on a file with nothing saved; a file with a bundle of
+-- its own plays with it, a change there is for viewing (or the Transform's Save, Auto save).
+-- Messages (to dlogm): uw-set uw|uw_highlights yes|no|toggle, uw-set uw_strength <0..1>; uw-apply-view <json> (Revert
+-- to saved); uw-remember (Use as default); key dlogm/uw-toggle
+-- State: user-data/uwcolor = { uw, uw_highlights, uw_strength, session, defaults, active (dlogm shows the clip through
+-- it), ok (the clip can have it), stats = { what the last frame measured } }
 
 local mp = require 'mp'
 local options = require 'mp.options'
@@ -23,6 +28,15 @@ local E = require 'uw_estimate'
 
 local o = { on = false, highlights = false, strength = 1.0 }
 options.read_options(o, "uwcolor")
+
+local function hundredths(x) return math.floor(math.max(0, math.min(1, tonumber(x) or 1)) * 100 + 0.5) / 100 end
+local function from_conf()
+    return { uw = o.on == true, uw_highlights = o.highlights == true, uw_strength = hundredths(o.strength) }
+end
+local BUNDLE = { "uw", "uw_highlights", "uw_strength" }
+local DEFAULTS = from_conf()
+local session, cur = {}, {}
+for _, k in ipairs(BUNDLE) do session[k], cur[k] = DEFAULTS[k], DEFAULTS[k] end
 
 local HIGHLIGHTS = 2.5
 local GW, GH = 320, 180
@@ -40,8 +54,8 @@ end
 
 local function publish()
     mp.set_property_native("user-data/uwcolor", {
-        on = o.on, highlights = o.highlights, strength = o.strength, active = active(),
-        ok = mp.get_property_native("user-data/dlogm/uw_ok") == true, stats = stats,
+        uw = cur.uw, uw_highlights = cur.uw_highlights, uw_strength = cur.uw_strength, session = session, defaults = DEFAULTS,
+        active = active(), ok = mp.get_property_native("user-data/dlogm/uw_ok") == true, stats = stats,
     })
 end
 
@@ -55,6 +69,7 @@ local function save()
     if not f then return end
     f:write(string.format("on=%s\nhighlights=%s\nstrength=%.2f\n", o.on and "yes" or "no", o.highlights and "yes" or "no", o.strength))
     f:close()
+    return true
 end
 
 -- The shader's numbers, set together (the property is the whole table)
@@ -65,8 +80,8 @@ local function send()
     opts.uw_db = string.format("%.4f", p.db)
     opts.uw_k = string.format("%.4f", p.k)
     opts.uw_ev = string.format("%.4f", p.ev)
-    opts.uw_s = string.format("%.3f", o.strength)
-    opts.uw_hp = o.highlights and tostring(HIGHLIGHTS) or "1"
+    opts.uw_s = string.format("%.3f", cur.uw_strength)
+    opts.uw_hp = cur.uw_highlights and tostring(HIGHLIGHTS) or "1"
     mp.set_property_native("glsl-shader-opts", opts)
 end
 
@@ -137,33 +152,83 @@ mp.observe_property("user-data/dlogm/curve", "native", function()
 end)
 mp.observe_property("user-data/dlogm/uw_ok", "native", publish)
 
-local function flag(v, cur)
-    if v == "toggle" then return not cur end
+local function flag(v, was)
+    if v == "toggle" then return not was end
     return v == "yes" or v == "true" or v == "1"
 end
 
-mp.register_script_message("uw-set", function(key, v)
-    if key == "on" then
-        o.on = flag(v, o.on)
-        publish()
-        mp.commandv("script-message-to", mp.get_script_name(), "uw-color", o.on and "yes" or "no")
-        mp.osd_message(o.on and "Underwater colour on" or "Underwater colour off", 1.5)
-    elseif key == "highlights" then
-        o.highlights = flag(v, o.highlights)
-        send()
-    elseif key == "strength" then
-        local x = tonumber(v)
-        if not x then return end
-        o.strength = math.max(0, math.min(1, x))
-        send()
-    else
-        return
-    end
-    save()
+-- The workspace plugin's bundle for the file playing, when one is saved for it; nil: the session's plays
+local function fixed()
+    local ws = mp.get_property_native("user-data/workspace")
+    if type(ws) == "table" and ws.path == mp.get_property("path") and type(ws.view) == "table" then return ws.view end
+    return nil
+end
+
+-- A bundle taken as what plays (a key it hasn't: the session's)
+local function take(b)
+    b = type(b) == "table" and b or session
+    cur.uw = type(b.uw) == "boolean" and b.uw or session.uw
+    cur.uw_highlights = type(b.uw_highlights) == "boolean" and b.uw_highlights or session.uw_highlights
+    cur.uw_strength = type(b.uw_strength) == "number" and hundredths(b.uw_strength) or session.uw_strength
+end
+
+-- What plays applied: the dlogm plugin's curve when on changed, the shader's numbers
+local function apply(was_on)
+    if cur.uw ~= was_on then mp.commandv("script-message-to", mp.get_script_name(), "uw-color", cur.uw and "yes" or "no") end
+    send()
     publish()
+end
+
+-- A change by hand: the session's too when the session's plays (nothing saved for the file)
+local function set(k, v)
+    local was = cur.uw
+    cur[k] = v
+    if not fixed() then session[k] = v end
+    apply(was)
+end
+
+mp.register_script_message("uw-set", function(key, v)
+    if key == "uw" or key == "on" then
+        set("uw", flag(v, cur.uw))
+        mp.osd_message(cur.uw and "Underwater colour on" or "Underwater colour off", 1.5)
+    elseif key == "uw_highlights" or key == "highlights" then
+        set("uw_highlights", flag(v, cur.uw_highlights))
+    elseif key == "uw_strength" or key == "strength" then
+        if tonumber(v) then set("uw_strength", hundredths(v)) end
+    end
 end)
 
-mp.add_key_binding(nil, "uw-toggle", function() mp.commandv("script-message-to", mp.get_script_name(), "uw-set", "on", "toggle") end)
+-- A bundle played now, for this viewing (the panel's Revert to saved)
+mp.register_script_message("uw-apply-view", function(json)
+    local b = utils.parse_json(json or "")
+    if type(b) ~= "table" then return end
+    local was = cur.uw
+    take(b)
+    apply(was)
+end)
+
+-- What plays as the defaults (Transform's Use as default, with the gyroflow plugin's)
+mp.register_script_message("uw-remember", function()
+    o.on, o.highlights, o.strength = cur.uw, cur.uw_highlights, cur.uw_strength
+    if save() then
+        DEFAULTS = from_conf()
+        for _, k in ipairs(BUNDLE) do session[k] = cur[k] end
+        publish()
+    end
+end)
+
+mp.add_key_binding(nil, "uw-toggle", function() mp.commandv("script-message-to", mp.get_script_name(), "uw-set", "uw", "toggle") end)
 
 send()
 publish()
+
+local M = {}
+-- At a file's start (the dlogm plugin's on_preloaded, before it picks the curve): its bundle taken; whether the
+-- correction is on for it
+function M.file_start()
+    take(fixed())
+    send()
+    publish()
+    return cur.uw
+end
+return M

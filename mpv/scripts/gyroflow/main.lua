@@ -2403,6 +2403,8 @@ mp.register_script_message("remember", function()
         for k, v in pairs(b) do session[k] = v end
         publish()
     end
+    -- The underwater colour's part of the transform (the dlogm plugin's uwcolor.conf)
+    mp.commandv("script-message-to", "dlogm", "uw-remember")
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 

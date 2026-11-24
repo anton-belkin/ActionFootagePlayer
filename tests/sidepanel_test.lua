@@ -403,5 +403,28 @@ mp.set_property_native("user-data/workspace", { path = "https://x/y.mp4", clip =
 expect("tags: none for a stream", find("tag-ask"), nil)
 messages.tab("output")
 
+-- Underwater colour: its own tab, its switches and strength part of the clip's transform (the dot: what's saved)
+mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", view_target = "source",
+    view_status = "changed", view_from = "source", saved = { uw = false, uw_highlights = false, uw_strength = 1 } })
+mp.set_property_native("user-data/uwcolor", { uw = true, uw_highlights = false, uw_strength = 0.6, active = true, ok = true,
+    session = {}, defaults = {}, stats = { under_water = 1, water = 0.48, water_hue = 263, water_hue_after = 263, water_a = -0.012,
+    water_a_after = -0.043, leak = 0.5, red = 0.09, blue = 0.18, blue_water = 0, lift = 0.94, median = 0.12,
+    applied = { red = 0.09, blue = 0.18, leak = 0.5, lift = 0.94 }, ms = 300 } })
+messages.tab("water")
+expect("underwater: the rail has its button", find("rail:water") ~= nil, true)
+expect("underwater: its switches and strength", find("uw-on") ~= nil and find("uw-hl") ~= nil and find("uw-strength") ~= nil, true)
+expect("underwater: the transform's Save there too", find("view-save") ~= nil and find("view-revert") ~= nil, true)
+click("uw-on")
+expect("underwater: the switch", last_ran(), "script-message-to dlogm uw-set uw toggle")
+click("uw-hl")
+expect("underwater: brighter highlights", last_ran(), "script-message-to dlogm uw-set uw_highlights toggle")
+click("view-save")
+expect("underwater: Save saves the transform", last_ran(), "script-message-to workspace view-save")
+click("view-default")
+expect("underwater: Use as default is the transform's", last_ran(), "script-message-to gyroflow remember")
+mp.set_property_native("user-data/uwcolor", { uw = false, uw_highlights = false, uw_strength = 1, active = false, ok = true, stats = {} })
+expect("underwater: off, highlights can't be switched", (function() local before = #ran; click("uw-hl"); return #ran == before end)(), true)
+messages.tab("output")
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)
