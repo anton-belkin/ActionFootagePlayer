@@ -29,7 +29,9 @@
 //
 // Where a moment starts in its clip (gyroflow_time_offset, s) is a parameter, not a define: each moment's shader then
 // has the same code as the others of its kind, and mpv takes its pipelines from its cache instead of building them
-// again (~2.5 s on an M-series Mac). gyroflow-gpu-table writes its value; nothing changes it.
+// again (~2.5 s on an M-series Mac). gyroflow-gpu-table writes its value; nothing changes it. The clip's frame rate
+// (gyroflow_fps) likewise: a clip of another frame rate shares the pipelines (tools/pipebench: a new rate cost 37 passes,
+// 3-8 s the first time).
 
 //!PARAM PTS
 //!TYPE DYNAMIC float
@@ -104,6 +106,10 @@
 //!PARAM gyroflow_time_offset
 //!TYPE DYNAMIC float
 @TIME_OFFSET@
+
+//!PARAM gyroflow_fps
+//!TYPE DYNAMIC float
+@FPS@
 
 //!TEXTURE GYROFLOW_TABLE
 //!SIZE @TABLE_W@ @TABLE_H@

@@ -1,0 +1,70 @@
+From 89524e5cbe2d1c320a059fb9f2196569487a9256 Mon Sep 17 00:00:00 2001
+From: Anton Belkin <anton.belkin@icloud.com>
+Date: Tue, 24 Nov 2026 10:37:09 +0100
+Subject: [PATCH] shaders/custom_mpv: only add the linearize helpers to hooks
+ that use them
+
+The linearize and delinearize helpers depend on the source's color space,
+and their specialization constants stay in the SPIR-V even when the hook
+never calls them. Every user shader pass was therefore compiled to new
+SPIR-V, and its pipeline built again, whenever that color space changed:
+with a large user shader (tens of passes) on MoltenVK that is seconds of
+stalls, although the passes themselves are the same.
+
+Add the helpers only to hooks whose text mentions them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ src/shaders/custom_mpv.c | 36 +++++++++++++++++++++---------------
+ 1 file changed, 21 insertions(+), 15 deletions(-)
+
+diff --git a/src/shaders/custom_mpv.c b/src/shaders/custom_mpv.c
+index fde6dcd..7500a2e 100644
+--- a/src/shaders/custom_mpv.c
++++ b/src/shaders/custom_mpv.c
+@@ -1436,21 +1436,27 @@ static struct pl_hook_res hook_hook(void *priv, const struct pl_hook_params *par
+             }
+         }
+ 
+-        // Helper sub-shaders
+-        uint64_t sh_id = SH_PARAMS(sh).id;
+-        pl_shader_reset(p->trc_helper, pl_shader_params(
+-            .id = ++sh_id,
+-            .gpu = p->gpu,
+-        ));
+-        pl_shader_linearize(p->trc_helper, params->orig_color);
+-        GLSLH("#define linearize "$" \n", sh_subpass(sh, p->trc_helper));
+-
+-        pl_shader_reset(p->trc_helper, pl_shader_params(
+-            .id = ++sh_id,
+-            .gpu = p->gpu,
+-        ));
+-        pl_shader_delinearize(p->trc_helper, params->orig_color);
+-        GLSLH("#define delinearize "$" \n", sh_subpass(sh, p->trc_helper));
++        // Helper sub-shaders, only for hooks that use them: they depend on the
++        // source's color space, and their specialization constants stay in the
++        // SPIR-V even when unused, so every hook pass would otherwise be
++        // recompiled (and its pipeline rebuilt) whenever that color space
++        // changes, e.g. when a file of another transfer function is played
++        if (pl_str_find(hook->pass_body, pl_str0("linearize")) >= 0) {
++            uint64_t sh_id = SH_PARAMS(sh).id;
++            pl_shader_reset(p->trc_helper, pl_shader_params(
++                .id = ++sh_id,
++                .gpu = p->gpu,
++            ));
++            pl_shader_linearize(p->trc_helper, params->orig_color);
++            GLSLH("#define linearize "$" \n", sh_subpass(sh, p->trc_helper));
++
++            pl_shader_reset(p->trc_helper, pl_shader_params(
++                .id = ++sh_id,
++                .gpu = p->gpu,
++            ));
++            pl_shader_delinearize(p->trc_helper, params->orig_color);
++            GLSLH("#define delinearize "$" \n", sh_subpass(sh, p->trc_helper));
++        }
+ 
+         // Load and run the user shader itself
+         sh_append_str(sh, SH_BUF_HEADER, hook->pass_body);
+-- 
+2.42.0
+

@@ -308,6 +308,9 @@ if mpv_bin:
     if mpv_lock.get("MPV_PATCHES", "").strip():
         own.append("mpv's patches, applied on that commit: " + mpv_lock["MPV_PATCHES"].strip() + " (tools/mpv-patches/ "
                    "in the ActionFootagePlayer project)\n")
+    if mpv_lock.get("LIBPLACEBO_PATCHES", "").strip():
+        own.append("libplacebo's patches, applied on that commit: " + mpv_lock["LIBPLACEBO_PATCHES"].strip() +
+                   " (tools/libplacebo-patches/ in the ActionFootagePlayer project)\n")
     own.append("mpv's build: tools/build_mpv.sh and tools/mpv.lock in the ActionFootagePlayer project, at this "
                "app's version\n")
 if ffmpeg_bin:

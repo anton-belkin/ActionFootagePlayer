@@ -4,9 +4,9 @@
 # app (MPV_BIN) in place of Homebrew's, with the libraries it links from Homebrew.
 #
 #   build/mpv-afp/src/mpv/                       mpv at MPV_COMMIT (a blobless clone: `git describe` names the version)
-#   build/mpv-afp/src/mpv/subprojects/libplacebo libplacebo at LIBPLACEBO_TAG, with its submodules (glad, jinja...),
-#                                                built by meson with mpv and linked in statically: mpv master needs a
-#                                                newer libplacebo than Homebrew's
+#   build/mpv-afp/src/mpv/subprojects/libplacebo libplacebo at LIBPLACEBO_TAG, with its submodules (glad, jinja...)
+#                                                and tools/libplacebo-patches/, built by meson with mpv and linked in
+#                                                statically: mpv master needs a newer libplacebo than Homebrew's
 #   build/mpv-afp/build/                         meson's build folder
 #   build/mpv-afp/out/                           what tools/bundle_runtime.py takes (MPV_BIN=build/mpv-afp/out/mpv):
 #     mpv                                        the binary
@@ -101,6 +101,16 @@ if [ "$(git -C "$pl_src" rev-parse HEAD)" != "$LIBPLACEBO_COMMIT" ]; then
     echo "libplacebo's $LIBPLACEBO_TAG is $(git -C "$pl_src" rev-parse HEAD), not $LIBPLACEBO_COMMIT (tools/mpv.lock)" >&2
     exit 1
 fi
+# The app's libplacebo patches (tools/libplacebo-patches/: `git format-patch` against LIBPLACEBO_TAG), applied to the
+# working tree, on a clean one each build (HEAD stays the tag the check above wants, and a second build doesn't apply
+# them twice)
+git -C "$pl_src" checkout -q -- .
+pl_patches=()
+for f in tools/libplacebo-patches/*.patch; do [ -f "$f" ] && pl_patches+=("$PWD/$f"); done
+if [ ${#pl_patches[@]} -gt 0 ]; then
+    echo "== libplacebo: ${#pl_patches[@]} patches from tools/libplacebo-patches"
+    git -C "$pl_src" apply "${pl_patches[@]}"
+fi
 
 echo "== Build"
 # libarchive is keg-only: its pkg-config file isn't in Homebrew's own folder
@@ -174,6 +184,7 @@ install -m 755 "$build/mpv" "$out/mpv"
     cat tools/mpv.lock
     echo "MPV_DESCRIBE=$(git -C "$mpv_src" describe --tags --match "v[0-9]*" --always)"
     echo "MPV_PATCHES=$(cd tools/mpv-patches 2>/dev/null && ls *.patch 2>/dev/null | tr '\n' ' ')"
+    echo "LIBPLACEBO_PATCHES=$(cd tools/libplacebo-patches 2>/dev/null && ls *.patch 2>/dev/null | tr '\n' ' ')"
 } > "$out/mpv.lock"
 cp "$mpv_src/LICENSE.GPL" "$mpv_src/LICENSE.LGPL" "$mpv_src/Copyright" "$out/licenses/mpv/"
 cp "$pl_src/LICENSE" "$out/licenses/libplacebo/"

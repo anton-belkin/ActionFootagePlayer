@@ -499,8 +499,8 @@ pub fn lens_blend(clip: &Clip) -> bool {
 pub fn defines(clip: &Clip, opts: &Options, table: &Table) -> String {
     let bg = clip.params.background;
     format!(
-        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS {:.9}\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}\n#define LENS_BLEND {}",
-        clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.fps, table.cols, table.block,
+        "#define SRC_W {}\n#define SRC_H {}\n#define OUT_W {}\n#define OUT_H {}\n#define FPS gyroflow_fps\n#define COLS {}\n#define BLOCK {}\n#define KNOTS {}\n#define FULL_ROWS {}\n#define PROJ {}\n#define INTERP {}\n#define SHRINK {}\n#define BACKGROUND vec4({:.6}, {:.6}, {:.6}, 1.0)\n#define HAS_DIGITAL {}\n#define TIME_OFFSET gyroflow_time_offset\n#define CHROMATIC {}\n#define CHROMATIC_FAST {}\n#define EDGE_FILL {}\n#define EDGE_BLUR {:.5}\n#define SPHERE_FILL {}\n#define LENS_BLEND {}",
+        clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, table.cols, table.block,
         table.per_frame.max(2), (opts.knots == 0) as i32, clip.params.output_projection.max(0), opts.interp, opts.shrink as i32,
         bg[0] / 255.0, bg[1] / 255.0, bg[2] / 255.0, clip.params.digital_lens.is_some() as i32,
         (opts.chromatic && opts.mode != Mode::Planes) as i32, opts.chromatic_fast as i32, opts.edge_fill.is_some() as i32, opts.edge_fill.unwrap_or(0.0),
@@ -739,7 +739,7 @@ pub fn denoise_shader(clip: &Clip, opts: &Options, table: &Table, size: (usize, 
     dn_layout(slot, MAX_TEX)?;
     let opts = Options { mode: Mode::Exact, denoise: true, ..*opts };
     let passes = denoise_passes(clip, &opts, &defines(clip, &opts, table), &[], slot);
-    Some(fill_head(table, "", &passes, opts.time_offset))
+    Some(fill_head(table, "", &passes, opts.time_offset, clip.fps))
 }
 
 /// How the ring's slots of `slot` pixels go into one texture of at most `max` a side: (across, down), the fewest
@@ -816,15 +816,17 @@ pub fn shader(clip: &Clip, opts: &Options, table: &Table) -> String { shader_wit
 
 /// The same with the translation compensation kept for the clip (translation.rs)
 pub fn shader_with(clip: &Clip, opts: &Options, table: &Table, trans: Option<&[[f32; 2]]>) -> String {
-    fill_head(table, &table.hex(), &passes(clip, opts, table, trans), opts.time_offset)
+    fill_head(table, &table.hex(), &passes(clip, opts, table, trans), opts.time_offset, clip.fps)
 }
 
-/// warp.glsl's head with the table's size and data, the passes and the moment's start (`time_offset`, a parameter:
-/// the code stays the same from one moment to the next, for mpv's pipeline cache)
-fn fill_head(table: &Table, hex: &str, passes: &str, time_offset: f64) -> String {
+/// warp.glsl's head with the table's size and data, the passes, the moment's start (`time_offset`) and the clip's frame
+/// rate (`fps`): parameters, so the code stays the same from one moment, and one frame rate, to the next, for mpv's
+/// pipeline cache
+fn fill_head(table: &Table, hex: &str, passes: &str, time_offset: f64, fps: f64) -> String {
     let (head, _, _) = sections();
     head.replace("@TABLE_W@", &table.width.to_string()).replace("@TABLE_H@", &table.height.to_string())
-        .replace("@TIME_OFFSET@", &format!("{time_offset:.6}")).replace("@TABLE_HEX@", hex).replace("@PASSES@", passes)
+        .replace("@TIME_OFFSET@", &format!("{time_offset:.6}")).replace("@FPS@", &format!("{fps:.9}"))
+        .replace("@TABLE_HEX@", hex).replace("@PASSES@", passes)
 }
 
 /// The GPU path's 360 mode: a 360 camera's sphere shader (warp.glsl's sphere360 and stamp360 passes) for its lens
@@ -886,7 +888,7 @@ pub fn sphere_shader(prep: &crate::sphere360::Prepared360, time_offset: f64) -> 
     let passes = format!("//!TEXTURE GYROFLOW_WEIGHTS\n//!SIZE {ww} {wh}\n//!FORMAT rgba8\n//!FILTER LINEAR\n{hex}\n\n{}",
         hook_pass(clip, &d(&["//!HOOK MAIN", "//!BIND HOOKED", "//!BIND GYROFLOW_TABLE", "//!BIND GYROFLOW_WEIGHTS", &format!("//!WIDTH {sw}"), &format!("//!HEIGHT {sh}"),
                             "//!WHEN gyroflow_gpu_on", "//!DESC gyroflow 360 sphere"]), &defs, &format!("#undef target_size\n#define target_size vec2({}.0, {}.0)\n#define RT target_size", prep.sphere.0, prep.sphere.1), pass_body("sphere360")));
-    Ok((fill_head(&table, &table.hex(), &passes, time_offset), (sw, sh)))
+    Ok((fill_head(&table, &table.hex(), &passes, time_offset, clip.fps), (sw, sh)))
 }
 
 /// Each row's 3x3 (row-major, `M·d`) as a quaternion (x, y, z, w), signs kept continuous along the rows
@@ -1021,7 +1023,8 @@ mod tests {
     /// Pass `name` as a shader for naga: "grid" a compute shader, the others fragment shaders
     fn glsl(clip: &Clip, opts: &Options, table: &Table, name: &str, uv_out: bool) -> String {
         let compute = name == "grid" || name.starts_with("sphere_");
-        let mut defs = defines(clip, opts, table);
+        // The frame rate is a parameter in libplacebo's passes (fill_head); a constant here
+        let mut defs = format!("#define gyroflow_fps {:.9}\n", clip.fps) + &defines(clip, opts, table);
         if name == "grid" { defs += "\n#define GRID_PASS"; }
         // The sphere's four passes, one body (as sphere_passes puts them), with its buffer. naga's GLSL front end has no
         // atomicAdd nor memoryBarrierBuffer, and takes barrier() for a subgroup barrier wgpu won't validate here (the
@@ -1200,12 +1203,12 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
     #[test]
     fn parameter_defaults_and_look_shaders() {
         let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
-        let text = fill_head(&t, "", "PASSES", 1.5);
+        let text = fill_head(&t, "", "PASSES", 1.5, 29.97);
         let text = set_param_default(&text, "gyroflow_dn_radius", 3.0).unwrap();
         let text = set_param_default(&text, "gyroflow_cam_zoom", 1.25).unwrap();
         let params = crate::user_shader::param_values(&text).expect("parses");
         assert!(params.contains(&("gyroflow_dn_radius".to_string(), 3.0)) && params.contains(&("gyroflow_cam_zoom".to_string(), 1.25)), "{params:?}");
-        assert!(params.contains(&("gyroflow_time_offset".to_string(), 1.5)));
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 1.5)) && params.contains(&("gyroflow_fps".to_string(), 29.97)));
         assert!(set_param_default(&text, "nope", 1.0).is_err());
         let dir = std::env::temp_dir().join(format!("afp-look-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
@@ -1225,7 +1228,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         // ffmpeg's libplacebo filter feeds no PTS: each pass takes its frame from libplacebo's pass counter
         let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
         let body = "//!HOOK LUMA\n//!DESC a\n#define SRC_W 1\nx\n//!HOOK CHROMA\n//!DESC b\n#define SRC_W 1\ny\n//!HOOK MAIN\n#define SRC_W 1\n";
-        let text = fill_head(&t, "", body, 0.0);
+        let text = fill_head(&t, "", body, 0.0, 25.0);
         assert_eq!((passes_per_frame(&text, 1), passes_per_frame(&text, 2)), (3, 4));
         let lp = for_libplacebo(&text, 3).unwrap();
         assert!(!lp.contains("//!PARAM PTS"));
@@ -1238,16 +1241,18 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
 
     #[test]
     fn moments_differ_only_in_a_parameter() {
-        // Two moments of one clip: the same code (mpv's pipeline cache hits), only the parameter's value differs
+        // Two moments of one clip, and of clips of two frame rates: the same code (mpv's pipeline cache hits), only the
+        // parameters' values differ
         let t = Table { width: 4, height: 1, data: vec![0.0; 16], block: 4, cols: 1, per_frame: 2 };
-        let (a, b) = (fill_head(&t, "", "PASSES", 2.909), fill_head(&t, "", "PASSES", 38.887));
+        let (a, b) = (fill_head(&t, "", "PASSES", 2.909, 29.97002997), fill_head(&t, "", "PASSES", 38.887, 25.0));
         let diff: Vec<(&str, &str)> = a.lines().zip(b.lines()).filter(|(x, y)| x != y).collect();
-        assert_eq!(diff, vec![("2.909000", "38.887000")]);
+        assert_eq!(diff, vec![("2.909000", "38.887000"), ("29.970029970", "25.000000000")]);
         assert!(a.contains("//!PARAM gyroflow_time_offset\n//!TYPE DYNAMIC float\n2.909000\n"));
-        for mark in ["@TABLE_W@", "@TABLE_H@", "@TABLE_HEX@", "@TIME_OFFSET@", "@PASSES@"] { assert!(!a.contains(mark), "{mark} left"); }
+        assert!(a.contains("//!PARAM gyroflow_fps\n//!TYPE DYNAMIC float\n29.970029970\n"));
+        for mark in ["@TABLE_W@", "@TABLE_H@", "@TABLE_HEX@", "@TIME_OFFSET@", "@FPS@", "@PASSES@"] { assert!(!a.contains(mark), "{mark} left"); }
         // Every block's data as libplacebo reads it (a comment between blocks broke a PARAM's value once)
         let params = crate::user_shader::param_values(&a).expect("the head parses");
-        assert!(params.contains(&("gyroflow_time_offset".to_string(), 2.909)), "{params:?}");
+        assert!(params.contains(&("gyroflow_time_offset".to_string(), 2.909)) && params.contains(&("gyroflow_fps".to_string(), 29.97002997)), "{params:?}");
     }
 
     #[test]
