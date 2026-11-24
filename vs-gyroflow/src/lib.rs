@@ -38,6 +38,7 @@ pub mod markers;
 pub mod mp4meta;
 pub mod cut;
 pub mod photo;
+pub mod uwcolor;
 pub mod xmp;
 pub mod stamp;
 pub mod rig;

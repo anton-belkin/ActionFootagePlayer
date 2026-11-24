@@ -66,7 +66,15 @@ folder with Project.afproject in it above the video, as the player initializes i
 folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
-                   one the camera's metadata says
+                   one the camera's metadata says; or uw, the underwater colour (as --uw-color yes, whatever the clip)
+  --uw-color <yes|no>  the player's underwater colour (#273: shaders/underwater_hlg.glsl, the dlogm plugin's curve
+                   \"uw\") for a plain SDR clip, one that's neither log nor HDR: corrected and made HLG, then in the look
+                   asked for as a log curve's HLG is. Its numbers are measured as the player measures them (src/uwcolor.rs):
+                   the frame itself for a photo or a still; for a video a few times a second, half a second ahead, eased
+                   from one to the next as playback has them (the GPU path can't change them by the frame: the pipes)
+  --uw-strength <0..1>  its strength, between the camera's colour (0) and the correction (1, the default)
+  --uw-highlights <yes|no>  the light end stretched into HDR's room (2.5x SDR white for the camera's white); no by default
+  --uw-params <dr,db,k,ev>  its numbers as given (the player's at the frame shown), for every frame, not measured
   --sdr            D-Log M to Rec.709 (DJI's LUT) instead of HLG
   --nbcu           to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve); an HDR file
                    that isn't log through NBCU's HLG or PQ -> SDR
@@ -218,11 +226,18 @@ QuickTime location): the camera's GPS at that time, else the clip's location in 
   --quality <0-100>  the image's quality (default 92)";
 
 // The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
-const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log")];
+const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log"),
+                                  // Not a log curve: the underwater colour, which the player shows as one (its LUT: Uw's)
+                                  ("uw", "Underwater colour")];
 
 struct Options {
     // None: from the metadata; Some(None): none
     curve: Option<Option<&'static str>>,
+    // --uw-color: the underwater colour where the clip has no curve (not log, not HDR); its strength and highlights;
+    // --uw-params, its numbers as the player has them
+    uw: bool,
+    uw_settings: vs_gyroflow::uwcolor::Settings,
+    uw_params: Option<vs_gyroflow::uwcolor::Estimate>,
     sdr: bool,
     nbcu: bool,
     no_stabilize: bool,
@@ -335,7 +350,7 @@ fn main() {
     }
     vs_gyroflow::init_logging();
     catch_signals();
-    let mut opts = Options { curve: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
+    let mut opts = Options { curve: None, uw: false, uw_settings: Default::default(), uw_params: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
                              interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, resolution: None, encode_quality: false, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
@@ -350,8 +365,17 @@ fn main() {
             "--curve" => opts.curve = Some(match value("--curve").as_str() {
                 "none" => None,
                 c => Some(CURVES.iter().find(|(id, _)| *id == c).map(|(id, _)| *id)
-                    .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, none)")))),
+                    .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, uw, none)")))),
             }),
+            "--uw-color" => opts.uw = yes_no("--uw-color", &value("--uw-color")),
+            "--uw-strength" => opts.uw_settings.strength = value("--uw-strength").parse::<f64>().ok().filter(|v| (0.0..=1.0).contains(v))
+                .unwrap_or_else(|| fail("--uw-strength takes 0-1")),
+            "--uw-highlights" => opts.uw_settings.highlights = yes_no("--uw-highlights", &value("--uw-highlights")),
+            "--uw-params" => {
+                let v: Vec<f64> = value("--uw-params").split(',').filter_map(|x| x.trim().parse::<f64>().ok()).filter(|x| x.is_finite()).collect();
+                if v.len() != 4 { fail("--uw-params takes dr,db,k,ev: four numbers"); }
+                opts.uw_params = Some(vs_gyroflow::uwcolor::Estimate { dr: v[0], db: v[1], k: v[2], ev: v[3], f: 1.0 });
+            }
             "--sdr" => opts.sdr = true,
             "--nbcu" => opts.nbcu = true,
             "--no-stabilize" => opts.no_stabilize = true,
@@ -870,7 +894,7 @@ struct VideoInfo {
 
 fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
     let out = ffmpeg_command("ffprobe").args(["-v", "error", "-select_streams", "v:0", "-show_entries",
-        "stream=width,height,r_frame_rate,nb_frames,duration,bit_rate,color_range,color_primaries,color_transfer,color_space:format=duration:format_tags=creation_time",
+        "stream=width,height,r_frame_rate,nb_frames,duration,bit_rate,pix_fmt,color_range,color_primaries,color_transfer,color_space:format=duration:format_tags=creation_time",
         "-of", "json"]).arg(path).output().map_err(|e| format!("ffprobe: {e}"))?;
     if !out.status.success() { return Err(format!("ffprobe: {}", String::from_utf8_lossy(&out.stderr).trim())); }
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())?;
@@ -888,7 +912,9 @@ fn ffprobe(path: &Path) -> Result<VideoInfo, String> {
         frames: num(&st["nb_frames"]).map(|x| x as u64).unwrap_or((duration * fps.0 as f64 / fps.1 as f64) as u64),
         duration,
         bit_rate: num(&st["bit_rate"]).map(|x| x as u64),
-        full_range: st["color_range"].as_str() == Some("pc"),
+        // A JPEG pixel format is full range whatever the stream says: its frames are (the decoder's VUI flag), and mpv
+        // decodes them so (old GoPros' H.264: yuvj420p in a stream tagged tv)
+        full_range: st["color_range"].as_str() == Some("pc") || st["pix_fmt"].as_str().is_some_and(|f| f.starts_with("yuvj")),
         created: json["format"]["tags"]["creation_time"].as_str().map(str::to_string),
         primaries: tag("color_primaries"),
         transfer: tag("color_transfer"),
@@ -1162,6 +1188,116 @@ fn hdr_in(path: &Path) -> bool {
     ffprobe(path).is_ok_and(|i| matches!(i.transfer.as_deref(), Some("arib-std-b67" | "smpte2084")))
 }
 
+fn yes_no(name: &str, v: &str) -> bool {
+    match v { "yes" | "true" | "1" => true, "no" | "false" | "0" => false, _ => fail(&format!("{name} takes yes or no")) }
+}
+
+// The clip's curve as the dlogm plugin picks it: --curve, else the camera's metadata; with --uw-color, the underwater
+// colour ("uw") for a clip with none that isn't HDR either (dlogm's uw_ok)
+fn clip_curve(opts: &Options, path: &Path) -> Option<&'static str> {
+    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    if curve.is_none() && opts.uw && !hdr_in(path) { Some("uw") } else { curve }
+}
+
+// The underwater colour of one export (src/uwcolor.rs): its numbers frame by frame as playback has them, and a LUT of
+// them (their median, for a video) for the paths that take only one: ffmpeg's lut3d, the GPU path's look shader,
+// YouTube's, a flipbook, a 360 export. A video on the pipes gets each frame's own on the GPU (gpu_lut.rs)
+struct Uw {
+    schedule: vs_gyroflow::uwcolor::Schedule,
+    settings: vs_gyroflow::uwcolor::Settings,
+    // The same numbers throughout (a photo, a still, --uw-params): the GPU path can take it
+    fixed: bool,
+    cube: TempFile,
+}
+
+// What an export of the underwater colour is measured for
+enum UwSpan {
+    // One frame, as the player measures the frame it's paused on
+    Still(f64),
+    // Played from `from` to `to`, as playback measures and eases
+    Played(f64, f64),
+    // Frames here and there (a flipbook, a 360 export): one set of numbers, their median
+    Median(Vec<f64>),
+}
+
+// uwcolor.rs's cube, 33 points a side as the curves' own LUTs (within 0.01 of the shader where it's smooth)
+const UW_CUBE: usize = 33;
+
+impl Uw {
+    fn new(path: &Path, opts: &Options, span: UwSpan, dir: &Path, stem: &str) -> Result<Uw, String> {
+        use vs_gyroflow::uwcolor::{ self as uw, Schedule };
+        let (schedule, fixed) = match (opts.uw_params, span) {
+            (Some(e), _) => (Schedule::fixed(e), true),
+            (None, UwSpan::Still(t)) => (Schedule::fixed(uw_measure(path, &[t])?[0]), true),
+            (None, UwSpan::Median(times)) => (Schedule::fixed(Schedule::new(0.0, uw_measure(path, &times)?).median()), true),
+            (None, UwSpan::Played(from, to)) => (Schedule::new(from, uw_measure(path, &uw::measure_times(from, to))?), false),
+        };
+        let p = uw::Params::new(&schedule.median(), &opts.uw_settings).clamped();
+        let cube = TempFile(dir.join(format!(".{stem}.uw.cube")));
+        std::fs::write(&cube.0, p.cube(UW_CUBE, "the underwater colour, by gyroflow-export")).map_err(|e| format!("{}: {e}", cube.0.display()))?;
+        Ok(Uw { schedule, settings: opts.uw_settings, fixed, cube })
+    }
+
+    /// The shader's numbers at each of `times` (seconds in the clip)
+    fn params_at(&self, times: &[f64]) -> Vec<[f32; 6]> {
+        self.schedule.at(times).iter().map(|e| vs_gyroflow::uwcolor::Params::new(e, &self.settings).clamped().array()).collect()
+    }
+
+    fn label(&self) -> String {
+        let p = vs_gyroflow::uwcolor::Params::new(&self.schedule.median(), &self.settings);
+        format!("{}strength {:.2}{}", if self.fixed { format!("red {:+.4}, blue {:+.4}, leak {:.4}, lift {:+.4} EV, ", p.dr, p.db, p.k, p.ev) } else { "measured as it plays, ".into() },
+                p.s, if p.hp != 1.0 { ", highlights" } else { "" })
+    }
+}
+
+// The underwater colour's numbers for the frames at `times` (seconds), as the player's uwcolor.lua measures one: the
+// frame decoded (VideoToolbox on macOS), 960x540 by area, bgr0 (uwcolor::estimate_bgr0). Times MIN_GAP apart from
+// one decoder (a video's), others each by its own
+fn uw_measure(path: &Path, times: &[f64]) -> Result<Vec<vs_gyroflow::uwcolor::Estimate>, String> {
+    use vs_gyroflow::uwcolor::{ self as uw, GRID, MIN_GAP };
+    let frame_bytes = GRID.0 * 3 * GRID.1 * 3 * 4;
+    let run = |at: f64, count: usize, regular: bool| -> Result<Vec<uw::Estimate>, String> {
+        let mut cmd = ffmpeg_command("ffmpeg");
+        cmd.args(["-v", "error", "-nostdin"]);
+        if cfg!(target_os = "macos") { cmd.args(["-hwaccel", "videotoolbox"]); }
+        let scale = format!("scale={}:{}:flags=area", GRID.0 * 3, GRID.1 * 3);
+        let vf = if regular { format!("fps=fps={:.6},{scale}", 1.0 / MIN_GAP) } else { scale };
+        cmd.args(["-ss", &format!("{:.3}", at.max(0.0)), "-i"]).arg(path)
+            .args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "bgr0", "-"])
+            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
+        let mut out = child.stdout.take().unwrap();
+        let mut got = Vec::with_capacity(count);
+        let mut buf = vec![0u8; frame_bytes];
+        while got.len() < count && out.read_exact(&mut buf).is_ok() {
+            if stopped() { let _ = child.kill(); return Err("cancelled".into()); }
+            got.push(uw::estimate_bgr0(&buf)?);
+        }
+        let _ = child.kill();
+        let status = child.wait_with_output().map_err(|e| format!("ffmpeg: {e}"))?;
+        if got.is_empty() { return Err(format!("the underwater colour: no frame at {at:.2} s ({})", String::from_utf8_lossy(&status.stderr).trim())); }
+        Ok(got)
+    };
+    let regular = times.len() > 2 && times.windows(2).all(|w| (w[1] - w[0] - MIN_GAP).abs() < 1e-6);
+    let mut v = if regular {
+        run(times[0], times.len(), true)?
+    } else {
+        // A few at a time
+        let mut v = Vec::with_capacity(times.len());
+        for chunk in times.chunks(4) {
+            let got: Vec<Result<Vec<uw::Estimate>, String>> = std::thread::scope(|s| {
+                let hs: Vec<_> = chunk.iter().map(|&t| s.spawn(move || run(t, 1, false))).collect();
+                hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("the underwater colour: a measurement failed".into()))).collect()
+            });
+            for g in got { v.push(g?[0]); }
+        }
+        v
+    };
+    // Past the clip's end: its last frame's
+    while v.len() < times.len() { let last = *v.last().unwrap(); v.push(last); }
+    Ok(v)
+}
+
 // A file removed when it goes out of scope, however the export ends
 struct TempFile(PathBuf);
 
@@ -1239,14 +1375,17 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
         .into_iter().map(|t| t.clamp(0.0, last)).collect();
     let cover_at = opts.cover.unwrap_or(info.duration / 2.0);
 
-    // The look, as a still's: D-Log M by the maker's LUT, another curve through NBCU's, HLG through NBCU's
-    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    // The look, as a still's: D-Log M by the maker's LUT, another curve through NBCU's, HLG through NBCU's; the
+    // underwater colour by its numbers at the flipbook's frames (their median: one LUT for them all)
+    let curve = clip_curve(opts, &path);
+    let uw = match curve { Some("uw") => Some(Uw::new(&source, opts, UwSpan::Median(times.clone()), &out_dir, &name)?), _ => None };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
     let mut _temp_lut = None;
     let cube = match curve {
         Some("dlogm") if !opts.nbcu && lut("dji-dlogm-rec709.cube").is_ok() => Some(lut("dji-dlogm-rec709.cube")?),
         Some(c) => {
             let composed = out_dir.join(format!(".{name}.nbcu.cube"));
-            gpu_lut::compose_nbcu(&lut(&format!("{c}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+            gpu_lut::compose_nbcu(&curve_lut(c)?, &lut(NBCU_HLG)?, &composed)?;
             _temp_lut = Some(TempFile(composed.clone()));
             Some(composed)
         }
@@ -1356,6 +1495,8 @@ struct Part {
     location: Option<String>,
     // When its photo was taken, as its QuickTime creation date
     created: Option<String>,
+    // Its photo's time: the underwater colour's numbers its frame's throughout, as the photo has them
+    still: Option<f64>,
 }
 
 // How much a player turns the video to show it upright, clockwise (its display matrix, mp4meta.rs); 0 when unknown
@@ -1380,7 +1521,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // For YouTube (src/youtube.rs): a video export's own kind
     let youtube = opts.youtube.filter(|_| part.is_none() && opts.preview.is_none());
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
-    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    let curve = clip_curve(opts, &path);
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
     let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref(), opts.lens) };
     let source = match (source, curve) {
@@ -1439,6 +1580,25 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     };
     let final_tmp = if youtube.is_some() { out_dir.join(format!(".{stem}.partial.{ext}")) } else { tmp_path.clone() };
 
+    // The underwater colour (curve "uw"): its numbers over the export, as playback has them; a still's, its frame's.
+    // A photo's motion, its photo's frame's (Part::still), so the two match
+    let uw = match curve {
+        Some("uw") => {
+            let (f, t) = (opt_from.unwrap_or(0.0).max(0.0), opt_to.unwrap_or(info.duration).min(info.duration));
+            let span = match (preview, part.and_then(|p| p.still)) {
+                (Some(_), _) => UwSpan::Still(opts.at.unwrap_or((f + t) / 2.0)),
+                (None, Some(at)) => UwSpan::Still(at),
+                (None, None) => UwSpan::Played(f, t),
+            };
+            Some(Uw::new(&path, opts, span, &out_dir, &stem)?)
+        }
+        _ => None,
+    };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
+    // On the pipes' GPU LUT, each frame's own numbers, exactly as the shader (gpu_lut.rs): what comes after it, a LUT
+    // from its HLG to SDR (NBCU's) or none
+    let mut uw_after: Option<Option<PathBuf>> = None;
+
     // Color: the LUT works in RGB (mpv's shader too: it reads MAIN, the decoded RGB), from the source's matrix and
     // range, and the result is converted back to YUV in the target's matrix. On the GPU (gpu_lut.rs) when the
     // output size allows, else ffmpeg's lut3d on the CPU, at a third of the speed. Only D-Log M has a maker's
@@ -1448,6 +1608,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let in_matrix = yuv_matrix(info.matrix.as_deref());
     let mut lut_job = None;
     let mut _temp_lut = None; // kept until the export ends
+    let mut _uw_temp = None;
     // A preview is in SDR: D-Log M by the maker's LUT when it's there, everything else through NBCU's conversion. A
     // Motion Photo's video too, in its image's look (Part::sdr)
     let part_sdr = part.and_then(|p| p.sdr);
@@ -1470,7 +1631,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let look_name = if look == Look::Maker { "DJI's LUT" } else { "NBCU" };
         // The video: a log curve's HLG, or an HLG clip, made PQ by one LUT; a PQ clip as it is
         let (log_hlg, name) = match (curve, info.transfer.as_deref()) {
-            (Some(c), _) => (Some(lut(&format!("{c}_hlg.cube"))?), CURVES.iter().find(|(id, _)| *id == c).map_or(c, |(_, name)| *name)),
+            (Some(c), _) => (Some(curve_lut(c)?), CURVES.iter().find(|(id, _)| *id == c).map_or(c, |(_, name)| *name)),
             (None, Some("arib-std-b67")) => (None, "HLG"),
             (None, Some("smpte2084")) => (None, "PQ"),
             _ => return Err("--youtube: an HDR video, for a log or HDR (HLG, PQ) clip".into()),
@@ -1503,15 +1664,23 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
         let (cube, matrix, primaries, transfer, label) = if nbcu {
             let composed = out_dir.join(format!(".{stem}.nbcu.cube"));
-            gpu_lut::compose_nbcu(&lut(&format!("{curve}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+            gpu_lut::compose_nbcu(&curve_lut(curve)?, &lut(NBCU_HLG)?, &composed)?;
             _temp_lut = Some(TempFile(composed.clone()));
+            if uw.is_some() {
+                let after = out_dir.join(format!(".{stem}.hlg-nbcu.cube"));
+                gpu_lut::compose_nbcu_after_hlg(&lut(NBCU_HLG)?, &after)?;
+                _uw_temp = Some(TempFile(after.clone()));
+                uw_after = Some(Some(after));
+            }
             (composed, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (NBCU)"))
         } else if maker_sdr {
             (lut("dji-dlogm-rec709.cube")?, "bt709", "bt709", "bt709", format!("{name} -> Rec.709 (DJI's LUT)"))
         } else {
             let no_sdr = if opts.sdr { " (no Rec.709 LUT for it)" } else { "" };
-            (lut(&format!("{curve}_hlg.cube"))?, "bt2020", "bt2020", "arib-std-b67", format!("{name} -> HLG{no_sdr}"))
+            if uw.is_some() { uw_after = Some(None); }
+            (curve_lut(curve)?, "bt2020", "bt2020", "arib-std-b67", format!("{name} -> HLG{no_sdr}"))
         };
+        let label = match &uw { Some(u) => format!("{label}: {}", u.label()), None => label };
         let graph = format!("scale=in_color_matrix={in_matrix}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,\
                              scale=out_color_matrix={matrix}:out_range=tv", filter_path(&cube));
         lut_job = Some((cube, matrix, graph));
@@ -1660,16 +1829,34 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let measure = if youtube.is_some() { gpu_lut::Measure::PqNits }
                 else if opts.dv_live_l1 && dv_rpus.is_some() && tags[1] == "arib-std-b67" { gpu_lut::Measure::HlgL1 }
                 else { gpu_lut::Measure::None };
-            match GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix, measure) {
+            let made = match &uw_after {
+                Some(after) => GpuLut::with_look(after.as_deref(), true, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix, measure),
+                None => GpuLut::new(&cube, ow, oh, gpu_lut::matrix_coefficients(in_matrix).unwrap(), info.full_range, out_matrix, measure),
+            };
+            match made {
                 Ok(l) => Some(l),
                 Err(e) => {
                     eprintln!("  LUT on the CPU (slower): {e}");
+                    // The underwater colour's numbers can't change by the frame there: their median throughout
+                    if uw.as_ref().is_some_and(|u| !u.fixed) { eprintln!("  the underwater colour: one set of numbers for the whole export"); }
+                    uw_after = None;
                     graph = cpu_graph;
                     None
                 }
             }
         }
     };
+
+    // Each frame's underwater colour numbers for the pipes' GPU LUT, by frame index from the first one decoded
+    let uw_frames: Option<Arc<(u64, Vec<[f32; 6]>)>> = match (&uw, &uw_after, &gpu_lut) {
+        (Some(u), Some(_), Some(_)) => {
+            let base = dec_first.min(first_frame);
+            let times: Vec<f64> = (base..=dec_last.max(last_frame)).map(|i| i as f64 / fps).collect();
+            Some(Arc::new((base, u.params_at(&times))))
+        }
+        _ => None,
+    };
+    let uw_of = |f: &(u64, Vec<[f32; 6]>), index: u64| f.1[(index.saturating_sub(f.0) as usize).min(f.1.len() - 1)];
 
     let duration_label = { let t = (to - from).max(0.0) as u64; format!("{}:{:02}", t / 60, t % 60) };
     let mut source_label = source.as_ref().map_or("color only", |s| s.label).to_string();
@@ -1693,6 +1880,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     if preview.is_none() && part.is_none() && opts.gpu != Some(false) {
         let why: Result<GpuPlan, String> = (|| {
             if youtube.is_some() { return Err("the YouTube export".to_string()); }
+            if uw.as_ref().is_some_and(|u| !u.fixed) { return Err("the underwater colour's numbers change by the frame".to_string()); }
             // Asked for by name: only the GPU path draws it
             if opts.with_translation { gpu_setup(&path).map_err(|e| format!("--with-translation needs the GPU path: {e}"))?; }
             if opts.crop.is_some() { return Err("--crop".to_string()); }
@@ -1906,9 +2094,14 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let (frame_rx, done_tx, engine) = (frame_rx.clone(), done_tx.clone(), engine.clone());
         let full_range = info.full_range;
         let mut lut = if post.is_some() { None } else { gpu_lut.as_ref().map(|l| l.worker()) };
+        let uw_frames = uw_frames.clone();
         std::thread::spawn(move || {
             loop {
                 let Ok((n, src)) = frame_rx.lock().recv() else { break };
+                // The underwater colour's numbers for this frame
+                if let (Some(l), Some(f)) = (lut.as_mut(), &uw_frames) {
+                    l.set_uw(uw_of(f, if all_frames { dec_first + n } else { first_frame + n * step }));
+                }
                 let frame = match &engine {
                     None => Ok(src),
                     Some(engine) => {
@@ -1956,13 +2149,16 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             let mut lut = gpu_lut.as_ref().map(|l| l.worker());
             let l1_tx = l1_tx.take();
             let written = written.clone();
+            let uw_frames = uw_frames.clone();
             let first = if all_frames { dec_first } else { first_frame };
             post_thread = Some(std::thread::spawn(move || -> Result<(), String> {
                 // The LUT and the encoder on a thread of their own, beside the shaders
                 let (out_tx, out_rx) = mpsc::sync_channel::<Vec<u8>>(2);
                 let writer = std::thread::spawn(move || -> Result<(), String> {
                     let mut enc_in = enc_in;
-                    for mut f in out_rx {
+                    for (k, mut f) in out_rx.into_iter().enumerate() {
+                        // The export's own frames, every `step`th from the first (emit below)
+                        if let (Some(l), Some(u)) = (lut.as_mut(), &uw_frames) { l.set_uw(uw_of(u, first_frame + k as u64 * step)); }
                         let l1 = match lut.as_mut() { Some(l) => l.apply(&mut f)?, None => None };
                         if let Some(tx) = &l1_tx { let _ = tx.send(l1.map(|v| v.map(|x| x.round() as i32))); }
                         enc_in.write_all(&f).map_err(|e| format!("encoder stopped: {e}"))?;
@@ -2825,7 +3021,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let clock = Instant::now();
     let lap = |what: &str| if std::env::var_os("AFP_TIMES").is_some() { eprintln!("  [{:6.2} s] {what}", clock.elapsed().as_secs_f64()) };
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
-    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&path.to_string_lossy()));
+    let curve = clip_curve(opts, &path);
     let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref(), opts.lens).ok() };
     let info = ffprobe(&path)?;
     if info.transfer.as_deref() == Some("smpte2084") && curve.is_none() {
@@ -3070,11 +3266,25 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
         let even = |v: f64| (v.round() as usize) & !1;
         let (x0, y0) = (even(cx * rw as f64).min(rw - 2), even(cy * rh as f64).min(rh - 2));
         let rect = (x0, y0, even(cw * rw as f64).clamp(2, rw - x0), even(ch * rh as f64).clamp(2, rh - y0));
-        let rgb = ph::yuv420p10_to_rgb([&planes[0], &planes[1], &planes[2]], rw, rh, rect, yuv_matrix(info.matrix.as_deref()), info.full_range);
+        let rgb = ph::yuv420p10_to_rgb_as([&planes[0], &planes[1], &planes[2]], rw, rh, rect, yuv_matrix(info.matrix.as_deref()), info.full_range,
+                                          curve != Some("uw"));
         drop(planes);
 
-        // The HDR look (HLG: the curve's LUT, or the video's own), and the SDR one the image is (--sdr-image)
-        let (hdr, recorded) = if let Some(curve) = curve {
+        // The HDR look (HLG: the curve's LUT, or the video's own), and the SDR one the image is (--sdr-image). The
+        // underwater colour pixel by pixel as the shader does it, with the numbers of the frame as the player has them
+        // paused on it (--uw-params: as it has them now)
+        let (hdr, recorded) = if curve == Some("uw") {
+            use vs_gyroflow::uwcolor::Params;
+            let e = match opts.uw_params { Some(e) => e, None => uw_measure(&path, &[t])?[0] };
+            let p = Params::new(&e, &opts.uw_settings).clamped();
+            lap("the underwater colour measured");
+            let mut pixels = rgb.pixels.clone();
+            let chunk = pixels.len().div_ceil(8).max(1);
+            std::thread::scope(|s| for part in pixels.chunks_mut(chunk) { s.spawn(move || for c in part.iter_mut() { *c = p.to_hlg(*c); }); });
+            let hdr = ph::Image { width: rgb.width, height: rgb.height, pixels };
+            (Some(hdr), format!("underwater colour (red {:+.4}, blue {:+.4}, leak {:.4}, lift {:+.4} EV, strength {:.2}{})",
+                                p.dr, p.db, p.k, p.ev, p.s, if p.hp != 1.0 { ", highlights" } else { "" }))
+        } else if let Some(curve) = curve {
             (Some(Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb)), curve.to_string())
         } else if info.transfer.as_deref() == Some("arib-std-b67") {
             (Some(rgb.clone()), "HLG".to_string())
@@ -3119,7 +3329,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             let to = (t + half).min(info.duration.max(from + 1.0 / fps));
             let video = out_dir.join(format!(".{}.motion.{}", out_path.file_name().unwrap().to_string_lossy(), if jpeg { "mp4" } else { "mov" }));
             let part = Part { from, to, out: video.clone(), max_side: LIVE_MAX_SIDE, bits_per_pixel: LIVE_BITS_PER_PIXEL, max_fps: LIVE_MAX_FPS, mp4: jpeg, dv: !jpeg, sdr: motion_sdr,
-                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)), created: dates.map(|(d, _)| d.quicktime()) };
+                              location: place.map(|p| vs_gyroflow::geotag::to_iso6709(&p.0)), created: dates.map(|(d, _)| d.quicktime()), still: Some(t) };
             // The photo's frame in it: the part starts at `first`
             let at = (n - first) as f64 / fps;
             scope.spawn(move || {
@@ -3141,6 +3351,12 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             }
             _ => (sdr, hdr),
         };
+        // For tests (tests/uw_export_check.py): the two renditions as written into the file, 16-bit RGB, here
+        if let Some(dir) = std::env::var_os("AFP_PHOTO_RENDITIONS").map(PathBuf::from) {
+            let stem = out_path.file_stem().unwrap_or_default().to_string_lossy().to_string();
+            ph::write_rgb16(&dir.join(format!("{stem}.sdr.{}x{}.rgb16", sdr.width, sdr.height)), &sdr)?;
+            if let Some(h) = &hdr { ph::write_rgb16(&dir.join(format!("{stem}.hdr.{}x{}.rgb16", h.width, h.height)), h)?; }
+        }
         let live = match motion.map(|m| m.join()) {
             None => None,
             Some(Ok(Ok(v))) => Some(v),
@@ -3505,22 +3721,29 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
     let mut decoder = dec_cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
     // The look, as it plays: a log curve's LUT to HLG, or to Rec.709 (--sdr: the maker's LUT, D-Log M's; --nbcu:
     // NBCU's from the HLG), in RGB from the source's matrix; else the colors as recorded, BT.709
-    let curve = opts.curve.unwrap_or_else(|| probe::log_curve(&video));
+    let curve = clip_curve(opts, &path);
     let in_range = if info.full_range { "pc" } else { "tv" };
     let mut _temp_lut = None;
+    // The underwater colour: one LUT, its numbers' median over what's exported
+    let uw = match curve {
+        Some("uw") => Some(Uw::new(&path, opts, UwSpan::Median(vs_gyroflow::uwcolor::measure_times(from, to)), &out_dir,
+                                   &out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default())?),
+        _ => None,
+    };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
     let (look_vf, tags, look_label) = match curve {
         None => ("scale=out_range=tv:out_color_matrix=bt709".to_string(), ["bt709", "bt709", "bt709"], "colors as recorded".to_string()),
         Some(curve) => {
             let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
             let (cube, tags, label) = if opts.nbcu {
                 let composed = out_dir.join(format!(".{}.nbcu.cube", out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default()));
-                gpu_lut::compose_nbcu(&lut(&format!("{curve}_hlg.cube"))?, &lut(NBCU_HLG)?, &composed)?;
+                gpu_lut::compose_nbcu(&curve_lut(curve)?, &lut(NBCU_HLG)?, &composed)?;
                 _temp_lut = Some(TempFile(composed.clone()));
                 (composed, ["bt709", "bt709", "bt709"], format!("{name} -> Rec.709 (NBCU)"))
             } else if opts.sdr && curve == "dlogm" {
                 (lut("dji-dlogm-rec709.cube")?, ["bt709", "bt709", "bt709"], format!("{name} -> Rec.709 (DJI's LUT)"))
             } else {
-                (lut(&format!("{curve}_hlg.cube"))?, ["bt2020", "arib-std-b67", "bt2020nc"], format!("{name} -> HLG"))
+                (curve_lut(curve)?, ["bt2020", "arib-std-b67", "bt2020nc"], format!("{name} -> HLG"))
             };
             let matrix = if tags[2] == "bt2020nc" { "bt2020" } else { "bt709" };
             (format!("scale=in_color_matrix={}:in_range={in_range},format=gbrp16le,lut3d=file={}:interp=tetrahedral,scale=out_color_matrix={matrix}:out_range=tv",

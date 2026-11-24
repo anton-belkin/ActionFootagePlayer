@@ -82,6 +82,17 @@ local function valid(k, v)
 end
 M.valid = valid
 
+-- The app's defaults a render is made with (transform.render_settings): the gyroflow plugin's bundle and the dlogm
+-- plugin's underwater colour (uwcolor.conf), the source's where it has none. get: mp.get_property_native
+function M.defaults(get)
+    local out = {}
+    for _, name in ipairs({ "user-data/gyroflow/defaults", "user-data/uwcolor/defaults" }) do
+        local t = get(name)
+        if type(t) == "table" then for k, v in pairs(t) do out[k] = v end end
+    end
+    return out
+end
+
 -- What a key missing from a bundle plays with: the session's of the gyroflow plugin. get: mp.get_property_native
 function M.session(get)
     local out = {}
@@ -214,8 +225,11 @@ function M.render_settings(doc, own, defaults)
     for k, v in pairs(bundle) do rendered[k] = v end
     if type(doc) == "table" then M.migrate_source(doc) end
     for k, v in pairs(type(doc) == "table" and type(doc.source) == "table" and doc.source or {}) do rendered[k] = v end
-    -- The underwater colour only where it's on: a source saved with it off (the Source tab's Save writes it whole)
-    -- renders as one without it, its hash as before (library/src/renders.rs settings, the same)
+    -- The underwater colour (the source's): where the source doesn't say, the defaults' (uwcolor.conf, as it plays
+    -- then: M.defaults). In the recipe only when it's on, so a recipe without it keeps the hash it had
+    for _, k in ipairs(M.UW_KEYS) do
+        if rendered[k] == nil and type(defaults) == "table" and valid(k, defaults[k]) then rendered[k] = defaults[k] end
+    end
     if rendered.uw ~= true then for _, k in ipairs(M.UW_KEYS) do rendered[k] = nil end end
     return bundle, rendered
 end

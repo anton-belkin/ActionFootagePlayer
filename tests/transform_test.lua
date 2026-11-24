@@ -175,6 +175,17 @@ expect("uw: an old bundle's not in a render's bundle", bundle.uw == nil and bund
 expect("uw: an old bundle's not in a render's recipe", rendered.uw == nil and rendered.uw_highlights == nil, true)
 bundle, rendered = t.render_settings({ view = { view = "wide" }, source = { curve = "auto", uw = true, uw_strength = 0.5 } }, nil, { view = "normal" })
 expect("uw: the source's in a render's recipe", rendered.uw == true and rendered.uw_strength == 0.5 and bundle.uw == nil, true)
+bundle, rendered = t.render_settings({ view = { view = "wide" }, source = { curve = "auto", uw = false, uw_highlights = false, uw_strength = 1 } }, nil, { view = "normal" })
+expect("uw off in the source: not in the recipe (its hash as before)", rendered.uw == nil and rendered.uw_highlights == nil and rendered.uw_strength == nil, true)
+bundle, rendered = t.render_settings({ view = { view = "wide" } }, nil, { view = "normal", uw = true, uw_highlights = true, uw_strength = 0.8 })
+expect("uw: the source says nothing, the defaults' on", rendered.uw == true and rendered.uw_highlights == true and rendered.uw_strength == 0.8, true)
+bundle, rendered = t.render_settings({ source = { uw = false } }, nil, { view = "normal", uw = true, uw_strength = 0.8 })
+expect("uw: the source's off over the defaults' on", rendered.uw == nil and rendered.uw_strength == nil, true)
+local d = t.defaults(function(name)
+    if name == "user-data/gyroflow/defaults" then return { view = "normal" } end
+    if name == "user-data/uwcolor/defaults" then return { uw = true, uw_strength = 1 } end
+end)
+expect("defaults: both plugins'", d.view == "normal" and d.uw == true, true)
 expect("uw: never moved out of a view by itself", (function() local d = { view = { uw = true } }; t.migrate_source(d); return d.view.uw == true and d.source == nil end)(), true)
 local got = t.session(function(name)
     if name == "user-data/gyroflow/session" then return { view = "wide" } end

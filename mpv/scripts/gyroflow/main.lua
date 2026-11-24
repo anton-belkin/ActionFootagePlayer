@@ -946,7 +946,11 @@ function publish()
     if DATA and DATA ~= "" then
         local preset
         for _, p in ipairs(PRESETS) do if file_exists(p) then preset = p; break end end
-        local text = utils.format_json({ v = 1, defaults = DEFAULTS, edges = o.edges, edges_blur = o.edges_blur,
+        -- (the underwater colour's defaults with them: the dlogm plugin's uwcolor.conf)
+        local defaults = {}
+        for k, v in pairs(DEFAULTS) do defaults[k] = v end
+        for k, v in pairs(mp.get_property_native("user-data/uwcolor/defaults") or {}) do defaults[k] = v end
+        local text = utils.format_json({ v = 1, defaults = defaults, edges = o.edges, edges_blur = o.edges_blur,
                                          temporal_denoise = o.temporal_denoise, preset = preset })
         if text and text ~= PRESETS.defaults_written then
             local path = utils.join_path(DATA, "render-defaults.json")

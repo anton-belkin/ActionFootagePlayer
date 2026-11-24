@@ -178,5 +178,57 @@ messages["photo-at"]("photo")
 a = last()
 expect("photo-at without the Library's: this player's photo settings (highest)", has(a, "--radius 7"), true)
 
+-- The underwater colour (#273: the dlogm plugin's curve "uw"): every route hands it over, a video's numbers measured
+-- by gyroflow-export as it plays, a photo's as the shader has them now; another clip's from its saved view
+props["user-data/dlogm/look"] = "hdr"
+props["user-data/dlogm/curve"] = "uw"
+props["user-data/uwcolor"] = { uw = true, uw_strength = 0.6, uw_highlights = true }
+props["glsl-shader-opts"] = { uw_dr = "0.2214", uw_db = "0.0335", uw_k = "0.5000", uw_ev = "1.4845", uw_s = "0.600", uw_hp = "2.5" }
+props.path = "/clips/uw1.MP4"
+bindings.export()
+a = last()
+expect("uw Shift+E: the curve", has(a, "--curve uw"), true)
+expect("uw Shift+E: its strength", has(a, "--uw-strength 0.60"), true)
+expect("uw Shift+E: its highlights", has(a, "--uw-highlights yes"), true)
+expect("uw Shift+E: numbers measured as it plays, not fixed", has(a, "--uw-params"), false)
+requests.prev = { id = 4, clip = "/clips/uw1.MP4", output = "/m/y.afplink.mp4", reply = "workspace" }
+messages.preview("prev")
+a = last()
+expect("uw preview: the curve", has(a, "--curve uw"), true)
+expect("uw preview: its frame measured", has(a, "--uw-params"), false)
+props["user-data/workspace"] = nil
+props["time-pos"] = 8
+props["user-data/gyroflow/live_photo"] = "live"
+local before = #ran
+bindings["photo-full"]()
+a = last()
+expect("uw photo: run", #ran > before, true)
+expect("uw photo: --photo", has(a, "--photo 8.0000"), true)
+expect("uw photo: the curve", has(a, "--curve uw"), true)
+expect("uw photo: the numbers on screen", has(a, "--uw-params 0.2214,0.0335,0.5000,1.4845"), true)
+expect("uw photo: its strength", has(a, "--uw-strength 0.60"), true)
+props["user-data/dlogm/look"] = "off"
+props.path = "/clips/uw2.MP4"
+bindings.export()
+a = last()
+expect("uw off (L): colours as recorded", has(a, "--curve none"), true)
+expect("uw off (L): no underwater colour", has(a, "--uw-strength"), false)
+props["user-data/dlogm/look"], props["user-data/dlogm/curve"] = "hdr", ""
+requests.req = { id = 5, clip = "/clips/uw3.MP4", output = "/out/uw3.mov", reply = "workspace", view = { uw = true, uw_strength = 0.5 } }
+messages["export-batch"]("req")
+a = last()
+expect("uw batch: the clip's", has(a, "--uw-color yes"), true)
+expect("uw batch: its strength", has(a, "--uw-strength 0.50"), true)
+expect("uw batch: its highlights (none saved: no)", has(a, "--uw-highlights no"), true)
+requests.req.view = { uw = false, uw_strength = 0.5 }
+messages["export-batch"]("req")
+a = last()
+expect("uw batch: off, nothing", has(a, "--uw-color") or has(a, "--uw-strength"), false)
+requests.photo = { id = 6, clip = "/clips/uw3.MP4", t = 2, reply = "workspace", view = { uw = true, uw_highlights = true } }
+messages["photo-at"]("photo")
+a = last()
+expect("uw photo-at: the clip's", has(a, "--uw-color yes") and has(a, "--uw-highlights yes"), true)
+expect("uw photo-at: its frame measured", has(a, "--uw-params"), false)
+
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

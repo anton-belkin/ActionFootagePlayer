@@ -1797,6 +1797,14 @@ local function next_clip()
         table.insert(args, "--at"); table.insert(args, table.concat(list, ","))
         table.insert(args, "--cover"); table.insert(args, list[1])
     end
+    -- The underwater colour, where the clip has it on (its source's input, else uwcolor.conf's): in it, as it plays
+    do
+        local _, rendered = transform.render_settings(sidecar.read(c.file), nil, transform.defaults(mp.get_property_native))
+        if rendered.uw == true then
+            for _, a in ipairs({ "--uw-color", "yes", "--uw-strength", string.format("%.2f", tonumber(rendered.uw_strength) or 1),
+                                 "--uw-highlights", rendered.uw_highlights == true and "yes" or "no" }) do table.insert(args, a) end
+        end
+    end
     table.insert(args, "--link")
     table.insert(args, utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project } }))
     table.insert(args, c.file)
@@ -2805,7 +2813,7 @@ end
 local function made_view_of(file, movie, own)
     -- `own`: a moment's own bundle, which it keeps whatever the source's is now (transform.render_settings: the
     -- Library's recipe works it out the same way)
-    local bundle, rendered = transform.render_settings(sidecar.read(file), own, mp.get_property_native("user-data/gyroflow/defaults"))
+    local bundle, rendered = transform.render_settings(sidecar.read(file), own, transform.defaults(mp.get_property_native))
     -- The frame's W:H for this source: its ratio turned for its orientation and the source's shape, upright (the
     -- file's turn and the input's)
     local w, h = movie and movie.width, movie and movie.height
