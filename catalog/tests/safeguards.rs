@@ -90,11 +90,21 @@ impl Pc {
     }
     /// Checks' "Read every file again", afp-catalog check
     fn check(&mut self) -> afp_catalog::Report { let r = self.reader(); self.cat.sweep(&roots(), &r, &Sweep { reread: true, ..Default::default() }).unwrap() }
-    /// The NAS's watcher starting: every folder listed, then its roots vouched for while it watches
-    fn helper_start(&mut self) -> afp_catalog::Report {
-        let rep = self.deep();
-        care::watching(&self.cat, &roots(), true);
-        rep
+    /// The NAS's watcher starting (cli.rs watch): every folder listed, then its roots vouched for while it watches —
+    /// unless it watched them until moments ago and someone looked at them deep within a day (a short break): then
+    /// folders' times only, and the watch goes on. Some(its deep look's report), or None for the short break
+    fn helper_start(&mut self) -> Option<afp_catalog::Report> {
+        let todo = care::to_look_at_start(&self.cat, &roots());
+        if todo.is_empty() {
+            self.look();
+            care::watching(&self.cat, &roots(), false);
+            return None;
+        }
+        let r = self.reader();
+        let rep = self.cat.sweep(&todo, &r, &Sweep { deep: true, ..Default::default() }).unwrap();
+        care::mark_deep(&self.cat, &todo);
+        care::watching(&self.cat, &todo, true);
+        Some(rep)
     }
     fn beat(&self) { care::watching(&self.cat, &roots(), false); }
     /// The NAS's watcher told by inotify that something in this folder changed
@@ -300,7 +310,8 @@ fn a_watching_helper_spares_the_library_and_a_stopped_one_doesnt() {
     assert!(mac.look_after().is_some(), "no longer watched: the Library looks");
 }
 
-/// The Helper starting again lists every folder: what was changed in place while it was down is seen.
+/// The Helper starting again after a long break (its watch no longer vouches) lists every folder: what was changed
+/// in place while it was down is seen.
 #[test]
 fn the_helper_at_its_start_sees_what_changed_while_it_was_down() {
     let fs = Fs::new();
@@ -308,13 +319,58 @@ fn the_helper_at_its_start_sees_what_changed_while_it_was_down() {
     let rel = "Day000/C0001.afp.json";
     fs.lock().unwrap().write(&footage(rel), br#"{"tags":[]}"#);
     let mut nas = Pc::new(&fs, "nas", 23, false);
-    nas.helper_start();
-    // Down; meanwhile a script edits in place
+    assert!(nas.helper_start().is_some(), "the first start looks deep");
+    // Down for 20 minutes; meanwhile a script edits in place
+    later(&fs, 20 * MINUTE);
     fs.lock().unwrap().write(&footage(rel), br#"{"tags":["while it was down"]}"#);
     nas.look();
     assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": [] } })), "a look by folders' times doesn't see it");
-    nas.helper_start();
+    assert!(nas.helper_start().is_some(), "a long break: deep");
     assert_eq!(nas.meta("f", rel), Some(json!({ "own": { "tags": ["while it was down"] } })));
+}
+
+/// A short break (the container restarted: its last beat minutes old, a deep look today) lists no folder in full: the
+/// look at folders' times sees what was added, renamed or deleted meanwhile; an edit in place during the break is the
+/// one thing it doesn't (Anton, 2026-11-24: no rescan for a short break). The watch goes on vouching, so the Library
+/// still doesn't look.
+#[test]
+fn a_short_break_lists_no_folder_in_full() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 0);
+    let edited = "Day000/C0001.afp.json";
+    let added = "Day001/C0099.afp.json";
+    fs.lock().unwrap().write(&footage(edited), br#"{"tags":[]}"#);
+    let mut nas = Pc::new(&fs, "nas", 23, false);
+    let mut mac = Pc::new(&fs, "mac", 0, false);
+    assert!(nas.helper_start().is_some());
+    later(&fs, 5 * MINUTE);
+    nas.beat();
+    // Restarted two minutes after its last beat; meanwhile a file added and one edited in place
+    later(&fs, 2 * MINUTE);
+    fs.lock().unwrap().write(&footage(added), br#"{"tags":["new"]}"#);
+    fs.lock().unwrap().write(&footage(edited), br#"{"tags":["in place"]}"#);
+    assert!(nas.helper_start().is_none(), "a short break: no deep look");
+    assert_eq!(nas.meta("f", added), Some(json!({ "own": { "tags": ["new"] } })), "the added file is seen by folders' times");
+    assert_eq!(nas.meta("f", edited), Some(json!({ "own": { "tags": [] } })), "the edit in place during the break isn't");
+    assert!(mac.look_after().is_none(), "still watched: the Library doesn't look");
+}
+
+/// A short break, but nobody has looked at the roots in full for a day: the Helper looks deep (so a watch going on
+/// for days doesn't vouch for an edit made in place during some short break for ever).
+#[test]
+fn a_short_break_after_a_day_without_a_deep_look_looks_deep() {
+    let fs = Fs::new();
+    project(&fs, 2, 4, 0);
+    let mut nas = Pc::new(&fs, "nas", 23, false);
+    assert!(nas.helper_start().is_some());
+    for _ in 0..(25 * 12) {
+        later(&fs, 5 * MINUTE);
+        nas.beat();
+    }
+    later(&fs, 2 * MINUTE);
+    assert!(nas.helper_start().is_some(), "a day since the last deep look: deep");
+    later(&fs, 2 * MINUTE);
+    assert!(nas.helper_start().is_none(), "and the next short break: not again");
 }
 
 /// A clip's own file written wrong (not JSON: a script's bug, or caught half-written) keeps its record as it was —

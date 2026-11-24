@@ -187,7 +187,33 @@ def ask_player(clip):
     return a if a.get("clip") else None
 
 
+_probes_lock = threading.Lock()
+
+
 def probe(path):
+    """The original's size, rate, colours, length and start (ffprobe), kept in ARGS by the file's size and time: a
+    restart doesn't read every original's header again (the catalog's first listing used to, ~2-4 min of the NAS's
+    disks at each start), only one that changed"""
+    key = os.path.join(ARGS, "probe-" + hashlib.sha1(path.encode()).hexdigest()[:16] + ".json")
+    st = stamp(path)
+    try:
+        with open(key) as f:
+            kept = json.load(f)
+        if kept.get("stamp") == st and st != "-":
+            return kept["stream"], kept["duration"]
+    except (OSError, ValueError, KeyError):
+        pass
+    s, duration = probe_now(path)
+    if s.get("width") and st != "-":
+        with _probes_lock:
+            os.makedirs(ARGS, exist_ok=True)
+            with open(key + ".tmp", "w") as f:
+                json.dump({"path": path, "stamp": st, "stream": s, "duration": duration}, f)
+            os.replace(key + ".tmp", key)
+    return s, duration
+
+
+def probe_now(path):
     r = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
                         "stream=width,height,pix_fmt,color_transfer,r_frame_rate:format=duration:format_tags=creation_time", "-of", "json", path],
                        capture_output=True, text=True)

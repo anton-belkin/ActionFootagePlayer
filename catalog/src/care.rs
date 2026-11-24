@@ -69,10 +69,10 @@ pub fn stop_watching(cat: &Catalog, roots: &[Root]) {
     for r in roots { let _ = cat.shared.remove(&mine(cat).join(format!("{}.watch", key(&r.id)))); }
 }
 
-/// Of these roots, the ones nobody has looked after within a day: to be looked at deep. Every one of them when the
-/// share can't say (its "now" not written): looking is what's safe
-pub fn uncovered(cat: &Catalog, roots: &[Root]) -> Vec<Root> {
-    let Some(now) = share_now(cat) else { return roots.to_vec() };
+/// Each root's care, by the share's clock: (looked at deep within a day, watched within BEAT_FRESH). None: the share
+/// can't say (its "now" not written)
+fn cared(cat: &Catalog, roots: &[Root]) -> Option<Vec<(Root, bool, bool)>> {
+    let now = share_now(cat)?;
     let mut deep: std::collections::HashMap<String, i64> = Default::default();
     let mut watch: std::collections::HashMap<String, i64> = Default::default();
     for c in cat.shared.list(&dir(cat)).unwrap_or_default().into_iter().filter(|c| c.stat.dir) {
@@ -83,12 +83,27 @@ pub fn uncovered(cat: &Catalog, roots: &[Root]) -> Vec<Root> {
             *t = (*t).max(f.stat.mtime);
         }
     }
-    roots.iter().filter(|r| {
+    Some(roots.iter().map(|r| {
         let k = key(&r.id);
-        let looked = deep.get(&k).is_some_and(|t| now - t < DAY_NS);
-        let watched = watch.get(&k).is_some_and(|t| now - t < BEAT_FRESH_NS);
-        !looked && !watched
-    }).cloned().collect()
+        (r.clone(), deep.get(&k).is_some_and(|t| now - t < DAY_NS), watch.get(&k).is_some_and(|t| now - t < BEAT_FRESH_NS))
+    }).collect())
+}
+
+/// Of these roots, the ones nobody has looked after within a day: to be looked at deep. Every one of them when the
+/// share can't say (its "now" not written): looking is what's safe
+pub fn uncovered(cat: &Catalog, roots: &[Root]) -> Vec<Root> {
+    let Some(c) = cared(cat, roots) else { return roots.to_vec() };
+    c.into_iter().filter(|(_, looked, watched)| !looked && !watched).map(|(r, _, _)| r).collect()
+}
+
+/// The NAS's watcher starting: the roots it looks at deep. Not one it watched until moments ago (a `.watch` younger
+/// than BEAT_FRESH: the container restarted, the NAS rebooted quickly) that some computer also looked at deep within a
+/// day: a short break doesn't list every folder again (Anton, 2026-11-24). What changed in place during that break
+/// (a script, its folder's time unchanged) is the one thing not seen; moves, renames, new and deleted files are, by the
+/// look at folders' times that follows. Every root when the share can't say
+pub fn to_look_at_start(cat: &Catalog, roots: &[Root]) -> Vec<Root> {
+    let Some(c) = cared(cat, roots) else { return roots.to_vec() };
+    c.into_iter().filter(|(_, looked, watched)| !(*looked && *watched)).map(|(r, _, _)| r).collect()
 }
 
 /// What a computer that keeps the catalog does at its start and then every hour or so (the Library; afp-catalog look

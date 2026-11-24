@@ -16,7 +16,8 @@ safeguards` in `catalog/`) and two tests in `library/src/seen.rs`.
    NAS/Mac ping-pong (ns vs 100 ns) that re-read and re-noted every file for ever: the door of both incidents.
 4. **Built — looked after within a day.** Each computer says which roots it looked at deep (`.afp/catalog/care/`); the
    NAS Helper says it watches. At its start and every hour the Library looks deep only at roots nobody looked after in
-   the last day. With the Helper running, the Library never looks deep; the Helper looks deep only at its start.
+   the last day. With the Helper running, the Library never looks deep; the Helper looks deep only at its start, and
+   not after a short break (2026-11-24, below).
 5. **Built — a broken own file keeps its record.** A clip's `.afp.json` that isn't JSON (a script's bug, a half-write)
    used to be read as "no tags" and wiped them from every view. Now its record stays, it's listed in Checks, and it's
    taken in as soon as it reads right.
@@ -70,7 +71,7 @@ Times are compared exactly, and since A always in whole 100 ns (`store::canon`),
 | Library | folders this Mac changed | ~1 s after FSEvents | listing |
 | Library | what it couldn't note | 5 s, doubling to 5 min | listing, files read as they are then |
 | Library | on demand (Checks) | at once | deep, or every file read again |
-| NAS Helper | its roots | at its start; after the system lost count; after being held up 15 min | deep (`cli.rs` `watch`) |
+| NAS Helper | its roots | at its start, unless a short break (watched until <15 min ago and a deep look within a day); after the system lost count; after being held up 15 min | deep (`cli.rs` `watch`, `care::to_look_at_start`) |
 | NAS Helper | folders inotify names | ~1 s after a change | listing |
 | NAS Helper | everything | every 30 min | folders' times |
 | Player | its clip's moments | as the clip opens | stat each, read again when size/time differ |
@@ -84,6 +85,13 @@ Times are compared exactly, and since A always in whole 100 ns (`store::canon`),
   minutes. Ages are measured against a file made on the share just then: the share's clock only, never one computer's
   against another's.
 - A root's key is a hash of its id (its location's path as the project's file has it), the same on every computer.
+
+A short break of the Helper (its container restarted, the NAS rebooted quickly: its last `.watch` line younger than 15
+minutes) when some computer looked at the roots deep within a day: no folder is listed in full at its start, only the
+look at folders' times, which sees files added, moved, renamed or deleted meanwhile; its `.watch` goes on. What a
+script changed in place during that break is the one thing not seen (Anton, 2026-11-24: a restart shouldn't list
+everything again). A long break, or no deep look for a day: deep at its start as before. Tests:
+`a_short_break_lists_no_folder_in_full`, `a_short_break_after_a_day_without_a_deep_look_looks_deep`.
 
 So: the Helper running, the Library never looks deep. The Helper stopped, within 15 minutes the Library takes over
 (at its next hourly turn). Two Macs, no Helper: whichever looks first that day spares the other.
