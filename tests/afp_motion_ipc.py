@@ -8,6 +8,9 @@ VapourSynth:
   project   a Gyroflow project beside it too: the project plays (it wins)
   measure   neither, then Ctrl+m: the motion measured in the player (gyroflow-optical), the clip played again with
             it, stabilized as "motion"
+  assign    neither, the clip's lens chosen for its mode in the side panel (assign-lens, the first lens offered): the
+            player's own lens database has it then ("from": "own"); kept in the rig's own folder (AFP_CURATED_LENSES),
+            not the user's
   none      neither: not stabilized (a clip without motion data: as recorded, or its lens alone corrected)
 
   tests/afp_motion_ipc.py [--keep] [--shots <dir>] <ActionFootagePlayer.app> <clip with a Gyroflow project of optical motion beside it>
@@ -105,7 +108,7 @@ def case(rig, sock, name, path):
             os.rename(aside, f)
         if not keep and os.path.exists(f):
             os.rename(f, aside)
-    pl = Player(rig, sock, clips + "/a.MP4", path, name not in ("none", "measure"))
+    pl = Player(rig, sock, clips + "/a.MP4", path, name not in ("none", "assign", "measure"))
     s, g = pl.state(), gyroflow_state(pl)
     log = ["%s/%s: %s %s" % (name, path, s, json.dumps(g))]
     stabilized = bool(s["warp"] or s["vf"])
@@ -118,6 +121,23 @@ def case(rig, sock, name, path):
         ok = ok and g2["horizon_lock"] == "no"
     elif name == "project":
         ok = stabilized and g["kind"] == "project"
+    elif name == "assign":
+        lens = pl.prop("user-data/gyroflow/lens") or {}
+        cands = lens.get("candidates") or []
+        log.append("  lens %r from %r, %d to choose from" % (lens.get("lens"), lens.get("from"), len(cands)))
+        if cands:
+            pl.cmd("script-message-to", "gyroflow", "assign-lens", cands[0]["id"])
+            t = time.time()
+            while time.time() - t < 30:
+                time.sleep(0.5)
+                try:
+                    lens = pl.prop("user-data/gyroflow/lens") or {}
+                except OSError:
+                    continue
+                if lens.get("from") == "own":
+                    break
+            log.append("  assign-lens %s -> %r from %r after %.1f s" % (cands[0]["id"], lens.get("lens"), lens.get("from"), time.time() - t))
+        ok = bool(cands) and lens.get("from") == "own"
     elif name == "measure":
         # Not stabilized before: as recorded, or its lens alone
         before = g["kind"] not in ("", "lens")
@@ -163,10 +183,12 @@ def main():
         sys.exit(__doc__)
     app, clip, paths = args[0], args[1], args[2:] or ["gpu", "vs"]
     rig, sock = make_rig(app, clip)
+    # The player's own lens database and lens list: the rig's, not the user's (assign writes there)
+    os.environ["AFP_CURATED_LENSES"] = os.path.join(rig, "lenses-home", "curated_lenses.json")
     failed = 0
     try:
         for path in paths:
-            for name in ["motion", "project", "none", "measure"]:
+            for name in ["motion", "project", "none", "assign", "measure"]:
                 ok, log = case(rig, sock, name, path)
                 print(("ok    " if ok else "FAIL  ") + "\n".join(log))
                 failed += not ok

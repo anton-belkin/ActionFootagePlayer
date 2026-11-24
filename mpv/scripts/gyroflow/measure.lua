@@ -7,6 +7,8 @@
 -- How far it is: user-data/gyroflow/measuring, the fraction done (false when nothing is measured), for the side panel,
 -- and a card. The measuring goes on while the clip plays; another clip opened meanwhile doesn't stop it.
 --
+-- Also the lens chosen in the side panel for the clip's whole mode (script messages assign-lens <id>, forget-lens).
+--
 --   require('measure').setup(env), env: { source = function() -> the plugin's current source, path = clip_path,
 --                                         again = play_again, notify = mp.notify }
 
@@ -17,6 +19,7 @@ local platform = require 'platform'
 local M = {}
 
 local OPTICAL = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-optical"))
+local PROBE = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-probe"))
 
 function M.setup(env)
     local job = nil
@@ -84,6 +87,30 @@ function M.setup(env)
     end
 
     mp.add_key_binding("Ctrl+m", "measure-motion", start)
+
+    -- A lens chosen in the side panel's Source for the clip's whole mode (gyroflow-probe --assign-lens, the player's own
+    -- lens database), or the one assigned taken away (--forget-lens); the clip played again with what it gives
+    local function lens_command(args, done_title)
+        local path = env.path()
+        if not path or path:find("://", 1, true) then return end
+        local name = path:match("([^/\\]+)$") or path
+        table.insert(args, 3, path)
+        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
+            local out = r and utils.parse_json((r.stdout or ""):match("[^\n]*") or "") or nil
+            if not (r and r.status == 0 and type(out) == "table") then
+                return env.notify({ id = "gyroflow:lens", kind = "error", title = "The lens couldn't be kept",
+                                    detail = type(out) == "table" and tostring(out.error) or name })
+            end
+            env.notify({ id = "gyroflow:lens", kind = "done", seconds = 5, title = done_title, detail = tostring(out.mode or name) })
+            if env.path() == path then env.again() end
+        end)
+    end
+    mp.register_script_message("assign-lens", function(id)
+        if id and id ~= "" then lens_command({ PROBE, "--assign-lens", id }, "Lens kept for this mode") end
+    end)
+    mp.register_script_message("forget-lens", function()
+        lens_command({ PROBE, "--forget-lens" }, "Lens taken away from this mode")
+    end)
 end
 
 return M

@@ -1276,11 +1276,40 @@ function lensInfoText(path, project) {
   if (r === null) return "Reading…";
   if (r.lens === "in the file") return "From the file";
   if (r.lens) return String(r.lens).replace(/_/g, " ");
+  if (r.camera && r.from === "") return "No ready lens";
   const t = r.type || r.recorded || r.default;
   const lb = t ? (((r.types || []).find((x) => x.id === t) || {}).label || t) : "";
   const mode = r.mode != null ? "mode " + r.mode : "";
   const inside = [lb, mode].filter(Boolean).join(", ");
   return r.camera || inside ? "Unknown" + (inside ? " (" + inside + ")" : "") : "";
+}
+// A lens chosen for the clip's whole mode (gyroflow-probe --lens's "candidates": its camera's lenses, the ones made for
+// exactly its mode first), kept in the player's own lens database (gyroflow-probe --assign-lens): every clip of the same
+// camera, mode, in-camera stabilization, size and frame rate takes it
+const LENS_ASSIGNING = {};
+function lensPickHtml(it) {
+  if (it.gyroflow) return "";
+  const r = LENS_INFO[it.path];
+  const c = r && Array.isArray(r.candidates) ? r.candidates : [];
+  if (!c.length) return "";
+  const busy = LENS_ASSIGNING[it.path];
+  const assigned = /, assigned$/.test(String(r.lens || ""));
+  return '<select data-a="assignlens" data-v="' + esc(it.path) + '" style="width:100%;max-width:100%;box-sizing:border-box"' + (busy ? " disabled" : "") + '><option value="">' + (busy ? "Keeping…" : r.from === "" ? "Choose a lens…" : "Another lens…") + '</option>' +
+    c.map((x) => '<option value="' + esc(x.id) + '">' + esc((x.exact ? "● " : "") + String(x.label || x.id).replace(/_/g, " ") + (x.local ? " · the player’s own" : x.readout ? "" : " · no readout")) + '</option>').join("") +
+    (assigned ? '<option value="-">Forget the lens assigned to this mode</option>' : "") + '</select>' +
+    '<span class="sub wrap blk">Kept for every clip of ' + esc(r.mode_key || "this mode") + '</span>';
+}
+async function assignLens(path, id) {
+  if (!id || LENS_ASSIGNING[path]) return;
+  LENS_ASSIGNING[path] = true; renderSide();
+  try {
+    const r = await invoke("assign_lens", { path, id: id === "-" ? null : id });
+    // Every clip of the mode reads otherwise now: asked again as each shows
+    for (const k of Object.keys(LENS_INFO)) delete LENS_INFO[k];
+    for (const k of Object.keys(LENS_OF)) delete LENS_OF[k];
+    toast((id === "-" ? "Lens taken away from " : String(r.lens || "The lens").replace(/_/g, " ") + " kept for ") + (r.mode || "the mode") + (r.again ? ": " + r.again + (r.again === 1 ? " clip" : " clips") + " of the camera read again" : ""));
+  } catch (e) { showError("The lens couldn’t be kept: " + e); }
+  finally { delete LENS_ASSIGNING[path]; renderSide(); }
 }
 // The lens of a clip's Gyroflow project (gyroflow-probe --lens's "project") and the button that keeps it in the user's
 // lens list as the default for the clip's camera, mode and size: every clip of them without a lens of its own takes it
@@ -1972,7 +2001,7 @@ function itemInfo(it) {
   const tags = (it.tags || []).length ? '<span class="chips">' + it.tags.map((t) => '<span class="chip tag">' + esc(t) + '</span>').join("") + '</span>' : "";
   if (it.kind === "clip") {
     const probe = PROBES[it.path];
-    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path, it.gyroflow)], ["In its Gyroflow project", projectLensHtml(it), false, true],
+    h += infoSec("Clip", kv([["Recorded", it.date], ["Length", it.dur], ["Size", sizeText(it.size)], ["Camera", it.cam || (probe ? "Unknown" : "Reading…")], ["Lens profile", lensInfoText(it.path, it.gyroflow)], ["Lens for the mode", lensPickHtml(it), false, true], ["In its Gyroflow project", projectLensHtml(it), false, true],
       ["Color", it.color], ["Picture", resText(probe)], ["Shape", it.is360 ? "360°" : probe ? "Flat" : ""], ["In or out of water", probe && probe.water ? "Recorded by the camera" : ""],
       ["Motion data", it.measured ? "Measured from the picture" + (probe.measured && probe.measured.in_water ? ", in water" : ", in air") : it.motion === true ? "In the clip" + (probe.mode && probe.mode !== "default" ? " (" + probe.mode + ")" : "") : it.motion === false ? (it.camStab ? "None, stabilized in the camera (" + it.camStab + ")" : "None") : ""],
       ["Tags", tags, false, true]]));
@@ -3010,6 +3039,7 @@ document.addEventListener("change", (e) => {
   else if (a === "optlens") { S.opticalLens = el.value; renderSide(); return; }
   else if (a === "optredo") { S.opticalRedo = el.checked; renderSide(); return; }
   else if (a === "srcset") { srcDraftSet(v, el.value); return; }
+  else if (a === "assignlens") { assignLens(v, el.value); return; }
   else if (a === "setting") { call("set_setting", { key: v, value: el.checked }).then(() => invoke("project")).then((i) => { S.info = i; renderSide(); }).catch(() => {}); return; }
   else return;
   renderAll();

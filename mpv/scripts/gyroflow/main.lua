@@ -1885,8 +1885,11 @@ mp.register_event("file-loaded", function()
                     if type(t) == "table" and t.id then label_of[t.id] = t.label or t.id end
                 end
                 local typ = type(info.type) == "string" and info.type or type(info.recorded) == "string" and info.recorded or nil
+                -- Where it comes from, the clip's mode as the player's own lens database keeps it, and the lenses to
+                -- choose for that mode (lens_pick::candidates)
                 current_lens = { camera = info.camera or "", lens = info.lens or "", mode = tonumber(info.mode),
-                                 type_label = typ and (label_of[typ] or typ) or nil }
+                                 type_label = typ and (label_of[typ] or typ) or nil, from = info.from or "", mode_key = info.mode_key,
+                                 candidates = type(info.candidates) == "table" and info.candidates or {} }
                 publish()
             end
         end)

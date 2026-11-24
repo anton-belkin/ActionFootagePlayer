@@ -400,7 +400,7 @@ local function source_part(u, x, w, y)
                            or (l.lens or "") ~= "" and (l.lens:gsub("_", " "))
                            -- No profile: the lens type it was recorded in (or given) when it's named, and the camera's own
                            -- number for the mode, for trying lenses on it
-                           or l.type_label and ("Unknown (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("Unknown (mode " .. l.mode .. ")") or "Unknown" },
+                           or l.type_label and ("No ready lens (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("No ready lens (mode " .. l.mode .. ")") or "No ready lens" },
                        { "Motion data", project and "Gyroflow project" or measured and ("Measured from the picture" .. (measured.in_water and ", in water" or ", in air"))
                            or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
@@ -413,11 +413,30 @@ local function source_part(u, x, w, y)
                 v = "…" .. v:sub(from)
             end
             u:text(x, y + 9 * s, r[1], { size = 13 })
-            u:text(x + w, y + 9 * s, v, { align = 6, size = 12, color = r[2]:find("^Unknown") and C.saved or C.dim })
+            u:text(x + w, y + 9 * s, v, { align = 6, size = 12, color = r[2]:find("^No ready lens") and C.saved or C.dim })
             y = y + 22 * s
         end
-        if not known and g.lens then
-            y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected. Picking one by hand comes later")
+        -- A lens chosen by hand for the clip's whole mode (the player's own lens database): its camera's lenses, the ones
+        -- made for exactly this mode first (gyroflow-probe --lens's candidates)
+        local cands = type(l.candidates) == "table" and l.candidates or {}
+        if not project and #cands > 0 then
+            local pick_rows = {}
+            for _, c in ipairs(cands) do
+                local label = tostring(c.label or c.id)
+                if #label > 52 then label = label:sub(1, 50):gsub("[\194-\244][\128-\191]*$", "") .. "…" end
+                pick_rows[#pick_rows + 1] = { kind = c.id, label = (c.exact and "● " or "") .. label,
+                                              note = c["local"] and "the player's own" or (c.readout and "Gyroflow's" or "Gyroflow's, no readout"),
+                                              cmd = "script-message-to gyroflow assign-lens " .. string.format("%q", c.id) }
+            end
+            if (l.lens or ""):find(", assigned$") then
+                pick_rows[#pick_rows + 1] = { kind = "forget", label = "Forget the lens assigned to this mode", cmd = "script-message-to gyroflow forget-lens" }
+            end
+            y = u:select_row(x, w, y + 4 * s, "lens-pick", "Lens for the mode", pick_rows, nil, { text = (l.from or "") == "" and "Choose…" or "Another…" })
+            y = u:caption(x, w, y, ((l.from or "") == "" and "No ready lens: none is made for exactly this mode, with its readout. " or "")
+                .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode") .. (measured and ". Measure the motion again after" or ""))
+        end
+        if not known and g.lens and #cands == 0 then
+            y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected")
         end
         -- Measured motion plays in the medium it was measured in: that one shown
         local water = measured and (measured.in_water and "yes" or "no") or (not project and index_of(WATER, g.underwater)) and g.underwater or nil

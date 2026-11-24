@@ -743,7 +743,7 @@ fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 4;
+pub const GEOTAG: u64 = 5;
 
 #[derive(Default)]
 pub struct Probes {
@@ -770,8 +770,15 @@ pub fn lens_list_stamp() -> String {
                    else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
         Some(base.join("ActionFootagePlayer").join("curated_lenses.json"))
     });
-    file.and_then(|f| std::fs::metadata(&f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
-        .unwrap_or_default()
+    let list = file.as_ref().and_then(|f| std::fs::metadata(f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
+        .unwrap_or_default();
+    // And the player's own lens database beside it (vs-gyroflow's lens_db::user_stamp, the same): a lens assigned to a
+    // mode changes the answers of that mode's clips
+    let mut own: Vec<String> = file.and_then(|f| Some(f.parent()?.join("lenses"))).map(|d| std::fs::read_dir(d).into_iter().flatten().flatten()
+        .filter_map(|e| { let m = e.metadata().ok()?; Some(format!("{}:{}:{:?}", e.file_name().to_string_lossy(), m.len(), m.modified().ok())) }).collect())
+        .unwrap_or_default();
+    own.sort();
+    if own.is_empty() { list } else { format!("{list}|{}", own.join("|")) }
 }
 
 /// A file's size and time: as the project's catalog has it (no question to the share for each clip: thousands of

@@ -518,6 +518,16 @@ Each step is its own PR, UI ones with before/after screenshots.
    - the local database, the "taken by itself" rule (§5.2) and `source.lens`;
    - a lens picker over local + Gyroflow profiles in panel Source and Library Info;
    - Gyroflow DB refreshed to v43.
+   - **Done (2026-11-24), PR on top of step 2:**
+     - `vs-gyroflow/src/lens_db.rs` holds the player's own database: 11 built-in profiles in `resources/lenses` and the
+       user's `lenses/`, each with an `"afp"` mode block.
+     - The order is §5.2's.
+     - DB picks need an exact identifier and a readout.
+     - The lens picker in panel Source and Library Info assigns to the mode (`gyroflow-probe --assign-lens` /
+       `--forget-lens`).
+     - HERO4 SETT 0/2 are named.
+     - DJI's EIS goes into the mode, from its metadata.
+     - Library probe answers are asked again (GEOTAG 5).
 4. **Find lens / Estimate lens:** #1296's core on our fork branch, Library commands, result list with Assign / Keep.
 
 **Test sample** (NAS, writes allowed for these clips only), about a dozen clips:

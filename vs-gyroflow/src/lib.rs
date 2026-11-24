@@ -55,6 +55,7 @@ pub mod translation;
 pub mod optical;
 pub mod afp_motion;
 pub mod tools;
+pub mod lens_db;
 pub mod measure;
 pub use levels::Level;
 pub use water::Underwater;

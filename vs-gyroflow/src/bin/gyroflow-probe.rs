@@ -45,6 +45,15 @@
 // and where the user's list would keep it ("camera", "type", "type_label", "size", "new_type"), "saved" when it does
 // already, or "error" when it can't (probe::project_lens_answer).
 //
+// --lens also has "from" (where the lens comes from: "file", "own" the player's own database, "list" the curated
+// list, "database" Gyroflow's made for exactly the clip, "" no ready lens), "mode_key" (the clip's mode as the player's
+// own database keeps lenses) and "candidates": the lenses of its camera to choose from, nearest first ({"id", "label",
+// "local", "exact", "readout"}, lens_pick::candidates).
+//
+// `gyroflow-probe --assign-lens <video> <id>`: one of those kept as the lens of the clip's whole mode in the player's
+// own database (lens_db.rs): {"file", "mode", "lens"}, or {"error"} (exit 1). `gyroflow-probe --forget-lens <video>`:
+// the lens assigned to the clip's mode taken away: {"removed", "mode"}.
+//
 // `gyroflow-probe --save-lens <video>`: that lens kept in the user's list as the default for the clip's camera, mode
 // and size (lens_pick::save_default): {"camera", "type", "type_label", "size", "new_type", "lens", "profile", "file"},
 // or {"error"} (exit 1).
@@ -60,7 +69,7 @@
 // recording, for the view360 plugin to play while it shows the recording, "hold" false (not asked for), "applied" or
 // "needed" (to be measured: gyroflow-export --reframe recording --measure-hold); {"error": why} when there's none.
 
-use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, camera_and_lens, lens_info, spherical }, water };
+use vs_gyroflow::{ probe::{ probe_with_camera_stabilization, color_profile, camera_and_lens, spherical }, water };
 
 fn video_size(path: &str) -> Option<(usize, usize, f64)> {
     let mut file = std::fs::File::open(path).ok()?;
@@ -85,14 +94,21 @@ fn main() {
     // and size (the Library's "Save as the default")
     let save_lens = args.first().is_some_and(|a| a == "--save-lens");
     if save_lens { args.remove(0); }
+    // --assign-lens <video> <id>: a lens of --lens's "candidates" kept as the lens of the clip's whole mode;
+    // --forget-lens <video>: the one assigned to it taken away
+    let assign = args.first().is_some_and(|a| a == "--assign-lens");
+    if assign { args.remove(0); }
+    let forget = args.first().is_some_and(|a| a == "--forget-lens");
+    if forget { args.remove(0); }
     // --library: everything Action Footage Library's index keeps about a clip
     let library = args.first().is_some_and(|a| a == "--library");
     if library { args.remove(0); }
     // --reframe: the recorded view, tidied, for the player's preview of the flat export
     let reframe = args.first().is_some_and(|a| a == "--reframe");
     if reframe { args.remove(0); }
+    let id = args.get(1).cloned();
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --save-lens | --library | --reframe] <video>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --save-lens | --library | --reframe | --forget-lens] <video>\n       gyroflow-probe --assign-lens <video> <id>");
         std::process::exit(2);
     };
     if reframe {
@@ -113,8 +129,16 @@ fn main() {
     if lens {
         // Gyroflow's readers take paths as URLs: a relative one reads nothing
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
-        println!("{}", serde_json::to_value(lens_info(&path).unwrap_or_default()).unwrap_or_default());
+        println!("{}", serde_json::to_value(vs_gyroflow::probe::lens_info_with_candidates(&path, 16).unwrap_or_default()).unwrap_or_default());
         return;
+    }
+    if assign || forget {
+        let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
+        let out = if forget { vs_gyroflow::probe::forget_lens(&path) } else {
+            match id { Some(id) => vs_gyroflow::probe::assign_lens(&path, &id), None => Err("which lens: --assign-lens <video> <id>".into()) }
+        }.unwrap_or_else(|e| serde_json::json!({ "error": e }));
+        println!("{out}");
+        std::process::exit(if out["error"].is_null() { 0 } else { 1 });
     }
     if save_lens {
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
@@ -167,8 +191,9 @@ fn main() {
         out["clock"] = serde_json::to_value(clock).unwrap_or_default();
         out["gps"] = serde_json::to_value(gps).unwrap_or_default();
         // What this answer knows: 2 = drones' names and places too, 3 = clocks set before 2017 believed, 4 = an older
-        // GoPro (HERO3) named by its firmware (the Library asks again for older answers: raise it with what's new here)
-        out["geotag"] = 4.into();
+        // GoPro (HERO3) named by its firmware, 5 = a lens only when one is made for exactly the clip's mode (lens_pick.rs)
+        // (the Library asks again for older answers: raise it with what's new here)
+        out["geotag"] = 5.into();
         out["marks"] = vs_gyroflow::markers::highlights(&path)
             .map(|(camera, times)| serde_json::json!({ "camera": camera, "times": times })).unwrap_or_default();
         println!("{out}");

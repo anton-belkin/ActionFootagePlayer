@@ -98,7 +98,7 @@ fn read_clip(video: &Path, path: &str) -> Result<(crate::lens_pick::Clip, bool),
                 .any(|m| m.contains_key(&TagId::Data) || m.contains_key(&TagId::Name));
             Ok((crate::lens_pick::Clip::from_input(path, &input, meta.width, meta.height, meta.fps), in_file))
         }
-        Err(_) => Ok((crate::lens_pick::Clip::from_file(path, meta.width, meta.height), false)),
+        Err(_) => Ok((crate::lens_pick::Clip::from_file(path, meta.width, meta.height, meta.fps), false)),
     }
 }
 

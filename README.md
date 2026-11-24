@@ -431,16 +431,26 @@ and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFoota
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
 
-**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the HERO12 Black does).
-Otherwise it comes from Gyroflow's database, picked the way you would pick it in Gyroflow's list. It must be the same
-camera, the same lens mode the camera recorded (GoPro: Wide, Linear, SuperView...) and the same aspect ratio. Of those,
-the player takes the one made for exactly this resolution, frame rate and HyperSmooth setting, else the same HyperSmooth
-setting, then the nearest resolution and frame rate, then an official profile, then the one with the most stars from
-Gyroflow's users (a profile they mostly voted down only when there's nothing else). Gyroflow itself loads a profile
-only on that exact match, and then the first of several, however it was rated. Source → Lens shows which one it took
-("Nearest: …" when it isn't made for exactly this mode). Clips with motion data get stabilized with it too, and clips
-without motion data (the camera's stabilization on) get their lens corrected on its own. The stars are a snapshot
-taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online.
+**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the
+HERO12 Black does). Otherwise the player takes a lens by itself only when it's **made for exactly the clip's mode**:
+the same camera, lens mode, in-camera stabilization (GoPro's HyperSmooth, DJI's EIS), resolution and frame rate, with
+its rolling-shutter readout. A lens that only nearly fits is not taken (Anton's rule: the readout matters most on old
+cameras). Where it looks, in order:
+
+1. a lens type chosen for the clip;
+2. the lens in the file;
+3. **the player's own lens database**: profiles estimated from footage (built in: HERO4 Black, HERO3 White, HERO7
+   Black and Osmo Action 6 modes, Anton's lens_profiles#41) and lenses you assigned to a mode;
+4. the curated list's type for the mode;
+5. Gyroflow's database, only a profile whose identifier is exactly the clip's, with a readout, not voted down.
+
+Otherwise Source → Lens says **No ready lens** and offers the camera's lenses under **Lens for the mode**, the ones
+made for exactly this mode first. The Library's Info has the same choice. A lens chosen there is **kept for every
+clip of that mode** in `lenses/` beside your own lens list (below), with an `"afp"` block naming the mode; **Forget the
+lens assigned to this mode** takes it away. `gyroflow-probe --lens <clip>` shows where the lens came from (`from`),
+the clip's mode (`mode_key`) and the lenses to choose from (`candidates`); `--assign-lens <clip> <id>` and
+`--forget-lens <clip>` do the same as the panel. The stars are a snapshot taken at build time
+(`tools/update_lens_ratings.sh`); the player reads nothing online.
 
 **Lens types, for cameras the database has nothing for.** Gyroflow's database has no Osmo Action 4/5/6 profiles; the
 Action 6 carries its lens in the file only in Wide with EIS off. Another Action camera's profile fits it, so a curated
@@ -452,10 +462,11 @@ camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off),
 number for it (DJI's fov_type), so a lens tried on such clips can be given that mode once it fits; a named type
 without a profile (Wide with EIS on) as "Unknown (Wide)".
 
-The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode and picks nothing,
-but its file's settings box (`udta/SETT`) has a number that looks like the mode: 0, 2 or 4, probably Wide, Medium and
-Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its one type, Wide, has the best-voted HERO4
-Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
+The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode, but its file's
+settings box (`udta/SETT`) has the mode: 0 is Wide and 2 is Medium (lenses estimated from Anton's footage confirm
+both); 4 (Narrow?) isn't named yet. Its types have no profile of their own: their lenses come from the player's own
+database, for exactly the clip's size and frame rate (Wide 1080p 59.94, 2.7K 59.94, 4K 29.97; Medium 2.7K at 23.98,
+29.97 and 59.94), else No ready lens.
 
 The drones are in it as well, with a focal length alone, since a drone straightens its picture itself and the
 gimbal holds it: the Mini 4 Pro and the Mavic Air 2 (FC3170) at 24 mm equivalent and the Mavic Pro (FC220) at 26 mm,
