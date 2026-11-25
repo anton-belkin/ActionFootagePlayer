@@ -13,7 +13,7 @@
 #     mpv.lock                                   the lock it's built from, with MPV_DESCRIBE: its `git describe`
 #     licenses/mpv/, licenses/libplacebo/        their license files, for the app's ThirdParty/
 #
-# Everything else it links (ffmpeg, libass, LuaJIT, VapourSynth, MoltenVK's Vulkan loader...) is Homebrew's, installed
+# Everything else it links (ffmpeg, libass, LuaJIT, MoltenVK's Vulkan loader...) is Homebrew's, installed
 # first with `brew install --only-dependencies mpv` and the build's tools. Built for macOS 15 and later
 # (MACOSX_DEPLOYMENT_TARGET); the Homebrew libraries it links set the floor the app really needs (their bottles').
 #
@@ -131,13 +131,13 @@ meson setup ${reconfigure[@]+"${reconfigure[@]}"} "$build" "$mpv_src" \
     -Dcplayer=true \
     -Dlibmpv=false \
     -Dgpl=true \
+    -Dvapoursynth=disabled \
     -Dvulkan=enabled \
     -Dcocoa=enabled \
     -Dswift-build=enabled \
     -Dvideotoolbox-pl=enabled \
     -Dcoreaudio=enabled \
     -Dlua=luajit \
-    -Dvapoursynth=enabled \
     -Dlibarchive=enabled \
     -Duchardet=enabled \
     -Dlcms2=enabled \

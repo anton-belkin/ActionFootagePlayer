@@ -464,7 +464,7 @@ local function recorded_curve(path)
 end
 
 -- The video tagged as `tags` (HLG_TAGS, SDR_TAGS), or as the file says (nil). The filter stays in the chain once
--- added, disabled when not needed. Changing it rebuilds the chain: Gyroflow's filter restarts, as with Ctrl+g
+-- added, disabled when not needed
 local function tag_video(tags)
     local vf = mp.get_property_native("vf") or {}
     local tag = nil

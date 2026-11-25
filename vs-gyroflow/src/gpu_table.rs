@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The GPU warp's table (docs/gpu-render.md, step 1: the spike): each frame's kernel parameters and its row rotations,
-// from gyroflow-core as the filter gets them, packed for shaders/gyroflow/warp.glsl, which finds its frame by mpv's
+// from gyroflow-core as the engine computes them, packed for shaders/gyroflow/warp.glsl, which finds its frame by mpv's
 // PTS. The rotations go as quaternion knots evenly over the frame's rows (nlerp between them in the shader), or one
 // per row (Gyroflow's own nearest-row matrices). bin/gyroflow-gpu-table writes the shader file.
 
@@ -32,7 +32,7 @@ const DIGITAL_LENSES: &[(&str, &str)] = &[
     ("digital_stretch", include_str!("../../shaders/gyroflow/lens/digital_stretch.glsl")),
 ];
 
-/// Why the warp can't render this clip as the VapourSynth path does, if it can't: the lens or digital lens it has no
+/// Why the warp can't render this clip as gyroflow-core does (the player then plays it as recorded), if it can't: the lens or digital lens it has no
 /// GLSL for, the equirect output, a horizontal rolling shutter, IBIS/OIS, lens breathing or a mesh (Sony). A lens
 /// correction below 100 % renders (warp.glsl's blend_ray, LENS_BLEND)
 pub fn unsupported(clip: &Clip) -> Option<String> {
@@ -72,8 +72,8 @@ pub struct Clip {
     pub frame_offset_us: i64,
 }
 
-/// The player's choices for a clip, as main.lua hands them to the VapourSynth filter (gyroflow.vpy's user-data JSON),
-/// plus the video's own size (`input_width`, `input_height`), which the filter learns from its input
+/// The player's choices for a clip, as main.lua's player_args has them (the request's JSON; up to 2026-11 the VapourSynth
+/// filter's user-data), plus the video's own size (`input_width`, `input_height`)
 pub fn from_player_json(j: &serde_json::Value) -> Result<(Clip, f64), String> {
     let loaded = PlayerClip::load(j)?;
     Ok((loaded.clip(j), j.get("time_offset").and_then(|v| v.as_f64()).unwrap_or(0.0)))

@@ -206,19 +206,35 @@ fn player_defaults() -> Value {
 }
 
 /// The player's defaults from its gyroflow.conf, as gyroflow/main.lua's `defaults_bundle` makes them (its options'
-/// own defaults where the file doesn't say). The preset's horizon isn't known here: "no"
+/// own defaults where the file doesn't say). The preset's horizon isn't known here: "no". The file is read as mpv's
+/// player/lua/options.lua reads it: a line starting with # is a comment, key=value split at the first =, nothing
+/// trimmed (a key with a space is another key, unknown), a boolean only yes or no (tests/gyroflow_conf_cases.json,
+/// checked on both sides)
 fn defaults_of(conf: &str) -> Value {
     let mut o = serde_json::Map::new();
     for line in conf.lines() {
-        let line = line.trim();
         if line.starts_with('#') { continue; }
-        if let Some((k, v)) = line.split_once('=') { o.insert(k.trim().to_string(), json!(v.trim())); }
+        if let Some((k, v)) = line.split_once('=') { o.insert(k.to_string(), json!(v)); }
     }
     let get = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let yes = |k: &str, default: bool| match get(k).as_str() { "yes" | "true" => true, "no" | "false" => false, _ => default };
+    let yes = |k: &str, default: bool| match get(k).as_str() { "yes" => true, "no" => false, _ => default };
     let one = |k: &str, of: &[&str], default: &str| { let v = get(k); if of.contains(&v.as_str()) { v } else { default.to_string() } };
-    let split = split_frame(&json!({ "aspect": if get("aspect").is_empty() { "original".to_string() } else { get("aspect") },
-                                     "orientation": if get("orientation").is_empty() { Value::Null } else { json!(get("orientation")) } }));
+    // The plugin's split_aspect: an aspect that isn't W:H is original; a portrait W:H (9:16, from before the orientation
+    // was a setting) turned, portrait; else the orientation set (as-is by default), landscape for a W:H if that's no choice
+    let split = {
+        let a = get("aspect");
+        let ratio = a.split_once(':').filter(|(w, h)| !w.is_empty() && !h.is_empty() && w.chars().chain(h.chars()).all(|c| c.is_ascii_digit()))
+            .map(|(w, h)| (w.parse::<u64>().unwrap_or(0), h.parse::<u64>().unwrap_or(0), format!("{h}:{w}")));
+        let set = if o.contains_key("orientation") { get("orientation") } else { "as-is".to_string() };
+        match ratio {
+            Some((w, h, turned)) if w < h => json!({ "aspect": turned, "orientation": "portrait" }),
+            _ => {
+                let aspect = if ratio.is_some() { a } else { "original".to_string() };
+                let orientation = if ["as-is", "landscape", "portrait"].contains(&set.as_str()) { set } else if ratio.is_some() { "landscape".into() } else { "as-is".into() };
+                json!({ "aspect": aspect, "orientation": orientation })
+            }
+        }
+    };
     let blur: f64 = get("edges_blur").parse().unwrap_or(2.0);
     json!({
         "defaults": {
@@ -233,7 +249,8 @@ fn defaults_of(conf: &str) -> Value {
             "denoise_strong": yes("denoise_strong", false),
             "preset_horizon": "no",
         },
-        "edges": if get("edges").is_empty() { "sphere".to_string() } else { get("edges") },
+        // The plugin's EDGE_LABELS
+        "edges": one("edges", &["off", "sphere", "smooth"], "sphere"),
         "edges_blur": blur,
         "temporal_denoise": one("temporal_denoise", &["full", "light", "off"], "full"),
     })
@@ -769,6 +786,26 @@ mod tests {
         assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
 
+    // gyroflow.conf read as the gyroflow plugin reads it (tests/gyroflow_conf_test.lua, the same cases)
+    #[test]
+    fn defaults_are_read_as_the_player_does() {
+        let doc: Value = serde_json::from_str(include_str!("../../tests/gyroflow_conf_cases.json")).unwrap();
+        let mut bad = Vec::new();
+        let mut checks = 0;
+        for c in doc["cases"].as_array().unwrap() {
+            let conf: Vec<&str> = c["conf"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+            let got = defaults_of(&conf.join("\n"));
+            for (k, want) in c["want"].as_object().unwrap() {
+                checks += 1;
+                let g = got[k].clone();
+                let same = match (g.as_f64(), want.as_f64()) { (Some(a), Some(b)) => a == b, _ => g == *want };
+                if !same { bad.push(format!("{}: {k}:\n  got  {g}\n  want {want}", c["name"])); }
+            }
+        }
+        assert!(checks >= 30, "only {checks} checks read");
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
+    }
+
     #[test]
     fn the_export_settings_are_part_of_a_render() {
         let (root, moment, photo, _clip) = project("export-settings");
@@ -842,9 +879,9 @@ mod tests {
         // The player's defaults
         let strong = hash(&recipe(&Ctx::with(&root, true, defaults_of("level=strong\nlive_photo=live\n")), &moment, hdr));
         // (an option that isn't about the pixels: nothing)
-        assert_eq!(hash(&recipe(&Ctx::with(&root, true, defaults_of("# mine\nlevel = strong\nlive_photo=no\n")), &moment, hdr)), strong);
+        assert_eq!(hash(&recipe(&Ctx::with(&root, true, defaults_of("# mine\nlevel=strong\nlive_photo=no\n")), &moment, hdr)), strong);
         differs("the player's defaults", strong);
-        differs("the player's edge fill", hash(&recipe(&Ctx::with(&root, true, defaults_of("edges=black\n")), &moment, hdr)));
+        differs("the player's edge fill", hash(&recipe(&Ctx::with(&root, true, defaults_of("edges=off\n")), &moment, hdr)));
         differs("the player's temporal denoise", hash(&recipe(&Ctx::with(&root, true, defaults_of("temporal_denoise=light\n")), &moment, hdr)));
         // A moment with no bundle of its own renders with the clip's saved view
         let plain = with("stab", Value::Null);

@@ -14,16 +14,9 @@ ffmpeg (plugins\gyroflow\ffmpeg.exe, ffprobe.exe)
 Python (python\)
     PSF License (licenses\Python.txt). https://www.python.org
 
-VapourSynth (python\Lib\site-packages\vapoursynth\)
-    LGPL 2.1 (licenses\VapourSynth.txt). Source: https://github.com/vapoursynth/vapoursynth (for arm64, built from
-    it, without its AviSynth layer, which is for x86 only; tools/make_windows_app.sh)
-
 Vulkan loader (vulkan\vulkan-1.dll, used only when the system has none)
     Apache 2.0 (licenses\Vulkan loader.txt). Source: https://github.com/KhronosGroup/Vulkan-Loader; the build:
     https://www.nuget.org/packages/Silk.NET.Vulkan.Loader.Native
-
-Microsoft Visual C++ runtime (mpv\msvcp140*.dll, vcruntime140*.dll, concrt140.dll, ...)
-    Redistributable under the Visual Studio license (licenses\VC++ runtime.txt), from https://pypi.org/project/msvc-runtime/
 
 NBCU LUTs (plugins\dlogm\luts\3-NBCU_HLG2SDR_DL_v1.2.cube, and plugins\dlogm\shaders\nbcu_hlg2sdr.glsl and
 nbcu_pq2sdr.glsl, made from it and 5-NBCU_PQ2SDR_DL_v1.2.cube)
@@ -31,5 +24,5 @@ nbcu_pq2sdr.glsl, made from it and 5-NBCU_PQ2SDR_DL_v1.2.cube)
     without warranty, on an "as is" basis, to encourage UHD Single-Master HDR-SDR production with consistent media
     exchange. https://github.com/digitaltvguy/NBCUniversal-UHD-HDR-SDR-Single-Master-Production-Workflow-Recommendation-LUTs
 
-The gyroflow plugin (plugins\gyroflow\vs_gyroflow.dll, gyroflow-*.exe) is built from this project's vs-gyroflow/,
+The gyroflow plugin's binaries (plugins\gyroflow\gyroflow-*.exe, afp-*.exe) is built from this project's vs-gyroflow/,
 with Gyroflow's engine (https://github.com/gyroflow/gyroflow, GPL 3).

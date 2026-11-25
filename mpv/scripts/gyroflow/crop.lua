@@ -2,7 +2,7 @@
 --
 -- A drag, or a two-finger scroll on a trackpad, pans; the mouse wheel, or a pinch, zooms; Alt+drag or a two-finger
 -- rotation turns the horizon. Where the gyroflow plugin stabilizes the clip, pan is the camera turned, not the picture
--- slid: the plugin renders it again with the camera's yaw and pitch after the smoothing (gyroflow-core's
+-- slid: the warp (main.lua's GPU path) renders it with the camera's yaw and pitch after the smoothing (gyroflow-core's
 -- view_rotation), and zoom is its FOV, through the lens's own projection. The frame sits in the middle at MARGIN of
 -- the video, with what's around it dimmed, so the view is rendered that much wider than the frame (zoom 1 / MARGIN to
 -- start with: the frame shows what the screen showed). Elsewhere it's mpv's video-zoom and video-pan.
@@ -11,20 +11,8 @@
 -- (gyroflow-core's view_rotation), so the horizon stays as stabilized whatever way it's turned. A drag turns it by as
 -- much as the picture moves under the mouse (in the middle), along the picture's horizon when it's rolled.
 --
--- The camera goes to the plugin through the edges control file (main.lua's write_edge_control, `camera=`), which it
--- reads within 50 ms while playing. Paused, mpv seeks to the frame on screen again to have it rendered anew; until
--- that's through, mpv's video-zoom and video-pan move the frame that's there by about as much (exact in the middle),
--- from the focal length the plugin writes next to the control file (Edges::write_camera_info). With mpv's GPU video
--- outputs it's crop_preview.glsl that moves it, exactly (a turn, a roll, a zoom): each render of the paused frame
--- carries a parity (the control file's crop_mark), and the shader has the mapping for each, so a new frame shows moved
--- by its own from the moment it's there (mpv shows it before a script hears of it). Elsewhere mpv's video-zoom and
--- video-pan move it, and the frame drawn over it turns the other way for a roll. While a seek's under way the control
--- file stays as it was when it was
--- asked for, so the frame that comes is the one it says (the filter reads the file as mpv sets it up, any time after
--- the seek's asked for); the camera since then goes with the next one.
---
--- On the GPU path (main.lua's, the warp as an mpv shader) the camera is the warp's own parameters: turned at once,
--- paused or playing, with nothing rendered again but the frame on screen; no control file, no seek, no preview.
+-- The camera is the warp's own parameters (main.lua's gpu_camera): turned at once, paused or playing, with nothing
+-- rendered again but the frame on screen.
 --
 -- Keys while it's on: a / Shift+a the frame's aspect, double click or Backspace back to the start, Enter saves it as a
 -- photo (export.lua's photo, with this camera and frame), c or Esc leaves
@@ -33,10 +21,9 @@
 --
 -- The mouse, the wheel and the trackpad's gestures are gestures.lua's, which the 360 view (../view360) turns by too.
 --
--- Loaded by main.lua, which says whether the plugin stabilizes the clip and writes the control file (init).
+-- Loaded by main.lua, which says whether the plugin stabilizes the clip and sets the warp's camera (init).
 
 local mp = require 'mp'
-local utils = require 'mp.utils'
 local gestures = require 'gestures'
 
 local M = {}
@@ -56,29 +43,17 @@ local ZOOM_MIN, ZOOM_MAX = 0.15, 4
 -- How the picture moves as the camera turns: view_rotation's yaw (looking right) moves it left, pitch (looking down)
 -- up, roll counterclockwise (ROLL_SIGN); the camera model below (rotation) has the same
 local ROLL_SIGN = 1
--- The control file at most this often while dragging, s
-local WRITE_EVERY = 1 / 30
--- Before the plugin has said, a focal length for a 90° wide picture
+-- Before the warp's table has said, a focal length for a 90° wide picture
 local DEFAULT_FX = 0.5
 
 local hooks = nil
 local active = false
 local aspect = 1
--- The camera asked for, the one in the control file, and the one the paused frame on screen was rendered with
+-- The camera asked for (the warp's)
 local cam = nil
-local written = nil
-local shown = nil
--- The parity of the render the control file asks for (crop_mark), and each parity's camera (crop_preview.glsl)
-local mark = 0
-local renders = {}
 -- Without the plugin: mpv's own zoom (log2) and pan
 local flat = nil
 local overlay = mp.create_osd_overlay("ass-events")
--- A seek to the paused frame under way, and whether the camera changed since it was asked
-local refreshing = nil
-local dirty = false
-local write_timer = nil
-local last_write = 0
 
 local function default_camera()
     return { yaw = 0, pitch = 0, roll = 0, zoom = 1 / MARGIN }
@@ -92,21 +67,11 @@ local function stabilizing()
     return hooks ~= nil and hooks.stabilizing()
 end
 
--- The GPU path (main.lua's): the camera is the warp's own parameters, the frame on screen has it the next refresh
-local function gpu_mode()
-    return hooks ~= nil and hooks.gpu ~= nil and hooks.gpu()
-end
-
--- What the plugin wrote: the focal length in output widths and heights at zoom 1
+-- The warp's table: the focal length in output widths and heights at zoom 1
 local function focal()
-    local g = gpu_mode() and hooks.focal()
+    local g = hooks and hooks.focal()
     if g and tonumber(g[1]) and tonumber(g[2]) then return tonumber(g[1]), tonumber(g[2]) end
-    local f = hooks and io.open(hooks.control_path() .. ".camera", "r")
-    if not f then return DEFAULT_FX, DEFAULT_FX * 16 / 9 end
-    local info = utils.parse_json(f:read("*a") or "")
-    f:close()
-    if not info or not info.fx or not info.zoom then return DEFAULT_FX, DEFAULT_FX * 16 / 9 end
-    return info.fx * info.zoom, info.fy * info.zoom
+    return DEFAULT_FX, DEFAULT_FX * 16 / 9
 end
 
 -- The video's rectangle in the window as it'd be without mpv's zoom and pan (those are the preview's): the window less
@@ -146,15 +111,12 @@ local function draw()
     local r = frame_rect(v)
     local W, H = v.osd_w, v.osd_h
     local x0, y0, x1, y1 = r.x, r.y, r.x + r.w, r.y + r.h
-    -- Not over the side panel nor the navigation bar below the video; turned about the frame's middle the other way from a roll the paused frame doesn't
-    -- have yet (what's in it is then what the frame rendered with the roll will show)
+    -- Not over the side panel nor the navigation bar below the video
     local right = W * (1 - (mp.get_property_number("video-margin-ratio-right") or 0))
     local bottom = H * (1 - (mp.get_property_number("video-margin-ratio-bottom") or 0))
-    local turn = 0
-    if cam and shown and not hooks.shader and mp.get_property_native("pause") then turn = -ROLL_SIGN * (cam.roll - shown.roll) end
     local function style(color, alpha)
-        return string.format("{\\an7\\pos(0,0)\\org(%d,%d)\\frz%.2f\\clip(0,0,%d,%d)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}",
-                             (x0 + x1) / 2, (y0 + y1) / 2, turn, right, bottom, color, alpha)
+        return string.format("{\\an7\\pos(0,0)\\clip(0,0,%d,%d)\\bord0\\shad0\\1c&H%s&\\1a&H%s&\\p1}",
+                             right, bottom, color, alpha)
     end
     local dim = style("000000", "50")
     -- Far enough out to cover the window turned
@@ -251,132 +213,13 @@ local function place(c, w)
     return fx * x / z, fy * y / z
 end
 
-local function mul(A, B)
-    local M = {}
-    for i = 1, 3 do
-        M[i] = {}
-        for j = 1, 3 do M[i][j] = A[i][1] * B[1][j] + A[i][2] * B[2][j] + A[i][3] * B[3][j] end
-    end
-    return M
-end
-
--- From the view asked for to the frame rendered with camera c, in texture coordinates (0-1, y down): both turn about
--- the same point, so it's a homography, K_c · R_c^T · R_cam · K_cam^-1
-local function homography(c)
-    local fx, fy = focal()
-    local fa, ga, fb, gb = fx / cam.zoom, fy / cam.zoom, fx / c.zoom, fy / c.zoom
-    local Ra, Rb = rotation(cam), rotation(c)
-    local M = {}
-    for i = 1, 3 do
-        M[i] = {}
-        for j = 1, 3 do M[i][j] = Rb[1][i] * Ra[1][j] + Rb[2][i] * Ra[2][j] + Rb[3][i] * Ra[3][j] end
-    end
-    local unproject = { { 1 / fa, 0, -0.5 / fa }, { 0, 1 / ga, -0.5 / ga }, { 0, 0, 1 } }
-    local project = { { fb, 0, 0.5 }, { 0, gb, 0.5 }, { 0, 0, 1 } }
-    return mul(project, mul(M, unproject))
-end
-
-local IDENTITY = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 } }
-local shader_set = nil
--- crop_preview.glsl's parameters, with whatever else glsl-shader-opts has; nil: off
-local function set_shader(a, b)
-    local opts = mp.get_property_native("glsl-shader-opts") or {}
-    for k in pairs(opts) do if k:match("^crop_") then opts[k] = nil end end
-    local key = "off"
-    if a then
-        opts.crop_on = "1"
-        for i = 1, 3 do
-            for j = 1, 3 do
-                opts["crop_a" .. ((i - 1) * 3 + j - 1)] = string.format("%.7g", a[i][j])
-                opts["crop_b" .. ((i - 1) * 3 + j - 1)] = string.format("%.7g", b[i][j])
-            end
-        end
-        local parts = {}
-        for i = 0, 8 do table.insert(parts, opts["crop_a" .. i] .. "," .. opts["crop_b" .. i]) end
-        key = table.concat(parts, ";")
-    end
-    if key == shader_set then return end
-    shader_set = key
-    mp.set_property_native("glsl-shader-opts", opts)
-end
-
--- The point the preview keeps where it should be: where the mouse took the picture last (nil: the middle)
+-- The point the camera turned about last: where the mouse took the picture (nil: the middle)
 local anchor = nil
 
--- The paused frame moved by mpv to about where the camera asked for puts it, from the one it was rendered with
-local function preview()
-    if not cam then return end
-    if gpu_mode() then return end
-    local paused = mp.get_property_native("pause")
-    if hooks.shader then
-        mp.set_property_number("video-zoom", 0)
-        mp.set_property_number("video-pan-x", 0)
-        mp.set_property_number("video-pan-y", 0)
-        -- Playing, the frames come with the camera asked for (a moment later)
-        local function h(c) return (paused and c) and homography(c) or IDENTITY end
-        set_shader(h(renders[0]), h(renders[1]))
-        return
-    end
-    if not paused or not shown then
-        mp.set_property_number("video-zoom", 0)
-        mp.set_property_number("video-pan-x", 0)
-        mp.set_property_number("video-pan-y", 0)
-        return
-    end
-    local v = video_rect()
-    if not v then return end
-    -- The frame on screen scaled by r and moved so that the anchor's point in the view asked for (a, b) shows where
-    -- it's in the frame on screen (as, bs): mpv puts that at the middle + (as + pan) * r * the video's size
-    local r = shown.zoom / cam.zoom
-    local a, b = 0, 0
-    if anchor then a, b = (anchor.x - (v.x + v.w / 2)) / v.w, (anchor.y - (v.y + v.h / 2)) / v.h end
-    local as, bs = place(shown, look(cam, a, b))
-    mp.set_property_number("video-zoom", math.log(r) / math.log(2))
-    if not as then return end
-    mp.set_property_number("video-pan-x", a / r - as)
-    mp.set_property_number("video-pan-y", b / r - bs)
-end
-
-local function same(a, b)
-    return a and b and a.yaw == b.yaw and a.pitch == b.pitch and a.roll == b.roll and a.zoom == b.zoom
-end
-
--- The camera into the control file, and paused, mpv seeks to the frame again, which sets the filter up again, which
--- reads it. Not while such a seek is under way: the frame it brings would be rendered with this camera or that one
-local function write_now()
-    if write_timer then write_timer:kill(); write_timer = nil end
-    -- The GPU path: the warp turns the camera itself, paused or playing, nothing to render again
-    if gpu_mode() then
-        hooks.camera(cam)
-        written, shown = copy(cam), copy(cam)
-        return
-    end
-    local paused = mp.get_property_native("pause")
-    if paused and refreshing then dirty = true; return end
-    last_write = mp.get_time()
-    written = copy(cam)
-    local t = paused and not same(written, shown) and mp.get_property_number("time-pos")
-    -- A render of the paused frame: the other parity (crop_preview.glsl)
-    if t then mark = 1 - mark end
-    renders[mark] = copy(written)
-    -- The shader's mapping for this render's parity before it can come (it may well come before the mouse moves on)
-    preview()
-    hooks.write()
-    if not t then return end
-    refreshing, dirty = copy(written), false
-    mp.msg.debug(string.format("refresh: yaw %.3f pitch %.3f roll %.3f zoom %.3f", cam.yaw, cam.pitch, cam.roll, cam.zoom))
-    mp.commandv("seek", tostring(t), "absolute+exact")
-end
-
--- The camera changed: the preview at once, the control file at most every WRITE_EVERY
+-- The camera changed: the warp has it at once (mpv's own zoom and pan without the plugin)
 local function changed()
-    if cam and gpu_mode() then
-        write_now()
-    elseif cam then
-        preview()
-        local wait = WRITE_EVERY - (mp.get_time() - last_write)
-        if wait <= 0 then write_now()
-        elseif not write_timer then write_timer = mp.add_timeout(wait, write_now) end
+    if cam then
+        hooks.camera(cam)
     else
         mp.set_property_number("video-zoom", flat.zoom)
         mp.set_property_number("video-pan-x", flat.x)
@@ -456,8 +299,7 @@ end
 
 local input = gestures.new({
     prefix = "crop", pan = pan, zoom = zoom, roll = roll, reset = reset,
-    -- The camera into the control file as soon as the mouse lets go
-    released = function() if cam then write_now() end end,
+    released = function() end,
     width = function() local v = video_rect(); return v and v.w end,
     bindings = {
         { "ENTER", "crop-key-photo", function() mp.commandv("script-message-to", "gyroflow", "photo") end },
@@ -473,33 +315,21 @@ function M.set(on)
     -- A photo shown (the live-photo plugin): nothing to save a frame of
     if on and type(mp.get_property_native("user-data/afp/photo")) == "table" then return end
     active = on
-    refreshing, dirty, written, renders = nil, false, nil, {}
     if on then
         if stabilizing() then
             cam, flat = default_camera(), nil
         else
             cam, flat = nil, { zoom = 0, x = 0, y = 0 }
         end
-        shown = nil
         input:set(true)
         mp.osd_message("Save frame: drag to pan, wheel or pinch to zoom, Alt+drag to level, Enter to save", 3)
     else
         input:set(false)
-        local had_camera = cam ~= nil
-        if write_timer then write_timer:kill(); write_timer = nil end
-        cam, flat, shown = nil, nil, nil
-        if hooks.shader then set_shader(nil) end
-        if gpu_mode() then hooks.camera(nil); had_camera = false end
+        if cam then hooks.camera(nil) end
+        cam, flat = nil, nil
         mp.set_property_number("video-zoom", 0)
         mp.set_property_number("video-pan-x", 0)
         mp.set_property_number("video-pan-y", 0)
-        if had_camera then
-            hooks.write()
-            if mp.get_property_native("pause") then
-                local t = mp.get_property_number("time-pos")
-                if t then mp.commandv("seek", tostring(t), "absolute+exact") end
-            end
-        end
         mp.osd_message("Save frame: off", 1)
     end
     if cam then changed() else draw(); publish() end
@@ -508,20 +338,13 @@ end
 function M.active() return active end
 
 -- A camera of its own for what plays, outside crop mode: a photo link's (Save frame's camera, kept in its link), so
--- the clip shows as Share renders the link (gyroflow-export --camera). In the warp's parameters (the GPU path: kept
--- there for the shader when it comes) and in the control file (the filter's: the paused frame rendered again with
--- it). nil: none again
+-- the clip shows as Share renders the link (gyroflow-export --camera). In the warp's parameters (kept there for the
+-- shader when it comes). nil: none again
 function M.view(c)
     if active then return end
     if not c and not cam then return end
     cam = c and { yaw = tonumber(c.yaw) or 0, pitch = tonumber(c.pitch) or 0, roll = tonumber(c.roll) or 0, zoom = tonumber(c.zoom) or 1 } or nil
-    written, shown, refreshing, renders = copy(cam), copy(cam), nil, {}
     hooks.camera(cam)
-    hooks.write()
-    if mp.get_property_native("pause") and not gpu_mode() and stabilizing() then
-        local t = mp.get_property_number("time-pos")
-        if t then mp.commandv("seek", tostring(t), "absolute+exact") end
-    end
 end
 
 -- A photo link's camera and crop (Save frame's: the frame in crop mode's middle, in shares of the stabilized frame) as
@@ -546,44 +369,14 @@ function M.fold(camera, crop)
     return { camera = cam, rest = rest }
 end
 
--- For the control file: the camera written last (write_now), while there's one
-function M.control_words()
-    if not cam or not written then return "" end
-    return string.format(" camera=%.4f,%.4f,%.4f,%.5f crop_mark=%d", written.yaw, written.pitch, written.roll, written.zoom, mark)
-end
-
--- A frame through after a seek: paused, it's the one asked for
-mp.register_event("playback-restart", function()
-    if not active or not cam then return end
-    mp.msg.debug(string.format("restart: refreshing %s, dirty %s", tostring(refreshing ~= nil), tostring(dirty)))
-    -- Ours, or a seek of the user's, or the chain set up again: rendered with the camera the file has
-    shown, refreshing = copy(written) or default_camera(), nil
-    preview()
-    draw()
-    if dirty then write_now() end
-end)
-
--- Playing, frames come with the camera asked for; paused, the one on screen is the one rendered last
-mp.observe_property("pause", "bool", function(_, paused)
-    if not active or not cam then return end
-    if paused then
-        -- Playing, the frames came with the camera written
-        shown = copy(written) or default_camera()
-        write_now()
-    end
-    preview()
-    draw()
-end)
-
 for _, prop in ipairs({ "osd-dimensions", "video-out-params", "video-margin-ratio-right", "video-margin-ratio-left",
                         "video-margin-ratio-bottom" }) do
     mp.observe_property(prop, "native", function() if active then draw(); publish() end end)
 end
 mp.register_event("end-file", function() M.set(false) end)
 
--- hooks: { stabilizing(): the plugin stabilizes the clip, write(): the control file written anew (with
--- control_words), control_path(): where it is; gpu(): on the GPU path, camera(c): the warp's camera set (nil: none),
--- focal(): its focal length }
+-- hooks: { stabilizing(): the plugin stabilizes the clip, camera(c): the warp's camera set (nil: none), focal(): its
+-- focal length }
 function M.init(h)
     hooks = h
     publish()

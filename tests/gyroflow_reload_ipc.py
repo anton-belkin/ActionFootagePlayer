@@ -1,25 +1,23 @@
 #!/usr/bin/env python3
 """The open player takes up a Gyroflow project saved while the clip plays (Ctrl+e, main.lua's check_project and
-reload_project), headless (macOS, the app's own mpv, no window): on the GPU path and through VapourSynth, for
+reload_project), headless (macOS, the app's own mpv, no window), for
 
   edit    an existing project saved once in Gyroflow
   twice   saved, then twice again within one second at the same size (mpv's mtimes are whole seconds)
   appear  a clip without motion data: the project Gyroflow saves next to it appears
 
-Each case passes when the new shader (the glsl-shaders list's warp) or filter (the vf's user-data version) is in place
-within a few seconds of the save, the clip playing on from where it was, and on the GPU path when the warp is the one a
-fresh open of the saved project gets.
+Each case passes when the new shader (the glsl-shaders list's warp) is in place within a few seconds of the save, the
+clip playing on from where it was, and the warp is the one a fresh open of the saved project gets.
 
   tests/gyroflow_reload_ipc.py [--lua <dir>] [--table <gyroflow-gpu-table>] [--cases edit,twice,appear] [--keep] <ActionFootagePlayer.app> <clip with motion
-                                data, DJI .MP4> [gpu|vs ...]
+                                data, DJI .MP4>
 
 The app is cloned into a temporary folder (cp -c) with this checkout's gyroflow plugin Lua put in it (or --lua's
 folder's: another branch's mpv/scripts/gyroflow), and two changes
-for the test alone: Ctrl+e's `open -b xyz.gyroflow` is /usr/bin/true (no Gyroflow window), and the GPU path is allowed
-with vo=null (mpv parses the warp but draws nothing: the picture isn't compared). The clip is cloned next to it; the
+for the test alone: Ctrl+e's `open -b xyz.gyroflow` is /usr/bin/true (no Gyroflow window), and the stabilization is
+allowed with vo=null (mpv parses the warp but draws nothing: the picture isn't compared). The clip is cloned next to it; the
 project made with the app's gyroflow-project; saves are made by editing its smoothness and FOV in place, as Gyroflow
 writes it. The app's table server (gyroflow-gpu-table) is the app's own unless --table <binary> gives another.
-VapourSynth's config goes to the temporary folder (XDG_CONFIG_HOME), not ~/.config.
 """
 import glob, hashlib, json, os, shutil, socket, subprocess, sys, tempfile, time
 
@@ -30,7 +28,7 @@ PLUGINS = ["workspace", "gyroflow", "view360", "dlogm", "dji-telemetry", "highli
 
 
 def make_rig(app, clip, table, lua):
-    rig = os.path.realpath(tempfile.mkdtemp(prefix="afp-reload-"))  # VSScript knows itself by its real path
+    rig = os.path.realpath(tempfile.mkdtemp(prefix="afp-reload-"))
     sock = os.path.join("/tmp", "afpgf-%d.sock" % os.getpid())  # short: macOS caps socket paths at 104
     subprocess.run(["cp", "-cR", app, rig + "/app.app"], check=True)
     g = rig + "/app.app/Contents/Resources/plugins/gyroflow"
@@ -40,9 +38,8 @@ def make_rig(app, clip, table, lua):
         shutil.copy(table, g + "/gyroflow-gpu-table")
     main = open(g + "/main.lua").read()
     for a, b in [('"/usr/bin/open"', '"/usr/bin/true"'),
-                 ('if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end',
-                  'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then return false end'),
-                 ('(vo == "" or vo:find("gpu-next", 1, true))', '(vo == "" or vo == "null" or vo:find("gpu-next", 1, true))')]:
+                 ('if vo ~= "" and not vo:find("gpu-next", 1, true) then',
+                  'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then')]:
         if a not in main:
             sys.exit("main.lua changed: the test's patch doesn't apply: " + a)
         main = main.replace(a, b)
@@ -60,27 +57,20 @@ def env_for(rig):
     res = c + "/Resources"
     env = dict(os.environ)
     for k, v in {"DLOGM_DATA": "data/dlogm", "GYROFLOW_DATA": "data/gyroflow", "AGENT_DATA": "data/agent",
-                 "AFP_JOURNAL_DIR": "journal", "XDG_CONFIG_HOME": "xdg"}.items():
+                 "AFP_JOURNAL_DIR": "journal"}.items():
         env[k] = os.path.join(rig, v)
         os.makedirs(env[k], exist_ok=True)
-    env["PATH"] = res + "/bin:" + c + "/Helpers:" + env["PATH"]
-    homes = glob.glob(c + "/Frameworks/Python.framework/Versions/[0-9]*")
-    if homes:
-        env["PYTHONHOME"] = homes[-1]
-        for vs in glob.glob(homes[-1] + "/lib/python*/site-packages/vapoursynth/libvsscript.dylib"):
-            env["VSSCRIPT_PATH"] = vs
-    if not os.path.exists(env["XDG_CONFIG_HOME"] + "/vapoursynth/vapoursynth.toml"):
-        subprocess.run([res + "/bin/vapoursynth", "config"], env=env, capture_output=True)
+    env["PATH"] = c + "/Helpers:" + env["PATH"]
     icd = res + "/vulkan/icd.d/MoltenVK_icd.json"
     env.update(VK_DRIVER_FILES=icd, VK_ICD_FILENAMES=icd, GYROFLOW_TOOLS=c + "/Helpers")
     return env
 
 
 class Player:
-    def __init__(self, rig, sock, clip, path, stabilized=True):
+    def __init__(self, rig, sock, clip, stabilized=True):
         self.rig, self.sock = rig, sock
         os.makedirs(rig + "/cfg/script-opts", exist_ok=True)
-        open(rig + "/cfg/script-opts/gyroflow.conf", "w").write("gpu=no\n" if path == "vs" else "")
+        open(rig + "/cfg/script-opts/gyroflow.conf", "w").write("")
         for f in glob.glob(rig + "/journal/*"):
             os.remove(f)
         res = rig + "/app.app/Contents/Resources"
@@ -98,7 +88,7 @@ class Player:
         # Until stabilized (or 30 s; a clip without motion data plays as it is), then a second's play
         for _ in range(300 if stabilized else 0):
             s = self.state()
-            if s["warp"] or s["vf"]:
+            if s["warp"]:
                 break
             time.sleep(0.1)
         time.sleep(1)
@@ -123,16 +113,13 @@ class Player:
     def state(self):
         warp = [x for x in (self.prop("glsl-shaders") or []) if "mpv-gyroflow-" in x]
         h = hashlib.md5(open(warp[-1], "rb").read()).hexdigest()[:10] if warp and os.path.exists(warp[-1]) else None
-        vf = [f for f in (self.prop("vf") or []) if f.get("label") == "gyroflow"]
-        ud = json.loads(vf[0]["params"]["user-data"]) if vf else None
-        return {"warp": h, "vf": (os.path.basename(ud.get("project") or ""), ud.get("version")) if ud else None,
-                "t": round(self.prop("time-pos") or -1, 2)}
+        return {"warp": h, "t": round(self.prop("time-pos") or -1, 2)}
 
     def wait_change(self, before, limit):
         t = time.time()
         while time.time() - t < limit:
             s = self.state()
-            if (s["warp"], s["vf"]) != (before["warp"], before["vf"]):
+            if s["warp"] != before["warp"]:
                 return s, round(time.time() - t, 2)
             time.sleep(0.1)
         return self.state(), None
@@ -145,7 +132,7 @@ class Player:
             for line in open(j):
                 e = json.loads(line)
                 n = e.get("n", "")
-                if n in ("warp-set", "vf-set", "gyroflow/edit") or "gpu-table" in n:
+                if n in ("warp-set", "gyroflow/edit") or "gpu-table" in n:
                     steps.append(n + ("(reused)" if e.get("reused") else ""))
         return steps
 
@@ -162,7 +149,7 @@ def save(project, smooth):
         json.dump(d, f)
 
 
-def run(rig, sock, case, path):
+def run(rig, sock, case):
     g = rig + "/app.app/Contents/Resources/plugins/gyroflow"
     a = rig + "/clips/a.gyroflow"
     if os.path.exists(a):
@@ -172,7 +159,7 @@ def run(rig, sock, case, path):
     project = clip[:-4] + ".gyroflow"
     if case == "appear" and os.path.exists(project):
         os.remove(project)
-    pl = Player(rig, sock, clip, path, case != "appear")
+    pl = Player(rig, sock, clip, case != "appear")
     pl.cmd("keypress", "Ctrl+e")
     time.sleep(0.5)
     pl.cmd("set_property", "pause", False)  # Ctrl+e pauses; it plays on, as it does when Gyroflow is used
@@ -204,12 +191,11 @@ def run(rig, sock, case, path):
             log.append("twice    %s after %s s" % (s, dt))
             ok = ok and dt is not None and s["t"] >= s1["t"]
     log.append("journal: " + " ".join(pl.quit()))
-    if path == "gpu":
-        fresh = Player(rig, sock, clip, path)
-        f = fresh.state()
-        fresh.quit()
-        log.append("fresh    %s" % f)
-        ok = ok and f["warp"] == s["warp"]
+    fresh = Player(rig, sock, clip)
+    f = fresh.state()
+    fresh.quit()
+    log.append("fresh    %s" % f)
+    ok = ok and f["warp"] == s["warp"]
     return ok, log
 
 
@@ -234,21 +220,20 @@ def main():
         del args[i:i + 2]
     if len(args) < 2:
         sys.exit(__doc__)
-    app, clip, paths = args[0], args[1], args[2:] or ["gpu", "vs"]
+    app, clip = args[0], args[1]
     rig, sock = make_rig(os.path.abspath(app), os.path.abspath(clip), table, lua)
     failed = 0
     try:
-        for path in paths:
-            for case in cases:
-                try:
-                    ok, log = run(rig, sock, case, path)
-                except Exception as e:  # mpv gone: its log is in the rig (--keep)
-                    ok, log = False, ["%s: %s" % (type(e).__name__, e)]
-                failed += not ok
-                print("%s %s %s" % ("OK  " if ok else "FAIL", case, path))
-                for line in log:
-                    print("     " + line)
-                sys.stdout.flush()
+        for case in cases:
+            try:
+                ok, log = run(rig, sock, case)
+            except Exception as e:  # mpv gone: its log is in the rig (--keep)
+                ok, log = False, ["%s: %s" % (type(e).__name__, e)]
+            failed += not ok
+            print("%s %s" % ("OK  " if ok else "FAIL", case))
+            for line in log:
+                print("     " + line)
+            sys.stdout.flush()
     finally:
         # The cloned app registered with Launch Services by nothing (never opened): the folder alone goes
         if keep:

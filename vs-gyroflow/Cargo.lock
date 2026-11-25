@@ -3473,12 +3473,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
 
 [[package]]
-name = "vapoursynth4-sys"
-version = "0.4.1+R79"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5187b816da71a85162d247b24c2fa994c858be997fb3dd27b454bf1630a76335"
-
-[[package]]
 name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3522,7 +3516,6 @@ dependencies = [
  "sha2",
  "simplelog",
  "url",
- "vapoursynth4-sys",
  "wgpu",
 ]
 

@@ -1,5 +1,10 @@
 # The render on the GPU: Gyroflow's warp as shaders
 
+> **2026-11-25:** built, and the player's only render path since: the VapourSynth path (the filter, `gyroflow.vpy`,
+> the Still filter, crop mode's preview shader) was taken out. A clip the warp can't do (`gpu_table.rs`'s
+> `unsupported`) or an mpv that can't run it (older than 0.42, a `vo` other than `gpu-next`) plays as recorded, with a
+> card saying why. What follows is the design as written, with the VapourSynth path as it was then.
+
 How the player, a streaming server and the export could render a stabilized clip with the frame never leaving the
 GPU: Gyroflow's per-frame warp ported to GLSL and run by libplacebo, with the color fringes, the edge fill and the
 look as passes of the same render rather than steps after it. This is a design, not built yet.

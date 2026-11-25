@@ -46,8 +46,9 @@ HDR_CURVES="dlog gplog2 ilog"
 macos=0
 [ "$(uname -s)" = Darwin ] && macos=1
 # The gyroflow plugin's binaries, as cargo names them here
-if [ $macos = 1 ]; then LIBRARY=libvs_gyroflow.dylib; else LIBRARY=libvs_gyroflow.so; fi
-BINARIES="$LIBRARY gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical"
+# What installs before had for the VapourSynth path, taken out
+VAPOURSYNTH_FILES="libvs_gyroflow.dylib libvs_gyroflow.so gyroflow.vpy sphere360.vpy chromatic.glsl crop_preview.glsl"
+BINARIES="gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical"
 
 apps=0
 for arg in "$@"; do
@@ -71,7 +72,7 @@ if [ $macos = 1 ]; then
     need mpv "brew install mpv"
     need python3 "Xcode command line tools"
 else
-    need mpv "your distribution's mpv, built with VapourSynth for the stabilization"
+    need mpv "your distribution's mpv, 0.42 or later for the stabilization"
     need python3 "your distribution's python3"
     need curl "your distribution's curl, to download DJI's LUT"
 fi
@@ -85,8 +86,12 @@ else
     need cargo "https://rustup.rs, or download a release, which has the binaries prebuilt"
 fi
 command -v ffmpeg >/dev/null || echo "Warning: no ffmpeg ($([ $macos = 1 ] && echo "brew install ffmpeg" || echo "install your distribution's")); exporting needs it" >&2
-if ! grep -q vapoursynth <<< "$(mpv --vf=help 2>/dev/null)"; then
-    echo "Warning: this mpv has no VapourSynth filter; videos will play, but not stabilized" >&2
+# The stabilization is Gyroflow's warp as an mpv shader (vo=gpu-next), which finds each frame by its PTS: mpv 0.42 or
+# later, or a 0.41.0 build 499 commits on (as the plugin checks it, gyroflow/main.lua's mpv_has_pts)
+mpv_version=$(mpv --version 2>/dev/null | head -1)
+if ! awk '{ v = $2; sub(/^v/, "", v); n = split(v, p, /[.-]/)
+            exit !(p[1] > 0 || p[2] >= 42 || (p[2] == 41 && n >= 4 && p[4] + 0 >= 499)) }' <<< "$mpv_version"; then
+    echo "Warning: ${mpv_version:-this mpv} is older than 0.42; videos will play, but not stabilized" >&2
 fi
 
 mkdir -p "$BUILD"
@@ -169,7 +174,7 @@ remove_ours() {
     for f in "$@"; do rm -f "$dir/$f" "$dir/$f".bak-*; done
     rmdir "$dir" 2>/dev/null || echo "   left $dir: there's more in it than this setup put there"
 }
-remove_ours "$MPV_DIR/gyroflow" gyroflow.vpy $BINARIES \
+remove_ours "$MPV_DIR/gyroflow" $BINARIES $VAPOURSYNTH_FILES \
     gyroflow-embed gyroflow-router export-finder.sh
 remove_ours "$MPV_DIR/shaders" dlogm_lut3d.glsl dlogm_hlg.glsl
 remove_ours "$MPV_DIR/luts" dlogm_hlg.cube dji-dlogm-rec709.cube
@@ -244,11 +249,9 @@ put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
 put mpv/scripts/gyroflow/measure.lua "$GYROFLOW/measure.lua" 644
 put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/dnstep.lua "$GYROFLOW/dnstep.lua" 644
-put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
-put mpv/scripts/gyroflow/sphere360.vpy "$GYROFLOW/sphere360.vpy" 644
-put mpv/scripts/gyroflow/chromatic.glsl "$GYROFLOW/chromatic.glsl" 644
-put mpv/scripts/gyroflow/crop_preview.glsl "$GYROFLOW/crop_preview.glsl" 644
 put mpv/scripts/gyroflow/gpu_hold.glsl "$GYROFLOW/gpu_hold.glsl" 644
+# The VapourSynth path's, from an install before it was taken out
+for f in $VAPOURSYNTH_FILES; do rm -f "$GYROFLOW/$f"; done
 # The default preset for clips without a project: underwater. Only if there's none yet, it's yours to change
 if [ ! -e "$GYROFLOW/default.gyroflow" ]; then
     install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$GYROFLOW/default.gyroflow"

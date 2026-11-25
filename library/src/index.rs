@@ -1557,3 +1557,102 @@ mod dump {
         std::fs::write(out, serde_json::to_vec(&all).unwrap()).unwrap();
     }
 }
+
+/// GEOTAG goes with what gyroflow-probe --library answers (#227: the probe told more, GEOTAG wasn't raised, and every
+/// clip's older answer stayed cached). The answer's fields are read from vs-gyroflow's sources (no link to it: the
+/// Library runs the probe as a process): the keys gyroflow-probe.rs sets on it and writes in its plain answer, the
+/// probe's own answer (probe.rs probe_inner), and the fields of what's serialized into it (markers::Movie,
+/// geotag::Clock and Fix, probe::LensInfo, lens_pick::LensType). When they change, raise GEOTAG here and the probe's
+/// "geotag" (gyroflow-probe.rs) with a line on what the new number means there, then change this test's line
+#[cfg(test)]
+mod probe_version {
+    use super::GEOTAG;
+
+    fn source(rel: &str) -> String {
+        std::fs::read_to_string(format!("{}/../vs-gyroflow/src/{rel}", env!("CARGO_MANIFEST_DIR"))).unwrap_or_else(|e| panic!("{rel}: {e}"))
+    }
+
+    /// The text of the block that opens at the first { after `start` (strings and // comments passed over)
+    fn block<'a>(text: &'a str, start: &str) -> &'a str {
+        let at = text.find(start).unwrap_or_else(|| panic!("no {start}"));
+        let b = text.as_bytes();
+        let open = at + text[at..].find('{').unwrap();
+        let (mut depth, mut i) = (0i32, open);
+        while i < b.len() {
+            match b[i] {
+                b'"' => { i += 1; while i < b.len() && b[i] != b'"' { if b[i] == b'\\' { i += 1; } i += 1; } }
+                b'/' if b.get(i + 1) == Some(&b'/') => { while i < b.len() && b[i] != b'\n' { i += 1; } }
+                b'{' => depth += 1,
+                b'}' => { depth -= 1; if depth == 0 { return &text[open..=i]; } }
+                _ => {}
+            }
+            i += 1;
+        }
+        panic!("{start}: not closed")
+    }
+
+    fn ident(s: &str) -> bool { !s.is_empty() && s.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') }
+
+    /// The keys set as `out["key"] = ` and written as `"key": ` in json!
+    fn keys(text: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, _) in text.match_indices("out[\"") {
+            let rest = &text[i + 5..];
+            let Some(end) = rest.find("\"]") else { continue };
+            let after = rest[end + 2..].trim_start();
+            if after.starts_with('=') && !after.starts_with("==") && ident(&rest[..end]) { out.push(rest[..end].to_string()); }
+        }
+        for (i, _) in text.match_indices('"') {
+            let rest = &text[i + 1..];
+            if let Some(end) = rest.find('"') {
+                if ident(&rest[..end]) && rest[end + 1..].trim_start().starts_with(':') && !rest[end + 1..].trim_start().starts_with("::") {
+                    out.push(rest[..end].to_string());
+                }
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// A struct's fields as serde writes them: #[serde(rename = "x")] as x, #[serde(skip)] left out
+    fn fields(text: &str, name: &str) -> String {
+        let body = block(text, &format!("pub struct {name} "));
+        let (mut out, mut rename, mut skip) = (Vec::new(), None::<String>, false);
+        for line in body.lines().map(str::trim) {
+            if line.starts_with("#[serde(") {
+                if line.contains("skip)") || line.contains("skip,") { skip = true; }
+                if let Some(r) = line.split("rename = \"").nth(1).and_then(|r| r.split('"').next()) { rename = Some(r.to_string()); }
+            } else if let Some(f) = line.strip_prefix("pub ").and_then(|l| l.split(':').next()) {
+                if !skip { out.push(rename.take().unwrap_or_else(|| f.trim().to_string())); }
+                rename = None;
+                skip = false;
+            }
+        }
+        out.join(" ")
+    }
+
+    #[test]
+    fn geotag_goes_with_what_the_probe_answers() {
+        let tool = source("bin/gyroflow-probe.rs");
+        let probe = source("probe.rs");
+        let mut answer = keys(block(&tool, "\nfn plain("));
+        answer.extend(keys(block(&tool, "    if library {\n")));
+        answer.extend(keys(block(&probe, "\nfn probe_inner(")));
+        answer.sort();
+        answer.dedup();
+        let kept = format!("answer: {} / movie: {} / clock: {} / gps: {} / lens_info: {} / lens type: {}", answer.join(" "),
+                           fields(&source("markers.rs"), "Movie"), fields(&source("geotag.rs"), "Clock"), fields(&source("geotag.rs"), "Fix"),
+                           fields(&probe, "LensInfo"), fields(&source("lens_pick.rs"), "LensType"));
+        assert_eq!((GEOTAG, kept.as_str()),
+                   (9, "answer: at brand camera clock color error fps frames geotag gps height how in_water lens lens_info lenses marks measured measured_aside measured_error measured_frames mode model motion movie readout_left_out readout_ms reason rig360 rotation spherical stabilized_in_camera times tracks water width / movie: duration created width height turn / clock: utc basis zone_min why / gps: lat lon alt t / lens_info: camera lens types type recorded default mode curated_file curated_error project from mode_key candidates / lens type: id label profile sizes note file_first"),
+                   "what gyroflow-probe --library answers changed, or GEOTAG did: they change together (see this test's comment)");
+    }
+
+    /// The probe says the same number
+    #[test]
+    fn the_probes_geotag_is_the_same() {
+        let tool = source("bin/gyroflow-probe.rs");
+        assert!(tool.contains(&format!("out[\"geotag\"] = {GEOTAG}.into();")), "gyroflow-probe.rs's \"geotag\" isn't {GEOTAG}");
+    }
+}

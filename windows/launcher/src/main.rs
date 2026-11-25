@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // ActionFootagePlayer.exe, the Windows app (macos/player.sh is the Mac's): the mpv it carries, with this project's
-// plugins, VapourSynth for the stabilization and ffmpeg for exports, all in the app's folder
-// (tools/make_windows_app.sh):
+// plugins (the stabilization is Gyroflow's warp as an mpv shader, vo=gpu-next) and ffmpeg for exports, all in the
+// app's folder (tools/make_windows_app.sh):
 //
 //   ActionFootagePlayer.exe   this: what Explorer opens videos with
-//   mpv\mpv.exe               mpv (shinchiro's build, with VapourSynth support), with this app's icon, and the VC++
-//                             runtime VapourSynth needs
-//   python\                   Python, with VapourSynth in Lib\site-packages\vapoursynth\ (VSSCRIPT_PATH tells mpv
-//                             where its vsscript.dll is; it finds this Python from there)
+//   mpv\mpv.exe               mpv (shinchiro's build), with this app's icon
+//   python\                   Python, for the setup (tools\setup.py)
 //   plugins\                  the plugins: dlogm, gyroflow (with ffmpeg.exe and ffprobe.exe for its exports),
 //                             dji-telemetry, highlights, footage-menu (their right-click menu), side-panel (their
 //                             settings beside the video), agent (notes for an AI agent, and its IPC), workspace
@@ -104,9 +102,9 @@ fn mpv_config() -> PathBuf {
     config
 }
 
-// What the plugins and their binaries find their things by. Python's folder in PATH too: vsscript.dll loads its
-// python3.dll, whose functions are python313.dll's, which Windows then has to find. And the app's Vulkan loader, last:
-// Windows looks in System32 before PATH, so the system's is used when there is one
+// What the plugins and their binaries find their things by. Python's folder first in PATH, as it has been (it has the
+// VC++ runtime's vcruntime140.dll). And the app's Vulkan loader, last: Windows looks in System32 before PATH, so the
+// system's is used when there is one
 fn environment(cmd: &mut Command, app: &Path) {
     let data = data_dir();
     let python = app.join("python");
@@ -116,8 +114,7 @@ fn environment(cmd: &mut Command, app: &Path) {
     if let Ok(path) = std::env::join_paths(path) {
         cmd.env("PATH", path);
     }
-    cmd.env("VSSCRIPT_PATH", python.join(r"Lib\site-packages\vapoursynth\vsscript.dll"))
-        .env("DLOGM_DATA", data.join("dlogm"))
+    cmd.env("DLOGM_DATA", data.join("dlogm"))
         .env("GYROFLOW_DATA", data.join("gyroflow"))
         .env("AGENT_DATA", data.join("agent"));
 }
