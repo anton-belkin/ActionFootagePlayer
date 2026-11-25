@@ -93,6 +93,14 @@ jobs:
           MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
 
       # A preview gyroflow-export makes, its link read back by the player's reader
+      # On Anton's Mac: the apps just built in dist/ are taken out of Launch Services, so double-clicking an MP4 keeps
+      # opening the one in ~/Applications (every app bundle macOS sees is registered, and may be the one it picks)
+      - name: Built apps unregistered (Anton's Mac)
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+          find dist -maxdepth 3 -name '*.app' -type d 2>/dev/null | while IFS= read -r app; do "$lsregister" -u "$app" || true; done
+
       - name: Preview test
         run: GYROFLOW_EXPORT=vs-gyroflow/target/release/gyroflow-export luajit tests/link_test.lua
 
