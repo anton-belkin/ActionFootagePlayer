@@ -3,7 +3,7 @@ out wherever a project's footage is listed (#128: _Stills was taken for footage,
 
 The folders made are found in the code (mpv/scripts, vs-gyroflow, catalog, library, tools/stream): every "_Name"
 string, and "Generated", ".afp", "stabilized" where a path is made of them. A new "_Name" that isn't a folder (a
-VapourSynth frame property, say) goes into NOT_FOLDERS.
+property name, say) goes into NOT_FOLDERS.
 
 Each place that lists footage says which it leaves out: a list of the project's own folders (lower case), a rule for
 names starting with _ or ., or both (SCANNERS). A folder made has to be left out by each, or be in KNOWN with its issue.
@@ -16,9 +16,7 @@ from twins import Checks, block, code_lines, files, read
 c = Checks("project folders")
 
 # "_Name" strings that aren't folders a project has
-NOT_FOLDERS = {
-    "_AbsoluteTime", "_ColorRange", "_DurationDen", "_DurationNum", "_GyroflowSkipped",  # VapourSynth frame properties
-}
+NOT_FOLDERS = set()
 # The places that list a project's footage: the file, how its own-folders list is written (None: it has none), and the
 # rules it has for _ and . names, each as a regex that must be in its code (None: it doesn't have that rule)
 SCANNERS = {
