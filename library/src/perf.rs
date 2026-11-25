@@ -307,7 +307,8 @@ fn where_the_time_goes() {
 }
 
 /// A view's look at the moments' renders from the catalog (renders::Ctx not fresh) finds exactly what the disk would:
-/// the same recipe, the same render found, and asks the share nothing (but each Gyroflow project's fingerprint, once)
+/// the same recipe, the same render found, and asks the share nothing (but each Gyroflow project's fingerprint, once).
+/// Counted on this thread (take_here): the other tests running beside it ask the disk too (#325)
 #[test]
 fn renders_seen_from_the_catalog_are_the_disks() {
     let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
@@ -315,16 +316,16 @@ fn renders_seen_from_the_catalog_are_the_disks() {
     let r = build(&base, 240);
     let (fresh, view) = (renders::Ctx::with(&r.p, true, json!({})), renders::Ctx::with(&r.p, false, json!({})));
     let (mut gyroflow, mut own, mut old) = (0, 0, 0);
-    nas::take();
+    nas::take_here();
     let mut asked_view = [0u64; 3];
     for rel in &r.moments {
         let item = renders::item(&r.p, "moment", rel).unwrap();
         for p in ["HDR", "SDR"] {
             let profile = renders::profile(p).unwrap();
             let a = renders::find(&fresh, &item, profile);
-            nas::take();
+            nas::take_here();
             let b = renders::find(&view, &item, profile);
-            for (x, y) in asked_view.iter_mut().zip(nas::take()) { *x += y; }
+            for (x, y) in asked_view.iter_mut().zip(nas::take_here()) { *x += y; }
             assert_eq!(a.recipe, b.recipe, "{rel} {p}");
             assert_eq!((a.hash, a.file, a.stale.clone()), (b.hash, b.file, b.stale.clone()), "{rel} {p}");
             if p == "HDR" {
@@ -341,6 +342,8 @@ fn renders_seen_from_the_catalog_are_the_disks() {
     let projects = r.moments.iter().filter(|m| r.p.join(m.replace(index::LINK_EXT, ".gyroflow")).is_file()).count()
         + r.moments.iter().filter_map(|m| renders::item(&r.p, "moment", m).ok()?.link["clip"].as_str().map(|c| r.f.join(c).with_extension("gyroflow").is_file())).filter(|x| *x).count();
     assert!(asked_view[1] <= projects as u64, "reads: only the {projects} fingerprints, once: {asked_view:?}");
+    // (and counted here at all: the fingerprints are read on this thread)
+    assert!(projects == 0 || asked_view[1] > 0, "this thread's reads counted: {asked_view:?}");
     *seen::SEEN.write().unwrap() = None;
     let _ = std::fs::remove_dir_all(&base);
 }
