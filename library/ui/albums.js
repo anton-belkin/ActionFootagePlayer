@@ -1,5 +1,5 @@
 "use strict";
-// Albums (docs/albums-photos-share-concept.md, "Albums"; the app's src/albums.rs): the view that was Footage. An album
+// Albums (docs/design/albums-photos-share-concept.md, "Albums"; the app's src/albums.rs): the view that was Footage. An album
 // is a folder of links in the project's folder: `_Clips/` holds the user's own ("Your albums", the view's top), what's
 // anywhere else in the project's folder is under Other folders (Generated among them). An item is a link, shown with
 // what's known of its original. Loaded before app.js, whose state (S, DATA, RAW_FOOTAGE, PROBES) and helpers it uses
@@ -281,7 +281,7 @@ async function albumGo() {
   }
 }
 
-// ---------- shown at once, written after (docs/library-responsiveness.md) ----------
+// ---------- shown at once, written after (docs/design/library-responsiveness.md) ----------
 //
 // Each album command is a change of writes.js: what it will make is worked out here by the command's own rules
 // (src/albums.rs: a name taken gets " 2", " 3"…; a clip already in the album, a photo of a time already there, is

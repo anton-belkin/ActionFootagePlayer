@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Tags and culling (docs/tags-and-culling.md): on an original, a moment or a still — never a clip preview or an export
+// Tags and culling (docs/design/tags-and-culling.md): on an original, a moment or a still — never a clip preview or an export
 // (derivatives) — one model of three parts: a pick (`"pick": "accept" | "reject"`, absent: neither), a rating
 // (`"rating": 1–5`, absent: none) and custom tags (`"tags"`, compared without case). Kept with each in the library, its
 // own store and the truth: an original's in its own file (beside it, wherever it is over the locations), a moment's in
@@ -37,7 +37,7 @@ pub(crate) fn holds_nothing(doc: &Value) -> bool {
     ["marks", "view", "source", "view360", "location", "tags", "rating", "pick", "comment"].iter().all(|k| doc.get(*k).is_none())
 }
 
-/// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
+/// A clip's own file over the project's locations (workspace.rs's own_file, docs/design/library-management.md §8): the
 /// copies in the library's locations in their order, then copies-only and this computer's own; the main file is beside
 /// the first copy that has one, else beside the first copy that isn't copies only or local
 pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {

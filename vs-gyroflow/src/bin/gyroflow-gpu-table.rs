@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The GPU warp's shader for a clip (docs/gpu-render.md, step 1: the spike): shaders/gyroflow/warp.glsl with the clip's
+// The GPU warp's shader for a clip (docs/design/gpu-render.md, step 1: the spike): shaders/gyroflow/warp.glsl with the clip's
 // table (src/gpu_table.rs) in it, for mpv's glsl-shaders. mpv then warps each frame on the GPU, finding it by its PTS.
 //
 //   gyroflow-gpu-table [options] <project.gyroflow | video> <out.glsl>
@@ -22,7 +22,7 @@
 //     asked of the server at <socket> when one listens there. A clip without a project starts from the motion data of
 //     the seconds it starts playing at ("start"; the reply says "partial", with the stretch it "covers" and up to where
 //     it's "settled"); the player then asks for more ahead of where it plays ("start" and "until"), and the server reads
-//     that stretch alone and joins it to the one it had (docs/gpu-table-ahead.md). "full": all of it at once. A
+//     that stretch alone and joins it to the one it had (docs/design/gpu-table-ahead.md). "full": all of it at once. A
 //     moment's part ("moment_end") is all it reads
 //
 //   gyroflow-gpu-table --serve <socket>

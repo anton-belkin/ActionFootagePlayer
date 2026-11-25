@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The 360 stamp (docs/360-cameras.md, "The stamp"): a frame's camera in the world and the heading of every heading
+// The 360 stamp (docs/design/360-cameras.md, "The stamp"): a frame's camera in the world and the heading of every heading
 // mode, written into the frame itself, under the sphere, for the view shader to read from the frame it draws. So the
 // angles are exact through dropped frames, seeks and pauses, with no mpv patch.
 //
@@ -55,7 +55,7 @@ const MODES: usize = QUAT + 8;
 const CHECK: usize = MODES + HEADINGS * 3;
 const _: () = assert!(CHECK + 1 == CODES);
 
-/// The heading modes, in the stamp's order (docs/360-cameras.md, "The heading modes")
+/// The heading modes, in the stamp's order (docs/design/360-cameras.md, "The heading modes")
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Heading { World, Camera, Travel, North }
 pub const HEADINGS: usize = 4;

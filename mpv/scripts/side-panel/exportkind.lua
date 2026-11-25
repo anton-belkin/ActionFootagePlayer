@@ -1,4 +1,4 @@
--- The Output tab's one Export button (docs/360-reframe.md, "One Export button in the Output tab"): the kinds of file
+-- The Output tab's one Export button (docs/design/360-reframe.md, "One Export button in the Output tab"): the kinds of file
 -- it makes, the rows of its list, the kind it makes now and its label. Each kind is what
 -- `script-message-to gyroflow export <how>` gets: hdr (as it plays), sdr, youtube, 360, flat.
 -- Plain Lua, no mpv: tests/exportkind_test.lua

@@ -1,6 +1,6 @@
 // The 360 view (main.lua; vo=gpu-next, gpu or libmpv): an equirectangular sphere shown as a view to look around in,
 // computed for every screen refresh from the frame on screen, so turning the head never waits for the video.
-// docs/360-cameras.md, "The view shader's part".
+// docs/design/360-cameras.md, "The view shader's part".
 //
 // Per output pixel: its ray (the output projection and FOV), turned by the head (yaw, pitch, roll), by the heading of
 // the chosen mode and into the camera of this frame (both from the frame's stamp), then looked up in the sphere.
@@ -94,7 +94,7 @@
 //!WHEN view360_on gyroflow_stamp360 ! *
 //!DESC 360 stamp
 
-// The stamp under the sphere (vs-gyroflow/src/stamp.rs, docs/360-cameras.md "The stamp"), read from the raw luma
+// The stamp under the sphere (vs-gyroflow/src/stamp.rs, docs/design/360-cameras.md "The stamp"), read from the raw luma
 // (not where the gyroflow plugin's GPU path makes the sphere: gyroflow_stamp360 1, its shader saves STAMP360 itself)
 // before anything scales or converts it: 34 codes, each a 2x2 block in the last two rows. Saved for the view pass as
 // one texel per code: texel 0 whether there's a stamp (the magic, and the check adds up), 1 the bits per fine code,

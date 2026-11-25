@@ -6,7 +6,7 @@
 -- seek or a new file) it reads the frame as recorded (ffmpeg, half a second ahead), works out the frame's numbers from
 -- a 320x180 grid of it, and the shader's numbers (glsl-shader-opts uw_*) glide to them, quicker when the scene changed.
 --
--- Its three settings are the source's input (docs/moments-and-workspaces.md, "Source and transform";
+-- Its three settings are the source's input (docs/design/moments-and-workspaces.md, "Source and transform";
 -- mpv/scripts/workspace/transform.lua), as the log curve is: it takes out the colour the camera put in, so every
 -- moment and clip preview of a clip plays it as the clip's own file says (Anton, 2026-11-24):
 --   uw             the correction on (true) or off
@@ -21,7 +21,7 @@
 
 local mp = require 'mp'
 
--- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
 -- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
 -- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()

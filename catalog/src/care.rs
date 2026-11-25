@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Who has looked after each of the project's roots, and when (docs/catalog-safeguards.md): so that a file changed in
+// Who has looked after each of the project's roots, and when (docs/design/catalog-safeguards.md): so that a file changed in
 // place by something not ours (a script, an editor: its folder's time stays as it was) is seen within a day, by
 // whoever is about, and nobody lists every folder again when somebody already has.
 //

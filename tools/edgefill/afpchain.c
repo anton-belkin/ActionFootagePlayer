@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// afpchain: the player's GPU chain run offscreen through libplacebo, with no window (docs/gpu-render.md, "The upscale
+// afpchain: the player's GPU chain run offscreen through libplacebo, with no window (docs/design/gpu-render.md, "The upscale
 // to the screen: FSR 1"): a clip's frames from stdin, each rendered with mpv user shaders (the Gyroflow warp from
 // gyroflow-gpu-table --player, its PTS set per frame as mpv sets it; the look; fsr.glsl) into a target the size of
 // the video's rectangle on screen. It prints each pass's GPU time per render (mean, p95, max), and the time from the

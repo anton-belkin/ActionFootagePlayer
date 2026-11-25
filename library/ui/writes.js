@@ -1,5 +1,5 @@
 "use strict";
-// Screen first, disk after (docs/library-responsiveness.md): a change made in the Library's window shows at once, and
+// Screen first, disk after (docs/design/library-responsiveness.md): a change made in the Library's window shows at once, and
 // is written in the background; one that couldn't be written is taken back, and the window says plainly what wasn't
 // saved and why. This file is the mechanism, on its own (app.js is its host: `Writes.host`); a command joins it with a
 // few lines (`Writes.define`), as tags, locations, Source settings, renaming and deleting do in app.js.

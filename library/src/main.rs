@@ -9,7 +9,7 @@
 // It plays and renders nothing itself: each batch is ActionFootagePlayer run with no window (the workspace plugin's
 // batch mode, AFP_BATCH), which makes them as the player does, with its plugins and settings, and writes how far it
 // is to a status file this reads. What a batch makes goes into Generated/<date> <time> <what>/, laid out as chosen for
-// that run (docs/library-management.md §8); nothing of it is kept in Project.afproject.
+// that run (docs/design/library-management.md §8); nothing of it is kept in Project.afproject.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -18,7 +18,7 @@ mod changed;
 mod checks;
 mod geo;
 mod index;
-// The responsiveness journal (docs/responsiveness-journal.md)
+// The responsiveness journal (docs/design/responsiveness-journal.md)
 mod journal;
 mod locations;
 mod renders;
@@ -271,7 +271,7 @@ fn watch(root: &Path, moved: bool) -> Watch {
     let (events, me) = (runner.events.clone(), root.to_path_buf());
     // A file's attributes changed (a Finder tag set by hand, FSEvents' ItemXattrMod; this Mac's disks, and this Mac's
     // own changes on a share): that original or moment synced with the library's tag stores, a second after it settles
-    // (docs/tags-and-culling.md, Sync). Our own writes, noticed again, find nothing to do
+    // (docs/design/tags-and-culling.md, Sync). Our own writes, noticed again, find nothing to do
     let (attrs, attrs_rx) = std::sync::mpsc::channel::<PathBuf>();
     let sync_root = root.to_path_buf();
     std::thread::spawn(move || {
@@ -522,7 +522,7 @@ struct ProjectInfo {
     // How clip previews are laid out in _Clips: tree, flat or trips (the player's workspace plugin, clips_layout)
     clips_layout: String,
     moments_alone: bool,
-    // The library's tag stores (docs/tags-and-culling.md): "finder"
+    // The library's tag stores (docs/design/tags-and-culling.md): "finder"
     tag_stores: Vec<String>,
 }
 
@@ -1076,7 +1076,7 @@ async fn scan(app: tauri::AppHandle, shared: State<'_, Shared>, probes: State<'_
         s.add("items", json!(out["items"].as_array().map(Vec::len)));
         drop(s);
         // Moments whose clip was found away from the path their link names: the path written into the link
-        // (docs/library-management.md §8), so the next look, from any computer, finds it at once
+        // (docs/design/library-management.md §8), so the next look, from any computer, finds it at once
         let tool = link_tool();
         let mut relinked = Vec::new();
         for it in out["items"].as_array_mut().into_iter().flatten() {
@@ -1680,7 +1680,7 @@ async fn set_rating(shared: State<'_, Shared>, probes: State<'_, index::SharedPr
     }).await.map_err(|e| e.to_string())
 }
 
-// Accept or Reject on the selection (None: neither; docs/tags-and-culling.md)
+// Accept or Reject on the selection (None: neither; docs/design/tags-and-culling.md)
 #[tauri::command]
 async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, pick: Option<String>) -> Result<changed::Changed, String> {
     let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
@@ -1694,7 +1694,7 @@ async fn set_pick(shared: State<'_, Shared>, probes: State<'_, index::SharedProb
     }).await.map_err(|e| e.to_string())
 }
 
-// The free-text comment of the selection (docs/tags-and-culling.md, "The comment"): the same text on each of `items`,
+// The free-text comment of the selection (docs/design/tags-and-culling.md, "The comment"): the same text on each of `items`,
 // None or empty: taken out
 #[tauri::command]
 async fn set_comment(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, items: Vec<Value>, comment: Option<String>) -> Result<changed::Changed, String> {
@@ -2136,7 +2136,7 @@ fn rename_in(root: &Path, view: &str, kind: &str, path: &str, name: &str) -> Res
     let root = root.to_path_buf();
     let name = good_name(name)?;
     let from = PathBuf::from(&path);
-    // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among its
+    // The project's own files and folders, wherever they are in its folder (docs/design/library-management.md §8); among its
     // footage (a project next to it), only a link file (a moment or clip preview beside its clip)
     let footage = index::footage_dirs(&root);
     let linked = kind != "folder" && index::link(&from).is_some();
@@ -2279,7 +2279,7 @@ fn delete_in(root: &Path, items: &[Value]) -> Value {
     for it in items {
         let path = PathBuf::from(it["path"].as_str().unwrap_or(""));
         let kind = it["kind"].as_str().unwrap_or("");
-        // The project's own files and folders, wherever they are in its folder (docs/library-management.md §8); among
+        // The project's own files and folders, wherever they are in its folder (docs/design/library-management.md §8); among
         // its footage, only a link file
         let linked = kind != "folder" && index::link(&path).is_some();
         if path == root || !path.starts_with(&root) || !(index::own_area(&root, &path, &footage) || linked) || (kind == "folder" && footage.iter().any(|d| d.starts_with(&path))) {
@@ -2435,7 +2435,7 @@ fn new_folder_in(root: &Path, view: &str, parent: &str) -> Result<String, String
 /// and one a file can have; else "untitled folder" as before. Its path in the project's folder is the answer
 fn new_folder_named(root: &Path, view: &str, parent: &str, want: Option<&str>) -> Result<String, String> {
     let root = root.to_path_buf();
-    // In the project's folder (docs/library-management.md §8: its own files are wherever one puts them)
+    // In the project's folder (docs/design/library-management.md §8: its own files are wherever one puts them)
     if !matches!(view, "footage" | "moments" | "stills" | "exports") { return Err("Folders of the sources are made in Finder".into()); }
     let mut dir = root.clone();
     for p in parent.split('/').filter(|p| !p.is_empty() && *p != "..") { dir.push(p); }
@@ -2638,7 +2638,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     if let Some(o) = &only { request["only"] = json!(o); }
     if kind == "photos" { request["photo"] = json!(photo); }
     if kind == "export" { request["sdr"] = json!(sdr); }
-    // Chosen for this run (docs/library-management.md §8): how clip previews are laid out in the run's folder, and
+    // Chosen for this run (docs/design/library-management.md §8): how clip previews are laid out in the run's folder, and
     // whether new moments are stabilized on their own
     // Clip previews (Anton, 2026-11-10): empty ones at once (a dark frame with the link inside, all in a few seconds), to
     // arrange in Footage right away; then a job making their pictures in their places, the folder in view first, out of

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // When a clip was recorded, as a moment in UTC, and where, if the camera itself knew: for Action Footage Library's
-// locations (docs/geolocation.md). `gyroflow-probe --library` reports both as "clock" and "gps".
+// locations (docs/design/geolocation.md). `gyroflow-probe --library` reports both as "clock" and "gps".
 //
 // What each camera writes as the MP4's own time (moov/mvhd creation_time), checked on Anton's clips 2026-11-10:
 // - DJI (Osmo Action 6, Mini 4 Pro, Mavic): UTC. The file's name is the camera's local time: DJI_20261022152937_0069_D
@@ -551,7 +551,7 @@ pub fn zone_text(min: i32) -> String {
 //
 // A photo saved from a clip carries its place in its Exif GPS (photo.rs, afp-photo), and a Live or Motion Photo's video
 // in its QuickTime location: the camera's own fix at the frame's time (`fix_at`), else the location the Library keeps
-// for the clip in its own file (`sidecar_place`, docs/geolocation.md), else none.
+// for the clip in its own file (`sidecar_place`, docs/design/geolocation.md), else none.
 
 /// How far from the frame's time a fix is still taken for it, s: a GPS that found its satellites a little after the
 /// recording started, or lost them for a while (under a bridge, in a dive), still places the frame near enough
@@ -712,7 +712,7 @@ fn srt_beside_at(path: &Path, t: f64) -> Option<Fix> {
     ["SRT", "srt"].iter().find_map(|ext| std::fs::read(path.with_extension(ext)).ok()).and_then(|b| srt_fix_at(&String::from_utf8_lossy(&b), t))
 }
 
-/// The location the Library keeps for the clip (docs/geolocation.md): `location` { lat, lon, alt? } in its own file,
+/// The location the Library keeps for the clip (docs/design/geolocation.md): `location` { lat, lon, alt? } in its own file,
 /// the main one over its project's locations (workspace::own_file), else the other copies' files, else <clip>.afp.json
 pub fn sidecar_place(clip: &Path) -> Option<Fix> {
     use crate::workspace as ws;

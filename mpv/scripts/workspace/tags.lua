@@ -1,4 +1,4 @@
--- Tags and culling (docs/tags-and-culling.md): on an original, a moment or a still (never a clip preview or an
+-- Tags and culling (docs/design/tags-and-culling.md): on an original, a moment or a still (never a clip preview or an
 -- export), one model of three parts, kept with the item in the library (library/src/tags.rs is this file's twin):
 --   pick     "accept" or "reject" (one or the other), absent: neither          P, X, U
 --   rating   1–5 stars, absent: none                                           1–5, 0

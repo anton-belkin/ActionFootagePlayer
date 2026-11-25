@@ -209,7 +209,7 @@ function M.common_folder(playlist)
     return nil
 end
 
--- The time of the frame on screen (docs/seek-and-scrub.md): t is time-pos (the newest frame decoded), d gyroflow's
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): t is time-pos (the newest frame decoded), d gyroflow's
 -- user-data/gyroflow/gpu_delay { delay, restart, show }. With the GPU path's temporal denoise the picture is up to the
 -- delay behind t, not before where it last started (a seek), or, paused, the frame asked for (show); otherwise t
 function M.shown_time(t, d)

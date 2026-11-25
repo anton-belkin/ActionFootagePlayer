@@ -1,5 +1,5 @@
 [hidden]{display:none!important}
-/* The Library's window (the mockup the design was settled on: docs/library-management.md) */
+/* The Library's window (the mockup the design was settled on: docs/design/library-management.md) */
 
 /* Layout: a desktop app window. Browser of the library's folders in the middle, one side panel of commands on the right, the queue as its tab (or a panel on the left). */
 :root{

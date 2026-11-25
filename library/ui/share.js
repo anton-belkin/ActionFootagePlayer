@@ -1,4 +1,4 @@
-// Share (docs/albums-photos-share-concept.md, "Share replaces export"): one command on any selection in Albums and
+// Share (docs/design/albums-photos-share-concept.md, "Share replaces export"): one command on any selection in Albums and
 // Originals (clips, moments, photos, mixed). Two choices: what (the selection) and where (a destination). The render
 // of each item comes from the render cache, made first where the cache lacks it (library/src/share.rs, renders.rs);
 // the page only says what's selected and shows how each item goes.
@@ -9,7 +9,7 @@
 const SHARE_DESTS = [
   { id: "folder", label: "Save to a folder…", sub: "Each item rendered as the player shows it, then copied into a folder you choose, under its own name." },
 ];
-// The export's settings (docs/export-settings.md), the same names and choices as the player's Output tab and Save
+// The export's settings (docs/design/export-settings.md), the same names and choices as the player's Output tab and Save
 // frame (mpv/scripts/gyroflow/exportsettings.lua): a video's size, encoding and quality, a photo's size and quality.
 // Each choice's first is the default, what was rendered before there were settings. Remembered on this computer
 const EXPORT_CHOICES = {

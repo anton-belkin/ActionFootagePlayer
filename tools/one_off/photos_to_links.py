@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """One-off: the photos rendered before photos were links (a full HEIC or JPEG with afp:link in its XMP, a Live
-Photo's HEIC + MOV) turned into photo objects (docs/albums-photos-share-concept.md, "Photos made before this").
+Photo's HEIC + MOV) turned into photo objects (docs/design/albums-photos-share-concept.md, "Photos made before this").
 
 NOT a feature: run once, by hand, on Anton's library, when he says so. Written 2026-11-16, never run on real data.
 

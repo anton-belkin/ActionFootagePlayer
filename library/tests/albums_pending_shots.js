@@ -1,4 +1,4 @@
-// Album actions shown at once (docs/library-responsiveness.md "Albums"), pictured in a headless Chrome against the mock
+// Album actions shown at once (docs/design/library-responsiveness.md "Albums"), pictured in a headless Chrome against the mock
 // (mock.js), the album commands slowed to 4 s as a NAS might take them: what the window shows 0.5 s after the click on
 // Add, then after the command answered. On an older page (a checkout's library/ui) the same clicks give the "before".
 //   PUPPETEER=<path to node_modules/puppeteer-core> node library/tests/albums_pending_shots.js <ui folder> <out folder> [dark]

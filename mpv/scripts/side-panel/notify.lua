@@ -1,4 +1,4 @@
--- What the player is doing, shown in one place and one look (docs/notifications.md): cards at the top of the video,
+-- What the player is doing, shown in one place and one look (docs/design/notifications.md): cards at the top of the video,
 -- in the middle (a card for each thing going on: working with a bar, done, an error, a short note), and the dialog a
 -- name is typed in, in the middle of the video. Drawn in ASS in the panel's colors, on an overlay of its own above the
 -- panel and the bar. The plugins talk to it with script messages (notify_client.lua sends them):

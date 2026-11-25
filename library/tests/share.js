@@ -60,7 +60,7 @@ const sheet = () => $("sheet").textContent;
   $("sharelook").value = "SDR"; $("sharelook").dispatchEvent(new w.Event("change", { bubbles: true })); await tick();
   ok($("sharelook").value === "SDR" && /1 moment\s*to render/.test(sheet().replace(/(\d+ moment)/, "$1 ")), "SDR is another render: to render");
   $("sharelook").value = "HDR"; $("sharelook").dispatchEvent(new w.Event("change", { bubbles: true })); await tick();
-  // The export's settings (docs/export-settings.md): the videos' size, encoding and quality, the photos' size and
+  // The export's settings (docs/design/export-settings.md): the videos' size, encoding and quality, the photos' size and
   // quality, the player's names; the defaults first (what was rendered before them)
   const sel = (id) => $(id);
   const opts = (id) => Array.from(sel(id).options).map((o) => o.value).join(",");

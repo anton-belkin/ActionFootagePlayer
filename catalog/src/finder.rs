@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// macOS Finder tags, written beside the library's own (docs/library-management.md §7): the extended attribute
+// macOS Finder tags, written beside the library's own (docs/design/library-management.md §7): the extended attribute
 // com.apple.metadata:_kMDItemUserTags, a binary property list, an array of strings ("Name", or "Name\n6" with Finder's
 // colour). Read and written as they are here; what they mean (Accept, Reject, ★★★, custom) and the two-way sync with
-// the library's own are library/src/tags.rs's (docs/tags-and-culling.md). The player's twin is
+// the library's own are library/src/tags.rs's (docs/design/tags-and-culling.md). The player's twin is
 // mpv/scripts/workspace/tags.lua (through /usr/bin/xattr). Elsewhere than on a Mac: nothing.
 
 use std::path::Path;

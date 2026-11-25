@@ -1,6 +1,6 @@
 -- Ctrl+m: the clip's motion measured from its picture (vs-gyroflow's gyroflow-optical, Gyroflow's own analysis run by
 -- the player: no Gyroflow app, no project), kept in <stem>.afp-motion beside it, and the clip played again with it from
--- where it was (docs/optical-without-gyroflow.md). For a clip without motion data the player stabilizes with: none
+-- where it was (docs/design/optical-without-gyroflow.md). For a clip without motion data the player stabilizes with: none
 -- recorded, or the camera's own stabilization on. A clip measured before is measured again; one with a Gyroflow project
 -- isn't (the project plays).
 --

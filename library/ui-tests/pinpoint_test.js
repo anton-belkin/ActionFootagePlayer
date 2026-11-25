@@ -1,5 +1,5 @@
 "use strict";
-// The pinpoint update (../ui/changes.js, docs/library-responsiveness.md): a command says what it changed, the catalog's
+// The pinpoint update (../ui/changes.js, docs/design/library-responsiveness.md): a command says what it changed, the catalog's
 // changes come as items, and the page corrects only those: no view is read again. And that it ends up exactly where
 // reading the views again would have: a sequence of changes made on two pages, one corrected item by item, one that
 // reads every view again after each, compared after every step.
@@ -131,7 +131,7 @@ test("what the player makes shows where it belongs: a moment in an album there i
   await page.quiet(40);
   assert.ok(!asked(page, mark).some((c) => c.startsWith("scan")), asked(page, mark).join(" "));
   // A clip's link deleted in Finder: the file is gone, the page knows it was an album's link. Which links are left
-  // isn't said item by item (docs/night-handover-responsive.md): Footage alone is read again. The album no longer
+  // isn't said item by item (docs/archive/night-handover-responsive.md): Footage alone is read again. The album no longer
   // has the clip; Originals does
   const e = views.footage.items.find((it) => it.id === E);
   const file = e.preview;

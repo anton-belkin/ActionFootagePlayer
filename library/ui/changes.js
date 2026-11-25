@@ -1,5 +1,5 @@
 "use strict";
-// The Library's changes as writes.js makes them (docs/library-responsiveness.md): shown at once, written after. Here
+// The Library's changes as writes.js makes them (docs/design/library-responsiveness.md): shown at once, written after. Here
 // is what ties writes.js to the page (app.js): where the views are kept, how they're drawn again, what's said when a
 // change couldn't be saved, the sign that changes are still being written, the window's close; and the changes
 // themselves, each a few lines (Writes.define). Loaded before app.js, whose names it uses only when called.

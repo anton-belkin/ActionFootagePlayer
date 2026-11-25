@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The 360 mode's sphere on the CPU's side (docs/360-cameras.md, "The plugin's part"; step 4 of
-// docs/360-implementation-plan.md), for gyroflow-export's 360 exports (export360.rs): a 360 camera's lens tracks joined
+// The 360 mode's sphere on the CPU's side (docs/design/360-cameras.md, "The plugin's part"; step 4 of
+// docs/archive/360-implementation-plan.md), for gyroflow-export's 360 exports (export360.rs): a 360 camera's lens tracks joined
 // side by side, in track order. (The player makes it with gpu_table::sphere_shader from the same Prepared360; this was
 // also its VapourSynth filter up to 2026-11.) Out comes the sphere, equirectangular, in the camera's own axes at the middle
 // of the frame: every lens mapped onto it by gyroflow-core's kernel (the fork's equirect output projection and RigLens:

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A clip's lens found from its own picture (docs/optical-without-gyroflow.md, step 4), with Gyroflow's own code for it
+// A clip's lens found from its own picture (docs/design/optical-without-gyroflow.md, step 4), with Gyroflow's own code for it
 // (gyroflow-core's lens_from_video, gyroflow/gyroflow#1296): the frames decoded here, tracked and judged there.
 //
 // - Find (`find`): the known lenses of the clip's camera, nearest first (lens_from_video::candidates: the one the player

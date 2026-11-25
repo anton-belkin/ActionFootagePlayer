@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Albums (docs/albums-photos-share-concept.md, "Albums"; docs/library-management.md §8): folders of links in the
+// Albums (docs/design/albums-photos-share-concept.md, "Albums"; docs/design/library-management.md §8): folders of links in the
 // project's folder, `_Clips/` being the user's own albums. A clip in an album is a light link: a small MP4,
 // `<name>.afplink.mp4`, whose one video frame is the clip's thumbnail (a JPEG, as it is: QuickTime's Photo JPEG) and
 // whose `ch.actionfootageplayer.link` key (moov/meta, as every link has it) is the link to the original,
@@ -278,7 +278,7 @@ fn dark() -> Vec<u8> {
 
 // ---------- a photo in an album: a small JPEG with the link in its XMP ----------
 
-/// A photo's link file: `<name>.afplink.jpg` (docs/albums-photos-share-concept.md, "Photos as objects")
+/// A photo's link file: `<name>.afplink.jpg` (docs/design/albums-photos-share-concept.md, "Photos as objects")
 pub const PHOTO_EXT: &str = ".afplink.jpg";
 const AFP_NS: &str = "https://actionfootageplayer.ch/ns/1.0/";
 /// The longest side of a photo link's picture
@@ -663,7 +663,7 @@ pub fn copy_to(root: &Path, album: &str, files: &[PathBuf]) -> Result<Value, Str
 
 // ---------- the page's commands ----------
 
-/// An album command's answer as the window takes it (docs/library-responsiveness.md, the pinpoint update): what it
+/// An album command's answer as the window takes it (docs/design/library-responsiveness.md, the pinpoint update): what it
 /// made, each as the views have it now (changed.rs's of_album), its own answer kept as `answer` (without the list),
 /// what it couldn't do in words
 pub fn changed_of(root: &Path, answer: Value, probes: &crate::index::SharedProbes) -> crate::changed::Changed { album_changed(root, answer).with_probes(probes) }

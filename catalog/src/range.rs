@@ -2,7 +2,7 @@
 //
 // Whether a clip's picture is HDR, log or SDR, as gyroflow-export decides its look (vs-gyroflow/src/probe.rs's log_curve,
 // and the video's own transfer): the Library's Share renders an SDR clip once for both its HDR and SDR profiles
-// (docs/export-gpu-path.md, "HDR in, HDR out"). Read from the MP4 alone, the way the dlogm plugin reads it
+// (docs/design/export-gpu-path.md, "HDR in, HDR out"). Read from the MP4 alone, the way the dlogm plugin reads it
 // (mpv/scripts/dlogm/dji_color.lua, gopro_color.lua): DJI's ColorMode in the first sample of its metadata track, GoPro's
 // Protune color (PTCL) and firmware in moov/udta, and the first video track's `colr` (nclx) box. Keep the four in step.
 

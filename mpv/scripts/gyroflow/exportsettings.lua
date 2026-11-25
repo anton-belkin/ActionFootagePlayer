@@ -1,4 +1,4 @@
--- An export's settings (docs/export-settings.md): one description for every file the player makes and for the
+-- An export's settings (docs/design/export-settings.md): one description for every file the player makes and for the
 -- Action Footage Library's Share, whose renders the player makes too (export.lua's export-batch and photo-at). A video:
 --   size     original (the default: as the export has always been), 2160, 1080, 720: the short side at most, never
 --            enlarged (gyroflow-export --resolution)

@@ -4,7 +4,7 @@
 --
 -- The camera's are read from the file when it's loaded (markers.lua, plain Lua: a few small reads). Cameras: GoPro
 -- HERO5 and later, DJI Osmo Action 4, 5 Pro and 6. While you've changed none, those are the marks. The first change
--- (M) writes them into the clip's own file beside it, <clip>.afp.json (docs/moments-and-workspaces.md, "Marks"; the
+-- (M) writes them into the clip's own file beside it, <clip>.afp.json (docs/design/moments-and-workspaces.md, "Marks"; the
 -- workspace plugin's sidecar.lua, which keeps the file's other part, the view it plays in), with the camera's copied
 -- in and flagged ("camera": "dji"), and from then on that list is the marks: a camera mark removed is gone from it.
 -- Delete the file (or its marks), and the camera's are the marks again. A file for a clip of another size (GoPro's
@@ -41,7 +41,7 @@ mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.
 mp.ask = mp.ask or function() return false end
 local utils = require 'mp.utils'
 
--- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
 -- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
 -- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
@@ -52,7 +52,7 @@ local function shown_time()
     local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
     return math.max(restart, t - d.delay)
 end
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
 do
     package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
@@ -84,7 +84,7 @@ local sidecar = has_sidecar and sidecar_lib.new({ parse_json = function(s) retur
     or { read = function() return nil end, update = function() return false, "the workspace plugin isn't installed" end }
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
--- user-data/workspace/clip, docs/moments-and-workspaces.md)
+-- user-data/workspace/clip, docs/design/moments-and-workspaces.md)
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")

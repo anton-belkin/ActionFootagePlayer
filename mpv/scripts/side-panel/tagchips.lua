@@ -1,5 +1,5 @@
 -- The Project tab's culling and tags of what plays (the workspace plugin's user-data/workspace/tags, its tags.lua;
--- docs/tags-and-culling.md): Accept / Reject (one or the other), the stars, the custom tags as chips (a click takes
+-- docs/design/tags-and-culling.md): Accept / Reject (one or the other), the stars, the custom tags as chips (a click takes
 -- one off), the tags used last that it hasn't (a click puts one on), and "Tag…" (K). The layout is plain Lua
 -- (tests/sidepanel_test.lua draws the tab with it); clicks run `script-message-to workspace tag-pick <which>`,
 -- `tag-rate <n>`, `tag-toggle <name>` and `tag-ask`.

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A project's catalog (docs/library-management.md §9): what's in its folder and its locations — every file and
+// A project's catalog (docs/design/library-management.md §9): what's in its folder and its locations — every file and
 // folder, and for the files whose insides count (moments, clip previews, exports, photos: their link; clips' sidecars:
 // marks and tags) what's inside them — shared between computers through the project's own folder, .afp/catalog/.
 //

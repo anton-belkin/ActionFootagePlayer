@@ -1,4 +1,4 @@
-// The four fixes from the first real try (docs/library-ui-fixes.md), in jsdom against the mock (mock.js + views_mock.js
+// The four fixes from the first real try (docs/archive/library-ui-fixes.md), in jsdom against the mock (mock.js + views_mock.js
 // with twelve more places): what doesn't need a real layout. The pinned bar's place on the screen and a tick under
 // the pointer are checked in a headless Chrome by ui_fixes_shots.js.
 //   JSDOM=<path to node_modules/jsdom> node library/tests/ui_fixes.js library/ui

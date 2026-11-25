@@ -1,4 +1,4 @@
--- Moments (docs/moments-and-workspaces.md): parts of a clip kept as small MP4s in the project's _Moments/ folder,
+-- Moments (docs/design/moments-and-workspaces.md): parts of a clip kept as small MP4s in the project's _Moments/ folder,
 -- `<name>.afplink.mp4`, each with the link to its original inside (link.lua reads it). This is the part with no mpv
 -- in it, so that luajit tests it (tests/moments_test.lua): names, dates, which clip a moment is of, where its
 -- original is, and the _Moments/ folder read.
@@ -24,7 +24,7 @@ M.EXT = ".afplink.mp4"
 M.EXPORTS = "_Exports"
 -- Clip previews: _Clips/<the clip's path>.afplink.mp4 (made before 0.11)
 M.CLIPS = "_Clips"
--- Where what's made goes (docs/library-management.md §8): Generated/ inside its kind's own folder (Anton, 2026-11-10:
+-- Where what's made goes (docs/design/library-management.md §8): Generated/ inside its kind's own folder (Anton, 2026-11-10:
 -- _Clips/Generated, _Moments/Generated, _Stills/Generated, _Exports/Generated), from where it's moved anywhere in the
 -- project folder; it's found there by the link inside. The project's "generated_runs" (Project.afproject) gives each
 -- run a folder of its own in it. Projects of before have Generated/ at the top: left there, found the same way
@@ -316,7 +316,7 @@ function M.new(ws, fs)
     end
 
     -- Every link file of `kind` (moment, or clip for clip previews, export) in the project's folder, wherever it was
-    -- put (docs/library-management.md §8): found by the link inside. In the project's own folders (_Moments, _Clips,
+    -- put (docs/design/library-management.md §8): found by the link inside. In the project's own folders (_Moments, _Clips,
     -- _Exports, Generated…) and outside its footage every .mp4 and .mov is read; among the footage (a project next to
     -- it), only <name>.afplink.mp4, so as not to read every clip. cache[file] = { size, mtime, raw } keeps what was
     -- read of a file, read again only when its size or time changes. dirs: the folders to watch (modification time,
@@ -479,7 +479,7 @@ function M.new(ws, fs)
 
     local function last_part(p) return (p:match("([^/\\]+)$") or p) end
 
-    -- The clip a link names (docs/library-management.md §8): found by what the clip is, its path in the tree only a
+    -- The clip a link names (docs/design/library-management.md §8): found by what the clip is, its path in the tree only a
     -- hint of where it was last seen.
     --   1. the hint: the file at link.clip in the project's tree, through its locations in order, of the link's size;
     --   2. where this computer last found it (fs.found_get, by the clip's identity), if it's still there;
@@ -490,7 +490,7 @@ function M.new(ws, fs)
     --   4. a moment copied out of its project: its path under each of the roots it was made with.
     -- -> the file, its path in the tree now, its location, and how it was found ("hint", "cache", "search", "roots")
     -- opts.hint_only: only where the link says (originals move only when the library is mended after, which rewrites
-    -- the links: docs/library-management.md §9); the looking further is the Library's repair
+    -- the links: docs/design/library-management.md §9); the looking further is the Library's repair
     function self.original(link, project, opts)
         if type(link) ~= "table" or type(link.clip) ~= "string" or link.clip == "" then return nil end
         local hint_only = opts and opts.hint_only

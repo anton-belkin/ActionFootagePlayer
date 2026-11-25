@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The GPU warp's table (docs/gpu-render.md, step 1: the spike): each frame's kernel parameters and its row rotations,
+// The GPU warp's table (docs/design/gpu-render.md, step 1: the spike): each frame's kernel parameters and its row rotations,
 // from gyroflow-core as the engine computes them, packed for shaders/gyroflow/warp.glsl, which finds its frame by mpv's
 // PTS. The rotations go as quaternion knots evenly over the frame's rows (nlerp between them in the shader), or one
 // per row (Gyroflow's own nearest-row matrices). bin/gyroflow-gpu-table writes the shader file.

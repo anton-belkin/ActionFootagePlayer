@@ -1,8 +1,8 @@
-// Which project a clip belongs to, and where that project's files for it are (docs/moments-and-workspaces.md): the
+// Which project a clip belongs to, and where that project's files for it are (docs/design/moments-and-workspaces.md): the
 // twin of the workspace mpv plugin's workspace.lua, for gyroflow-export run without the player (the Finder quick
 // action, the command line). Both are tested over tests/workspace_cases.txt: keep the two in step.
 //
-// A project is a folder with `Project.afproject` in it. Its footage is in its locations (docs/library-management.md),
+// A project is a folder with `Project.afproject` in it. Its footage is in its locations (docs/design/library-management.md),
 // each placed at a point of the project's tree, in an order; without any, the project's own folder at the top (the
 // trip folder, its footage under it). What belongs to a clip (its Gyroflow project, its own file) lives beside the
 // clip, one per clip over all the locations. A clip finds its project in the folders above it: a Project.afproject,
@@ -198,7 +198,7 @@ pub fn files_at<'a>(tree: &str, locations: &'a [Location]) -> Vec<(PathBuf, &'a 
     out
 }
 
-/// Where the clip's own file is over the locations, decided the same way on every computer (docs/library-management.md
+/// Where the clip's own file is over the locations, decided the same way on every computer (docs/design/library-management.md
 /// §8): the copies in the library's locations in their order, then the copies-only ones; the main file is beside the
 /// first copy that has one; none has one: beside the first copy that isn't copies only (where the first save writes
 /// it). Second: the other copies' files, read never written
@@ -481,7 +481,7 @@ mod tests {
 /// How much of each end of a file its fingerprint reads
 pub const FINGERPRINT_PART: u64 = 1 << 20;
 
-/// A file's fingerprint, kept in a link with the original's path (docs/moments-and-workspaces.md, "The link inside"),
+/// A file's fingerprint, kept in a link with the original's path (docs/design/moments-and-workspaces.md, "The link inside"),
 /// to find the original again once it's been moved or renamed: SHA-256 (hex) of its first MiB followed by its last
 /// MiB, the two overlapping in a file under 2 MiB. Reads 2 MiB, not a 4 GB clip off a NAS; the link's size and
 /// creation time go with it. The same as `(head -c 1048576 f; tail -c 1048576 f) | shasum -a 256`

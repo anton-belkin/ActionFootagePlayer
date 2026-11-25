@@ -1,4 +1,4 @@
-// The render cache (docs/albums-photos-share-concept.md, "Renders": found by recipe, not by path). A render is the
+// The render cache (docs/design/albums-photos-share-concept.md, "Renders": found by recipe, not by path). A render is the
 // real pixels of one item (a moment, a photo link, a whole clip) in one profile. What decides its pixels is its recipe;
 // the recipe's hash names its file: <project>/_Renders/<hash>.<profile>.<ext>. So a render is found whatever the item
 // is called and wherever it lies: moved, renamed or copied items keep theirs, two copies of a moment share one, and a
@@ -16,7 +16,7 @@ use std::path::{ Path, PathBuf };
 
 pub const DIR: &str = "_Renders";
 /// Raised when the renderer's pixels change for the same recipe: every render is then another one. 4: gyroflow-export
-/// renders on the GPU path where it can, the player's own shaders (docs/export-gpu-path.md), not Gyroflow's engine
+/// renders on the GPU path where it can, the player's own shaders (docs/design/export-gpu-path.md), not Gyroflow's engine
 pub const VERSION: u64 = 4;
 
 pub struct Profile {
@@ -365,7 +365,7 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
     Value::Object(out)
 }
 
-/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/share-fixes.md):
+/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/archive/share-fixes.md):
 /// v, kind, clip { hash | path, size }, in / out / alone (a moment), t / crop / camera (a photo), settings (what it's
 /// rendered with: `settings` from the clip's own file, a moment's own bundle and the player's defaults: the player
 /// renders with exactly these, sent in its request), opts (the player's edge fill and temporal denoise), gyroflow (the
@@ -373,7 +373,7 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
 /// there is no project), profile { name, look }
 pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value { recipe_with(ctx, item, profile, &Value::Null) }
 
-/// The export's settings an item is rendered with (Share's dialog: docs/export-settings.md), the values that aren't
+/// The export's settings an item is rendered with (Share's dialog: docs/design/export-settings.md), the values that aren't
 /// the defaults: { size, encode, quality } for a video, { size, quality } for a photo. The defaults are what was
 /// rendered before there were settings, so with them the recipe, its hash and its render stay what they were
 pub const EXPORT_CHOICES: [(&str, &[&str]); 3] = [("size", &["original", "2160", "1080", "720"]), ("encode", &["fast", "quality"]),

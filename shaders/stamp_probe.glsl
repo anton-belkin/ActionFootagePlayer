@@ -1,5 +1,5 @@
 // The 360 stamp's probe (vo=gpu-next): reads the stamp vs-gyroflow writes into the bottom of the luma plane
-// (vs-gyroflow/src/stamp.rs, docs/360-cameras.md "The stamp") the way the view shader is to read it, with texel fetches
+// (vs-gyroflow/src/stamp.rs, docs/design/360-cameras.md "The stamp") the way the view shader is to read it, with texel fetches
 // of the raw plane, scaled by its black and white references (gpu-next normalizes some formats a little off),
 // decodes it, and paints what it decoded over the picture as a grid of bits, for
 // tools/stamp360/stamp360.py's check (removed with the VapourSynth path, 2026-11; in git history) to read from a screenshot and compare with what the plugin wrote. Not part of the player.

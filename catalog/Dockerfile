@@ -1,4 +1,4 @@
-# afp-catalog's watcher, for a NAS (docs/library-management.md §9, "The NAS's watcher"): keeps a project's catalog on
+# afp-catalog's watcher, for a NAS (docs/design/library-management.md §9, "The NAS's watcher"): keeps a project's catalog on
 # the NAS's own disks, told by the system what changes. Built from this folder alone:
 #   docker build -t afp-catalog catalog/
 #   docker run -d --name afp-catalog-trip --restart unless-stopped --hostname nas \

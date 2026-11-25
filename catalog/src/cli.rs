@@ -2,7 +2,7 @@
 //
 // afp-catalog: the project's catalog from the command line — what the player asks of it (a clip's moments, the
 // project's own files of a kind, what it wrote noted), and what the Library does (looking at the folders, folding a
-// snapshot), to see and try it without the app. docs/library-management.md §9.
+// snapshot), to see and try it without the app. docs/design/library-management.md §9.
 
 use crate::catalog::{ Catalog, Error, Sweep, Want };
 use crate::inspect::{ self, Ours };

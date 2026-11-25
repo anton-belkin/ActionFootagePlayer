@@ -1,4 +1,4 @@
--- The responsiveness journal (docs/responsiveness-journal.md): each thing asked of the player (a key, a panel button,
+-- The responsiveness journal (docs/design/responsiveness-journal.md): each thing asked of the player (a key, a panel button,
 -- a file opened, a seek), when it was asked, the steps it took and when its result was on screen, written as JSON
 -- lines to this computer's log folder, for tools/journal_report.py to say where the waiting is. Nothing is sent
 -- anywhere.
@@ -164,7 +164,7 @@ local function process_start()
     return now() - (uptime - ticks / 100) * 1000
 end
 
--- The folder: AFP_JOURNAL_DIR, else this computer's logs (docs/responsiveness-journal.md)
+-- The folder: AFP_JOURNAL_DIR, else this computer's logs (docs/design/responsiveness-journal.md)
 local function journal_dir()
     local d = os.getenv("AFP_JOURNAL_DIR")
     if d and d ~= "" then return d end

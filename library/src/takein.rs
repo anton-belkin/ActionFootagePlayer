@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Taking one project into another, once (docs/library-management.md, "Taking one project into another"): the other
+// Taking one project into another, once (docs/design/library-management.md, "Taking one project into another"): the other
 // project's locations that are already inside this one's tree move nothing and add nothing; the others are added,
 // placed under a folder of the tree chosen for them. Its _Moments, _Clips, _Stills, _Exports, _Renders go into this
 // project's, under its place in the tree (a folder is a bin); every path it kept gets that place in front (its links,

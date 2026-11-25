@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// What the catalog keeps of what's inside the project's files (docs/library-management.md §9), read the same way by
+// What the catalog keeps of what's inside the project's files (docs/design/library-management.md §9), read the same way by
 // every program that looks: the Library's looks, afp-catalog's notes for the player.
 //
 // - a moment, clip preview, export or render (a video in the project's own area, or a .afplink.mp4 anywhere): its link,
@@ -181,7 +181,7 @@ pub fn read(path: &Path) -> io::Result<Option<Value>> {
     if is_sidecar(&lower) {
         let text = std::fs::read(path)?;
         // Not JSON (being written by something that doesn't write it whole, or written wrong): an error, not a clip
-        // without tags, so that its record stays as it was until the file reads right (docs/catalog-safeguards.md)
+        // without tags, so that its record stays as it was until the file reads right (docs/design/catalog-safeguards.md)
         let own = serde_json::from_slice::<Value>(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
         return Ok(Some(json!({ "own": own_kept(&own) })));
     }
@@ -268,7 +268,7 @@ mod tests {
     fn an_unknown_field_is_kept() {
         let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "clip": { "file": "A.MP4" }, "synced": {}, "pick": "reject", "later": { "x": 1 } });
         assert_eq!(own_kept(&own), json!({ "marks": null, "view": null, "source": null, "tags": null, "rating": null, "pick": "reject", "location": null, "later": { "x": 1 } }));
-        // The Library's comment (docs/tags-and-culling.md, "The comment") is such a field: not in OWN_KEPT, so a
+        // The Library's comment (docs/design/tags-and-culling.md, "The comment") is such a field: not in OWN_KEPT, so a
         // catalog of this version, or an older one since 2026-11-17 (the NAS Helper's), keeps it as it is
         let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "rating": 3, "comment": "Черепаха у рифа\nthen the wreck" });
         assert_eq!(own_kept(&own)["comment"], json!("Черепаха у рифа\nthen the wreck"));

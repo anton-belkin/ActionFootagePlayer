@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A 360° camera's rig (docs/360-cameras.md, "The plugin's part"): telemetry-parser's CameraRig, video-types' geometry,
+// A 360° camera's rig (docs/design/360-cameras.md, "The plugin's part"): telemetry-parser's CameraRig, video-types' geometry,
 // turned into what gyroflow-core renders each lens with: its lens profile (model, focal, centre in the pixels of its
 // picture), its pose in the rig and its offset from the rig's centre (gyroflow-core's RigLens), where its picture is in
 // the tracks joined side by side (mpv's lavfi-complex hstack), its validity, its blend and its masks.

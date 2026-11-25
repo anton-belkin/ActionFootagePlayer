@@ -1,4 +1,4 @@
--- The project's own file, `<project>/Project.afproject` (docs/moments-and-workspaces.md): what marks a folder as a
+-- The project's own file, `<project>/Project.afproject` (docs/design/moments-and-workspaces.md): what marks a folder as a
 -- project, and what the player and Action Footage Library keep for it. A double click on it opens the project in Action
 -- Footage Library. JSON:
 --
@@ -8,7 +8,7 @@
 --                 moments of the marks stabilized on their own)
 --
 -- Up to 0.10 it also had lists (clips_made, clips_failed, stills_made, moment_names). Since 0.11
--- (docs/library-management.md §8, "The project is its files") nothing reads or writes them: what was made is found by
+-- (docs/design/library-management.md §8, "The project is its files") nothing reads or writes them: what was made is found by
 -- the link inside each file, names are the moments'. A file that still has them keeps them as anything else it
 -- doesn't know (taken out once by hand, 2026-11-11).
 --
@@ -91,7 +91,7 @@ function M.new(env)
         return read_file(root) or p.read_legacy(root) or blank()
     end
 
-    -- What's written: since 0.11 (docs/library-management.md §8) the file keeps only where the footage is; the lists of
+    -- What's written: since 0.11 (docs/design/library-management.md §8) the file keeps only where the footage is; the lists of
     -- before are kept while they have something (the Library takes what it needs from them), empty ones left out
     local OLD_LISTS = { "settings", "clips_made", "clips_failed", "stills_made", "moment_names" }
     local function written(doc)

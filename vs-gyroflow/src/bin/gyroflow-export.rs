@@ -140,7 +140,7 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --force          replace an existing output instead of skipping the video
   --interpolation  bilinear | bicubic | lanczos (default lanczos)
   --gpu <auto|on|off>  the GPU path: one ffmpeg decoding, running the player's own shaders (libplacebo filter) and
-                   encoding, the frames on the GPU throughout (docs/export-gpu-path.md). auto (default): where this
+                   encoding, the frames on the GPU throughout (docs/design/export-gpu-path.md). auto (default): where this
                    ffmpeg and the clip allow it, else the pipes, with a line saying why; on: only it
   --gpu-interpolation <i>  its warp's interpolation: bilinear, bspline, bicubic, bicubic9, lanczos, ewa (default:
                    the player's, lanczos up to 31 fps, bicubic9 above)
@@ -148,7 +148,7 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --resolution <r> the output's short side at most: 2160, 1080, 720 (or any number of pixels), never enlarged;
                    original (the default) as it's always been: the clip's or its Gyroflow project's size. The GPU path
                    renders the warp at that size directly, the pipes scale the stabilized frames; a photo is scaled
-                   at the end (docs/export-settings.md)
+                   at the end (docs/design/export-settings.md)
   --encode <fast|quality>  fast (the default): the encoder's real-time mode on the GPU path (VideoToolbox), its
                    default on the pipes, the source's bit rate for the output's size; quality: the encoder's quality
                    mode on both paths (VideoToolbox not real-time, NVENC p7, x265 slow) and 1.5x that bit rate
@@ -159,7 +159,7 @@ folder next to it. A log video with nothing to stabilize it with is color-conver
   --control <file> read stop / background / normal from this file while running (for Windows, which has no
                    SIGUSR1/SIGUSR2)
 
-Previews, for the player's moments (docs/moments-and-workspaces.md): small H.264 MP4s in SDR that any system
+Previews, for the player's moments (docs/design/moments-and-workspaces.md): small H.264 MP4s in SDR that any system
 shows and plays, the frame also their cover art (the icon)
   --preview still  one frame, stabilized as with the options above, in SDR (the maker's LUT for D-Log M, else
                    NBCU's conversion; HLG through NBCU's), held for --from to --to (the whole video without them);
@@ -177,7 +177,7 @@ shows and plays, the frame also their cover art (the icon)
                    `hash` added as for an export
   --dates <time>   its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00): the MP4's creation time,
                    QuickTime's creation date (Photos' day) and the file's dates; without it, the video's dates
-A 360 camera's own file (an Insta360 .insv: docs/360-cameras.md), as the player shows it (the sphere stitched from its
+A 360 camera's own file (an Insta360 .insv: docs/design/360-cameras.md), as the player shows it (the sphere stitched from its
 lenses, the horizon level by gravity, pointed along a heading mode); --from, --to, --out, --output, --force,
 --encoder, --progress as above:
   --360            a stabilized 360 video: the whole sphere turned into the world and the heading, equirect, with
@@ -205,7 +205,7 @@ measured, fitted to the camera's own jerks. Prints a JSON line: the cache file (
 wide measured and left (before, after) and the share of the fit used (share); --progress writes the percent done
 Photos: --photo <time> the frame at that time as a still instead, with a gain map where there's an HDR look: an SDR
 rendition as the image, the HDR one (HLG) above it. Its place in its Exif GPS (a Live or Motion Photo's video in its
-QuickTime location): the camera's GPS at that time, else the clip's location in the Library (docs/geolocation.md)
+QuickTime location): the camera's GPS at that time, else the clip's location in the Library (docs/design/geolocation.md)
   --sdr-image <maker|nbcu|macos>  the SDR image: DJI's LUT (D-Log M; the default for it), NBCU's conversion of the
                    HLG (the default for the others), or the HLG as macOS shows it on an SDR screen (afp-photo)
   --radius <n>     clean it up from n frames on each side (0-7, default 5; 0: as it is), as the player's Ctrl+p
@@ -262,7 +262,7 @@ struct Options {
     project: Option<PathBuf>,
     force: bool,
     interpolation: Interpolation,
-    // The GPU path (docs/export-gpu-path.md): None where it can, Some(true) only it, Some(false) never
+    // The GPU path (docs/design/export-gpu-path.md): None where it can, Some(true) only it, Some(false) never
     gpu: Option<bool>,
     // The GPU warp's interpolation (warp.glsl's INTERP); None: the player's for the clip's frame rate
     gpu_interp: Option<i32>,
@@ -991,7 +991,7 @@ fn export_bit_rate(source: Option<u64>, source_px: usize, out_px: usize, quality
 }
 
 /// The encoder's own mode for --encode: on the GPU path (`gpu`), fast is VideoToolbox's real-time mode (82 fps for 4K
-/// HEVC Main10 against 50, the same quality at the same bit rate: docs/export-gpu-path.md), the pipes keep each
+/// HEVC Main10 against 50, the same quality at the same bit rate: docs/design/export-gpu-path.md), the pipes keep each
 /// encoder's default; quality is each one's quality mode on both
 fn encode_mode_args(encoder: &str, quality: bool, gpu: bool) -> Vec<String> {
     let v = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -1071,7 +1071,7 @@ fn pick_encoder(opts: &Options, prores: bool) -> Result<Encoder, String> {
     }
 }
 
-// Where an export goes by default: its project's _Exports/ (docs/moments-and-workspaces.md), else stabilized/ next to
+// Where an export goes by default: its project's _Exports/ (docs/design/moments-and-workspaces.md), else stabilized/ next to
 // the video. A project is never made here: the player initializes one where its user chooses
 fn default_out_dir(video: &Path) -> PathBuf {
     match vs_gyroflow::workspace::project_root(video) {
@@ -1357,7 +1357,7 @@ fn flipbook_times(duration: f64) -> Vec<f64> {
     (0..n).map(|i| 1.0 + span * (i as f64 + 0.5) / n as f64).collect()
 }
 
-// --preview flipbook: the clip at a glance (docs/moments-and-workspaces.md, "Clips"). Color only: only keyframes are
+// --preview flipbook: the clip at a glance (docs/design/moments-and-workspaces.md, "Clips"). Color only: only keyframes are
 // decoded, one per time, from the low-resolution copy when there is one, through the SDR look of a still
 fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
@@ -1882,7 +1882,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     if !cfg!(target_os = "macos") && preview.is_none() { eprintln!("  encoder: {}", enc.name); }
     if dv_rpus.is_some() && enc.name != "hevc_videotoolbox" { return Err(format!("--dv-rpu: needs hevc_videotoolbox, not {}", enc.name)); }
 
-    // The GPU path (docs/export-gpu-path.md): one ffmpeg, the frames on the GPU from the decoder to the encoder, the
+    // The GPU path (docs/design/export-gpu-path.md): one ffmpeg, the frames on the GPU from the decoder to the encoder, the
     // player's own shaders. Else the pipes below, saying why
     if preview.is_none() && part.is_none() && opts.gpu != Some(false) {
         let why: Result<GpuPlan, String> = (|| {
@@ -2007,7 +2007,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         if prores {
             enc_cmd.args(["-tag:v", "apch"]);
         } else if enc.name == "ffv1" {
-            // Lossless, for comparing pictures (docs/export-gpu-path.md)
+            // Lossless, for comparing pictures (docs/design/export-gpu-path.md)
             enc_cmd.args(["-level", "3"]);
         } else {
             enc_cmd.args(["-tag:v", "hvc1", "-b:v", &format!("{}", bit_rate as u64)]);
@@ -2894,7 +2894,7 @@ fn set_file_dates(path: &Path, at: std::time::SystemTime) {
     let _ = f.set_times(times);
 }
 
-// Photos: the project's _Stills (beside its _Exports, docs/moments-and-workspaces.md), else stabilized/ next to the clip
+// Photos: the project's _Stills (beside its _Exports, docs/design/moments-and-workspaces.md), else stabilized/ next to the clip
 fn out_dir_for(path: &Path, opts: &Options) -> PathBuf {
     opts.out.clone().unwrap_or_else(|| match vs_gyroflow::workspace::project_root(path) {
         Some(root) => root.join("_Stills"),
@@ -3450,7 +3450,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    // docs/export-settings.md: the export's settings (--resolution, --encode, the quality preset's --interpolation) on
+    // docs/design/export-settings.md: the export's settings (--resolution, --encode, the quality preset's --interpolation) on
     // each path's command line
     #[test]
     fn export_settings_on_the_command_line() {

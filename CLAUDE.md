@@ -1,10 +1,18 @@
 # ActionFootagePlayer: rules for every session
 
-Read this before changing anything. It holds the rules and the things that must agree with each other. How each part
-works is in README.md ("How it works", "Layout") and docs/. Where a doc says "design" or "not built yet", check the
-code, which is the truth. Many sessions work on this repository at once, and this file is what they all share. When
-you learn a rule or a trap that will matter again, add it here (or to the doc it belongs to) in your PR, not only to
-your own memory.
+Read this before changing anything. It holds the rules and the things that must agree with each other. Many sessions
+work on this repository at once, and this file is what they all share.
+
+- **How it is:** `docs/reference/`: the parts and processes (`architecture.md`), every file kept
+  (`files-and-formats.md`), the contracts between processes (`contracts.md`), each setting on each path
+  (`settings-flow.md`), the words (`glossary.md`). **How to work on it:** `docs/dev/` (`testing.md`, `release.md`,
+  `gotchas.md`). Index with each doc's status: `docs/README.md`. The code is the truth: where a doc disagrees, fix
+  the doc.
+- **Keep them true in your PR.** A change to a format, a contract or a setting's path changes its reference doc in the
+  same PR. Script messages, `user-data` keys, `AFP_*` variables and `gyroflow-export` flags are listed by
+  `python3 tools/gen_reference.py`; `tests/reference_test.py` fails until you run it, and on any broken link.
+- **A rule or a trap that will matter again** goes here or into `docs/dev/gotchas.md` in your PR, not only into your
+  own memory. Designs go into `docs/design/` with a status line (see `docs/README.md`).
 
 ## The parts
 
@@ -71,7 +79,9 @@ sources has an allow-list for what it can't resolve, with why (add to it rather 
   - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
     `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
     `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
-  - the render recipe: workspace `RENDER_VERSION` and `renders.rs` `VERSION`.
+  - the render recipe: `renders.rs` `VERSION` (the cache by hash; raise it when the pixels change for the same recipe),
+    and the older recipe in a render's link, workspace `RENDER_VERSION` and `library/src/index.rs` `RENDER_VERSION`,
+    together. No test guards these yet.
 - **Curves:** `dlogm/main.lua` `CURVES` and `gyroflow-export.rs` `CURVES`. A curve the player offers must either be
   accepted by the export or be mapped before `--curve`. Also the packagers' `make_hdr_lut.py` curves (each export
   curve needs its `luts/<id>_hlg.cube`), the Library's `app.js` `SRC_CURVES`, `tags.rs`'s curve list and `albums.js`
@@ -92,12 +102,15 @@ sources has an allow-list for what it can't resolve, with why (add to it rather 
 - **The clip's own file (`<clip>.afp.json`)** is found in `sidecar.lua`, `workspace.rs`, `tags.rs` (`clip_own_in`) and
   `reframe.rs`.
 - **The 360 view:** `view360.glsl`, `view360.wgsl` and `view.lua`.
+- **The underwater colour's rule:** `dlogm/uw_estimate.lua` and `vs-gyroflow/src/uwcolor.rs`, shared grids in
+  `tests/uwcolor_cases.json` (`tests/uwcolor_test.lua` writes them, cargo reads them).
 
 ## Stored data: the rules Anton set
 
 - **The project is its files.** `Project.afproject` keeps only `locations`, `hosts` and `id`. Everything else lives in
   the files themselves (sidecars, XMP, links) or in a per-computer cache. Never add new state to `Project.afproject`.
-  (`docs/library-management.md` §8.)
+  (`docs/design/library-management.md` §8. What it still holds against the rule, the Library's `settings`
+  and `generated_runs`: `docs/reference/files-and-formats.md`.)
 - **Raise the version whenever what's kept changes.**
   - What the catalog or project keeps: `afp_catalog::project::VERSION` and `projectfile.lua` `M.VERSION`, together.
     The test `what_is_kept_goes_with_the_projects_version` guards this.
@@ -136,7 +149,8 @@ sources has an allow-list for what it can't resolve, with why (add to it rather 
   `tests/`, or in `library/ui-tests/*_test.js`.
 - **A bug fixed gets a test that fails without the fix**, whenever the bug can be reached without a screen.
 - **Live rigs are not in CI:** `tests/*_ipc.py`, `tests/*_e2e.py`, `tests/photo_link_frame.py`, `tools/pipebench`,
-  the panel render rig. Run them yourself for changes they cover, and say which you ran.
+  the panel render rig. Run them yourself for changes they cover, and say which you ran. How to run each:
+  `docs/dev/testing.md`.
 - **Ask Anton first before any test that takes the screen** (opens windows in a loop, takes focus, keeps the display
   awake). Ask again after any break. mpv's gpu-next hangs while the Mac is locked.
 - **"Not verified" is a debt, not a footnote.** Every "not tried / not verified" line in a PR gets an issue labelled
@@ -152,13 +166,15 @@ sources has an allow-list for what it can't resolve, with why (add to it rather 
 - **A fix made on a trial or integration branch goes back into its PR, or into its own PR.** It must never live only
   on a local trial branch.
 - **An integration PR's tree must equal the build Anton tried** (`git diff <trial> HEAD` empty).
-- **Build a trial app with `tools/dev_app.sh`,** not `install.sh --apps`. Then:
+- **Build a trial app with `tools/dev_app.sh`,** not `install.sh --apps` (the steps: `docs/dev/release.md`). Then:
   - check `Contents/Helpers/mpv --version`;
   - unregister every other copy from Launch Services;
   - check that an MP4 opens the copy in `~/Applications`.
 - **Merging to main and tagging a release are Anton's decisions.**
 
 ## Traps
+
+The ones that bite most often; the rest, by area, are in `docs/dev/gotchas.md`.
 
 - **The Lua 200-locals limit.** `workspace/main.lua` sits at Lua's 200 top-level locals, and `gyroflow/main.lua` near
   it (~170 since the VapourSynth path left, 2026-11). Put

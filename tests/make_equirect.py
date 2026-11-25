@@ -8,7 +8,7 @@
 The grid has a line every 15°, the equator and the meridian ahead thicker, each quarter its own color (ahead red,
 right green, behind blue, left yellow) and labelled with words that read wrong when mirrored, so a turned or mirrored
 view is plain to see. A white box goes round the equator to the right, once every 8 s, to tell playing from paused.
-The conventions are video-types' (docs/360-cameras.md): longitude 0 in the picture's middle, +90° (right) at three
+The conventions are video-types' (docs/design/360-cameras.md): longitude 0 in the picture's middle, +90° (right) at three
 quarters of its width, latitude +90° (up) at its top.
 
 Needs ffmpeg (libx264) and Pillow. 2880 x 1440, H.264, 30 fps: a few MB.

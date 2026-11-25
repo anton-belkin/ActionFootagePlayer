@@ -168,7 +168,7 @@ expect("of clip: same fingerprint", #m.of_clip({ { name = "x", link = { clip = "
 expect("of clip: other fingerprint", #m.of_clip({ { name = "x", link = { clip = "A.MP4", hash = "h", size = 1, ["in"] = 1, out = 2 } } },
     { relative = "A.MP4", size = 1, hash = "g" }), 0)
 
--- A clip moved away from the path its link names: found by what it is (docs/library-management.md §8)
+-- A clip moved away from the path its link names: found by what it is (docs/design/library-management.md §8)
 local T0 = moments_lib.parse_time("2026-10-24T06:45:41Z")
 local hashes, created, remembered, never_rename = {}, {}, {}, false
 fs.fingerprint = function(f) return hashes[f] end
