@@ -14,7 +14,7 @@ It does three things, each a setting of its own:
   none of them walking the share. It writes nothing but the catalog. A project newer than the helper (its
   `version` in Project.afproject) is refused, not touched: then update the helper.
 - **The stream** (`AFP_STREAM`, on): every clip, moment and clip preview of the projects as an HLS stream, the way
-  the player shows it: stabilized with Gyroflow's warp on the GPU, D-Log M in HDR (HLG), each file with its saved view
+  the player shows it: stabilized with Gyroflow's warp on the GPU, a log clip in HDR (HLG), each file with its saved view
   or its project's settings. Rendered by the NAS's GPU as it's watched, kept in a cache. Its page,
   `http://<nas>:8099/`, lists the clips with their streams and pre-renders folders; `/settings` shows this
   helper's state and settings. Safari, iPhones, Apple TV and VLC play the streams as they are. Details:
@@ -68,7 +68,7 @@ container (`docker compose up -d`).
 | Setting | Default | What it does |
 |---|---|---|
 | `AFP_COLLABORATION` | `on` | Collaboration: several people and computers working in one library at once. The NAS is told what changes on its own disks and writes it into each project's catalog (afp-catalog watch), so what one person does (a moment marked, clips sorted, a trip added, also on the NAS itself) reaches everyone else's player and Library in about a second, without anyone walking the share. It writes nothing but the catalog. A project newer than this helper is refused, not touched: update the helper. One of: `on`, `off`. |
-| `AFP_STREAM` | `on` | The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri: graphics with VA-API that encode HEVC (Intel, AMD). One stream at a time is what an N100 surely keeps up with; a second at once may stutter. One of: `on`, `off`. |
+| `AFP_STREAM` | `on` | The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the player plays it (stabilized on the GPU, a log clip in HDR, the project's settings), rendered by the NAS's GPU as it is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri: graphics with VA-API that encode HEVC (Intel, AMD). One stream at a time is what an N100 surely keeps up with; a second at once may stutter. One of: `on`, `off`. |
 | `AFP_JELLYFIN` | `off` | Links for Jellyfin: a folder (/jellyfin) a Jellyfin Home Videos library reads, a .strm (the stream's URL), .nfo and cover per item, sorted into trips; the library refreshed after a change. Needs the stream. One of: `on`, `off`. |
 
 ### What it looks at
@@ -91,6 +91,7 @@ container (`docker compose up -d`).
 | `AFP_OPENING` | `8` | Seconds of each clip that 'pre-render openings' renders ahead, so a folder played in a row starts each clip at once. |
 | `AFP_INTERP` | `bilinear` | The warp's interpolation. bilinear is the fastest (67-69 fps at 1080p on an N100); bspline, bicubic and lanczos are sharper and slower. One of: `bilinear`, `bspline`, `bicubic`, `lanczos`. |
 | `AFP_CHROMATIC` | `0` | 1: the water's color fringes taken out where the player does it (slower: ~48 fps on an N100, not real time at 4K60). One of: `0`, `1`. |
+| `AFP_DENOISE` | `off` | player: the temporal denoise where the player has it on for the clip (Ctrl+p, the clip's transform; how much: /config/player's gyroflow.conf temporal_denoise, full or light). Far slower than real time on an N100: for clips pre-rendered whole (the page's 'pre-render whole clips'). off: none. One of: `off`, `player`. |
 | `AFP_TV_LOOK` | `hlg` | What TVs that take only MPEG-TS HLS get (Samsung Tizen before 5, LG webOS before 3.5; also any stream asked with ?fmt=ts): hlg, pq (HDR10) or sdr, optionally followed by x<peak> (highlights expanded up to that many nits), g<gain> (the whole picture brighter) and r<fps> (at most that many frames a second), e.g. pqg2.5r30. |
 | `AFP_LOG_REQUESTS` | `1` | 1: every request in the log, with its User-Agent (who asked for what); 0: none. One of: `0`, `1`. |
 

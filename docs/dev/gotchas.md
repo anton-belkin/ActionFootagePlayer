@@ -195,6 +195,12 @@ docs/design/library-management.md §9 and docs/design/catalog-safeguards.md have
   read). The table is read ahead in steps (`ahead.lua`, docs/design/gpu-table-ahead.md).
 - **Drop a file from this Mac's cache without sudo:** mmap it and `msync(MS_INVALIDATE)` (`tests/gpu_ahead_e2e.py
   --cold`). The NAS keeps its own cache.
+- **The stream's `fingerprint` decides what the NAS renders again.** A new part in it changes every clip's, and the
+  whole cache (up to `AFP_CACHE_GB`, 40 GB) is rendered again as it's watched. Add a part only for the clips whose
+  pixels change (#315: `|look:<curve>`, `|dn:…`).
+- **The temporal denoise shows a frame behind the newest** (warp.glsl's `dn_after`). Any renderer of it decodes
+  frames before and after the part it outputs and gives the last frame again at the clip's end:
+  gyroflow-export's GPU path (`skip`, `pad`) and `afp-render -behind` do.
 
 ## Builds, installs and checkouts
 

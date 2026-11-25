@@ -1,7 +1,8 @@
 # afp-stream: clips stabilized and in HDR over the network
 
 A small service for the NAS (an Intel N100 here): each clip of the library as an HLS stream, stabilized on the GPU with
-Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for DJI's D-Log M, given the player's hdr look: HEVC Main10, HLG
+Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for a log clip (every log curve the player plays: D-Log M, D-Log,
+GP-Log, GP-Log2, I-Log), given the player's hdr look: HEVC Main10, HLG
 (BT.2020), fMP4 segments of 2 s, the audio copied. Nothing leaves the GPU: VAAPI decodes, libplacebo renders into the
 encoder's own surfaces, VDEnc encodes (docs/design/gpu-render.md, "The streaming server").
 
@@ -39,7 +40,7 @@ Files:
 - `Dockerfile`: the image, on top of the GPU spike's (tools/gpu-spike, in git history: mpv 0.42 + libplacebo 7.387 on Fedora 43 with RPM Fusion's ffmpeg)
 
 On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` built for Linux there (15 min on the N100),
-`dlogm_hlg.glsl` (tools/cube_to_glsl.py), the player's plugins in `player/` (below), and the container:
+`dlogm_hlg.glsl` (tools/cube_to_glsl.py; since #315 every curve's, by `make_looks.py`), the player's plugins in `player/` (below), and the container:
 
     docker run -d --name afp-stream --restart unless-stopped --memory=1500m --device /dev/dri -p 8099:8099 \
       -v "/volume1/ssd/Action Footage Library:/library/project:ro" \
@@ -58,7 +59,7 @@ once, as it does on a Mac; here the write fails and nothing changes.
 The memory cap keeps it from pushing the Home Assistant VM out.
 
 Settings (environment): `AFP_INTERP` (bilinear; bspline, bicubic, lanczos), `AFP_CHROMATIC` (0; 1 takes the water's
-color fringes out), `AFP_HEIGHT` (1080), `AFP_BITRATE` (12M), `AFP_SEGMENT` (1 s), `AFP_CACHE_GB` (40), `AFP_OPENING`
+color fringes out), `AFP_DENOISE` (off; player: the clip's temporal denoise, below), `AFP_HEIGHT` (1080), `AFP_BITRATE` (12M), `AFP_SEGMENT` (1 s), `AFP_CACHE_GB` (40), `AFP_OPENING`
 (8 s), `AFP_LIBRARY`, `AFP_PORT` (8099), `AFP_PLAYER` (/stream/player), `AFP_ARGS` (/stream/args), `AFP_SHARES`
 (the player's: network shares as folders here, `//host/share=/dir;...`).
 
@@ -72,8 +73,23 @@ gyroflow, dlogm) and no window, `--script-opts-append=gyroflow-render_args=<file
 writes the original, the part (offset, length), gyroflow-gpu-table's request and the log curve, and quits. So every
 rule of the player counts (what's saved for the file over the defaults, a project over the bundle, a moment stabilized
 on its own), and none is copied here. The stream changes only what it must: the smooth edge fill for the sphere trail,
-its own interpolation and color fringes (`AFP_INTERP`, `AFP_CHROMATIC`), the hdr look (HLG) for D-Log M whatever
-look the player starts in.
+its own interpolation and color fringes (`AFP_INTERP`, `AFP_CHROMATIC`), the hdr look (HLG) for a log clip whatever
+look the player starts in, and the temporal denoise only with `AFP_DENOISE=player`.
+
+- **The looks:** the log curve is the dlogm plugin's (`dlogm.curve` in the answer), and its look is the plugin's own
+  shader for it (registry.json's curves, `hdr`), baked for every log curve into the image by `make_looks.py`. The
+  underwater colour (`uw`) isn't a log curve and needs the player's per-frame estimate: such a clip streams as recorded.
+- **The temporal denoise** (`AFP_DENOISE=player`): where the player has it on for the clip (`render.settings`:
+  `denoise`, `temporal_denoise` from `/config/player`'s gyroflow.conf, `denoise_strong`, `denoise_grain`), the warp
+  is asked with its denoise passes and `afp-render -behind <n>` renders it as gyroflow-export's GPU path does: the
+  shown frame is n behind the newest, so it decodes 2n+10 frames before a segment and n after it, and gives the
+  clip's last frame n more times. It costs more than the warp (measured on an M1 Pro at 1080p, 4K60 D-Log M: warp
+  ~160 fps, decode-bound; with the full denoise 75 fps, ~7 ms more a frame), so on the N100, where the warp alone
+  takes ~15 ms of a 60 fps frame's 16.7, it's far from real time: it's for clips pre-rendered whole. Off, a clip with
+  the denoise on says so in the log at each render.
+- **The project's own folders** (registry.json's `own_folders`: `Generated/`, `_Exports/`, …) are never footage at a
+  project's top, nor gyroflow-export's `stabilized/` anywhere; `_Moments/` and `_Clips/` are read as moments and clip
+  previews.
 
 - `/stream/player/`: the plugins (the repo's Lua over the Linux plugin bundle's binaries: gyroflow-probe and the rest),
   and `config/script-opts/gyroflow.conf` and `dlogm.conf`, the defaults (Anton's, copied from the Mac's app:
