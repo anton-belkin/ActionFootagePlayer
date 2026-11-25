@@ -1622,7 +1622,7 @@ mod probe_version {
     }
 }
 
-/// The recipe of a moment's render as the player makes it (mpv/scripts/workspace/main.lua's render_recipe and its
+/// The recipe of a moment's render as the player makes it (mpv/scripts/workspace/renders.lua's render_recipe and its
 /// RENDER_VERSION) is render_recipe_of's: the same version, the same fields. A render the player made is current
 /// while its link's recipe is the moment's now, as either works it out
 #[cfg(test)]
@@ -1658,9 +1658,9 @@ mod render_recipe_twin {
 
     #[test]
     fn the_players_render_recipe_is_this_one() {
-        let lua = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/scripts/workspace/main.lua")).unwrap();
-        assert!(lua.contains(&format!("\nlocal RENDER_VERSION = {RENDER_VERSION}\n")), "workspace/main.lua's RENDER_VERSION isn't {RENDER_VERSION}");
-        let a = lua.find("\nlocal function render_recipe(").expect("workspace/main.lua's render_recipe");
+        let lua = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/scripts/workspace/renders.lua")).unwrap();
+        assert!(lua.contains(&format!("\nlocal RENDER_VERSION = {RENDER_VERSION}\n")), "workspace/renders.lua's RENDER_VERSION isn't {RENDER_VERSION}");
+        let a = lua.find("\nlocal function render_recipe(").expect("workspace/renders.lua's render_recipe");
         let body = &lua[a..];
         let t = &body[body.find("trimmed({").unwrap() + "trimmed(".len()..];
         let lua_fields = lua_keys(t);

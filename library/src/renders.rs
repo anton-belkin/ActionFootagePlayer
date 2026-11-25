@@ -2,7 +2,7 @@
 // real pixels of one item (a moment, a photo link, a whole clip) in one profile. What decides its pixels is its recipe;
 // the recipe's hash names its file: <project>/_Renders/<hash>.<profile>.<ext>. So a render is found whatever the item
 // is called and wherever it lies: moved, renamed or copied items keep theirs, two copies of a moment share one, and a
-// changed recipe is another file. The player makes them (its batch `share`, workspace/main.lua): the Library works the
+// changed recipe is another file. The player makes them (its batch `share`, workspace/renders.lua): the Library works the
 // recipe and the file out and hands both over, so only this file hashes.
 //
 // Renders made before (0.11: _Renders/<the moment's path>.<profile>.mov, a v1 recipe in the link) are still found, by

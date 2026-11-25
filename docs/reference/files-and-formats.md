@@ -98,7 +98,7 @@ VERSION.
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/sidecar.lua` `read`; `workspace/workspace.lua` `own_file`, `sidecar_file`; `workspace/main.lua` `own_path`; `highlights/main.lua`; `view360/main.lua`; `workspace/transform.lua` `migrate_source` | `sidecar.lua` `update` (each plugin through its own `sidecar.new`) |
+| Lua | `workspace/sidecar.lua` `read`; `workspace/workspace.lua` `own_file`, `sidecar_file`; `workspace/places.lua` `own_path`; `highlights/main.lua`; `view360/main.lua`; `workspace/transform.lua` `migrate_source` | `sidecar.lua` `update` (each plugin through its own `sidecar.new`) |
 | Rust (vs-gyroflow) | `workspace.rs` `own_file`, `sidecar_file`; `reframe.rs` `sidecar_path`, `Recording::read`; `lens_pick.rs` `clip_lens_value`, chosen lens type; `geotag.rs` | — |
 | Rust (catalog) | `inspect.rs` `read` (`is_sidecar`), `own_kept` | — |
 | Rust (Library) | `tags.rs` `clip_own`, `clip_own_in`; `index.rs`; `checks.rs`; `changed.rs` | `tags.rs` `write_json` (tags, pick, rating, comment, `source.lens_type`), `geo.rs` (`location`), `main.rs` (`source.lens`, set_source) |
@@ -156,7 +156,7 @@ it"). Every writer raises a lower version to its own and never lowers it (`proje
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/projectfile.lua` `read`; `workspace/workspace.lua` `locations`, `place`; `workspace/main.lua` `generated_runs` | `projectfile.lua` `update`, `migrate` (from `_ActionFootagePlayer/`) |
+| Lua | `workspace/projectfile.lua` `read`; `workspace/workspace.lua` `locations`, `place`; `workspace/opening.lua` `generated_runs` | `projectfile.lua` `update`, `migrate` (from `_ActionFootagePlayer/`) |
 | Rust (vs-gyroflow) | `workspace.rs` `locations` | — |
 | Rust (catalog) | `project.rs` `project_id`, `version`, `too_new`; `locations.rs` `locations`, `read_json` | `project.rs` `raise` |
 | Rust (Library) | `main.rs` `read_doc`, `project_info`; `changed.rs` | `main.rs` `update_doc` (via `project_id`, `save_locations`, `set_setting`, the project move) |
@@ -209,7 +209,7 @@ clip is looked for. `tag_stores`: the tag stores synced on this computer (only `
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/main.lua` `locations_of`, `fs.projects_dir`; `workspace.lua` `known` | — |
+| Lua | `workspace/places.lua` `locations_of`, `fs.projects_dir`; `workspace.lua` `known` | — |
 | Rust (vs-gyroflow) | `workspace.rs` `projects_dir`, `known` | — |
 | Rust (catalog) | `locations.rs` `local_file`, `locations`, `never_rename`, `tag_stores`, `pointer_project` | `locations.rs` `note_here` (`project`, as a project opens) |
 | Rust (Library) | through the catalog | `main.rs` `save_local`, the tag stores' save |
@@ -267,7 +267,7 @@ Library listening on 127.0.0.1) and `player-<pid>.in` (a player's inbox of `{pro
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/main.lua` `catalog.ask`, `catalog.now`, `catalog.derived` (through `afp-catalog`) | `catalog.note`, `catalog.look` (runs `afp-catalog note`/`look`) |
+| Lua | `workspace/catalogtool.lua` `catalog.ask`, `catalog.now`, `catalog.derived` (through `afp-catalog`) | `catalog.note`, `catalog.look` (runs `afp-catalog note`/`look`) |
 | Rust (catalog) | `catalog.rs` `load`, `journal.rs` `parse`, `snapshot.rs` `Manifest::from_bytes`, `decode_part`, `care.rs` | `catalog.rs` `note`, fold, clean-up; `journal.rs` `header`, `line`; `snapshot.rs`; `care.rs`; `live.rs` |
 | Rust (Library) | `seen.rs`, `index.rs`, `checks.rs` (through `afp_catalog`) | through `afp_catalog` (looks, folds) |
 | Python | — | NAS Helper runs `afp-catalog` with `AFP_HOME=/data/catalog` |
@@ -317,7 +317,7 @@ camera's `.THM`, else the card's picture, in normal colour when the clip's curve
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/link.lua` `read`, `read_keys`, `created`; `workspace/moments.lua` `scan`, `original` | builds the JSON in `workspace/main.lua` (moment, export, clip, photo, render), passes it as `--link` |
+| Lua | `workspace/link.lua` `read`, `read_keys`, `created`; `workspace/moments.lua` `scan`, `original` | builds the JSON in `workspace/` `momentsave.lua` (moment, export, photo), `clippreviews.lua` (clip), `renders.lua` (render), passes it as `--link` |
 | Rust (vs-gyroflow) | `mp4meta.rs` `read_keys` | `mp4meta.rs` `write_keys`, `merged_meta`; `gyroflow-export --link`; `afp-cut --set-key` (in place); `afp-meta --link/--tags/--key` |
 | Rust (catalog) | `inspect.rs` `mp4_keys`, `read` | — |
 | Rust (Library) | `index.rs`, `renders.rs` | `albums.rs` (album items, written whole with their thumbnail frame) |
@@ -364,7 +364,7 @@ _renders _cache moments clips exports stabilized _actionfootageplayer generated`
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `workspace/moments.lua` `scan`, `generated_rel`, `clip_preview_relative`; `workspace/main.lua` `render_file` | `workspace/main.lua` (moments, previews, photos, exports, renders through gyroflow-export) |
+| Lua | `workspace/moments.lua` `scan`, `generated_rel`, `clip_preview_relative`; `workspace/renders.lua` `render_file` | `workspace/` `momentsave.lua`, `clippreviews.lua`, `marksjob.lua`, `renders.lua` (moments, previews, photos, exports, renders through gyroflow-export) |
 | Rust | `catalog/src/inspect.rs` `Ours`; `library/src/index.rs`, `renders.rs`, `checks.rs` | `gyroflow-export`; `library/src/albums.rs`, `renders.rs`, `takein.rs` |
 | Python | `tools/stream/afp_stream.py`, `tools/stream/jellyfin.py` | — |
 
@@ -403,7 +403,7 @@ both have one) differs is "measured on another clip" and not used.
   beside the clip. Ctrl+e writes a new one at the first name. Gyroflow's own format; the player only reads it, except
   for that new one. (`workspace.lua` / `workspace.rs` `gyroflow_projects`, `gyroflow_project`, `gyroflow_new`.)
 - **A moment's or clip preview's own project:** `<name>.gyroflow` beside its `.afplink.mp4` (a copy made with the
-  moment, so a later change to the clip's project doesn't change it). `workspace/main.lua` `own_project`.
+  moment, so a later change to the clip's project doesn't change it). `workspace/places.lua` `own_project`.
 - **The default preset** for clips without a project: Gyroflow's own, then the first of `$GYROFLOW_DATA/default.gyroflow`
   and `<plugin folder>/default.gyroflow`. The plugin also ships `underwater.gyroflow`.
 - A project's fingerprint goes into a render's recipe (`gyroflow`), so editing it makes the render stale.
@@ -428,7 +428,7 @@ and what they last agreed on (`synced.<store>` in the item's record).
 
 | Language | Read / written |
 |---|---|
-| Lua | `workspace/tags.lua` (model, merge, Finder through `/usr/bin/xattr`); `workspace/main.lua` (`recent_file`, `remember_tags`); `side-panel/tagchips.lua` |
+| Lua | `workspace/tags.lua` (model, merge, Finder through `/usr/bin/xattr`); `workspace/tagging.lua` (`recent_file`, `remember_tags`); `side-panel/tagchips.lua` |
 | Rust (catalog) | `finder.rs` `plist`, read/write of the xattr |
 | Rust (Library) | `tags.rs` (`set`, sync, `holds_nothing`), `index.rs` `photo_tags`; `ui/culling.js` |
 
@@ -464,7 +464,7 @@ the run), `log.txt`; and `focus.json` beside the jobs (the folders the Library s
 - Status (written whole): `{ kind, state, done, total, failed, fraction, current, message, failures }`, `state` one of
   `starting looking running done stopped failed`.
 
-Read/written by `workspace/main.lua` (the batch block, `render_moments`) and `library/src/main.rs` (`start_job`,
+Read/written by `workspace/batch.lua` (and `renders.lua` `render_moments`) and `library/src/main.rs` (`start_job`,
 `start_player`). Optical and lens jobs run `gyroflow-optical` with the same request file.
 
 ## Settings: script-opts and render-defaults
@@ -511,7 +511,7 @@ All can be deleted; they are rebuilt.
 | Motion data, probes, Library probes, GPU tables, translation, lens find, 360 hold | `~/Library/Caches/ActionFootagePlayer/<kind>/<hash>` (`motion`, `probe`, `library`, `gpu`, `translation`, `lensfind`, `reframe-hold`) | SHA-256 of path, size, mtime and a version (`lib.rs` `file_cache`) | vs-gyroflow binaries |
 | HDR stills | `~/Library/Caches/ActionFootagePlayer/hdr-stills` | — | `live-photo/main.lua` |
 | Project lookup | `~~cache/actionfootageplayer-projects.json` | `{ v: 2, folders }`; holds while folders, files and mounts are as they were | `workspace/projectcache.lua` |
-| Moment scan, this computer's choices | `~~cache/actionfootageplayer-moments.json` | each link file's size, mtime, raw link; `found`; `moments_alone`, `clips_layout` | `workspace/main.lua` |
+| Moment scan, this computer's choices | `~~cache/actionfootageplayer-moments.json` | each link file's size, mtime, raw link; `found`; `moments_alone`, `clips_layout` | `workspace/momentlist.lua` |
 | Catalog | `~/Library/Caches/ActionFootage/catalog/<project id>/`, `…/live/` | see [the catalog](#the-catalog-afpcatalog) | afp-catalog |
 | Library | `~/Library/Caches/<Library app id>/`: `thumbs/`, `views/<hash>-<view>.json`, `lists/`, `maps/`, `probes.json`, `places.json` | — | `library/src/main.rs`, `albums.rs`, `geo.rs` |
 | GPU path prefetch | `$TMPDIR/vs-gyroflow-prefetch-*.bin` | — | `prefetch.rs` |
@@ -571,8 +571,8 @@ CLAUDE.md says the product has no dual-format reader. These remain in the code t
 | `_ActionFootagePlayer/` project folder (up to 0.8) | `workspace.lua`, `projectfile.lua` | makes a project; `migrate` moves its settings into `Project.afproject` |
 | `Project.afproject` `photo_tags` | `library/src/tags.rs` | taken into the photo at its next change |
 | `view` holding input keys | `transform.lua` `migrate_source` | moved into `source` |
-| `_Renders/<moment path>.<profile>.mov` (v1 recipe) | `renders.rs`, `workspace/main.lua` | still counts as current while its recipe matches |
-| `Generated/` at the project's top | `workspace/main.lua`, `index.rs` | read where it is |
+| `_Renders/<moment path>.<profile>.mov` (v1 recipe) | `renders.rs`, `workspace/renders.lua` | still counts as current while its recipe matches |
+| `Generated/` at the project's top | `workspace/opening.lua` `moments_home`, `index.rs` | read where it is |
 
 ## Where the twins disagree
 

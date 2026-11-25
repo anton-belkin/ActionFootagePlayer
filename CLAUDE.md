@@ -41,7 +41,7 @@ work on this repository at once, and this file is what they all share.
   ```
 
 - **Check what open PRs touch the files you'll change** with `gh pr list` and `gh pr view N --json files`.
-  - If another open PR is in the same big file (`workspace/main.lua`, `gyroflow/main.lua`, `library/src/main.rs`,
+  - If another open PR is in the same big file (`gyroflow/main.lua`, `library/src/main.rs`,
     `library/ui/app.js`, `vs-gyroflow/src/lib.rs`, `library/src/index.rs`), say so to Anton before starting.
   - Better still, build on that PR or wait for it.
 - **Keep stacks to two or three PRs deep**, merged bottom first.
@@ -198,10 +198,10 @@ to it rather than around it).
 
 The ones that bite most often; the rest, by area, are in `docs/dev/gotchas.md`.
 
-- **The Lua 200-locals limit.** `workspace/main.lua` sits at Lua's 200 top-level locals, and `gyroflow/main.lua` near
-  it (~170 since the VapourSynth path left, 2026-11). Put
-  new code in a module of its own (as `transform.lua`, `sidecar.lua` and `ahead.lua` are), not in another
-  `(function() end)()` block. Add the module to the packagers; `packaging_test.py` checks it.
+- **The Lua 200-locals limit.** `gyroflow/main.lua` sits near Lua's 200 top-level locals (~170 since the VapourSynth
+  path left, 2026-11). `workspace/main.lua` is only its plugin's wiring: its parts are modules that share `W`
+  (`docs/dev/gotchas.md`). Put new code in a module of its own (as `transform.lua`, `momentsave.lua` and `ahead.lua`
+  are), not in another `(function() end)()` block. Add the module to the packagers; `packaging_test.py` checks it.
 - **libplacebo user shaders:**
   - `//!` inside comments is read as a directive;
   - `keepaspect=no` drops margins;

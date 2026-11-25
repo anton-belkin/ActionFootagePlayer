@@ -315,6 +315,22 @@ put mpv/scripts/workspace/journal.lua   "$WORKSPACE/journal.lua" 644
 put mpv/scripts/workspace/librarylist.lua "$WORKSPACE/librarylist.lua" 644
 put mpv/scripts/workspace/registry.lua  "$WORKSPACE/registry.lua" 644
 put mpv/scripts/workspace/registry.json "$WORKSPACE/registry.json" 644
+# The plugin's parts, which main.lua wires
+put mpv/scripts/workspace/places.lua       "$WORKSPACE/places.lua" 644
+put mpv/scripts/workspace/catalogtool.lua  "$WORKSPACE/catalogtool.lua" 644
+put mpv/scripts/workspace/common.lua       "$WORKSPACE/common.lua" 644
+put mpv/scripts/workspace/trash.lua        "$WORKSPACE/trash.lua" 644
+put mpv/scripts/workspace/momentlist.lua   "$WORKSPACE/momentlist.lua" 644
+put mpv/scripts/workspace/opening.lua      "$WORKSPACE/opening.lua" 644
+put mpv/scripts/workspace/momentsave.lua   "$WORKSPACE/momentsave.lua" 644
+put mpv/scripts/workspace/clippreviews.lua "$WORKSPACE/clippreviews.lua" 644
+put mpv/scripts/workspace/cutout.lua       "$WORKSPACE/cutout.lua" 644
+put mpv/scripts/workspace/viewsave.lua     "$WORKSPACE/viewsave.lua" 644
+put mpv/scripts/workspace/marksjob.lua     "$WORKSPACE/marksjob.lua" 644
+put mpv/scripts/workspace/renders.lua      "$WORKSPACE/renders.lua" 644
+put mpv/scripts/workspace/tagging.lua      "$WORKSPACE/tagging.lua" 644
+put mpv/scripts/workspace/inbox.lua        "$WORKSPACE/inbox.lua" 644
+put mpv/scripts/workspace/batch.lua        "$WORKSPACE/batch.lua" 644
 
 # The keys in a Cyrillic keyboard layout too (Ctrl+з as Ctrl+p)
 put mpv/scripts/any-layout/main.lua "$ANYLAYOUT/main.lua" 644
