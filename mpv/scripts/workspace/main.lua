@@ -206,8 +206,13 @@ fs.files = function(p)
     listed[p] = info and names and { names = names, mtime = info.mtime, at = mp.get_time() } or nil
     return names
 end
+-- Kept a few seconds: a lookup asks for them per share path (workspace.lua's place) and the project cache once per
+-- answer it checks (projectcache.lua), a run of /sbin/mount each (in fs: no local, 200 is the limit)
 fs.mounts = function()
+    local kept = fs.mounts_kept
+    if kept and mp.get_time() - kept.at < 10 then return kept.list end
     local out = {}
+    fs.mounts_kept = { list = out, at = mp.get_time() }
     -- Shares reached otherwise than mounted from the network (a container on the NAS itself, where they're its own
     -- folders, bound in): AFP_SHARES="//NAS/photo=/shares/photo;//NAS/DJI_Inbox=/shares/DJI_Inbox" (afp-stream)
     for src, dir in (os.getenv("AFP_SHARES") or ""):gmatch("(//[^=;]+)=([^;]+)") do out[#out + 1] = { source = src, dir = dir } end
@@ -227,6 +232,10 @@ fs.mounts = function()
     end
     return out
 end
+-- The Library's records of this computer's projects, by id (where each one's folder is here): a pointer whose path
+-- doesn't reach its project finds it there (workspace.lua's known)
+fs.projects_dir = (windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
+                   or os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") or "") .. "/.config") .. "/ActionFootage/projects"
 local ws = workspace.new(fs)
 -- The project a clip's folder is in, kept between the player's runs (each Library double click is a new one) while the
 -- folders and files it was found from are as they were: a stat each instead of the lookup (no local: 200 is the limit)

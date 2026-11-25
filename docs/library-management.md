@@ -137,8 +137,15 @@ Written once, the same for every computer:
 
 A clip opened from Finder has to find its project without anything the computer remembers, since a project on the SSD
 isn't above its footage. So each location has, at its top, a small visible file per project that uses it:
-`Footage.afplocation` (JSON: the project's network path, its `id`, the location's place in its tree). The Library
-writes it when a location is added, and removes it when the location is.
+`Footage.afplocation` (JSON: the project's network path, its `id`, the NAS's other names from the project's `hosts`,
+the location's place in its tree). The Library writes it when a location is added or the locations are saved, and
+removes it when the location is.
+
+A pointer counts only for the project of its `id`: the folder its path reaches must hold a `Project.afproject` with
+that id, else it's passed over (a pointer with no id counts for none). When its path doesn't reach the project (the
+share mounted by a name the pointer doesn't know, 24 Nov 2026), the project is looked for where this computer last had
+it open: the Library notes that, by id, in this computer's own file for it (`ActionFootage/projects/<id>.json`,
+`"project"`), each time the project is opened. The same id check applies there. Shares are never searched by name.
 
 1. From the clip's folder up to the top of its volume, the player gathers the `.afplocation` files and the
    `Project.afproject` files (a project next to its footage is found by its own file).

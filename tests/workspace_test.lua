@@ -26,6 +26,8 @@ for line in io.lines("tests/workspace_cases.txt") do
         section = nil
     elseif line:match("^home ") then
         case.home = line:sub(6)
+    elseif line:match("^known ") then
+        case.known = line:sub(7)
     elseif line:match("^mount ") then
         local source, dir = line:match("^mount (%S+) (.-)%s*$")
         table.insert(case.mounts, { source = source, dir = dir })
@@ -77,7 +79,7 @@ for _, c in ipairs(cases) do
     local files = {}
     for rel in pairs(c.files) do files[BASE .. "/" .. rel] = true; add_parents(rel) end
     local texts = {}
-    for rel, t in pairs(c.texts) do texts[BASE .. "/" .. rel] = t end
+    for rel, t in pairs(c.texts) do texts[BASE .. "/" .. rel] = t:gsub("@/", BASE .. "/") end
     local mounts = {}
     for _, m in ipairs(c.mounts) do mounts[#mounts + 1] = { source = m.source, dir = BASE .. "/" .. m.dir } end
     local ws = workspace.new({
@@ -92,6 +94,7 @@ for _, c in ipairs(cases) do
             return out
         end,
         mounts = function() return mounts end,
+        projects_dir = c.known and BASE .. "/" .. c.known or nil,
     })
     for _, clip in ipairs(c.clips) do
         local path = in_base(clip.path)
