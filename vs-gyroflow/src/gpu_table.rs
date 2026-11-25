@@ -958,6 +958,20 @@ pub fn from_knots(m: &[[f32; 16]], knots: usize) -> Vec<[f32; 16]> {
 
 #[cfg(test)]
 mod tests {
+    /// The player's request is the settings JSON's keys the table reads (registry.json settings_json, `table`): each key
+    /// the table loads a clip by is one, and each one is read here or by gyroflow-gpu-table's shader
+    #[test]
+    fn the_request_is_the_settings_json_s() {
+        let reg = crate::lists::get();
+        for k in super::PLAYER_GEOMETRY_KEYS {
+            assert!(reg.json_key(k).is_some_and(|x| x.table), "PLAYER_GEOMETRY_KEYS {k}: not a settings_json key the table reads");
+        }
+        let code = format!("{}{}", include_str!("gpu_table.rs"), include_str!("bin/gyroflow-gpu-table.rs"));
+        for k in reg.settings_json.iter().filter(|k| k.table) {
+            assert!(code.contains(&format!("\"{}\"", k.key)), "registry.json: the table reads {}, gpu_table.rs and gyroflow-gpu-table.rs don't", k.key);
+        }
+    }
+
     #[test]
     fn frames_copied_from_the_table_before() {
         // Two tables of the same layout: frames 1-3 of the new one become the old one's, the others stay

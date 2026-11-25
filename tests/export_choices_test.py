@@ -2,7 +2,8 @@
 exportsettings.lua, the Library's Share dialog (share.js) and its render recipe (renders.rs) read them there
 (tests/registry_test.py checks each does). What's still apart, checked here:
   * gyroflow-export takes each size (--resolution) and encoding (--encode): its own argument parser
-  * each setting's flag is the one exportsettings.lua's apply sets and gyroflow-export's parser reads
+  * each setting's flag is gyroflow-export's on its command line, and stands for a key of the settings JSON
+    (registry.json settings_json) that exportsettings.lua's apply sets and gyroflow-export's apply_settings reads
   * the first choice is each setting's default in the player's options (gyroflow.conf's export_size, photo_size, …)
 A choice added to the registry that the export doesn't take would fail the render. From the repository's folder:
 python3 tests/export_choices_test.py"""
@@ -29,10 +30,14 @@ for ch in settings["size"]["choices"]:
 encodes = set(re.findall(r'"(\w+)" => (?:false|true)', re.search(r'"--encode" => [^\n]*', export).group(0)))
 for ch in settings["encode"]["choices"]:
     c.expect(f"gyroflow-export --encode {ch['value']}", ch["value"] in encodes, str(encodes))
+json_keys = json.loads(read("mpv/scripts/workspace/registry.json"))["settings_json"]
 for s in reg["settings"]:
     if s.get("flag"):
-        c.expect(f"{s['key']}: exportsettings.lua sets {s['flag']}", f'"{s["flag"]}"' in lua)
+        field = next((k["key"] for k in json_keys if s["flag"] in k.get("cli", [])), None)
+        c.expect(f"{s['key']}: {s['flag']} stands for a key of the settings JSON", field)
+        c.expect(f"{s['key']}: exportsettings.lua sets st.{field}", re.search(rf"\bst\.{field}\b", lua))
         c.expect(f"{s['key']}: gyroflow-export reads {s['flag']}", f'"{s["flag"]}" =>' in export)
+        c.expect(f"{s['key']}: gyroflow-export's apply_settings reads {field}", f'"{field}" =>' in export)
 
 # The player's options start at each setting's default (the first choice)
 for kind, keys in reg["kinds"].items():

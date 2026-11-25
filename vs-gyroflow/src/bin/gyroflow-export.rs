@@ -65,6 +65,9 @@ Renders each video stabilized (and, for log, color-converted) into the _Exports/
 folder with Project.afproject in it above the video, as the player initializes it), else into a stabilized/
 folder next to it. A log video with nothing to stabilize it with is color-converted only.
 
+  --settings <json|file|->  the settings JSON the player builds (docs/reference/contracts.md, \"The settings\"; its
+                   keys: registry.json's settings_json): how the clip is shown, as the player shows it, in place of the
+                   options below that it stands for; options after it change what it set
   --curve <curve>  the log curve: dlogm, dlog, gplog, gplog2, ilog, or none (colors as recorded) instead of the
                    one the camera's metadata says; or uw, the underwater colour (as --uw-color yes, whatever the clip)
   --uw-color <yes|no>  the player's underwater colour (#273: shaders/underwater_hlg.glsl, the dlogm plugin's curve
@@ -265,8 +268,15 @@ struct Options {
     gpu: Option<bool>,
     // The GPU warp's interpolation (warp.glsl's INTERP); None: the player's for the clip's frame rate
     gpu_interp: Option<i32>,
-    // The translation compensation kept for the clip, as the player draws it with Ctrl+j (GPU path)
+    // The translation compensation kept for the clip, as the player draws it with Ctrl+j (GPU path); `translation_kept`:
+    // the settings' (Ctrl+j on), where it's computed for the clip and the GPU path can, else without a word against it
     with_translation: bool,
+    translation_kept: bool,
+    // The preset a clip without a project is stabilized with (the settings': the player's), else the plugin's own
+    preset: Option<PathBuf>,
+    // A 360 camera's sphere: its width, its stitching distance (0: the camera's own), what straight ahead follows
+    // (the settings', for --360 and --reframe)
+    sphere: (usize, f64, Option<vs_gyroflow::stamp::Heading>),
     encoder: Option<String>,
     // --resolution: the output's short side at most (None: as it is); --encode quality
     resolution: Option<usize>,
@@ -317,6 +327,8 @@ struct Mode360 {
     keys: Option<Head360>,
     heading: Option<vs_gyroflow::stamp::Heading>,
     sphere_width: usize,
+    // Where its lenses' seam is right, in metres (0: the camera's own, else 2 m), as the player's sphere
+    distance: f64,
     size: (usize, usize),
     projection: vs_gyroflow::view360::Projection,
     // --measure-hold: only the picture hold's measuring of the recording
@@ -324,7 +336,7 @@ struct Mode360 {
 }
 
 impl Default for Mode360 {
-    fn default() -> Self { Mode360 { keys: None, heading: None, sphere_width: 0, size: (1920, 1080), projection: vs_gyroflow::view360::Projection::Auto, measure_hold: false } }
+    fn default() -> Self { Mode360 { keys: None, heading: None, sphere_width: 0, distance: 0.0, size: (1920, 1080), projection: vs_gyroflow::view360::Projection::Auto, measure_hold: false } }
 }
 
 // What --preview makes (flipbooks and video previews come later)
@@ -335,32 +347,28 @@ enum Preview { Still, Flipbook }
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Dates { unix: f64, offset_min: i32 }
 
-fn main() {
-    let first = std::env::args().nth(1);
-    if first.as_deref() == Some("--fingerprint") {
-        let mut failed = false;
-        for f in std::env::args().skip(2) {
-            match vs_gyroflow::workspace::fingerprint(Path::new(&f)) {
-                Ok(h) => println!("{h}"),
-                Err(e) => { eprintln!("{f}: {e}"); println!(); failed = true; }
-            }
-        }
-        std::process::exit(if failed { 1 } else { 0 });
-    }
-    vs_gyroflow::init_logging();
-    catch_signals();
-    let mut opts = Options { curve: None, uw: false, uw_settings: Default::default(), uw_params: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
+// The options as the command line sets them, the defaults first; and the videos
+fn default_options() -> Options {
+    Options { curve: None, uw: false, uw_settings: Default::default(), uw_params: None, sdr: false, nbcu: false, no_stabilize: false, lens: vs_gyroflow::LensMode::Stabilized, horizon_lock: None, underwater: Underwater::Auto, fov: Fov::Project, level: Level::Medium, frame: vs_gyroflow::Frame::default(),
                              edges: EdgeMode::Off, edge_settings: EdgeSettings::default(), denoise: 0, denoise_strong: false, chromatic: true, prores: false, from: None, to: None, out: None, project: None, force: false,
-                             interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, encoder: None, resolution: None, encode_quality: false, progress: Progress(None), control: None,
+                             interpolation: Interpolation::Lanczos4, gpu: None, gpu_interp: None, with_translation: false, translation_kept: false, preset: None, sphere: (0, 0.0, None), encoder: None, resolution: None, encode_quality: false, progress: Progress(None), control: None,
                              dv_rpu: None, dv_live_l1: false, output: None, alone: false, alone_project: None, preview: None, at: None, at_list: vec![], cover: None, link: None, dates: None,
                              translation: false, photo: None, photo_radius: 5, photo_grain: 0.25, camera: None, crop: None, image: None, picture: None,
                              jpeg: !cfg!(target_os = "macos"), quality: 92, sdr_image: None, live: false,
-                             youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None };
+                             youtube: None, youtube_levels: vs_gyroflow::youtube::Levels::Full, sphere360: None }
+}
+
+fn parse_args(mut args: impl Iterator<Item = String>) -> (Options, Vec<String>) {
+    let mut opts = default_options();
     let mut files = Vec::new();
-    let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
         let mut value = |name: &str| args.next().unwrap_or_else(|| fail(&format!("{name} needs a value")));
         match a.as_str() {
+            "--settings" => {
+                let v = value("--settings");
+                let j = read_settings(&v).unwrap_or_else(|e| fail(&format!("--settings: {e}")));
+                apply_settings(&mut opts, &j).unwrap_or_else(|e| fail(&format!("--settings: {e}")));
+            }
             "--curve" => opts.curve = Some(match value("--curve").as_str() {
                 "none" => None,
                 c => Some(vs_gyroflow::lists::curve(c).map(|x| x.id.as_str())
@@ -506,11 +514,35 @@ fn main() {
                 .filter(|p| *p != vs_gyroflow::view360::Projection::Equirect)
                 .unwrap_or_else(|| fail(&format!("--view {v}: auto, rectilinear, stereographic or planet"))); }
             "--background" => { BACKGROUND.store(true, Relaxed); set_background(&[0], true); }
-            "-h" | "--help" => { println!("{USAGE}"); return; }
+            "-h" | "--help" => { println!("{USAGE}"); std::process::exit(0); }
             _ if a.starts_with("--") => fail(&format!("unknown option {a}\n\n{USAGE}")),
             _ => files.push(a),
         }
     }
+    // The settings' sphere, where the command line doesn't say
+    if let Some(m) = opts.sphere360.as_mut() {
+        if m.sphere_width == 0 { m.sphere_width = opts.sphere.0; }
+        m.distance = opts.sphere.1;
+        if m.heading.is_none() { m.heading = opts.sphere.2; }
+    }
+    (opts, files)
+}
+
+fn main() {
+    let first = std::env::args().nth(1);
+    if first.as_deref() == Some("--fingerprint") {
+        let mut failed = false;
+        for f in std::env::args().skip(2) {
+            match vs_gyroflow::workspace::fingerprint(Path::new(&f)) {
+                Ok(h) => println!("{h}"),
+                Err(e) => { eprintln!("{f}: {e}"); println!(); failed = true; }
+            }
+        }
+        std::process::exit(if failed { 1 } else { 0 });
+    }
+    vs_gyroflow::init_logging();
+    catch_signals();
+    let (mut opts, files) = parse_args(std::env::args().skip(1));
     if files.is_empty() { fail(USAGE); }
     if opts.project.is_some() && files.len() > 1 { fail("--project is for one video"); }
     if opts.output.is_some() && files.len() > 1 { fail("--output is for one video"); }
@@ -559,7 +591,7 @@ fn translation(file: &str, opts: &Options) -> Result<Outcome, String> {
     let t0 = Instant::now();
     let path = Path::new(file);
     let info = ffprobe(path)?;
-    let source = find_source(path, opts.project.as_deref(), opts.lens)?;
+    let source = find_source(path, opts.project.as_deref(), opts.lens, opts.preset.as_deref())?;
     if source.lens == vs_gyroflow::LensMode::Only { return Ok(Outcome::Skipped("no motion data to stabilize with".into())); }
     let key = opts.project.as_ref().map_or(file.to_string(), |p| p.to_string_lossy().to_string());
     let fps = info.fps.0 as f64 / info.fps.1.max(1) as f64;
@@ -846,8 +878,10 @@ fn plugin_file(plugin: &str, name: &str) -> PathBuf {
 }
 
 // `project`: the one given (--project), else the video's own, as the workspace plugin finds it
-fn find_source(path: &Path, project: Option<&Path>, lens: vs_gyroflow::LensMode) -> Result<Source, String> {
+// `preset`: the one the settings name (the player's), else the plugin's own
+fn find_source(path: &Path, project: Option<&Path>, lens: vs_gyroflow::LensMode, preset: Option<&Path>) -> Result<Source, String> {
     let s = path.to_string_lossy().to_string();
+    let default_preset = || preset.map(Path::to_path_buf).filter(|p| p.is_file()).unwrap_or_else(|| plugin_file("gyroflow", "default.gyroflow"));
     if let Some(p) = project {
         return Ok(Source { project: p.to_string_lossy().to_string(), preset: None, label: "project", lens });
     }
@@ -870,14 +904,14 @@ fn find_source(path: &Path, project: Option<&Path>, lens: vs_gyroflow::LensMode)
     let info = match probe::probe(&s) {
         Ok(info) => info,
         Err(_) if measured => {
-            let preset = plugin_file("gyroflow", "default.gyroflow");
+            let preset = default_preset();
             return Ok(Source { project: s.clone(), preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "motion measured from the picture", lens });
         }
         Err(e) => return lens_alone(e),
     };
     match info["mode"].as_str() {
         Some("default") => {
-            let preset = plugin_file("gyroflow", "default.gyroflow");
+            let preset = default_preset();
             Ok(Source { project: s.clone(), preset: preset.is_file().then(|| preset.to_string_lossy().to_string()), label: "default preset", lens })
         }
         _ => lens_alone("no project or motion data".into()),
@@ -1185,6 +1219,108 @@ fn still_from_picture(file: &str, opts: &Options, picture: &Path) -> Result<Outc
     if out_path.exists() { copy_finder_attributes(&out_path, &tmp_path); }
     std::fs::rename(&tmp_path, &out_path).map_err(|e| e.to_string())?;
     Ok(Outcome::Done(out_path))
+}
+
+// --settings: the JSON itself ({...}), - for stdin, else a file holding it
+fn read_settings(v: &str) -> Result<serde_json::Value, String> {
+    let text = if v.trim_start().starts_with('{') || v.trim() == "[]" { v.to_string() }
+        else if v == "-" { let mut t = String::new(); std::io::stdin().read_to_string(&mut t).map_err(|e| e.to_string())?; t }
+        else { std::fs::read_to_string(v).map_err(|e| format!("{v}: {e}"))? };
+    let j: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("not JSON, {e}"))?;
+    // (mpv's format_json writes an empty table as [])
+    if j.as_array().is_some_and(|a| a.is_empty()) { return Ok(serde_json::json!({})); }
+    if !j.is_object() { return Err("not a JSON object".into()); }
+    Ok(j)
+}
+
+/// The settings JSON (docs/reference/contracts.md, "The settings"; its keys: registry.json's settings_json) into the
+/// options, as the flags it stands for would set them: the player's settings for the clip as it plays, or for a
+/// saved view, sent as they are. Flags after --settings change what it set. A key the registry says gyroflow-export
+/// reads and this doesn't is an error (the tests send every one); the others' (the table's, the request's) are left
+fn apply_settings(opts: &mut Options, j: &serde_json::Value) -> Result<(), String> {
+    use vs_gyroflow::LensMode;
+    let obj = j.as_object().ok_or("not a JSON object")?;
+    let reg = vs_gyroflow::lists::get();
+    let (mut denoise_on, mut amount, mut radius) = (None, None, None);
+    for (k, v) in obj {
+        if v.is_null() { continue; }
+        let text = || v.as_str().ok_or_else(|| format!("{k}: a string"));
+        let num = || v.as_f64().or_else(|| v.as_str().and_then(|s| s.trim().parse().ok())).ok_or_else(|| format!("{k}: a number"));
+        let flag = || v.as_bool().or_else(|| v.as_i64().map(|i| i != 0)).ok_or_else(|| format!("{k}: true or false"));
+        match k.as_str() {
+            // The video itself when it plays without one: the export finds the clip's own project then
+            "project" => { let p = text()?; if vs_gyroflow::is_project_file(p) { opts.project = Some(PathBuf::from(p)); } }
+            "preset" => { let p = PathBuf::from(text()?); if p.is_file() { opts.preset = Some(p); } }
+            "fov" => { let f = num()?; if f > 0.0 { opts.fov = Fov::Set(f.clamp(0.1, 4.0)); } }
+            "level" => opts.level = Level::parse(text()?).ok_or_else(|| format!("level {v}"))?,
+            "wide" => if flag()? && !matches!(opts.fov, Fov::Set(_)) { opts.fov = Fov::Wide },
+            "horizon_lock" => opts.horizon_lock = Some(num()?.clamp(0.0, 100.0)),
+            "underwater" => opts.underwater = Underwater::parse(text()?).ok_or_else(|| format!("underwater {v}"))?,
+            "rotation" => opts.frame.rotation = vs_gyroflow::Frame::parse_rotation(num()? as i64).ok_or_else(|| format!("rotation {v}"))?,
+            "aspect" => opts.frame.aspect = vs_gyroflow::Frame::parse_aspect(text()?).ok_or_else(|| format!("aspect {v}"))?,
+            "projection" => opts.frame.projection = Some(match v.as_str() {
+                Some(name) => vs_gyroflow::Frame::parse_projection(name),
+                None => v.as_i64().filter(|n| (0..=4).contains(n)).map(|n| n as i32),
+            }.ok_or_else(|| format!("projection {v}"))?),
+            "lens" => match text()? {
+                "off" => opts.no_stabilize = true,
+                l => { opts.lens = LensMode::parse(l).ok_or_else(|| format!("lens {v}"))?; opts.no_stabilize = false; }
+            },
+            // The GPU warp's, as gyroflow-gpu-table names them (bicubic: its bicubic9)
+            "interpolation" => opts.gpu_interp = Some(match text()? {
+                "bilinear" => 0, "bspline" => 1, "lanczos" | "lanczos4" => 3, "ewa" => 4, "bicubic" | "bicubic9" => 5,
+                i => return Err(format!("interpolation {i}")),
+            }),
+            "engine_interpolation" => opts.interpolation = match text()? {
+                "bilinear" => Interpolation::Bilinear, "bicubic" => Interpolation::Bicubic, "lanczos" => Interpolation::Lanczos4,
+                i => return Err(format!("engine_interpolation {i}")),
+            },
+            "edges" => opts.edges = EdgeMode::parse(text()?).ok_or_else(|| format!("edges {v}"))?,
+            "edges_blur" => opts.edge_settings.blur = (num()? as f32 / 100.0).clamp(0.0, 0.2),
+            "chromatic" => opts.chromatic = flag()?,
+            "denoise" => denoise_on = Some(flag()?),
+            "temporal_denoise" => amount = Some(text()?.to_string()),
+            "denoise_strong" => opts.denoise_strong = flag()?,
+            "denoise_grain" => opts.photo_grain = num()?.clamp(0.0, 1.0) as f32,
+            "still_radius" => radius = Some((num()?.max(0.0) as usize).min(vs_gyroflow::still::MAX_RADIUS)),
+            "translation" => opts.translation_kept = flag()?,
+            "curve" => opts.curve = Some(match text()? {
+                "none" => None,
+                c => Some(vs_gyroflow::lists::curve(c).map(|x| x.id.as_str()).ok_or_else(|| format!("curve {c}"))?),
+            }),
+            "uw" => opts.uw = flag()?,
+            "uw_strength" => opts.uw_settings.strength = num()?.clamp(0.0, 1.0),
+            "uw_highlights" => opts.uw_settings.highlights = flag()?,
+            "uw_params" => {
+                let n: Vec<f64> = v.as_array().ok_or("uw_params: [dr, db, k, ev]")?.iter().filter_map(|x| x.as_f64()).filter(|x| x.is_finite()).collect();
+                if n.len() != 4 { return Err("uw_params: [dr, db, k, ev]".into()); }
+                opts.uw_params = Some(vs_gyroflow::uwcolor::Estimate { dr: n[0], db: n[1], k: n[2], ev: n[3], f: 1.0 });
+            }
+            "sdr" => match text()? { "maker" => { opts.sdr = true; opts.nbcu = false; } "nbcu" => { opts.nbcu = true; opts.sdr = false; } x => return Err(format!("sdr {x}")) },
+            "sdr_image" => opts.sdr_image = Some(match text()? { x @ ("maker" | "nbcu" | "macos") => x.to_string(), x => return Err(format!("sdr_image {x}")) }),
+            "dv_rpu" => opts.dv_rpu = Some(PathBuf::from(text()?)),
+            "dv_live_l1" => opts.dv_live_l1 = flag()?,
+            "resolution" => { let r = v.as_str().map(str::to_string).unwrap_or_else(|| v.to_string()); opts.resolution = parse_resolution(&r).ok_or_else(|| format!("resolution {r}"))?; }
+            "encode" => opts.encode_quality = match text()? { "fast" => false, "quality" => true, e => return Err(format!("encode {e}")) },
+            "sphere_width" => { let w = num()?.max(0.0) as usize; opts.sphere.0 = if w == 0 { 0 } else { w.clamp(1024, 16384) / 4 * 4 }; }
+            "stitching_distance" => opts.sphere.1 = num()?.max(0.0),
+            "heading" => opts.sphere.2 = Some(vs_gyroflow::export360::parse_heading(text()?).ok_or_else(|| format!("heading {v}"))?),
+            _ => if reg.json_key(k).is_some_and(|x| x.export) { return Err(format!("{k}: registry.json says gyroflow-export reads it, apply_settings doesn't")); },
+        }
+    }
+    // The temporal denoise: on for the clip, and how much (none, light: 3 frames each side, full: 5)
+    if denoise_on.is_some() || amount.is_some() {
+        let on = denoise_on.unwrap_or(true);
+        opts.denoise = match amount.as_deref().unwrap_or("full") {
+            _ if !on => 0,
+            "off" => 0, "light" => 3, "full" => 5,
+            a => return Err(format!("temporal_denoise {a}")),
+        };
+    }
+    // A photo cleaned up from its neighbours where the clip has the denoise on (#319: the settings', a recipe's too, not
+    // this computer's), as many as asked
+    opts.photo_radius = radius.unwrap_or(if opts.denoise == 0 && (denoise_on.is_some() || amount.is_some()) { 0 } else { opts.photo_radius });
+    Ok(())
 }
 
 // NBCUniversal's HLG -> SDR conversion (Type III), in the dlogm plugin's luts/
@@ -1531,7 +1667,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = clip_curve(opts, &path);
     // Nothing to stabilize with, or --no-stabilize: the color conversion alone, if there's one
-    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref(), opts.lens) };
+    let source = if opts.no_stabilize { Err("stabilization off".to_string()) } else { find_source(&path, opts.project.as_deref(), opts.lens, opts.preset.as_deref()) };
     let source = match (source, curve) {
         (Ok(s), _) => Some(s),
         (Err(_), Some(_)) => None,
@@ -2408,10 +2544,11 @@ fn warp_shader(engine: &Engine, opts: &Options, key: &str, view: u8, camera: vs_
     let mut o = gpu_table::Options::player(interp, wet, edge_fill, sphere, denoise > 0, first_frame as f64 / fps);
     o.mode = gpu_table::Mode::Grid;
     let table = Table::build(&clip, &o)?;
+    let kept = || vs_gyroflow::translation::cached(key).filter(|v| v.len() == clip.frame_count);
     let trans = if opts.with_translation {
-        Some(vs_gyroflow::translation::cached(key).filter(|v| v.len() == clip.frame_count)
-            .ok_or("--with-translation: no translation compensation computed for this clip (gyroflow-export --translation)")?)
-    } else { None };
+        Some(kept().ok_or("--with-translation: no translation compensation computed for this clip (gyroflow-export --translation)")?)
+    } else if opts.translation_kept { kept() } else { None };
+    if trans.is_some() { eprintln!("  with the sideways jerks taken out (Ctrl+j)"); }
     let mut text = gpu_table::shader_with(&clip, &o, &table, trans.as_deref());
     if denoise > 0 {
         // What the player sets for its clean frame (glsl-shader-opts), here the parameters' defaults
@@ -3029,7 +3166,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
     let lap = |what: &str| if std::env::var_os("AFP_TIMES").is_some() { eprintln!("  [{:6.2} s] {what}", clock.elapsed().as_secs_f64()) };
     let path = vs_gyroflow::canonicalize(file).map_err(|e| e.to_string())?;
     let curve = clip_curve(opts, &path);
-    let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref(), opts.lens).ok() };
+    let source = if opts.no_stabilize { None } else { find_source(&path, opts.project.as_deref(), opts.lens, opts.preset.as_deref()).ok() };
     let info = ffprobe(&path)?;
     if info.transfer.as_deref() == Some("smpte2084") && curve.is_none() {
         return Err("PQ video: no photo of it yet (HLG, log and SDR video only)".into());
@@ -3429,6 +3566,96 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
 mod tests {
     use super::*;
 
+    // What the options say about the picture (the job's own left out), to compare two ways of setting them. A
+    // video's leaves out the photo's radius; the denoise's Stronger counts only with a denoise
+    fn summary(o: &Options, photo: bool) -> String {
+        format!("curve {:?} uw {} {} {} {:?} sdr {} nbcu {} off {} lens {:?} horizon {:?} water {:?} fov {:?} level {:?} frame {:?} edges {:?} blur {} \
+                 denoise {} strong {} chromatic {} interp {:?} gpu_interp {:?} translation {} {} preset {:?} project {:?} res {:?} quality {} \
+                 dv {:?} {} sdr_image {:?} grain {} sphere {:?} radius {}",
+                o.curve, o.uw, o.uw_settings.strength, o.uw_settings.highlights, o.uw_params, o.sdr, o.nbcu, o.no_stabilize, o.lens, o.horizon_lock,
+                o.underwater, o.fov, o.level, o.frame, o.edges, o.edge_settings.blur, o.denoise, o.denoise_strong && o.denoise > 0, o.chromatic,
+                o.interpolation as i32, o.gpu_interp, o.with_translation, o.translation_kept, o.preset, o.project, o.resolution, o.encode_quality,
+                o.dv_rpu, o.dv_live_l1, o.sdr_image, o.photo_grain, o.sphere, if photo { o.photo_radius as i64 } else { -1 })
+    }
+
+    fn with_settings(j: serde_json::Value) -> Options {
+        let mut o = default_options();
+        apply_settings(&mut o, &j).unwrap_or_else(|e| panic!("{j}: {e}"));
+        o
+    }
+
+    fn repo(file: &str) -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join(file) }
+
+    // tests/settings_cases.json: a saved view's settings set the options its flags did (the player's view_args before)
+    #[test]
+    fn settings_set_what_their_flags_did() {
+        let cases: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(repo("tests/settings_cases.json")).unwrap()).unwrap();
+        let cases = cases["cases"].as_array().unwrap();
+        assert!(cases.len() >= 10);
+        for c in cases {
+            let name = c["name"].as_str().unwrap();
+            let photo = c["kind"] == "photo";
+            let flags: Vec<String> = c["flags"].as_array().unwrap().iter().map(|f| f.as_str().unwrap().to_string()).collect();
+            let (by_flags, _) = parse_args(flags.into_iter());
+            assert_eq!(summary(&with_settings(c["settings"].clone()), photo), summary(&by_flags, photo), "{name}");
+        }
+    }
+
+    // Every key registry.json says gyroflow-export reads is read (an unread one is an error), and its example changes
+    // the options; the table's and the request's keys are left alone
+    #[test]
+    fn every_key_the_export_takes_is_read() {
+        let dir = std::env::temp_dir().join(format!("afp-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let preset = dir.join("default.gyroflow");
+        std::fs::write(&preset, "{}").unwrap();
+        let raw = |o: &Options| format!("{} {}", summary(o, true), o.denoise_strong);
+        let none = raw(&default_options());
+        let reg = vs_gyroflow::lists::get();
+        assert!(reg.settings_json.len() > 30);
+        for k in &reg.settings_json {
+            let mut v = k.example.clone().unwrap();
+            if k.key == "preset" { v = serde_json::json!(preset.to_string_lossy()); }
+            let mut o = default_options();
+            let r = apply_settings(&mut o, &serde_json::json!({ k.key.as_str(): v }));
+            if k.export {
+                r.unwrap_or_else(|e| panic!("{}: {e}", k.key));
+                assert_ne!(raw(&o), none, "{}: its example {v} changes nothing", k.key);
+            } else {
+                assert!(r.is_ok() && raw(&o) == none, "{}: not gyroflow-export's, yet it read it", k.key);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+        // A key it doesn't know is left (the table's, another program's); a wrong value for one it reads isn't
+        assert!(apply_settings(&mut default_options(), &serde_json::json!({ "a_key_of_the_future": 1 })).is_ok());
+        assert!(apply_settings(&mut default_options(), &serde_json::json!({ "level": "extreme" })).is_err());
+    }
+
+    // #313: Ctrl+j's translation in the settings is taken where it's computed; #314: the grain; #320: the sphere's width,
+    // its stitching distance and heading reach a 360 export; #319: a photo's clean-up follows the settings' denoise
+    #[test]
+    fn settings_the_flags_left_out() {
+        assert!(with_settings(serde_json::json!({ "translation": true })).translation_kept, "#313");
+        assert_eq!(with_settings(serde_json::json!({ "denoise_grain": 0.6 })).photo_grain, 0.6, "#314");
+        let (o, files) = parse_args(["--settings", r#"{"sphere_width": 4096, "stitching_distance": 3.5, "heading": "north"}"#, "--360", "a.insv"].map(String::from).into_iter());
+        let m = o.sphere360.as_ref().unwrap();
+        assert_eq!((m.sphere_width, m.distance, m.heading), (4096, 3.5, Some(vs_gyroflow::stamp::Heading::North)), "#320");
+        assert_eq!(files, ["a.insv"]);
+        // The command line's own width wins
+        let (o, _) = parse_args(["--settings", r#"{"sphere_width": 4096}"#, "--sphere-width", "2048", "--360", "a.insv"].map(String::from).into_iter());
+        assert_eq!(o.sphere360.unwrap().sphere_width, 2048);
+        // #319: the settings' denoise decides, whatever this computer plays
+        assert_eq!(with_settings(serde_json::json!({ "denoise": true, "temporal_denoise": "light" })).photo_radius, 5);
+        assert_eq!(with_settings(serde_json::json!({ "denoise": true, "temporal_denoise": "off" })).photo_radius, 0);
+        assert_eq!(with_settings(serde_json::json!({ "denoise": false, "still_radius": 7 })).photo_radius, 7);
+        // The player's request as-is: the video itself as the project is no project; a .gyroflow is
+        assert!(with_settings(serde_json::json!({ "project": "/clips/GX010001.MP4" })).project.is_none());
+        assert!(with_settings(serde_json::json!({ "project": "/clips/GX010001.gyroflow" })).project.is_some());
+        // Flags after --settings change what it set
+        let (o, _) = parse_args(["--settings", r#"{"level": "weak", "edges": "smooth"}"#, "--level", "strong", "v.mp4"].map(String::from).into_iter());
+        assert_eq!((o.level, o.edges), (Level::Strong, EdgeMode::Smooth));
+    }
+
     // GOPR1585: a clip with no motion data of its own and its motion measured from the picture beside it is exported
     // stabilized with that, not with the lens alone
     #[test]
@@ -3439,12 +3666,12 @@ mod tests {
         let video = dir.join("GOPR0001.MP4");
         std::fs::write(&video, vec![0u8; 4321]).unwrap();
         // Nothing to stabilize it with, no lens: not exported
-        assert!(find_source(&video, None, vs_gyroflow::LensMode::Stabilized).is_err());
+        assert!(find_source(&video, None, vs_gyroflow::LensMode::Stabilized, None).is_err());
         let header = vs_gyroflow::afp_motion::Header { clip: vs_gyroflow::afp_motion::ClipId::of(&video).unwrap(), ..Default::default() };
         let correction = gyroflow_core::gyro_source::OpticalCorrection { enabled: true, frames: 2, measured_frames: 1,
             video_base: vec![(0, [1.0, 0.0, 0.0, 0.0]), (33_366, [1.0, 0.0, 0.0, 0.0])], ..Default::default() };
         vs_gyroflow::afp_motion::MotionFile::new(header, correction).unwrap().write(&vs_gyroflow::afp_motion::path_for(&video)).unwrap();
-        let source = find_source(&video, None, vs_gyroflow::LensMode::Stabilized).expect("stabilized with its measured motion");
+        let source = find_source(&video, None, vs_gyroflow::LensMode::Stabilized, None).expect("stabilized with its measured motion");
         assert_eq!(source.label, "motion measured from the picture");
         assert!(source.lens != vs_gyroflow::LensMode::Only);
         let _ = std::fs::remove_dir_all(&dir);
@@ -3553,7 +3780,7 @@ fn measure_hold(file: &str, opts: &Options, rec: &vs_gyroflow::reframe::Recordin
     let angles = rec.tidied();
     let t0 = Instant::now();
     // A small sphere is enough for a 480-pixel view
-    let render = Render360::new(&video, depth, !info.full_range, Output::Flat { size: HOLD_SIZE, head: HeadPath::Recording(angles.clone()) }, Some(rec.follows), 2048)?;
+    let render = Render360::new(&video, depth, !info.full_range, Output::Flat { size: HOLD_SIZE, head: HeadPath::Recording(angles.clone()) }, Some(rec.follows), 2048, opts.sphere.1)?;
     let fps = info.fps.0 as f64 / info.fps.1 as f64;
     let (from, to) = angles.span();
     let to = (to + 0.5 / fps).min(info.duration.max(from));
@@ -3724,7 +3951,7 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
         (Some(Head360::Recording), None) => unreachable!(),
     };
     let t0 = Instant::now();
-    let render = Render360::new(&video, depth, !info.full_range, out, heading, mode.sphere_width)?;
+    let render = Render360::new(&video, depth, !info.full_range, out, heading, mode.sphere_width, mode.distance)?;
     if let Some(note) = &render.heading_note { eprintln!("{}: {note}", file_name(file)); }
     eprintln!("{}: {} {}, {} lenses; {}, along {} ({:.1} s to load)", file_name(file), rig.brand, rig.model, rig.lenses.len(),
               if kind == "360" { "a 360 video" } else { "a reframe" }, heading_name(render.heading), t0.elapsed().as_secs_f64());

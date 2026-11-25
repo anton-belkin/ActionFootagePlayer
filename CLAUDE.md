@@ -55,8 +55,10 @@ Most regressions so far were a feature that worked in the live player but not on
 one *done*, *n/a because…*, or *not done → issue #N*:
 
 1. Player (`gpu_table.rs`, `warp.glsl`, `user_shader.rs`).
-2. Export (`gyroflow-export`), on both its GPU path and its pipes path (`lib.rs`'s engine). Check what `export.lua`
-   passes, from both the live state (`as_it_plays`) and the saved bundle.
+2. Export (`gyroflow-export`), on both its GPU path and its pipes path (`lib.rs`'s engine). It takes the player's
+   settings JSON as they are (`--settings`, keys in registry.json `settings_json`, read by `apply_settings`): the clip
+   playing's (`gpu_settings`) and a saved view's (`gyroflow/settings.lua` `of_view`). Never pass it a flag a key
+   stands for (`tests/settings_json_test.py`).
 3. Photo, Live Photo and Motion Photo (`still.rs`, `photo`).
 4. Moment, and the Save frame view.
 5. Library: the render recipe and its hash (`library/src/renders.rs`, `BUNDLE_KEYS`/`valid`/`defaults_of`), Source

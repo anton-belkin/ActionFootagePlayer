@@ -5,15 +5,13 @@
 -- that part. Playback goes on while it runs; the progress shows in a corner, the result on screen and
 -- as a notification. Shift+E again on a video being exported, twice, cancels it.
 --
--- As it plays: with the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't
--- log (--curve; without the dlogm plugin gyroflow-export reads the curve from the metadata as it does), in its
--- look (Ctrl+s): HDR, SDR by the maker's LUT (--sdr, DJI's) or by NBCU's conversion (--nbcu), HDR + Dolby Vision with the RPU
--- the look plays (--dv-rpu, with each frame's L1 as the player measures it, --dv-live-l1: Apple's devices then show the
--- export as the player does), not stabilized when Ctrl+g turned it off (--no-stabilize: the color
--- only; --lens-only with the lens corrected; --lens-recorded stabilized with the lens as recorded), at Ctrl+k's level (--level), in Ctrl+g's wider view (--wide) with Ctrl+b's edge fill (--edges,
--- --edges-blur), with the horizon locked or not when the gyroflow plugin's menu says so (--horizon-lock), and the lens
--- under water, above it, as the camera says or as the project says, as the menu has it (--underwater), with the
--- Gyroflow project it plays with (--project). A log clip with nothing to stabilize it with gyroflow-export converts
+-- As it plays: gyroflow-export takes the clip's settings as the player plays them (--settings: the gyroflow plugin's
+-- user-data/gyroflow/settings, the JSON its warp is made from: docs/reference/contracts.md, "The settings") with the
+-- dlogm plugin's log curve and look over them (Ctrl+l, Ctrl+s: HDR, SDR by the maker's LUT or by NBCU's conversion, HDR
+-- + Dolby Vision with the RPU the look plays and each frame's L1 as the player measures it), Ctrl+j's sideways jerks
+-- where they're computed, and the export's own settings (exportsettings.lua). Another clip (a moment's preview, the
+-- Library's batch, a photo of a mark) the same way from its saved view (settings.lua of_view). A log clip with
+-- nothing to stabilize it with gyroflow-export converts
 -- in color only by itself. Script messages, for the right-click menu:
 --   export [hdr|sdr|youtube|360|flat]  the same as Shift+E (hdr, or nothing), or in SDR whatever plays: the SDR look
 --                        it plays in, else the one the dlogm plugin would choose (its sdr_look); for YouTube: HDR10 in
@@ -266,159 +264,91 @@ local function settings(kind)
     return es.normalize(type(all) == "table" and all[kind] or nil, kind)
 end
 
--- The output's lens (the gyroflow plugin's projection), as gyroflow-export names it; linear is its default
-local PROJECTIONS = { stereographic = true, equidistant = true, equisolid = true, orthographic = true }
+-- The settings JSON gyroflow-export takes (--settings: docs/reference/contracts.md, "The settings"), one object for every
+-- route: the clip as it plays, or a saved view (settings.lua of_view). Nothing here passes a flag the settings carry
+-- (tests/settings_json_test.py)
+local S = require 'settings'
 
--- The color and stabilization as they play, into args. `sdr`: in SDR whatever plays; `photo`: the photo's image is
--- what an SDR screen shows of the look (--sdr-image), its gain map leads to the HLG, and its motion (`live`) is the
--- video as Shift+E exports it (--sdr, --nbcu, --dv-rpu):
+-- This computer's, for what a saved view doesn't say: the edge fill, how much temporal denoise, the grain it keeps; the
+-- session's clean-up, else the app's defaults
+local function here()
+    local g = function(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
+    local live = type(g("settings")) == "table" and g("settings") or {}
+    return { edges = g("edges"), edges_blur = g("edges_blur"), temporal_denoise = g("temporal_denoise") or "full",
+             denoise_grain = live.denoise_grain, session = g("session") or {}, defaults = g("defaults") or {} }
+end
+
+-- The look and the colour as they play (the dlogm plugin's), over the clip's settings. `sdr`: in SDR whatever plays;
+-- `photo`: the photo's image is what an SDR screen shows of the look (sdr_image), its gain map leads to the HLG, and its
+-- motion (`live`) is the video as Shift+E exports it (sdr, dv_rpu):
 --   maker                     the maker's LUT
 --   hdr                       the HLG as macOS tones it down for an SDR screen (elsewhere NBCU's)
 --   nbcu, tonemap, dv, dvsdr  NBCU's conversion: Dolby Vision's own SDR, as macOS draws it, only exists on screen
 --                             (AVFoundation's decoders ignore the RPU), and the RPU's trims are fitted to NBCU's; mpv's
 --                             tone mapping isn't in gyroflow-export
--- The clip's clean-up, as it plays, into args: the temporal denoise (Ctrl+p, the clip's transform; as much of it as
--- this computer does, Performance & Quality's temporal_denoise: light or full, off none) with its Stronger, and the
--- water's color fringes (Ctrl+a) taken out or left as recorded (whatever chromatic_skip leaves out on this screen).
--- Every export carries them: the video, a moment, a batch's, a Live Photo's motion (gyroflow-export runs the player's
--- own shaders for them). A clip whose saved view doesn't say: as the session has it, else the app's defaults
-local function cleanup_args(args, denoise, strong, chromatic, amount)
-    local session = mp.get_property_native("user-data/gyroflow/session") or {}
-    local defaults = mp.get_property_native("user-data/gyroflow/defaults") or {}
-    local function pick(v, k)
-        if type(v) == "boolean" then return v end
-        if type(session[k]) == "boolean" then return session[k] end
-        return defaults[k] == true
-    end
-    -- `amount`: the Library's recipe's (a share), else this computer's
-    amount = amount or mp.get_property_native("user-data/gyroflow/temporal_denoise") or "full"
-    if pick(denoise, "denoise") and (amount == "full" or amount == "light") then
-        table.insert(args, "--denoise"); table.insert(args, amount)
-        if pick(strong, "denoise_strong") then table.insert(args, "--denoise-strong") end
-    end
-    if type(chromatic) ~= "boolean" then chromatic = type(session.chromatic) == "boolean" and session.chromatic or defaults.chromatic ~= false end
-    table.insert(args, "--chromatic"); table.insert(args, chromatic and "yes" or "no")
-end
-
-local function as_it_plays(args, sdr, photo, live, s)
+local function as_it_looks(st, how)
     local look, curve = mp.get_property_native("user-data/dlogm/look"), mp.get_property_native("user-data/dlogm/curve")
-    if look == "off" or curve == "" then
-        table.insert(args, "--curve"); table.insert(args, "none")
-    elseif curve then
-        table.insert(args, "--curve"); table.insert(args, curve)
-    end
+    -- With the dlogm plugin's log curve, Ctrl+l's included, or none when log is off (L) or the clip isn't log; without
+    -- the plugin gyroflow-export reads the curve from the metadata as it does
+    if look == "off" or curve == "" then st.curve = "none" elseif curve then st.curve = curve end
     -- The underwater colour (curve uw, the dlogm plugin's uwcolor.lua): its strength and highlights; for a photo (and
     -- its motion) the numbers its shader has now, the frame as it shows, else gyroflow-export measures them as it plays
     if curve == "uw" and look ~= "off" then
         local u = mp.get_property_native("user-data/uwcolor") or {}
-        table.insert(args, "--uw-strength"); table.insert(args, string.format("%.2f", tonumber(u.uw_strength) or 1))
-        table.insert(args, "--uw-highlights"); table.insert(args, u.uw_highlights == true and "yes" or "no")
-        local o = photo and mp.get_property_native("glsl-shader-opts") or {}
+        st.uw_strength = math.floor((tonumber(u.uw_strength) or 1) * 100 + 0.5) / 100
+        st.uw_highlights = u.uw_highlights == true
+        local o = how.photo and mp.get_property_native("glsl-shader-opts") or {}
         local n = { tonumber(o.uw_dr), tonumber(o.uw_db), tonumber(o.uw_k), tonumber(o.uw_ev) }
-        if #n == 4 then
-            table.insert(args, "--uw-params"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.4f", n[1], n[2], n[3], n[4]))
-        end
+        if #n == 4 then st.uw_params = n end
     end
-    local sdr_look = sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
-    if photo then
-        local image = look == "maker" and "maker" or (look == "hdr" and platform.macos) and "macos" or "nbcu"
-        table.insert(args, "--sdr-image"); table.insert(args, image)
-    end
-    local video = not photo or live
-    if video and sdr_look == "maker" then table.insert(args, "--sdr") end
-    if video and sdr_look == "nbcu" then table.insert(args, "--nbcu") end
+    local sdr_look = how.sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
+    if how.photo then st.sdr_image = look == "maker" and "maker" or (look == "hdr" and platform.macos) and "macos" or "nbcu" end
+    local video = not how.photo or how.live
+    if video and (sdr_look == "maker" or sdr_look == "nbcu") then st.sdr = sdr_look end
     -- The dv look: the RPU file the player attaches, on every frame of the export too, with each frame's own L1 when
-    -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way)
+    -- the player measures it (--macos-dovi-live-l1: the export measures its frames the same way). A file's own Dolby
+    -- Vision isn't carried: its RPU is for the frames as they were, not as they're made here
     local rpu = mp.get_property("macos-dovi-rpu-file") or ""
-    -- (a file's own Dolby Vision isn't carried: its RPU is for the frames as they were, not as they're made here)
     local own = mp.get_property_native("user-data/dlogm/dv_own") == true
-    if not sdr and video and (look == "dv" or look == "dvsdr") and not own and rpu ~= "" then
-        table.insert(args, "--dv-rpu"); table.insert(args, rpu)
-        if mp.get_property_native("macos-dovi-live-l1") == true then table.insert(args, "--dv-live-l1") end
+    if not how.sdr and video and (look == "dv" or look == "dvsdr") and not own and rpu ~= "" then
+        st.dv_rpu = rpu
+        if mp.get_property_native("macos-dovi-live-l1") == true then st.dv_live_l1 = true end
     end
-    local function gyroflow(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
-    -- What the filter does: stabilized (the lens corrected or as recorded), the lens alone, or nothing
-    local filter = gyroflow("filter") or ""
-    local view = gyroflow("view")
-    if filter == "" then table.insert(args, "--no-stabilize")
-    elseif filter == "only" then table.insert(args, "--lens-only")
-    elseif filter == "recorded" then table.insert(args, "--lens-recorded") end
-    -- The project it plays with, wherever the workspace plugin found it
-    local project = gyroflow("project")
-    if filter ~= "" and project and project ~= "" then table.insert(args, "--project"); table.insert(args, project) end
-    if view == "wide" and (filter == "stabilized" or filter == "recorded") then table.insert(args, "--wide") end
-    if gyroflow("level") then table.insert(args, "--level"); table.insert(args, gyroflow("level")) end
-    if gyroflow("edges") then
-        table.insert(args, "--edges"); table.insert(args, gyroflow("edges"))
-        if gyroflow("edges_blur") then table.insert(args, "--edges-blur"); table.insert(args, string.format("%g", gyroflow("edges_blur"))) end
-    end
-    local horizon = mp.get_property_native("user-data/gyroflow/horizon_lock")
-    if horizon == "yes" or horizon == "no" then
-        table.insert(args, "--horizon-lock"); table.insert(args, horizon == "yes" and "100" or "0")
-    end
-    if gyroflow("underwater") then table.insert(args, "--underwater"); table.insert(args, gyroflow("underwater")) end
-    -- The output's frame: turned, and of another aspect (the Clip tab's), stabilized or not
-    -- The frame's W:H as it shows (its ratio turned for its orientation and the source's shape)
-    local rotation, aspect = gyroflow("rotation"), gyroflow("frame_aspect")
-    if rotation and rotation ~= 0 then table.insert(args, "--rotation"); table.insert(args, tostring(rotation)) end
-    if aspect and aspect ~= "original" then table.insert(args, "--aspect"); table.insert(args, aspect) end
-    local projection = gyroflow("projection")
-    if PROJECTIONS[projection] and (filter == "stabilized" or filter == "only") then table.insert(args, "--projection"); table.insert(args, projection) end
-    cleanup_args(args, gyroflow("denoise"), gyroflow("denoise_strong"), gyroflow("chromatic"), es.amount(s, nil))
 end
 
--- A clip's saved view (the workspace plugin's: curve, view, level, horizon_lock, underwater, aspect, rotation) into
--- args, for a clip that isn't the one playing (the Project tab's moments and photos of marks): what isn't saved is
--- gyroflow-export's own default (the curve from the clip's metadata, the preset's), the edge fill as it's set here
-local function view_args(args, v, s)
-    local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
-    if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
-    -- The underwater colour, as the source's input has it (a moment: its original's): gyroflow-export gives it to a plain SDR clip
-    -- (neither log nor HDR) as the dlogm plugin does; measured there as it plays
-    if v.uw == true then
-        add("--uw-color", "yes")
-        if type(v.uw_strength) == "number" then add("--uw-strength", string.format("%.2f", v.uw_strength)) end
-        add("--uw-highlights", v.uw_highlights == true and "yes" or "no")
-    end
-    -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
-    -- it (a bundle from before the lens was a key: off was as recorded)
-    local lens = v.lens or (v.view == "off" and "as-recorded" or "corrected")
-    if v.view == "off" then add(lens == "corrected" and "--lens-only" or "--no-stabilize")
+-- The one function every route makes its settings with: `view` nil, the clip as it plays (the gyroflow plugin's own
+-- settings, user-data/gyroflow/settings: what the warp plays with, the clean-up, Ctrl+j; with the look and colour as
+-- they play); else a saved view (another clip's, a moment's, a Library recipe's: settings.lua of_view, this computer's
+-- for what it doesn't say). how: { sdr (a saved view: NBCU's SDR), photo, live, kind (video, photo), export (the
+-- export's settings: exportsettings apply), youtube (HDR, without the SDR and Dolby Vision choices) }
+local function export_settings(view, how)
+    how = how or {}
+    local st = {}
+    if view == nil then
+        local live = mp.get_property_native("user-data/gyroflow/settings")
+        for k, v in pairs(type(live) == "table" and live or { lens = "off" }) do st[k] = v end
+        as_it_looks(st, how)
     else
-        if v.view == "wide" then add("--wide") end
-        if lens == "as-recorded" then add("--lens-recorded") end
+        st = S.of_view(view, here())
+        if how.sdr then st.sdr = "nbcu" end
     end
-    if v.level then add("--level", v.level) end
-    -- The edge fill: the Library's recipe's (a share), else as it's set here
-    local edges = v.edges or mp.get_property_native("user-data/gyroflow/edges")
-    if edges then
-        add("--edges", edges)
-        local blur = v.edges_blur or mp.get_property_native("user-data/gyroflow/edges_blur")
-        if blur then add("--edges-blur", string.format("%g", blur)) end
-    end
-    if v.horizon_lock == "yes" or v.horizon_lock == "no" then add("--horizon-lock", v.horizon_lock == "yes" and "100" or "0") end
-    if v.underwater then add("--underwater", v.underwater) end
-    if v.rotation and v.rotation ~= 0 then add("--rotation", v.rotation) end
-    -- The frame's W:H for that source (the workspace plugin's frame_aspect: its ratio turned for its orientation);
-    -- an aspect from before, as it showed
-    local aspect = v.frame_aspect or (v.orientation == nil and v.aspect) or nil
-    if aspect and aspect ~= "original" then add("--aspect", aspect) end
-    if PROJECTIONS[v.projection] and lens == "corrected" then add("--projection", v.projection) end
-    cleanup_args(args, v.denoise, v.denoise_strong, v.chromatic, es.amount(s, v.temporal_denoise))
+    if how.youtube then st.sdr, st.dv_rpu, st.dv_live_l1 = nil, nil, nil end
+    if how.export then es.apply(st, how.export, how.kind or "video") end
+    return st
 end
 
--- For YouTube (gyroflow-export --youtube): what as_it_plays put in args, in HDR, without the SDR and Dolby Vision
--- choices (the export's own), and the SDR look of the LUT inside: the one an SDR export takes (the dlogm plugin's
--- sdr_look; the maker's is DJI's, D-Log M only), else gyroflow-export's own choice
-local function youtube_args(args)
-    for i = #args, 1, -1 do
-        local a = args[i]
-        if a == "--sdr" or a == "--nbcu" or a == "--dv-live-l1" then table.remove(args, i)
-        elseif a == "--dv-rpu" then table.remove(args, i + 1); table.remove(args, i) end
-    end
+-- The settings into gyroflow-export's arguments (as JSON: the log shows them, and the command runs again as it is)
+local function with_settings(args, st)
+    table.insert(args, "--settings")
+    table.insert(args, utils.format_json(st))
+    return args
+end
+
+-- For YouTube (gyroflow-export --youtube): the SDR look of the LUT inside: the one an SDR export takes (the dlogm
+-- plugin's sdr_look; the maker's is DJI's, D-Log M only), else gyroflow-export's own choice
+local function youtube_look()
     local d = mp.get_property_native("user-data/dlogm") or {}
-    local look = (d.sdr_look == "maker" and d.curve == "dlogm") and "maker" or d.sdr_look == "nbcu" and "nbcu" or "auto"
-    table.insert(args, "--youtube"); table.insert(args, look)
+    return (d.sdr_look == "maker" and d.curve == "dlogm") and "maker" or d.sdr_look == "nbcu" and "nbcu" or "auto"
 end
 
 local function installed(what)
@@ -439,11 +369,9 @@ local function start(path, how, named)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    -- The export's settings: its size, encoder and quality preset
-    local s = settings("video")
-    as_it_plays(args, how == "sdr", false, false, s)
-    if how == "youtube" then youtube_args(args) end
-    es.apply(args, s, "video")
+    -- As it plays, with the export's settings: its size, encoder and quality preset
+    with_settings(args, export_settings(nil, { sdr = how == "sdr", youtube = how == "youtube", export = settings("video"), kind = "video" }))
+    if how == "youtube" then table.insert(args, "--youtube"); table.insert(args, youtube_look()) end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     -- The workspace plugin's part, in the clip's time (a moment playing is a video of its own, from 0)
     if named and named.from and named.to then a, b = named.from, named.to end
@@ -500,12 +428,9 @@ end
 local function begin(path, how)
     local ws = mp.get_property_native("user-data/workspace")
     if type(ws) ~= "table" or not ws.clip or ws.path ~= mp.get_property("path") then return start(path, how) end
-    local args = {}
-    as_it_plays(args, how == "sdr", false, false)
-    local has = {}
-    for i, v in ipairs(args) do has[v] = true; if v == "--curve" and args[i + 1] == "none" then has.none = true end end
-    local label = has["--dv-rpu"] and " (Dolby Vision)" or (has["--sdr"] or has["--nbcu"]) and " (SDR)" or ""
-    local look = has["--dv-rpu"] and "dv" or has["--sdr"] and "maker" or has["--nbcu"] and "nbcu" or has.none and "recorded" or "hdr"
+    local st = export_settings(nil, { sdr = how == "sdr" })
+    local label = st.dv_rpu and " (Dolby Vision)" or st.sdr and " (SDR)" or ""
+    local look = st.dv_rpu and "dv" or st.sdr or st.curve == "none" and "recorded" or "hdr"
     if how == "youtube" then label, look = " (YouTube)", "youtube" end
     local g = mp.get_property_native("user-data/gyroflow") or {}
     mp.commandv("script-message-to", "workspace", "export-name", utils.format_json({
@@ -561,20 +486,18 @@ local function start_360(path, how)
     local args = { EXPORT, "--force", "--progress", progress }
     if control then table.insert(args, "--control"); table.insert(args, control) end
     if playing then table.insert(args, "--background") end
-    -- The look: the curve and the SDR choice of as_it_plays (the rest is the 360 view's own)
-    local look = {}
-    as_it_plays(look, false, false, false)
-    for i, a in ipairs(look) do
-        if a == "--curve" or a == "--uw-strength" or a == "--uw-highlights" then table.insert(args, a); table.insert(args, look[i + 1])
-        elseif a == "--sdr" or a == "--nbcu" then table.insert(args, a) end
-    end
+    -- The look as it plays (the curve, the underwater colour's, the SDR choice), the sphere as the player makes it (its
+    -- width, its stitching distance: gyroflow.conf's) and what straight ahead follows; the rest is the 360 view's own
+    local st, sphere = export_settings(nil, {}), {}
+    for _, k in ipairs({ "curve", "uw_strength", "uw_highlights", "sdr", "sphere_width", "stitching_distance" }) do sphere[k] = st[k] end
+    sphere.heading = how ~= "flat" and v.heading or nil
+    with_settings(args, sphere)
     if how == "flat" then
         local size = (FLAT_SIZES[r.frame] or FLAT_SIZES["16:9"])[r.size] or "1920x1080"
         table.insert(args, "--reframe"); table.insert(args, "recording")
         table.insert(args, "--size"); table.insert(args, size)
     else
         table.insert(args, "--360")
-        if v.heading then table.insert(args, "--heading"); table.insert(args, v.heading) end
     end
     local a, b = mp.get_property_number("ab-loop-a"), mp.get_property_number("ab-loop-b")
     local range = how == "flat" and " flat" or " 360°"
@@ -649,23 +572,18 @@ mp.register_script_message("preview", function(json)
         table.insert(args, "--picture"); table.insert(args, picture)
     else
         -- Another clip's (req.view: its saved view), or as this one plays. An error here is answered, not left in silence
+        -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays)
         local ok, err = xpcall(function()
-            if type(req.view) == "table" then view_args(args, req.view) else as_it_plays(args, true, false, false) end
+            local st = type(req.view) == "table" and export_settings(req.view) or export_settings(nil, { sdr = true })
+            if req.project ~= nil then st.project = type(req.project) == "string" and req.project or nil end
+            with_settings(args, st)
         end, debug.traceback)
         if not ok then
             mp.msg.error("preview: " .. tostring(err))
             return reply(false, tostring(err):match("^[^\n]*"))
         end
     end
-    -- A moment's own stabilization: its project, or none (false: the preset with the settings as it plays), its part
-    -- on its own (with a picture: it's in the picture already)
-    if picture then
-    elseif req.project ~= nil then
-        for i = #args - 1, 1, -1 do
-            if args[i] == "--project" then table.remove(args, i + 1); table.remove(args, i) end
-        end
-        if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
-    end
+    -- Its part on its own (with a picture: it's in the picture already)
     if picture then
     elseif req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
@@ -708,17 +626,15 @@ mp.register_script_message("export-batch", function(json)
     if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
     if control then table.insert(args, "--control"); table.insert(args, control) end
     -- The Library's export settings (Share's dialog), else the defaults
-    local s = es.normalize(req.export, "video")
-    view_args(args, type(req.view) == "table" and req.view or {}, s)
-    if req.sdr == true then table.insert(args, "--nbcu") end
-    if type(req.project) == "string" then table.insert(args, "--project"); table.insert(args, req.project) end
+    local st = export_settings(type(req.view) == "table" and req.view or {}, { sdr = req.sdr == true, export = es.normalize(req.export, "video"), kind = "video" })
+    if type(req.project) == "string" then st.project = req.project end
+    with_settings(args, st)
     if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
     local function add(k, v) if v ~= nil then table.insert(args, k); table.insert(args, tostring(v)) end end
     add("--from", req.from and string.format("%.3f", req.from))
     add("--to", req.to and string.format("%.3f", req.to))
     add("--output", req.output)
     add("--link", req.link)
-    es.apply(args, s, "video")
     table.insert(args, req.clip)
     mp.msg.info("export (batch): " .. table.concat(args, " "))
     local job = { control = control, progress = req.progress, state = {} }
@@ -898,7 +814,7 @@ local function photo_full()
     if mode == "motion" then table.insert(args, "--format"); table.insert(args, "jpeg") end
     -- The photo's settings: its size and quality preset (its motion's too)
     local s = settings("photo")
-    as_it_plays(args, false, true, live, s)
+    with_settings(args, export_settings(nil, { photo = true, live = live, export = s, kind = "photo" }))
     -- A moment stabilized on its own (by its part's motion alone, the gyroflow plugin's fixed()), as it plays: its
     -- part of the clip; one with a project of its own, the project's "only within the trim range" as it's viewed
     local moment = type(ws) == "table" and ws.path == mp.get_property("path")
@@ -907,8 +823,6 @@ local function photo_full()
     elseif moment and ws.alone ~= nil and (mp.get_property_native("user-data/gyroflow/project") or "") ~= "" then
         table.insert(args, ws.alone and "--alone" or "--whole")
     end
-    local still = mp.get_property_native("user-data/gyroflow/still")
-    if still == false then table.insert(args, "--radius"); table.insert(args, "0") end
     local c, f = save_frame()
     if c then table.insert(args, "--camera"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.5f", c.yaw, c.pitch, c.roll, c.zoom)) end
     if f then table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h)) end
@@ -919,7 +833,6 @@ local function photo_full()
     local frame_args, frame_file
     if s.quality ~= "highest" then frame_args, frame_file = gpu_frame() end
     for _, a in ipairs(frame_args or {}) do table.insert(args, a) end
-    es.apply(args, s, "photo")
     table.insert(args, path)
     photos = photos + 1
     local name = platform.file_name(path)
@@ -1004,7 +917,8 @@ mp.register_script_message("photo-at", function(json)
     local view = type(req.view) == "table" and req.view or {}
     -- Its settings: the Library's (Share's dialog), else this player's for photos
     local s = type(req.export) == "table" and es.normalize(req.export, "photo") or settings("photo")
-    view_args(args, view, s)
+    -- Cleaned up as that clip's view says (a recipe's denoise and its amount, #319), else as the session has it
+    with_settings(args, export_settings(view, { export = s, kind = "photo" }))
     -- A photo link's own frame (its crop in shares of the frame, its camera), and what its link is to carry
     local c, f = req.camera, req.crop
     if type(c) == "table" and c.yaw and c.pitch and c.roll and c.zoom then
@@ -1014,16 +928,9 @@ mp.register_script_message("photo-at", function(json)
         table.insert(args, "--crop"); table.insert(args, string.format("%.5f,%.5f,%.5f,%.5f", f.x, f.y, f.w, f.h))
     end
     if type(req.link) == "string" then table.insert(args, "--link"); table.insert(args, req.link) end
-    -- Cleaned up as that clip's transform says (else as the one playing is), where this computer does the denoise
-    local denoise = view.denoise
-    if type(denoise) ~= "boolean" then denoise = mp.get_property_native("user-data/gyroflow/still") ~= false end
-    if not denoise or mp.get_property_native("user-data/gyroflow/temporal_denoise") == "off" then
-        table.insert(args, "--radius"); table.insert(args, "0")
-    end
     -- Where it goes: the place asked for (a run's folder), else the project's _Stills/Generated
     local dir = type(req.out_dir) == "string" and req.out_dir or photo_dir()
     if dir then table.insert(args, "--out"); table.insert(args, dir) end
-    es.apply(args, s, "photo")
     table.insert(args, req.clip)
     mp.msg.info("photo: " .. table.concat(args, " "))
     mp.command_native_async({ name = "subprocess", args = args, playback_only = false, capture_stderr = true }, function(_, r)

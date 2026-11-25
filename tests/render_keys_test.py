@@ -4,8 +4,10 @@ renders.rs's defaults_of reads gyroflow.conf by its conf names (tests/registry_t
 tests/render_settings.json and tests/gyroflow_conf_cases.json check what each gives, case by case). What the registry
 says that's still kept apart, checked here:
   * each key's gyroflow.conf option and default are the gyroflow plugin's own (gyroflow/main.lua's `o`)
-  * each key gyroflow-export takes (exported, cli) is in its argument parser and handed to it by export.lua
-  * each key's field in the warp's request (gpu) is in gyroflow/main.lua's player_args
+  * each key gyroflow-export takes (exported, cli) is in its argument parser (the command line's), and is a key of the
+    settings JSON it reads (settings_json, apply_settings) that a saved view's settings carry (gyroflow/settings.lua
+    of_view; export.lua hands the settings, never the flag: tests/settings_json_test.py)
+  * each key's field in the warp's request (gpu) is in gyroflow/main.lua's player_args or gpu_settings
   * a key not exported says why (player_only)
 From the repository's folder: python3 tests/render_keys_test.py"""
 import json
@@ -16,7 +18,6 @@ from twins import Checks, block, read
 c = Checks("render keys")
 reg = json.loads(read("mpv/scripts/workspace/registry.json"))
 plugin = read("mpv/scripts/gyroflow/main.lua")
-export_lua = read("mpv/scripts/gyroflow/export.lua")
 export_rs = read("vs-gyroflow/src/bin/gyroflow-export.rs")
 
 GROUPS = {"bundle", "uw", "input", "opts"}
@@ -28,7 +29,9 @@ c.expect("each key once", len(keys) == len(set(keys)), str(keys))
 o = {}
 for k, v in re.findall(r'(\w+) = ("[^"]*"|true|false|-?[\d.]+)', re.search(r"\nlocal o = \{([^\n]*)", plugin).group(1)):
     o[k] = json.loads(v) if v not in ("true", "false") else v == "true"
-args = block(plugin, r"\nlocal function player_args\(source\)", "gyroflow/main.lua player_args")
+args = block(plugin, r"\nlocal function player_args\(source\)", "gyroflow/main.lua player_args") + re.search(r"\ngpu_settings = function\(source\)\n(.*?)\nend\n", plugin, re.S).group(1)
+settings_lua = read("mpv/scripts/gyroflow/settings.lua")
+json_keys = {k["key"]: k for k in reg["settings_json"]}
 parsed = set(re.findall(r'"(--[a-z0-9-]+)"(?: \| "[^"]*")* =>', export_rs))
 
 for s in reg["settings"]:
@@ -49,7 +52,9 @@ for s in reg["settings"]:
         c.expect(f"{k}: exported, by its flags", s.get("cli"))
         for flag in s.get("cli", []):
             c.expect(f"{k}: gyroflow-export reads {flag}", flag in parsed)
-            c.expect(f"{k}: export.lua hands it {flag}", f'"{flag}"' in export_lua)
+        field = s["gpu"] if s.get("gpu") in json_keys else k
+        c.expect(f"{k}: in the settings JSON as {field}, which gyroflow-export reads", json_keys.get(field, {}).get("export"))
+        c.expect(f"{k}: a saved view's settings carry {field} (settings.lua of_view)", re.search(rf"\bs\.{field}\b", settings_lua))
     else:
         c.expect(f"{k}: not exported, says why (player_only)", s.get("player_only"))
     if s.get("gpu"):

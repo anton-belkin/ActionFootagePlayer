@@ -45,7 +45,7 @@ function M.is_default(t, kind)
     return true
 end
 
--- How much temporal denoise the export takes (export.lua's cleanup_args `amount`): the clip's transform still says
+-- How much temporal denoise the export takes (apply sets it so in the settings): the clip's transform still says
 -- whether; highest takes the full one even where this computer plays it lighter or not at all, quickest none
 function M.amount(s, amount)
     if s and s.quality == "highest" then return "full" end
@@ -53,54 +53,34 @@ function M.amount(s, amount)
     return amount
 end
 
--- args (gyroflow-export's, as built so far, before the clip): the value after `key`, its index
-local function find(args, key)
-    for i = 1, #args do if args[i] == key then return args[i + 1], i end end
-    return nil, nil
-end
-local function set(args, key, value)
-    local _, i = find(args, key)
-    if i then args[i + 1] = value else table.insert(args, key); table.insert(args, value) end
-end
-local function remove(args, key, values)
-    local _, i = find(args, key)
-    if i then for _ = 0, values do table.remove(args, i) end end
-end
-
 -- The radius a photo is cleaned up from at its best (gyroflow-export's still::MAX_RADIUS)
 M.PHOTO_RADIUS_MAX = reg.export.photo_radius_max
 
--- The settings into gyroflow-export's arguments, for a video or a photo: the size and the encoder as its own options,
--- the quality preset as the options it stands for (each of the picture-quality settings playback has that a file can
--- have; fps and the size rendered on screen aren't: a file has every frame, at its size):
+-- The settings into the settings JSON gyroflow-export takes (settings.lua's, `st`), for a video or a photo: the size
+-- and the encoder as its keys, the quality preset as the keys it stands for (each of the picture-quality settings
+-- playback has that a file can have; fps and the size rendered on screen aren't: a file has every frame, at its size):
 --   quickest  no temporal denoise, edges filled by the frame's edge spread out (not the trail), the water's color
 --             fringes left as recorded, bilinear interpolation (both paths), a photo not cleaned up from its neighbours
 --   highest   the full temporal denoise where the clip has it, edges by the trail, Lanczos (both paths, at any frame
 --             rate: playback takes bicubic above 31 fps), a photo cleaned up from 7 frames each side, rendered by
---             gyroflow-export itself (not the player's frame on screen)
---   displayed nothing added: as it plays here
+--             gyroflow-export itself (not the player's frame on screen: the caller leaves out --image)
+--   displayed nothing changed: as it plays here
 -- Returns the settings used
-function M.apply(args, t, kind)
+function M.apply(st, t, kind)
     local s = M.normalize(t, kind)
-    if s.size ~= "original" then set(args, "--resolution", s.size) end
-    if kind ~= "photo" and s.encode == "quality" then set(args, "--encode", "quality") end
+    if s.size ~= "original" then st.resolution = s.size end
+    if kind ~= "photo" and s.encode == "quality" then st.encode = "quality" end
     if s.quality == "quickest" then
-        remove(args, "--denoise", 1)
-        remove(args, "--denoise-strong", 0)
-        if find(args, "--edges") == "sphere" then set(args, "--edges", "smooth") end
-        set(args, "--chromatic", "no")
-        set(args, "--gpu-interpolation", "bilinear")
-        set(args, "--interpolation", "bilinear")
-        if kind == "photo" then set(args, "--radius", "0") end
+        st.temporal_denoise = "off"
+        if st.edges == "sphere" then st.edges = "smooth" end
+        st.chromatic = false
+        st.interpolation, st.engine_interpolation = "bilinear", "bilinear"
+        if kind == "photo" then st.still_radius = 0 end
     elseif s.quality == "highest" then
-        if find(args, "--denoise") then set(args, "--denoise", "full") end
-        if find(args, "--edges") == "smooth" then set(args, "--edges", "sphere") end
-        set(args, "--gpu-interpolation", "lanczos")
-        set(args, "--interpolation", "lanczos")
-        if kind == "photo" then
-            set(args, "--radius", tostring(M.PHOTO_RADIUS_MAX))
-            remove(args, "--image", 1)
-        end
+        if st.denoise ~= false then st.temporal_denoise = "full" end
+        if st.edges == "smooth" then st.edges = "sphere" end
+        st.interpolation, st.engine_interpolation = "lanczos", "lanczos"
+        if kind == "photo" then st.still_radius = M.PHOTO_RADIUS_MAX end
     end
     return s
 end

@@ -1818,12 +1818,13 @@ local function next_clip()
         table.insert(args, "--at"); table.insert(args, table.concat(list, ","))
         table.insert(args, "--cover"); table.insert(args, list[1])
     end
-    -- The underwater colour, where the clip has it on (its source's input, else uwcolor.conf's): in it, as it plays
+    -- The underwater colour, where the clip has it on (its source's input, else uwcolor.conf's): in it, as it plays (the
+    -- settings JSON gyroflow-export takes, docs/reference/contracts.md; the rest of a clip preview is its own: unstabilized)
     do
         local _, rendered = transform.render_settings(sidecar.read(c.file), nil, transform.defaults(mp.get_property_native))
         if rendered.uw == true then
-            for _, a in ipairs({ "--uw-color", "yes", "--uw-strength", string.format("%.2f", tonumber(rendered.uw_strength) or 1),
-                                 "--uw-highlights", rendered.uw_highlights == true and "yes" or "no" }) do table.insert(args, a) end
+            table.insert(args, "--settings")
+            table.insert(args, utils.format_json({ uw = true, uw_strength = tonumber(rendered.uw_strength) or 1, uw_highlights = rendered.uw_highlights == true }))
         end
     end
     table.insert(args, "--link")

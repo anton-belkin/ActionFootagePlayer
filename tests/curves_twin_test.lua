@@ -92,7 +92,7 @@ for _, c in ipairs(registry.curves) do
     end
 end
 
--- export.lua over a fake mpv: what each player curve becomes on gyroflow-export's command line
+-- export.lua over a fake mpv: what each player curve becomes in the settings gyroflow-export takes (--settings)
 local props = { platform = "darwin" }
 local messages, bindings, ran, requests = {}, {}, {}, {}
 local mp = {
@@ -118,7 +118,8 @@ package.loaded['mp'] = mp
 package.loaded['mp.utils'] = {
     join_path = function(a, b) return a .. "/" .. b end,
     file_info = function(path) if path:match("gyroflow%-export$") then return { is_file = true } end end,
-    format_json = function() return "{}" end,
+    -- The settings a route hands over (--settings): the table itself, by a name
+    format_json = function(t) requests[#requests + 1] = t; return "json" .. #requests end,
     parse_json = function(s) return requests[s] end,
     getpid = function() return 1 end,
 }
@@ -128,7 +129,10 @@ expect("export.lua takes export-batch", type(messages["export-batch"]) == "funct
 
 local function curve_arg()
     local args = ran[#ran] or {}
-    for i = 1, #args do if args[i] == "--curve" then return args[i + 1] end end
+    for i = 1, #args do
+        if args[i] == "--curve" then return args[i + 1] end
+        if args[i] == "--settings" then return (requests[tonumber(args[i + 1]:match("%d+"))] or {}).curve end
+    end
 end
 for id in pairs(player) do
     -- Shift+E on a clip playing in that curve

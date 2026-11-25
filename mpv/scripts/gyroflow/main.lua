@@ -495,6 +495,9 @@ local function defaults_bundle()
         denoise = o.still == true,
         denoise_strong = o.denoise_strong == true,
         preset_horizon = preset_horizon(),
+        -- The lens under water for a source that doesn't say (#317: the Library's renders take it too): auto by
+        -- default, project too (default_underwater's rule; that's further down)
+        underwater = (o.underwater == "yes" or o.underwater == "no") and o.underwater or "auto",
     }
 end
 local DEFAULTS = defaults_bundle()
@@ -624,6 +627,8 @@ end
 
 -- What the warp does with the lens and the motion (vs-gyroflow's LensMode, further down), nil: nothing
 local filter_lens
+-- The clip's settings as it plays (further down; docs/reference/contracts.md, "The settings"), what publish publishes
+local gpu_settings
 
 -- The output projection the warp is given (vs-gyroflow's Frame: 0-4), nil for none of its own: over a Gyroflow
 -- project, the one picked whatever it is (linear too: in place of a fisheye project's), "project" its own; without one,
@@ -643,8 +648,8 @@ local function player_args(source)
     local project_alone = nil
     if has_project(source) and alone ~= nil then project_alone = alone end
     return { project = source.project, preset = source.preset, interpolation = interpolation(source),
-             wide = view == "wide" or nil, level = level, lookahead = o.lookahead, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur,
-             chromatic = true, time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
+             wide = view == "wide" or nil, level = level, horizon_lock = horizon ~= nil and (horizon and 100 or 0) or nil, underwater = underwater, edges = edge_mode, edges_blur = edge_blur,
+             time_offset = time_offset(), trim_start = trim and trim["in"], trim_end = trim and trim.out,
              alone = project_alone,
              rotation = frame.rotation ~= 0 and frame.rotation or nil,
              aspect = shown_aspect() ~= "original" and shown_aspect() or nil,
@@ -772,6 +777,8 @@ function publish()
         session = session, defaults = DEFAULTS,
         -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
         lens = current_lens or false,
+        -- The settings it plays with (gpu_settings): what an export of it takes
+        settings = gpu_settings and gpu_settings(current_source) or false,
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/gyroflow/" .. k, v) end
     -- What a render takes from this computer's settings, for Action Footage Library's recipes (library/src/renders.rs
@@ -1027,18 +1034,45 @@ local function gpu_unhold()
     end
 end
 
--- What gyroflow-gpu-table --player is asked for the clip as it plays now (player_args): its project or preset, the
--- transform, the moment's part, the lens
-local function gpu_user_data(source)
-    local ud = player_args(source)
-    ud.input_width, ud.input_height = source.width, source.height
-    ud.gpu_chromatic = chromatic and not o.chromatic_skip
-    ud.edges, ud.edges_blur = edge_mode, edge_blur
-    return ud
-end
-
 -- Ctrl+j's translation compensation computed this many times this session (a new shader each time)
 local trans_rev = 0
+
+-- The settings JSON's (settings.lua): what the table's request takes of the settings
+local settings_json = require 'settings'
+
+-- The clip's settings as it plays now (docs/reference/contracts.md, "The settings"; registry.json's settings_json):
+-- its project or preset, the transform, the moment's part, the lens (player_args), the clean-up (the temporal
+-- denoise, how much, its Stronger and the grain it keeps; the water's colour fringes), Ctrl+j's sideways jerks, a 360
+-- camera's sphere. Published as user-data/gyroflow/settings: export.lua hands them to gyroflow-export as they are,
+-- and the table's request is made of them (gpu_user_data). Without a clip to stabilize: nothing done (lens off)
+gpu_settings = function(source)
+    local s = source and player_args(source) or {}
+    s.lens = source and filter_lens(source) or "off"
+    s.chromatic = chromatic
+    s.denoise, s.temporal_denoise, s.denoise_strong, s.denoise_grain = still.switched(), o.temporal_denoise, denoise_strong, o.still_grain
+    -- Ctrl+j on, where this computer takes the jerks out (gyroflow.conf translation): the export takes them where they're
+    -- computed for the clip
+    s.translation = (o.translation and trans.on) and true or false
+    if o.sphere_width > 0 then s.sphere_width = o.sphere_width end
+    if o.stitching_distance > 0 then s.stitching_distance = o.stitching_distance end
+    return s
+end
+
+-- What gyroflow-gpu-table --player is asked for the clip as it plays now: the settings' keys it reads, with what only
+-- playback adds (the video's size; the fringes as this screen shows them, chromatic_skip; the denoise where this
+-- computer does it; the jerks in the shader where computed, on and off by its PARAM)
+local function gpu_user_data(source)
+    local ud = settings_json.request(gpu_settings(source))
+    -- (the table is asked only where the warp does something)
+    if ud.lens == "off" then ud.lens = "stabilized" end
+    ud.input_width, ud.input_height = source.width, source.height
+    ud.gpu_chromatic = chromatic and not o.chromatic_skip
+    ud.gpu_denoise = still.enabled()
+    ud.gpu_translation = o.translation and true or false
+    ud.translation_rev = trans_rev > 0 and trans_rev or nil
+    ud.lookahead = o.lookahead
+    return ud
+end
 
 -- The shader applied (further down): a table extended ahead of where it plays in place of the one before
 local gpu_apply
@@ -1073,12 +1107,9 @@ local function gpu_table(source, done)
     -- table starts from a stretch of it, as the engine does (motion.rs): a moment's part (all it plays), or the
     -- seconds it starts playing at, the reply "partial", extended ahead of where it plays after (gpu_ahead)
     if not has_project(source) then ud.moment_end = moment_end() end
-    -- Ctrl+p (the clean frame), unless this computer does none (temporal_denoise=off): on the GPU path the temporal
-    -- denoise while it plays and paused (warp.glsl's dn_ passes; dn_sync delays the audio)
-    ud.gpu_denoise = still.enabled()
-    -- The translation compensation, where it's been computed for the clip (Ctrl+j); a new shader once it is
-    ud.gpu_translation = o.translation and true or false
-    ud.translation_rev = trans_rev > 0 and trans_rev or nil
+    -- (gpu_user_data: Ctrl+p's clean frame where this computer does it, on the GPU path the temporal denoise while it
+    -- plays and paused, warp.glsl's dn_ passes, dn_sync delays the audio; the translation compensation where it's been
+    -- computed for the clip, Ctrl+j, a new shader once it is)
     -- Written before with these settings (and the project as it is now): that file again
     local project = source.project and utils.file_info(source.project)
     local key = settings_key(ud) .. (project and string.format("|%s/%s", tostring(project.mtime), tostring(project.size)) or "")
@@ -1583,7 +1614,8 @@ local function add_filter(source, done)
 
     -- render_args (afp-stream, tools/stream): what it would play with, written down instead of played
     if o.render_args ~= "" then
-        render_dump = { stabilize = filter_lens(source) ~= nil, kind = source.kind, user_data = gpu_user_data(source) }
+        -- (user_data: the table's request; settings: what it's made of, the clean-up and the look's too)
+        render_dump = { stabilize = filter_lens(source) ~= nil, kind = source.kind, user_data = gpu_user_data(source), settings = gpu_settings(source) }
         return done()
     end
 
@@ -2260,16 +2292,12 @@ end
 local function trans_compute()
     local source = current_source
     if not source or not source.project then return end
-    local ud = gpu_user_data(source)
-    local video, args = source.project, { EXPORTER, "--translation" }
-    if video:lower():match("%.gyroflow$") then
-        args[#args + 1], args[#args + 2] = "--project", video
-        video = mp.get_property("path")
-    end
-    if ud.level then args[#args + 1], args[#args + 2] = "--level", tostring(ud.level) end
-    if ud.underwater then args[#args + 1], args[#args + 2] = "--underwater", tostring(ud.underwater) end
-    if tonumber(ud.horizon_lock) then args[#args + 1], args[#args + 2] = "--horizon-lock", string.format("%g", ud.horizon_lock) end
-    if ud.wide == true or ud.wide == 1 then args[#args + 1] = "--wide" end
+    -- Measured on the stabilization as it plays (the settings' project, level, view, horizon, water: what moves the
+    -- camera, not the frame it's shown in)
+    local s, how = gpu_settings(source), {}
+    for _, k in ipairs({ "project", "level", "underwater", "horizon_lock", "wide" }) do how[k] = s[k] end
+    local video, args = source.project, { EXPORTER, "--translation", "--settings", utils.format_json(how) }
+    if video:lower():match("%.gyroflow$") then video = mp.get_property("path") end
     local progress = utils.join_path(platform.temp_dir(), string.format("mpv-translation-%d.json", utils.getpid()))
     args[#args + 1], args[#args + 2], args[#args + 3] = "--progress", progress, video
     trans.progress = 0

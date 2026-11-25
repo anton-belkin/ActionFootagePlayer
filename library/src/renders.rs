@@ -259,6 +259,8 @@ fn defaults_of(conf: &str) -> Value {
             "denoise": conf("denoise"),
             "denoise_strong": conf("denoise_strong"),
             "preset_horizon": "no",
+            // The lens under water for a source that doesn't say (#317); project is auto here, as the plugin reads it
+            "underwater": conf("underwater"),
         },
         "edges": conf("edges"),
         "edges_blur": blur,
@@ -350,6 +352,11 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
     let bundle = pick(own).or_else(|| pick(&doc["view"])).unwrap_or_else(|| defaults.clone());
     let mut out = complete(&bundle, defaults);
     if doc.is_object() { for (k, v) in migrated_source(doc) { out.insert(k, v); } }
+    // The lens under water where the source doesn't say: the defaults' (gyroflow.conf's underwater, #317), as the
+    // player plays it; auto (gyroflow-export's own) left out, so a recipe without it keeps its hash
+    if out.get("underwater").is_none_or(Value::is_null) && (defaults["underwater"] == json!("yes") || defaults["underwater"] == json!("no")) {
+        out.insert("underwater".into(), defaults["underwater"].clone());
+    }
     // The underwater colour (the source's): where the source doesn't say, the defaults' (the player's uwcolor.conf, in
     // its render-defaults.json); only when it's on, so a recipe without it keeps the hash it had
     for k in uw_keys() {
@@ -775,7 +782,8 @@ mod tests {
         let doc: Value = serde_json::from_str(include_str!("../../tests/render_settings.json")).unwrap();
         let mut bad = Vec::new();
         for c in doc["cases"].as_array().unwrap() {
-            let got = settings(&c["doc"], &c["own"], &doc["defaults"]);
+            let defaults = if c["defaults"].is_object() { &c["defaults"] } else { &doc["defaults"] };
+            let got = settings(&c["doc"], &c["own"], defaults);
             let same = |a: &Value, b: &Value| { let (mut x, mut y) = (String::new(), String::new()); canonical(a, &mut x); canonical(b, &mut y); x == y };
             if !same(&got, &c["want"]) { bad.push(format!("{}:\n  got  {got}\n  want {}", c["name"], c["want"])); }
         }

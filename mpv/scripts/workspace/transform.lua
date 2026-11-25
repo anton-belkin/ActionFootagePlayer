@@ -227,6 +227,11 @@ function M.render_settings(doc, own, defaults)
     for k, v in pairs(bundle) do rendered[k] = v end
     if type(doc) == "table" then M.migrate_source(doc) end
     for k, v in pairs(type(doc) == "table" and type(doc.source) == "table" and doc.source or {}) do rendered[k] = v end
+    -- The lens under water where the source doesn't say: the defaults' (gyroflow.conf's underwater, #317), as it plays;
+    -- auto (gyroflow-export's own) left out, so a recipe without it keeps its hash
+    if rendered.underwater == nil and type(defaults) == "table" and (defaults.underwater == "yes" or defaults.underwater == "no") then
+        rendered.underwater = defaults.underwater
+    end
     -- The underwater colour (the source's): where the source doesn't say, the defaults' (uwcolor.conf, as it plays
     -- then: M.defaults). In the recipe only when it's on, so a recipe without it keeps the hash it had
     for _, k in ipairs(M.UW_KEYS) do
