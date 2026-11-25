@@ -368,13 +368,13 @@ Writes.define("renders", {
   send: (a) => ["delete_renders", { moments: a.moments, staleOnly: a.staleOnly }],
   problems: (r) => r.problems,
 });
-// A name a file can have on every system (src/main.rs's good_name); "": it can, else why not
+// A name a file can have on every system (src/items.rs's good_name); "": it can, else why not
 function badName(name) {
   if (!name || name === "." || name === ".." || name.startsWith(".")) return "That name can’t be a file’s";
   if (/[\/\\:*?"<>|\u0000-\u001f]/.test(name)) return "A name can’t have / \\ : * ? \" < > |";
   return "";
 }
-// A moment, photo or export as it is once renamed (src/main.rs's rename_in): its extension kept (.afplink.mp4, a
+// A moment, photo or export as it is once renamed (src/items.rs's rename_in): its extension kept (.afplink.mp4, a
 // Motion Photo's .MP.jpg whole)
 function renamed(it, name) {
   const file = it.id.split("/").pop(), lower = file.toLowerCase();
@@ -403,7 +403,7 @@ Writes.define("renamefolder", {
   send: (a) => ["rename_item", { view: a.view, kind: "folder", path: a.path, name: a.name }],
 });
 // An album renamed: its folders (in _Clips, _Moments, _Stills: up to three) as one change, shown whole or taken back
-// whole (src/main.rs's rename_album names back the ones done when one can't be)
+// whole (src/items.rs's rename_album names back the ones done when one can't be)
 Writes.define("renamealbum", {
   views: ["footage", "moments", "stills", "exports"],
   what: (a) => "renaming the album " + a.was + " to " + a.name,

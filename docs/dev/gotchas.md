@@ -230,6 +230,18 @@ docs/design/library-management.md §9 and docs/design/catalog-safeguards.md have
 - **Apple's `strip` and `install_name_tool`,** not another one earlier in PATH (Anaconda's cctools): those leave a
   broken signature. `tools/dev_app.sh` takes them from `xcrun`.
 
+## The Library's commands
+
+- **A new command goes into its area's module** (`library/src/project.rs`, `batch.rs`, `items.rs`, …), as
+  `pub(crate) fn`, and its name into `generate_handler!` in `main.rs`. `#[tauri::command]` makes a hidden macro with
+  the function's own visibility: a private one isn't found from `main.rs`'s list ("cannot find macro `__cmd__…`").
+  A `pub` one would be `#[macro_export]`ed: keep `pub(crate)`.
+- **Each area's module is `use`d whole by `main.rs`, and each starts with `use super::*;`,** so they call each other
+  by bare names as when all was in one file. Two modules with a `pub(crate)` item of the same name make that name
+  ambiguous where it's used: give it another.
+- **A Windows-only line (`#[cfg(windows)]`) isn't compiled on the Mac:** check it with
+  `PATH=/opt/homebrew/opt/llvm@19/bin:$PATH cargo check --target x86_64-pc-windows-msvc` in `library/`.
+
 ## The Library page
 
 - **`lenses.js` loads before `app.js`** (`library/ui/index.html`), so it must not touch `S` at load time.

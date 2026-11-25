@@ -3,7 +3,7 @@
 # still, the hover over the Live icon plays its live part from the photo's own frame and round again while it stays,
 # Space switches the same on and off (Esc off too), the run carries on into the photos taken right after it, round
 # again from its start, and rests on the one it got to when stopped, a plain photo has no icon. Opened as a list from
-# the Library (an .afplist.m3u8 as library/src/main.rs writes it, read by workspace/librarylist.lua): the photo at its
+# the Library (an .afplist.m3u8 as library/src/playing.rs writes it, read by workspace/librarylist.lua): the photo at its
 # place in it, the run's neighbours from the list (not the folder), and it rests on a photo of the list.
 #
 #   python3 tests/live_photo_ipc.py <folder of live photos taken in a row> [<a plain photo>]

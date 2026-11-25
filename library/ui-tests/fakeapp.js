@@ -1,6 +1,6 @@
 "use strict";
 // The app's changing commands, stood in for on the views a test has (page.js): each changes the views as the disk
-// would change (src/tags.rs, src/geo.rs, src/main.rs's rename_in and delete_in), so that a view read afterwards shows
+// would change (src/tags.rs, src/geo.rs, src/items.rs's rename_in and delete_in), so that a view read afterwards shows
 // it, and tells the page what the catalog tells it (`catalog-changed`). A test makes one fail (`fail`) or slow (page.js's
 // `delay`).
 //
@@ -157,7 +157,7 @@ function fake(views, o) {
       const rel = a.path.slice(root.length + 1);
       if (/[\/\\:*?"<>|]/.test(a.name)) throw "A name can't have / \\ : * ? \" < > |";
       if (a.kind === "folder") {
-        // A folder of the project's, by its path (src/main.rs's rename_in: whatever the view asked from): what's in
+        // A folder of the project's, by its path (src/items.rs's rename_in: whatever the view asked from): what's in
         // it follows in every view. Footage: the clips' links in it (and the clips whose preview is one of them)
         const to = (parent(rel) ? parent(rel) + "/" : "") + a.name;
         const taken = (x) => x && ((x.dirs || []).includes(to) || (x.clips_dirs || []).includes(to));
@@ -352,7 +352,7 @@ function fake(views, o) {
     told(null);
     return dir(name);
   };
-  // An album's folders renamed as one (src/main.rs's rename_album): the ones done named back when one can't be
+  // An album's folders renamed as one (src/items.rs's rename_album): the ones done named back when one can't be
   app.commands.rename_album = (a) => {
     refuse("rename_album", a);
     const done = [];

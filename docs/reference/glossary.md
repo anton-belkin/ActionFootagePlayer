@@ -67,7 +67,7 @@ processes in [architecture.md](architecture.md), settings in [settings-flow.md](
 | **Unsupported**, **as recorded** | What the warp can't do plays as recorded, with a card saying why. | `gpu_table.rs` `unsupported`, `gyroflow/gpupath.lua` `play_unstabilized` |
 | **Card** | The player's notification (a small box), and `mp.ask` dialogs, drawn by the side panel. | `side-panel/notify.lua`, `notify_client.lua` |
 | **Panel**, **side panel** | The settings beside the video (tabs Source, Transform, Output, Project, 360°…), drawn in ASS. | `mpv/scripts/side-panel/` |
-| **Batch** | The player run without a window by the Library, doing one job described in a request file (`AFP_BATCH`): moments, photos, exports, share renders. | `workspace/batch.lua`, `library/src/main.rs` |
+| **Batch** | The player run without a window by the Library, doing one job described in a request file (`AFP_BATCH`): moments, photos, exports, share renders. | `workspace/batch.lua`, `library/src/batch.rs` |
 | **Inbox** | `player-<pid>.in`: lines the Library appends for a running player to pick up (open this, reload that). | see [contracts.md](contracts.md) |
 | **IPC** | mpv's JSON socket (`--input-ipc-server`), used by the Library, the agent and the live rigs. | `mpv/scripts/agent/`, `tests/*_ipc.py` |
 | **Catalog** | What was last seen of a project's files, shared through `.afp/catalog/`: each computer's journal, snapshots folding them, care marks. The files are the truth; the catalog is a cache. | `catalog/` (`afp-catalog`), `library/src/seen.rs` |

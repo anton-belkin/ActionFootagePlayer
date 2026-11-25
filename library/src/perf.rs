@@ -125,7 +125,7 @@ impl Rig {
     pub fn clip(&self, i: usize) -> Value { json!({ "kind": "clip", "id": self.clips[i], "path": self.f.join(&self.clips[i]).display().to_string() }) }
     pub fn own(&self, kind: &str, rel: &str) -> Value { json!({ "kind": kind, "id": rel, "path": self.p.join(rel).display().to_string() }) }
 
-    /// A view as the page's `scan` gets it (main.rs's scan, step for step: the project's settings, the view from the
+    /// A view as the page's `scan` gets it (browsing.rs's scan, step for step: the project's settings, the view from the
     /// catalog, what the clips are, the view kept in this computer's cache): the answer, and its size as sent
     pub fn view(&self, view: &str) -> (Value, usize) {
         let flat = crate::changed::flat_previews(&self.p);
