@@ -156,7 +156,7 @@ The same logic in more than one language, from CLAUDE.md, with the test that fai
 | Bundle keys and valid values | `transform.lua` `KEYS`, `UW_KEYS`, `INPUT_KEYS`, `VALID`; `renders.rs` `BUNDLE_KEYS`, `UW_KEYS`, `valid` | [render_keys_test.py](../../tests/render_keys_test.py) (allow-list `PLAYER_ONLY`) |
 | gyroflow.conf defaults | `gyroflow/bundle.lua` `defaults_bundle`, `renders.rs` `defaults_of` | [gyroflow_conf_cases.json](../../tests/gyroflow_conf_cases.json): [gyroflow_conf_test.lua](../../tests/gyroflow_conf_test.lua) and `renders.rs` `defaults_are_read_as_the_player_does` |
 | Render recipe version | workspace `RENDER_VERSION` (1) and `index.rs` `RENDER_VERSION` (1): the old per-moment recipe; `renders.rs` `VERSION` (4): the hashed one | **none**. CLAUDE.md pairs workspace `RENDER_VERSION` with `renders.rs` `VERSION`, but its real twin is `index.rs` `RENDER_VERSION` (`render_recipe_of`) |
-| Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export.rs` `CURVES`, `make_hdr_lut.py`, `source.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
+| Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export/options.rs` `--curve`, `make_hdr_lut.py`, `source.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
 | Export choices | `exportsettings.lua` `CHOICES`, `share.js` `EXPORT_CHOICES`, `renders.rs` `EXPORT_CHOICES`, gyroflow-export `--resolution`/`--encode`, `still.rs` `MAX_RADIUS` | [export_choices_test.py](../../tests/export_choices_test.py) |
 | Underwater colour rule | `dlogm/uw_estimate.lua`, `vs-gyroflow/src/uwcolor.rs` (not in CLAUDE.md's list) | [uwcolor_cases.json](../../tests/uwcolor_cases.json), written by [uwcolor_test.lua](../../tests/uwcolor_test.lua), read by `uwcolor.rs` tests |
 | Project's own folders | `index.rs` `OWN_FOLDERS`, `inspect.rs` `OWN_FOLDERS`, `checks.rs` `OWN`, `moments.lua` `OWN_FOLDERS`, `afp_stream.py` | [project_folders_test.py](../../tests/project_folders_test.py) |
@@ -193,7 +193,7 @@ Then go through each step. Mark each one in the PR as *done*, *n/a because…*, 
    for, an example), set in `gpu_settings` (or `player_args`, which it starts from) and read by `vs-gyroflow`'s
    `PlayerClip` if the warp needs it. If it changes the geometry, add it to `gpu_table.rs` `PLAYER_GEOMETRY_KEYS`. A
    shader value is a `//!PARAM` in `warp.glsl`. Run `python3 tools/gen_reference.py`.
-3. **Export.** `gyroflow-export.rs` `apply_settings` reads the key (its test sends the registry's example and fails
+3. **Export.** `gyroflow-export/options.rs` `apply_settings` reads the key (its test sends the registry's example and fails
    until it does), working on both its GPU path and its pipes path (`lib.rs`'s engine); a flag for the command line if
    you like, parsed into the same `Options`. The clip playing's settings reach it as they are; a saved view's need
    `gyroflow/settings.lua` `of_view` to set it (a case in `tests/settings_cases.json`). If a quality preset should

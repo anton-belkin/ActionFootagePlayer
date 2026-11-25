@@ -745,7 +745,7 @@ give different pixels, Y 39 dB).
 
 **Where things are:**
 
-- **The path:** `export()` in `vs-gyroflow/src/bin/gyroflow-export.rs` branches to `export_gpu()` just after the encoder
+- **The path:** `export()` in `vs-gyroflow/src/bin/gyroflow-export/video.rs` branches to `export_gpu()` just after the encoder
   is picked. The conditions and the fallback reasons are in the `why` closure there.
 - **The shader:** `warp_shader()` builds it from `gpu_table` (`Options::player`, `shader_with`, `look_shader`,
   `set_param_default`, `for_libplacebo`, `passes_per_frame`).

@@ -61,7 +61,8 @@ for _, name in ipairs({ "DJI_CURVES", "GOPRO_CURVES" }) do
 end
 
 -- gyroflow-export takes the registry's curves (vs-gyroflow/src/lists.rs); its help names the log ones
-local exporter = read("vs-gyroflow/src/bin/gyroflow-export.rs")
+-- (its --help text: options.rs, one of gyroflow-export's parts)
+local exporter = read("vs-gyroflow/src/bin/gyroflow-export/options.rs")
 local export = player
 local help = exporter:match("%-%-curve <curve>  the log curve: ([^\n]*)")
 expect("gyroflow-export's help for --curve is there", help ~= nil)

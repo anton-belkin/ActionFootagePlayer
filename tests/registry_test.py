@@ -32,7 +32,7 @@ READERS = {
     "mpv/scripts/footage-menu/main.lua": LUA,
     "mpv/scripts/side-panel/main.lua": LUA,
     "vs-gyroflow/src/lists.rs": r'include_str!\("\.\./\.\./mpv/scripts/workspace/registry\.json"\)',
-    "vs-gyroflow/src/bin/gyroflow-export.rs": r"vs_gyroflow::lists::",
+    "vs-gyroflow/src/bin/gyroflow-export/main.rs": r"vs_gyroflow::lists::",
     "library/src/lists.rs": r'include_str!\("\.\./\.\./mpv/scripts/workspace/registry\.json"\)',
     "library/src/main.rs": r"js_init_script\(lists::page_script\(\)\)",
     "library/src/renders.rs": RUST,

@@ -167,7 +167,7 @@ camera's sphere, an export's own choices. It's built once and taken as it is by 
   over the clip playing's (`as_it_looks`); the export's choices over both (`exportsettings.lua` `apply`).
 - **Taken by** `gyroflow-gpu-table`: its request is the settings' keys it reads (`settings.lua` `request`) with what
   only playback adds (below, "request"); and by `gyroflow-export --settings <json|file|->` for every export, photo,
-  Live Photo, moment preview, 360 export and Ctrl+j's measuring (`apply_settings` in `gyroflow-export.rs`).
+  Live Photo, moment preview, 360 export and Ctrl+j's measuring (`apply_settings` in `gyroflow-export/options.rs`).
 - **Through** the Library's batches and renders (the recipe's `view` goes to `export-batch` and `photo-at`, which
   make it into settings with `of_view`) and the NAS stream (`render_args`' dump: `render.user_data`, the table's
   request, and `render.settings`, what it's made of).
@@ -696,7 +696,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_CACHE_GB` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_CATALOG_TIMES` | `catalog/src/cli.rs` | — |
 | `AFP_CHROMATIC` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_CHROMATIC_GLSL` | `vs-gyroflow/src/bin/gyroflow-export.rs` | — |
+| `AFP_CHROMATIC_GLSL` | `vs-gyroflow/src/bin/gyroflow-export/post.rs` | — |
 | `AFP_COLLABORATION` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_COMPUTER_NAME` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_CURATED_LENSES` | `library/src/index.rs`, `vs-gyroflow/src/lens_pick.rs` | `tests/afp_motion_ipc.py`, `tests/lens_dialog_ipc.py` |
@@ -705,8 +705,8 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_GENERATED` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_GPU_CLIP` | `vs-gyroflow/src/gpu_table.rs` | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_EXPORT` | — | `vs-gyroflow/tests/export_gpu.rs` |
-| `AFP_GPU_FFMPEG` | `vs-gyroflow/src/bin/gyroflow-export.rs` | `vs-gyroflow/tests/export_gpu.rs` |
-| `AFP_GPU_KEEP` | `vs-gyroflow/src/bin/gyroflow-export.rs` | `tools/edgefill/chain.sh`, `tools/edgefill/synth/run.py` |
+| `AFP_GPU_FFMPEG` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `vs-gyroflow/tests/export_gpu.rs` |
+| `AFP_GPU_KEEP` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `tools/edgefill/chain.sh`, `tools/edgefill/synth/run.py` |
 | `AFP_GPU_SDR_CLIPS` | — | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_SERVER_LOG` | `vs-gyroflow/src/bin/gyroflow-gpu-table.rs` | `tests/gpu_ahead_e2e.py` |
 | `AFP_GPU_STRICT` | `vs-gyroflow/src/gpu_table.rs` | — |
@@ -739,7 +739,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_OPTICAL_PROJECT` | `vs-gyroflow/src/optical.rs` | — |
 | `AFP_PHOTO` | — | `tests/live_photo_ipc.py` |
 | `AFP_PHOTO_CLIPS` | — | `vs-gyroflow/tests/photo_dates.rs` |
-| `AFP_PHOTO_RENDITIONS` | `vs-gyroflow/src/bin/gyroflow-export.rs` | `tests/uw_export_check.py` |
+| `AFP_PHOTO_RENDITIONS` | `vs-gyroflow/src/bin/gyroflow-export/photo.rs` | `tests/uw_export_check.py` |
 | `AFP_PLAYER` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_PLAYER_CONFIG` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_PORT` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
@@ -753,7 +753,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_STREAM` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_TEST_CLIP` | — | `vs-gyroflow/tests/table_ahead.rs` |
 | `AFP_TEST_ROOT` | — | `tests/journal_mpv_test.lua`, `tests/journal_mpv_test.sh` |
-| `AFP_TIMES` | `vs-gyroflow/src/bin/gyroflow-export.rs`, `vs-gyroflow/src/bin/gyroflow-gpu-table.rs` | — |
+| `AFP_TIMES` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs`, `vs-gyroflow/src/bin/gyroflow-export/main.rs`, `vs-gyroflow/src/bin/gyroflow-export/photo.rs`, `vs-gyroflow/src/bin/gyroflow-export/post.rs` and 2 more | — |
 | `AFP_TV_LOOK` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
@@ -903,5 +903,5 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--view` | <p> | a reframe's projection | — |
 | `--background` |  | start at background priority (SIGUSR1 / SIGUSR2 switch it later) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/view360/main.lua`, `mpv/scripts/workspace/clippreviews.lua` |
 
-72 flags, from the argument match in `vs-gyroflow/src/bin/gyroflow-export.rs`; the full text is `gyroflow-export --help`.
+72 flags, from the argument match in `vs-gyroflow/src/bin/gyroflow-export/options.rs`; the full text is `gyroflow-export --help`.
 <!-- END GENERATED: export-flags -->

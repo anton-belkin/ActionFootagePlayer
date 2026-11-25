@@ -10,13 +10,14 @@ python3 tests/export_choices_test.py"""
 import json
 import re
 
-from twins import Checks, read
+from twins import Checks, files, read
 
 c = Checks("export choices")
 
 reg = json.loads(read("mpv/scripts/workspace/registry.json"))["export"]
 lua = read("mpv/scripts/gyroflow/exportsettings.lua")
-export = read("vs-gyroflow/src/bin/gyroflow-export.rs")
+# gyroflow-export, all its parts (src/bin/gyroflow-export/: options.rs parses, encode.rs sizes)
+export = "\n".join(read(f) for f in files("vs-gyroflow/src/bin/gyroflow-export", [".rs"]))
 plugin = read("mpv/scripts/gyroflow/main.lua")
 settings = {s["key"]: s for s in reg["settings"]}
 c.expect("the registry's export settings", set(settings) == {"size", "encode", "quality"}, str(sorted(settings)))
