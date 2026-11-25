@@ -58,17 +58,35 @@ one *done*, *n/a because…*, or *not done → issue #N*:
 
 ### The same logic is in more than one language
 
-Change these copies together, in the same PR:
+Change these copies together, in the same PR. The test after each fails when they drift apart; a guard that reads the
+sources has an allow-list for what it can't resolve, with why (add to it rather than around it).
 
 - **Workspace and pointer lookup:** `workspace.lua`, `vs-gyroflow/src/workspace.rs` and `catalog/src/locations.rs`.
-  The shared cases are in `tests/workspace_cases.txt`.
+  The shared cases are in `tests/workspace_cases.txt`, run by all three (the catalog: locations, `relative`,
+  `original`).
 - **Render settings:**
   - `mpv/scripts/workspace/transform.lua` and `library/src/renders.rs`, shared cases in `tests/render_settings.json`;
-  - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`;
+    the keys and their valid values: `tests/render_keys_test.py`;
+  - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
+    `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
+    `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
   - the render recipe: workspace `RENDER_VERSION` and `renders.rs` `VERSION`.
 - **Curves:** `dlogm/main.lua` `CURVES` and `gyroflow-export.rs` `CURVES`. A curve the player offers must either be
-  accepted by the export or be mapped before `--curve`.
-- **Export choices:** `exportsettings.lua`, `library/ui/share.js` and `renders.rs` `EXPORT_CHOICES`.
+  accepted by the export or be mapped before `--curve`. Also the packagers' `make_hdr_lut.py` curves (each export
+  curve needs its `luts/<id>_hlg.cube`), the Library's `app.js` `SRC_CURVES`, `tags.rs`'s curve list and `albums.js`
+  `ALBUM_CURVES`. `tests/curves_twin_test.lua`.
+- **Export choices:** `gyroflow/exportsettings.lua`, `library/ui/share.js` and `renders.rs` `EXPORT_CHOICES`, plus what
+  `gyroflow-export` takes (`--resolution`, `--encode`) and `still.rs` `MAX_RADIUS`. `tests/export_choices_test.py`.
+- **The project's own folders** (`_Moments`, `_Stills`, `_Renders`, `Generated`, `.afp`, …) are left out of the
+  footage by `library/src/index.rs` `OWN_FOLDERS`, `catalog/src/inspect.rs` `OWN_FOLDERS`, `library/src/checks.rs`
+  `OWN`, `workspace/moments.lua` `OWN_FOLDERS` and `tools/stream/afp_stream.py`. A new folder goes into each.
+  `tests/project_folders_test.py`.
+- **Script messages and key bindings:** every `script-message-to <plugin> <msg>` (Lua, the Library's IPC, the rigs)
+  has its `register_script_message` in that plugin; a binding named like a message takes it over unless the message is
+  registered after it (#225). `tests/script_messages_test.py`.
+- **user-data:** every `user-data/<key>` read is written somewhere (`tests/user_data_test.py`).
+- **The probe's answer:** what `gyroflow-probe --library` answers and `library/src/index.rs` `GEOTAG` (and the probe's
+  own `"geotag"`) change together: `index.rs`'s `probe_version` tests.
 - **Tags:** `tags.lua`, `library/src/tags.rs` and `catalog/src/finder.rs`.
 - **The clip's own file (`<clip>.afp.json`)** is found in `sidecar.lua`, `workspace.rs`, `tags.rs` (`clip_own_in`) and
   `reframe.rs`.
@@ -83,6 +101,7 @@ Change these copies together, in the same PR:
   - What the catalog or project keeps: `afp_catalog::project::VERSION` and `projectfile.lua` `M.VERSION`, together.
     The test `what_is_kept_goes_with_the_projects_version` guards this.
   - What the probe answers: `library/src/index.rs` `GEOTAG`. If you forget it, the old answers stay cached (#227).
+    The test `geotag_goes_with_what_the_probe_answers` guards this.
   - The render recipe: as above.
   - Older programs must refuse newer data, never wipe it (#220, #249).
 - **A `.afplocation` pointer counts only for its project's id.**
