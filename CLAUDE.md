@@ -188,7 +188,12 @@ to it rather than around it).
 - **A fix made on a trial or integration branch goes back into its PR, or into its own PR.** It must never live only
   on a local trial branch.
 - **An integration PR's tree must equal the build Anton tried** (`git diff <trial> HEAD` empty).
-- **Build a trial app with `tools/dev_app.sh`,** not `install.sh --apps` (the steps: `docs/dev/release.md`). Then:
+- **Builds come from CI, not from this Mac or the NAS** (Anton, 2026-11-26: memory is the bottleneck on both,
+  the internet is fast). Never `docker build` locally, on the Mac or the NAS: the NAS Helper image is CI's `nas-helper`
+  artifact (main's run, or `gh workflow run release.yml --ref <branch>` to have GitHub build a branch). A trial app is
+  CI's `release-macos` artifact of the commit: downloaded (say the file and size), its two apps taken out, the download
+  deleted (`docs/dev/release.md`). `tools/dev_app.sh`, never `install.sh --apps`, only when CI hasn't built that tree.
+- **After installing a trial app:**
   - check `Contents/Helpers/mpv --version`;
   - unregister every other copy from Launch Services;
   - check that an MP4 opens the copy in `~/Applications`.
