@@ -689,7 +689,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_360_TIMES` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_360_WIDTH` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_ARGS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_BATCH` | `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua`, `mpv/scripts/gyroflow/export.lua` and 5 more | `tests/agent_test.lua` |
+| `AFP_BATCH` | `library/src/batch.rs`, `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua` and 6 more | `tests/agent_test.lua` |
 | `AFP_BIN` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_BITRATE` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_CACHE` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
@@ -713,7 +713,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_GRACE` | — | `catalog/examples/rig.rs` |
 | `AFP_HEIGHT` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_HELPER_STATUS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_HOME` | `catalog/src/project.rs`, `library/src/seen.rs`, `mpv/scripts/live-photo/main.lua`, `mpv/scripts/workspace/main.lua` and 1 more | `library/src/tests/e2e.rs`, `library/src/tests/live_e2e.rs`, `library/src/tests/tests.rs`, `tests/gpu_ahead_e2e.py` and 1 more |
+| `AFP_HOME` | `catalog/src/project.rs`, `library/src/seen.rs`, `mpv/scripts/live-photo/main.lua`, `mpv/scripts/workspace/inbox.lua` and 1 more | `library/src/tests/e2e.rs`, `library/src/tests/live_e2e.rs`, `library/src/tests/tests.rs`, `tests/gpu_ahead_e2e.py` and 1 more |
 | `AFP_INTERP` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_JELLYFIN` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_JELLYFIN_EVERY` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
