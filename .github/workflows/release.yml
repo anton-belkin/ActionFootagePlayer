@@ -9,11 +9,17 @@
 # Pull requests build it as a check; the files are kept as the runs' artifacts.
 name: Release
 
+# Also every push to main, so main itself is known to build and pass; a PR's newer push cancels its older run.
 on:
   push:
+    branches: [main]
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: write
@@ -60,50 +66,12 @@ jobs:
         if: steps.mpv.outputs.cache-hit != 'true'
         run: tools/build_mpv.sh --no-deps
 
-      # The workspace plugin's lookup and its Rust twin, over the same cases (tests/workspace_cases.txt); the link
-      # reader over files made here and by ffmpeg, and the MP4 keys' writer; the lossless cut, of a file ffmpeg makes;
-      # the 360 view's geometry and gestures, and the spherical metadata; the side panel's Export button over a stand-in
-      # for mpv, its drop-downs and button rows, the photo button and the export's settings (and their gyroflow-export
-      # options), and the gyroflow plugin's lens over a Gyroflow project; the GPU table kept ahead of where a clip plays
-      # (ahead.lua) against a model of the table server; LuaJIT is one of mpv's dependencies
+      # Every tests/*_test.{lua,py,sh}, found by name (tools/run_tests.sh: a new test needs no list here), and
+      # vs-gyroflow's tests; LuaJIT is one of mpv's dependencies. The Library and the catalog: the tests job below
       - name: Tests
         run: |
-          luajit tests/workspace_test.lua
-          luajit tests/link_test.lua
-          luajit tests/moments_test.lua
-          luajit tests/cut_test.lua
-          luajit tests/sidecar_test.lua
-          luajit tests/view360_test.lua
-          luajit tests/transform_test.lua
-          luajit tests/render_settings_test.lua
-          luajit tests/projectfile_test.lua
-          luajit tests/longpath_test.lua
-          luajit tests/journal_test.lua
-          python3 tests/journal_report_test.py
-          python3 tests/jellyfin_test.py
-          python3 tests/fmp4time_test.py
-          sh tests/journal_mpv_test.sh
-          luajit tests/timeline_test.lua
-          luajit tests/navkeys_test.lua
-          luajit tests/exportkind_test.lua
-          luajit tests/scrub_test.lua
-          luajit tests/sidepanel_test.lua
-          luajit tests/notify_test.lua
-          luajit tests/uwcolor_test.lua
-          luajit tests/gyroflow_lens_test.lua
-          luajit tests/camera_subs_test.lua
-          luajit tests/agent_test.lua
-          luajit tests/export_args_test.lua
-          luajit tests/exportsettings_test.lua
-          luajit tests/gpu_ahead_test.lua
-          luajit tests/dnstep_test.lua
-          python3 tests/packaging_test.py
-          luajit tests/tags_test.lua
-          luajit tests/live_photo_test.lua
-          luajit tests/photo_link_fold_test.lua
-          luajit tests/librarylist_test.lua
-          luajit tests/projectcache_test.lua
-          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans export_settings an_image_is_made_smaller uwcolor:: uw_on_the_gpu)
+          sh tools/run_tests.sh
+          (cd vs-gyroflow && cargo test --release)
 
       - name: Build
         run: |
@@ -119,6 +87,42 @@ jobs:
           name: release-macos
           path: dist/
           if-no-files-found: error
+
+  # The Library and the catalog, which the macos job builds but doesn't test: afp-catalog's tests (with its
+  # safeguards and the many-computers random run, in release: slow otherwise), the Library's Rust tests, and its page
+  # in jsdom against a mock of the app (library/ui-tests). Beside the build, so it adds no time to it
+  tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            catalog/target
+            library/target
+          key: cargo-tests-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('catalog/Cargo.lock', 'library/Cargo.lock') }}
+          restore-keys: cargo-tests-${{ runner.os }}-${{ runner.arch }}-
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: library/ui-tests/package-lock.json
+
+      - name: Catalog
+        run: cd catalog && cargo test --release
+
+      - name: Library
+        run: cd library && cargo test
+
+      - name: Library page
+        run: cd library/ui-tests && npm ci && npm test
 
   # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-<arch>.zip, and on Windows the app with its installer,
   # ActionFootagePlayer-<version>-windows-<arch>-setup.exe, for x86_64 and arm64 (on GitHub's arm64 runner, built
@@ -313,7 +317,7 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [macos, plugin, plugins, nas-helper]
+    needs: [macos, tests, plugin, plugins, nas-helper]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
