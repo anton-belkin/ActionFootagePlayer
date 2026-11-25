@@ -88,7 +88,7 @@ function drawMap(main) {
     '<button type="button" role="tab" aria-selected="' + ((x[0] === "map") === asMap) + '" class="' + ((x[0] === "map") === asMap ? "on" : "") + '" data-a="mapmode" data-v="' + x[0] + '">' + x[1] + '</button>').join("") + '</div>' +
     '<span class="sub" style="display:inline">' + avCount(placed.length, "item", "items") + " at " + avCount(places.length, "place", "places") + (list.length !== all.length ? " (filtered)" : "") + '</span>' +
     (none ? '<span class="sub" style="display:inline">· ' + avCount(none, "item", "items") + ' without a location</span><button type="button" class="btn sm" data-a="mapplace" data-v="none">List them</button>' : "") + '</div>';
-  h = '<div class="mbar">' + h + '</div>'; // pinned while the places' list scrolls (app.js pinBar)
+  h = '<div class="mbar">' + h + '</div>'; // pinned while the places' list scrolls (drawing.js pinBar)
   if (!DATA.sources) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; return; }
   if (!placed.length) {
     main.innerHTML = h + '<div class="empty">' + (list.length ? "Nothing here has a location yet. The side panel’s Location part sets one from Apple Photos or by hand; a camera with GPS writes its own." : "Nothing in the library yet.") + '</div>';

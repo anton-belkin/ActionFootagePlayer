@@ -1,5 +1,5 @@
 "use strict";
-// The tile of a clip, a moment, a photo or an export: in the grid of every view (app.js's renderMain) and in
+// The tile of a clip, a moment, a photo or an export: in the grid of every view (drawing.js's renderMain) and in
 // Timeline's (albumviews.js's avCard). Loaded before albumviews.js and app.js, whose state and helpers (S, esc, img,
 // RAW_FOOTAGE, albumShown, userAlbum, cullBadge) it uses when called.
 //

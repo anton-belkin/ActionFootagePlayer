@@ -435,7 +435,7 @@ span.rstart{margin:0 6px;cursor:default;min-height:0;padding:1px 6px}
 .pill.bad{background:var(--st-bg);color:var(--st)}
 .sharejob ul{margin:4px 0 0;padding-left:18px}
 /* The bars above the list (breadcrumbs, the filters' line, the selection's bar, the list's head): pinned to the top of
-   #main, the scrolling box, while the list scrolls (app.js pinBar). Plain sticky positioning: Safari/WKWebView has it
+   #main, the scrolling box, while the list scrolls (drawing.js pinBar). Plain sticky positioning: Safari/WKWebView has it
    unprefixed since 13; the prefixed line is for older WebKit. What sticks below it uses --mbar-h, its height. */
 .main>.mbar{position:-webkit-sticky;position:sticky;top:0;z-index:3;background:var(--win);flex:none}
 .main.scrolled>.mbar{box-shadow:0 1px 0 var(--line),0 6px 10px -8px rgba(0,0,0,.25)}

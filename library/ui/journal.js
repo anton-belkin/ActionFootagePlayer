@@ -218,7 +218,7 @@
     p.then(() => finish(true), () => finish(false));
     return p;
   };
-  // The page's scripts ask for commands through Journal.invoke (app.js's `invoke`): the app's own object is frozen in the
+  // The page's scripts ask for commands through Journal.invoke (state.js's `invoke`): the app's own object is frozen in the
   // real window (Tauri's window.__TAURI__.core), so swapping its invoke works only in tests. Tried anyway, for a script
   // that still asks the app's object directly
   api.invoke = journaled;

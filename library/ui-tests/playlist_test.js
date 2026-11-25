@@ -1,5 +1,5 @@
 "use strict";
-// The player's playlist from what the window shows (app.js's playList, open_list): an item double-clicked plays in
+// The player's playlist from what the window shows (items.js's playList, open_list): an item double-clicked plays in
 // the list as the window shows it then (search, filters, sort), the item at its place; what the player can't play
 // left out; several selected and opened: those, in the window's order; photos are in the list (the player shows them
 // as a phone does), a photo double-clicked plays at its place in it. What the

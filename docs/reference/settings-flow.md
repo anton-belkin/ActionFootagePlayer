@@ -48,7 +48,7 @@ The paths:
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| Stabilization on, wider, off | `view.view`; default `conf:view` (normal, wide) | `view`, `stab_off` → `req.wide`, `req.lens` (`filter_lens`) | `--wide`, `--no-stabilize`, `--lens-only` | same flags | `stab.view` | `settings.view`; shown read-only in the list filters (`app.js` `deriveTransform`) | `user_data.wide`, `lens` |
+| Stabilization on, wider, off | `view.view`; default `conf:view` (normal, wide) | `view`, `stab_off` → `req.wide`, `req.lens` (`filter_lens`) | `--wide`, `--no-stabilize`, `--lens-only` | same flags | `stab.view` | `settings.view`; shown read-only in the list filters (`items.js` `deriveTransform`) | `user_data.wide`, `lens` |
 | Level (weak, medium, strong) | `view.level`; `conf:level` | `req.level` (`levels.rs`) | `--level` | same | `stab.level` | `settings.level` | `user_data.level` |
 | Horizon lock | `view.horizon_lock` (yes, no; "project" read as the preset's); `conf:horizon_lock` | `req.horizon_lock` 0 or 100 | `--horizon-lock 0\|100` | same | `stab.horizon_lock` | `settings.horizon_lock` (`preset_horizon` "no" in `defaults_of`) | `user_data.horizon_lock` |
 | Lens corrected or as recorded | `view.lens`; `conf:lens` | `lens_mode` → `req.lens` (stabilized, recorded, only) | `--lens-recorded`, `--lens-only` | same | `stab.lens` | `settings.lens` | `user_data.lens` |
@@ -156,7 +156,7 @@ The same logic in more than one language, from CLAUDE.md, with the test that fai
 | Bundle keys and valid values | `transform.lua` `KEYS`, `UW_KEYS`, `INPUT_KEYS`, `VALID`; `renders.rs` `BUNDLE_KEYS`, `UW_KEYS`, `valid` | [render_keys_test.py](../../tests/render_keys_test.py) (allow-list `PLAYER_ONLY`) |
 | gyroflow.conf defaults | `gyroflow/bundle.lua` `defaults_bundle`, `renders.rs` `defaults_of` | [gyroflow_conf_cases.json](../../tests/gyroflow_conf_cases.json): [gyroflow_conf_test.lua](../../tests/gyroflow_conf_test.lua) and `renders.rs` `defaults_are_read_as_the_player_does` |
 | Render recipe version | workspace `RENDER_VERSION` (1) and `index.rs` `RENDER_VERSION` (1): the old per-moment recipe; `renders.rs` `VERSION` (4): the hashed one | **none**. CLAUDE.md pairs workspace `RENDER_VERSION` with `renders.rs` `VERSION`, but its real twin is `index.rs` `RENDER_VERSION` (`render_recipe_of`) |
-| Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export.rs` `CURVES`, `make_hdr_lut.py`, `app.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
+| Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export.rs` `CURVES`, `make_hdr_lut.py`, `source.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
 | Export choices | `exportsettings.lua` `CHOICES`, `share.js` `EXPORT_CHOICES`, `renders.rs` `EXPORT_CHOICES`, gyroflow-export `--resolution`/`--encode`, `still.rs` `MAX_RADIUS` | [export_choices_test.py](../../tests/export_choices_test.py) |
 | Underwater colour rule | `dlogm/uw_estimate.lua`, `vs-gyroflow/src/uwcolor.rs` (not in CLAUDE.md's list) | [uwcolor_cases.json](../../tests/uwcolor_cases.json), written by [uwcolor_test.lua](../../tests/uwcolor_test.lua), read by `uwcolor.rs` tests |
 | Project's own folders | `index.rs` `OWN_FOLDERS`, `inspect.rs` `OWN_FOLDERS`, `checks.rs` `OWN`, `moments.lua` `OWN_FOLDERS`, `afp_stream.py` | [project_folders_test.py](../../tests/project_folders_test.py) |

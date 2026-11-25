@@ -170,7 +170,7 @@ function cullBody(c) {
 // ---------- the comment ----------
 //
 // A few lines of free text on an original, a moment or a photo (what happens in it), kept with each where its tags are
-// (src/tags.rs set_comment) and found by the search (app.js's textMatch). Typed, it's saved by itself: a moment after
+// (src/tags.rs set_comment) and found by the search (items.js's textMatch). Typed, it's saved by itself: a moment after
 // the last key, and at once when the field is left (another item clicked, another tab) or ⌘↩ (which also selects the
 // next one, to go through a folder quickly). Several selected with the same comment (or none): what's typed goes to
 // all of them, as for one. Several with different comments: the field starts empty and nothing is saved until Set for

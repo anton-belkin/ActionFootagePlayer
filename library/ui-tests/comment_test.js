@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The comment on the Tags part (culling.js) and the search by it (app.js's textMatch), on the page in jsdom over
+// The comment on the Tags part (culling.js) and the search by it (items.js's textMatch), on the page in jsdom over
 // mock.js: npm test here, or node comment_test.js. What's typed is saved by itself (a moment after the last key, at
 // once when the field is left or the selection changes, ⌘↩ with the next one selected), never onto the item selected
 // next; several with the same comment get it all; several with different ones only on Set for all. The search finds it
