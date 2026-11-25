@@ -1,5 +1,5 @@
 -- An export's settings (mpv/scripts/gyroflow/exportsettings.lua, docs/design/export-settings.md): the choices, their
--- defaults (what was exported before them), and each one into gyroflow-export's arguments.
+-- defaults (what was exported before them), and each one into the settings gyroflow-export takes.
 -- From the repository's folder: luajit tests/exportsettings_test.lua
 
 package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
@@ -35,62 +35,67 @@ expect("…the other kept", es.normalize({ size = "720", quality = "best" }, "vi
 expect("defaults are default", es.is_default({}, "video"), true)
 expect("…a size isn't", es.is_default({ size = "1080" }, "video"), false)
 
--- The defaults add nothing: an export is what it was
-local base = { "--curve", "dlogm", "--edges", "sphere", "--denoise", "light", "--chromatic", "yes" }
-local function copy(t) local o = {} for i, v in ipairs(t) do o[i] = v end return o end
+-- The defaults change nothing: an export is what it was (exportsettings apply, on the settings JSON gyroflow-export takes)
+local base = { curve = "dlogm", edges = "sphere", denoise = true, temporal_denoise = "light", chromatic = true }
+local function copy(t) local o = {} for k, v in pairs(t) do o[k] = v end return o end
+local function line(t)
+    local keys = {}
+    for k in pairs(t) do keys[#keys + 1] = k end
+    table.sort(keys)
+    local out = {}
+    for _, k in ipairs(keys) do out[#out + 1] = k .. "=" .. tostring(t[k]) end
+    return table.concat(out, " ")
+end
 local a = copy(base)
 es.apply(a, {}, "video")
-expect("defaults: nothing added", line(a), line(base))
+expect("defaults: nothing changed", line(a), line(base))
 es.apply(a, { size = "original", encode = "fast", quality = "displayed" }, "video")
-expect("defaults said: nothing added either", line(a), line(base))
+expect("defaults said: nothing changed either", line(a), line(base))
 expect("displayed: this computer's denoise amount", es.amount({ quality = "displayed" }, "light"), "light")
 
 -- Size and encoder
 a = copy(base)
 es.apply(a, { size = "1080", encode = "quality" }, "video")
-expect("size", has(a, "--resolution 1080"), true)
-expect("encoder", has(a, "--encode quality"), true)
+expect("size", a.resolution, "1080")
+expect("encoder", a.encode, "quality")
 a = copy(base)
 es.apply(a, { size = "720", encode = "quality" }, "photo")
-expect("a photo's size", has(a, "--resolution 720"), true)
-expect("a photo: no encoder", has(a, "--encode"), false)
+expect("a photo's size", a.resolution, "720")
+expect("a photo: no encoder", a.encode, nil)
 
 -- Quickest: each display setting at its lightest
 a = copy(base)
-table.insert(a, "--denoise-strong")
+a.denoise_strong = true
 es.apply(a, { quality = "quickest" }, "video")
-expect("quickest: no denoise", has(a, "--denoise"), false)
-expect("…nor its Stronger", has(a, "--denoise-strong"), false)
-expect("quickest: edges spread out, not the trail", has(a, "--edges smooth"), true)
-expect("quickest: fringes left", has(a, "--chromatic no"), true)
-expect("quickest: bilinear on the GPU path", has(a, "--gpu-interpolation bilinear"), true)
-expect("quickest: bilinear on the pipes", has(a, "--interpolation bilinear"), true)
+expect("quickest: no denoise", a.temporal_denoise, "off")
+expect("quickest: edges spread out, not the trail", a.edges, "smooth")
+expect("quickest: fringes left", a.chromatic, false)
+expect("quickest: bilinear on the GPU path", a.interpolation, "bilinear")
+expect("quickest: bilinear on the pipes", a.engine_interpolation, "bilinear")
 expect("quickest: no denoise amount", es.amount({ quality = "quickest" }, "full"), "off")
-a = { "--edges", "off" }
+a = { edges = "off" }
 es.apply(a, { quality = "quickest" }, "video")
-expect("quickest: no fill stays no fill", has(a, "--edges off"), true)
-a = { "--radius", "0", "--image", "/tmp/f.png" }
+expect("quickest: no fill stays no fill", a.edges, "off")
+a = {}
 es.apply(a, { quality = "quickest" }, "photo")
-expect("quickest photo: not cleaned up", has(a, "--radius 0"), true)
-expect("quickest photo: the frame on screen kept", has(a, "--image /tmp/f.png"), true)
+expect("quickest photo: not cleaned up", a.still_radius, 0)
 
 -- Highest: each at its best
 a = copy(base)
 es.apply(a, { quality = "highest" }, "video")
-expect("highest: full denoise", has(a, "--denoise full"), true)
-expect("highest: the trail", has(a, "--edges sphere"), true)
-expect("highest: fringes as the clip says", has(a, "--chromatic yes"), true)
-expect("highest: Lanczos on the GPU path", has(a, "--gpu-interpolation lanczos"), true)
-expect("highest: Lanczos on the pipes", has(a, "--interpolation lanczos"), true)
+expect("highest: full denoise", a.temporal_denoise, "full")
+expect("highest: the trail", a.edges, "sphere")
+expect("highest: fringes as the clip says", a.chromatic, true)
+expect("highest: Lanczos on the GPU path", a.interpolation, "lanczos")
+expect("highest: Lanczos on the pipes", a.engine_interpolation, "lanczos")
 expect("highest: full even where this computer has it off", es.amount({ quality = "highest" }, "off"), "full")
-a = { "--edges", "smooth" }
+a = { edges = "smooth", denoise = false, temporal_denoise = "light" }
 es.apply(a, { quality = "highest" }, "video")
-expect("highest: smooth becomes the trail", has(a, "--edges sphere"), true)
-expect("highest: no denoise where the clip has none", has(a, "--denoise"), false)
-a = { "--radius", "0", "--image", "/tmp/f.png" }
+expect("highest: smooth becomes the trail", a.edges, "sphere")
+expect("highest: no denoise where the clip has none", a.temporal_denoise, "light")
+a = {}
 es.apply(a, { quality = "highest" }, "photo")
-expect("highest photo: 7 frames each side", has(a, "--radius 7"), true)
-expect("highest photo: rendered by gyroflow-export", has(a, "--image"), false)
+expect("highest photo: 7 frames each side", a.still_radius, 7)
 
 -- What can't be had
 expect("360: its own size", es.unavailable("size", "360") ~= nil, true)

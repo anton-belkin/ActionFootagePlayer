@@ -123,13 +123,14 @@ fn plane_sizes((w, h): (usize, usize)) -> [(usize, usize); 3] { [(w, h), (w / 2,
 
 impl Render360 {
     /// `depth`: 8 (yuv420p frames, a byte a sample) or 10 (yuv420p10le, two); `sphere_width`: the sphere's (0: the
-    /// plugin's default); `heading`: None for the player's choice; `limited_range`: the frames' range
-    pub fn new(video: &str, depth: u32, limited_range: bool, out: Output, heading: Option<Heading>, sphere_width: usize) -> Result<Render360, String> {
+    /// plugin's default); `heading`: None for the player's choice; `limited_range`: the frames' range; `distance`: where
+    /// the lenses' seam is right, in metres (0: the camera's own, else 2 m), as the player's sphere (gyroflow.conf)
+    pub fn new(video: &str, depth: u32, limited_range: bool, out: Output, heading: Option<Heading>, sphere_width: usize, distance: f64) -> Result<Render360, String> {
         let rig = crate::rig::read(video).ok_or_else(|| format!("{video}: not a 360 camera's file"))??;
         let joined = rig.joined_size();
         let kind = if depth > 8 { SampleKind::U16 } else { SampleKind::U8 };
         let width = if sphere_width > 0 { sphere_width } else if let Output::Sphere { width } = out { width.max(DEFAULT_WIDTH) } else { DEFAULT_WIDTH };
-        let sphere = Sphere360::load(video, joined, 3, (kind, depth, true, (1, 1)), Interpolation::Bilinear, width, 0.0, 2)?;
+        let sphere = Sphere360::load(video, joined, 3, (kind, depth, true, (1, 1)), Interpolation::Bilinear, width, distance, 2)?;
         let has = |m: &str| sphere.report.get(m).and_then(|v| v.get("available")).and_then(|v| v.as_bool()) == Some(true);
         let why = |m: &str| sphere.report.get(m).and_then(|v| v.get("why")).and_then(|v| v.as_str()).unwrap_or("not in this clip").to_string();
         let (heading, heading_note) = match heading {

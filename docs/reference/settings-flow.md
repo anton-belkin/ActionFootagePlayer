@@ -1,7 +1,7 @@
 # Settings: where each one is stored and who reads it
 Covers: the player (mpv plugins, `gyroflow-gpu-table`, `warp.glsl`), the export (`export.lua` → `gyroflow-export`), photos and Live Photos, moments, the Library (`renders.rs`, Source settings, Share) and the NAS stream (`afp_stream.py`).
 
-Checked against 295101c (2026-11-25).
+Checked against 295101c (2026-11-25), with the settings JSON (the export takes the player's settings, 2026-11-25).
 
 This is a map, not a design. When a row and the code disagree, the code is right: fix the row.
 Rows cite symbols, not line numbers. One row per setting, so a change touches one row.
@@ -24,14 +24,19 @@ Where a setting is kept:
 - `ud:x`: `user-data/gyroflow/x`, what the gyroflow plugin publishes (`publish`).
 - `req.x`: a key of `gyroflow-gpu-table --player`'s JSON (`player_args`, `gpu_user_data`, `gpu_table`).
 - `PARAM x`: a `//!PARAM` of `shaders/gyroflow/warp.glsl`, set through `glsl-shader-opts`.
+- `set.x`: a key of [the settings JSON](contracts.md#the-settings), which the export takes as it is (`--settings`). A
+  flag in an Export cell is the one the key stands for on gyroflow-export's command line; nothing of ours passes it
+  (`tests/settings_json_test.py`).
 
 The paths:
 
 - **Player**: what reads it and how it reaches the picture.
-- **Export**: `export.lua`. `as_it_plays` builds the flags from the clip playing (Shift+E). `view_args` builds them
-  from a saved view (another clip, a Library batch, `photo-at`). Both end in `cleanup_args`.
-- **Photo**: `photo_full` (Alt+Shift+s: `as_it_plays`) and `photo-at` (`view_args`), into `gyroflow-export --photo`
-  (`still.rs`, `photo.rs`). A Live Photo or Motion Photo adds `--live` and renders its motion with the same flags.
+- **Export**: `export.lua` `export_settings`, one function for every route: the clip playing (Shift+E) sends the
+  gyroflow plugin's own settings (`gpu_settings`, `user-data/gyroflow/settings`: what its warp is made of) with the
+  look and colour as they play (`as_it_looks`); a saved view (another clip, a Library batch, `photo-at`) sends
+  `settings.lua` `of_view`'s. The export's choices go over both (`exportsettings.lua` `apply`).
+- **Photo**: `photo_full` (Alt+Shift+s: the clip playing) and `photo-at` (a saved view), into `gyroflow-export --photo`
+  (`still.rs`, `photo.rs`). A Live Photo or Motion Photo adds `--live` and renders its motion with the same settings.
   A photo link (Alt+s) keeps only `t`, `crop`, `camera`; the Library renders it later.
 - **Moment**: what a moment's link keeps, and what its preview (`preview` message) renders with.
 - **Library**: `renders.rs` `recipe_with` (what is hashed), Source settings (`app.js`, written by `tags.rs`
@@ -48,11 +53,11 @@ The paths:
 | Horizon lock | `view.horizon_lock` (yes, no; "project" read as the preset's); `conf:horizon_lock` | `req.horizon_lock` 0 or 100 | `--horizon-lock 0\|100` | same | `stab.horizon_lock` | `settings.horizon_lock` (`preset_horizon` "no" in `defaults_of`) | `user_data.horizon_lock` |
 | Lens corrected or as recorded | `view.lens`; `conf:lens` | `lens_mode` → `req.lens` (stabilized, recorded, only) | `--lens-recorded`, `--lens-only` | same | `stab.lens` | `settings.lens` | `user_data.lens` |
 | Output projection | `view.projection` (linear, stereographic, equidistant, equisolid, orthographic, project); `conf:projection` | `frame.projection` → `req.projection` (`lens_projection`) | `--projection` (only for the four non-linear ones, lens corrected) | same | `stab.projection` | `settings.projection` | `user_data.projection` |
-| Frame aspect | `view.aspect` (W:H landscape-wise or original); `conf:aspect` | `shown_aspect()` (`transform.concrete`) → `req.aspect` | `--aspect` from `ud:frame_aspect`; `view_args` from `frame_aspect`, worked out by the workspace plugin (`made_view_of`) | same | `stab.aspect` | `settings.aspect`; `frame_aspect` added by the player at render time | `user_data.aspect` |
+| Frame aspect | `view.aspect` (W:H landscape-wise or original); `conf:aspect` | `shown_aspect()` (`transform.concrete`) → `req.aspect` | `set.aspect`: the clip playing's `shown_aspect()`; a saved view's `frame_aspect`, worked out by the workspace plugin (`made_view_of`) | same | `stab.aspect` | `settings.aspect`; `frame_aspect` added by the player at render time | `user_data.aspect` |
 | Frame orientation | `view.orientation` (as-is, landscape, portrait); `conf:orientation` | folded into `shown_aspect()` | inside `--aspect` | same | `stab.orientation` | `settings.orientation` | inside `user_data.aspect` |
-| Water's colour fringes | `view.chromatic`; `conf:chromatic` | `chromatic` → `req.gpu_chromatic` (off when `conf:chromatic_skip`) | `--chromatic yes\|no` (`cleanup_args`); never skipped | same; the screen grab (`gpu_frame`) is not used when skipped | `stab.chromatic` | `settings.chromatic` | **gap**: only with `AFP_CHROMATIC=1` (default off) |
-| Temporal denoise on or off | `view.denoise`; `conf:still` | `still.lua` → `req.gpu_denoise`, `PARAM gyroflow_dn_radius` | `--denoise <amount>` when on (`cleanup_args`) | still: `--radius 0` when off; motion: `--denoise` | `stab.denoise` | `settings.denoise` | **gap**: `gpu_denoise` dropped (`afp_stream.py` pops it) |
-| Denoise Stronger | `view.denoise_strong`; `conf:denoise_strong` | `PARAM gyroflow_dn_strong` | `--denoise-strong` | same | `stab.denoise_strong` | `settings.denoise_strong` | **gap** (no denoise) |
+| Water's colour fringes | `view.chromatic`; `conf:chromatic` | `set.chromatic` → `req.gpu_chromatic` (off when `conf:chromatic_skip`) | `set.chromatic` (`--chromatic`); never skipped | same; the screen grab (`gpu_frame`) is not used when skipped | `stab.chromatic` | `settings.chromatic` | **gap**: only with `AFP_CHROMATIC=1` (default off) |
+| Temporal denoise on or off | `view.denoise`; `conf:still` | `still.lua` → `set.denoise`; `req.gpu_denoise`, `PARAM gyroflow_dn_radius` | `set.denoise` with `set.temporal_denoise` (`--denoise <amount>`) | still: cleaned up where the settings' denoise is on (`still_radius` 0 otherwise); motion: as export | `stab.denoise` | `settings.denoise` | **gap**: `gpu_denoise` dropped (`afp_stream.py` pops it) |
+| Denoise Stronger | `view.denoise_strong`; `conf:denoise_strong` | `PARAM gyroflow_dn_strong`; `set.denoise_strong` | `set.denoise_strong` (`--denoise-strong`) | same | `stab.denoise_strong` | `settings.denoise_strong` | **gap** (no denoise) |
 | Gyroflow project | `<clip>.gyroflow` or `<clip.ext>.gyroflow`; a moment's own `<link>.gyroflow` | `req.project` | `--project` (`ud:project`) | same | own project beside the link; `--project`, `--alone`/`--whole` | `gyroflow` fingerprint in the recipe, else `preset` fingerprint | `user_data.project`; a dep of the cached answer |
 | Preset (no project) | `default.gyroflow` in `$GYROFLOW_DATA` or the plugin folder | `req.preset` | gyroflow-export finds it itself | same | same | `preset` fingerprint (from `render-defaults.json`) | the NAS player's own preset |
 
@@ -63,12 +68,12 @@ kept but not used.
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| Temporal denoise amount | `conf:temporal_denoise` (full, light, off) | `DENOISE_FRAMES` → `PARAM gyroflow_dn_radius`; off: none whatever `view.denoise` | `--denoise full\|light` (`cleanup_args` `amount`; quality preset may override: `exportsettings.lua` `amount`) | motion as export; the still's `--radius 0` checks this computer's `ud:temporal_denoise`, even for a Library photo (**gap**: not the recipe's `opts.temporal_denoise`) | this computer's at render time | `opts.temporal_denoise` (from `render-defaults.json` or `defaults_of`) | **gap** (no denoise) |
-| Grain kept | `conf:still_grain` (0.25) | `PARAM gyroflow_dn_keep` | **gap**: `--grain` never passed, gyroflow-export uses 0.25 | **gap**, same | **gap** | **gap**: not in the recipe | n/a |
+| Temporal denoise amount | `conf:temporal_denoise` (full, light, off) | `DENOISE_FRAMES` → `PARAM gyroflow_dn_radius`; off: none whatever `view.denoise`; `set.temporal_denoise` | `set.temporal_denoise` (a recipe's `opts.temporal_denoise` for a Library render; the quality preset may override: `exportsettings.lua` `apply`) | motion as export; the still is cleaned up as the settings say, a Library photo by its recipe's amount (#319) | this computer's at render time | `opts.temporal_denoise` (from `render-defaults.json` or `defaults_of`) | **gap** (no denoise) |
+| Grain kept | `conf:still_grain` (0.25) | `PARAM gyroflow_dn_keep`; `set.denoise_grain` | `set.denoise_grain` (`--grain`, #314) | same | this computer's at render time | this computer's at render time; **gap**: not in the recipe, so a changed grain doesn't make a new render | in `render.settings`; **gap** (no denoise, #315) |
 | Edge fill | `conf:edges` (sphere, smooth, off) | `edge_mode` → `req.edges` | `--edges` (quality preset may change it) | same | this computer's | `opts.edges` | **gap**: sphere becomes smooth |
 | Edge blur | `conf:edges_blur` | `req.edges_blur` | `--edges-blur` | same | this computer's | `opts.edges_blur` | `user_data.edges_blur` |
-| Sideways jerks (translation) | `conf:translation` (allowed); computed per clip by Ctrl+j into `translation.rs`'s cache; on/off per session (`trans.on`) | `req.gpu_translation`, `PARAM gyroflow_trans` | **gap**: `--with-translation` exists, `export.lua` never passes it | **gap** | **gap** | **gap**: not in bundle or recipe | **gap** |
-| Lens under water default | `conf:underwater` (auto, yes, no, project) | `default_underwater`, used where `source.underwater` is unset | `as_it_plays`: `--underwater` from `ud:underwater`. `view_args`: only `source.underwater` | same | from the original's source | **gap**: not in `render-defaults.json` or `defaults_of`; a batch without `source.underwater` gets gyroflow-export's auto | the NAS player's own conf |
+| Sideways jerks (translation) | `conf:translation` (allowed); computed per clip by Ctrl+j into `translation.rs`'s cache; on/off per session (`trans.on`) | `req.gpu_translation`, `PARAM gyroflow_trans`; `set.translation` (allowed and on) | `set.translation`: taken where computed for the clip, on the GPU path (#313) | same, the clip playing | the clip playing's preview | **gap**: a session's toggle, not in bundle or recipe | **gap** |
+| Lens under water default | `conf:underwater` (auto, yes, no, project: auto) | `default_underwater`, used where `source.underwater` is unset; `defaults.underwater` | the clip playing: `set.underwater` as it plays. A saved view: `source.underwater`, else the defaults' (`transform.render_settings`) | same | from the original's source, else the defaults' | `defaults_of` and `render-defaults.json`'s `defaults.underwater`; in the recipe's settings where the source doesn't say and it's yes or no (#317; auto left out: hashes kept) | the NAS player's own conf |
 | Playback only | `conf:resolution` (→ `PARAM gyroflow_render_scale`), `ask_when_slow`, `chromatic_skip`, `lookahead`, `hwdec`, `gpu_flush`, `still_delay`; `dlogm.conf:denoise` | yes | n/a: a file has every frame at its own size | n/a | n/a | n/a | `AFP_HEIGHT`, `AFP_INTERP` instead |
 | Warp interpolation | none: by frame rate (`INTERPOLATION_SLOW`/`_FAST`: Lanczos up to 31 fps, `SLOW_MAX_FPS`, bicubic above) | `req.interpolation` | export default; quality preset sets `--gpu-interpolation`, `--interpolation` | same | n/a | through `export.quality` | `AFP_INTERP` (bilinear) |
 
@@ -90,7 +95,7 @@ Read and ignored: `still_radius`, `still_tolerance`, and the VapourSynth path's 
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| On | `source.uw`; default `uwcolor.conf:on` | `uwcolor.lua`; dlogm curve becomes `uw` (`underwater_hlg.glsl`) | `as_it_plays`: `--curve uw`; `view_args`: `--uw-color yes` | same | the original's | Source settings `SRC_UW`; `settings.uw` only when on; HDR kept (`resolve`) | **gap**: curve `uw` has no look ("no look for the curve") |
+| On | `source.uw`; default `uwcolor.conf:on` | `uwcolor.lua`; dlogm curve becomes `uw` (`underwater_hlg.glsl`) | the clip playing: `set.curve` uw; a saved view: `set.uw` | same | the original's | Source settings `SRC_UW`; `settings.uw` only when on; HDR kept (`resolve`) | **gap**: curve `uw` has no look ("no look for the curve") |
 | Brighter highlights | `source.uw_highlights`; `uwcolor.conf:highlights` | shader `uw_*` opts | `--uw-highlights` | same | the original's | `SRC_UW` "bright"; `settings.uw_highlights` | **gap** |
 | Strength | `source.uw_strength` (0–1); `uwcolor.conf:strength` | eases the shader's numbers | `--uw-strength` | same, plus `--uw-params` (the numbers on screen) | the original's | Source settings "Strength"; `settings.uw_strength` | **gap** |
 
@@ -115,9 +120,9 @@ left out there.
 | Save frame crop | session; a photo link's `crop` | mpv `video-crop` | n/a | `--crop x,y,w,h` | n/a | recipe `crop` (photo) | n/a |
 | Photo kind (still, Live, Motion) | `conf:live_photo` | n/a | n/a | `--live`, `--format jpeg` | n/a | always a still (`photo-at` `still = true`) | n/a |
 | 360 view (yaw, pitch, roll, fov, projection) | session (`user-data/view360`) | `view360.glsl` `PARAM view360_*` | `--360` exports the whole sphere; the view itself is not passed | `--camera` from crop mode | **gap**: not kept | **gap**: no 360 fields in the recipe | **gap** |
-| 360 heading | session | `PARAM view360_heading` | `--heading` (`start_360`) | n/a | **gap** | **gap** | **gap** |
+| 360 heading | session | `PARAM view360_heading` | `set.heading` (`start_360`) | n/a | **gap** | **gap** | **gap** |
 | 360 recording, its frame, size, tidy | `<clip>.afp.json` `view360.recording` | `recording.lua` | flat: `--reframe recording --size` | n/a | **gap** | **gap** | **gap** |
-| Sphere width, stitching distance | `conf:sphere_width` (0: 5760, `sphere360::DEFAULT_WIDTH`), `conf:stitching_distance` | `gyroflow-gpu-table --sphere360` arguments | **gap**: `start_360` passes neither (`--sphere-width` exists; no flag for the distance) | n/a | n/a | n/a | n/a |
+| Sphere width, stitching distance | `conf:sphere_width` (0: 5760, `sphere360::DEFAULT_WIDTH`), `conf:stitching_distance` | `gyroflow-gpu-table --sphere360` arguments; `set.sphere_width`, `set.stitching_distance` | `start_360`: both in its settings (#320) | n/a | n/a | n/a | n/a |
 
 ## Export choices
 
@@ -138,7 +143,7 @@ the bundle in `stab`. It never keeps the input (read from the original's `source
 denoise amount): those are read when it plays or renders. Its own Gyroflow project lies beside the link.
 
 The preview (`preview` message) is the frame on screen when k was pressed (`--picture`), else rendered by
-gyroflow-export with `view_args` (another clip) or `as_it_plays` (the clip playing).
+gyroflow-export with a saved view's settings (another clip) or the clip playing's.
 
 ## Twins and their guards
 
@@ -184,16 +189,19 @@ Then go through each step. Mark each one in the PR as *done*, *n/a because…*, 
      `gyroflow_conf_cases.json`. Read the conf as mpv's `options.lua` does: nothing trimmed, booleans only yes/no.
    - Computer's option: also into `publish`'s `render-defaults.json`, and `renders.rs` `recipe_with` `opts`.
    - Never in `Project.afproject`.
-2. **Player.** Into `player_args` or `gpu_user_data` (the `--player` JSON) and `vs-gyroflow`'s `PlayerClip`. If it
-   changes the geometry, add it to `gpu_table.rs` `PLAYER_GEOMETRY_KEYS`. A shader value is a `//!PARAM` in
-   `warp.glsl`. Publish it under `user-data/gyroflow/` if export or the panel read it.
-3. **Export.** A `gyroflow-export` flag, working on both its GPU path and its pipes path (`lib.rs`'s engine). Pass it
-   from `as_it_plays` (the live state) and from `view_args` (a saved view). Clean-up settings go in `cleanup_args`.
-   If a quality preset should change it, `exportsettings.lua` `apply`.
+2. **Player.** A key of the settings JSON: registry.json `settings_json` (with `table`, `export`, the flag it stands
+   for, an example), set in `gpu_settings` (or `player_args`, which it starts from) and read by `vs-gyroflow`'s
+   `PlayerClip` if the warp needs it. If it changes the geometry, add it to `gpu_table.rs` `PLAYER_GEOMETRY_KEYS`. A
+   shader value is a `//!PARAM` in `warp.glsl`. Run `python3 tools/gen_reference.py`.
+3. **Export.** `gyroflow-export.rs` `apply_settings` reads the key (its test sends the registry's example and fails
+   until it does), working on both its GPU path and its pipes path (`lib.rs`'s engine); a flag for the command line if
+   you like, parsed into the same `Options`. The clip playing's settings reach it as they are; a saved view's need
+   `gyroflow/settings.lua` `of_view` to set it (a case in `tests/settings_cases.json`). If a quality preset should
+   change it, `exportsettings.lua` `apply`. Never a flag from `export.lua` (`tests/settings_json_test.py`).
 4. **Photo, Live Photo, Motion Photo.** Check `photo_full` and `photo-at`; the still in `still.rs` may need its own
    flag (as the denoise has `--radius`). Check `gpu_frame`: the screen grab must show the same thing, or be skipped.
 5. **Moment.** A bundle key travels in the link's `stab` by itself. Anything else: decide whether a moment keeps it.
-   Check the preview's `view_args` and the Save frame view.
+   Check the preview (a saved view's settings) and the Save frame view.
 6. **Library.** The recipe must change when the pixels change. A bundle or input key is in `settings` already. A
    computer's option goes in `opts`. Keep the default out of the recipe (as `uw` and the export choices are), or
    every render's hash changes. Show or set it in Source settings or Share if the user needs it there. Add it to

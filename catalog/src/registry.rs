@@ -21,6 +21,10 @@ pub struct Registry {
     pub curves: Vec<Curve>,
     pub export: Export,
     pub settings: Vec<Setting>,
+    /// The settings JSON's keys (docs/reference/contracts.md, "The settings"): what the player builds once and
+    /// gyroflow-gpu-table and gyroflow-export take as-is
+    #[serde(default)]
+    pub settings_json: Vec<JsonKey>,
     pub own_folders: Vec<String>,
     pub recycle_bins: Vec<String>,
 }
@@ -89,6 +93,29 @@ pub struct Setting {
     pub gpu: Option<String>,
 }
 
+/// A key of the settings JSON
+#[derive(Debug, Clone, Deserialize)]
+pub struct JsonKey {
+    pub key: String,
+    /// path, number, bool, enum, string, array
+    pub kind: String,
+    #[serde(default)]
+    pub values: Vec<String>,
+    /// gyroflow-gpu-table reads it
+    #[serde(default)]
+    pub table: bool,
+    /// gyroflow-export reads it (apply_settings), as `cli` says on its command line
+    #[serde(default)]
+    pub export: bool,
+    /// Not a setting: what playback adds to the table's request
+    #[serde(default)]
+    pub request: bool,
+    #[serde(default)]
+    pub cli: Vec<String>,
+    /// A value it takes, for the tests
+    pub example: Option<Value>,
+}
+
 pub fn parse(text: &str) -> Registry {
     serde_json::from_str(text).unwrap_or_else(|e| panic!("{PATH}: {e}"))
 }
@@ -96,6 +123,8 @@ pub fn parse(text: &str) -> Registry {
 impl Registry {
     pub fn curve(&self, id: &str) -> Option<&Curve> { self.curves.iter().find(|c| c.id == id) }
     pub fn setting(&self, key: &str) -> Option<&Setting> { self.settings.iter().find(|s| s.key == key) }
+    /// A key of the settings JSON
+    pub fn json_key(&self, key: &str) -> Option<&JsonKey> { self.settings_json.iter().find(|k| k.key == key) }
     /// The settings' keys of a group, in order
     pub fn keys(&self, group: &str) -> Vec<&str> { self.settings.iter().filter(|s| s.group == group).map(|s| s.key.as_str()).collect() }
     /// Each export setting's values, in order (the first its default)
@@ -172,5 +201,29 @@ mod tests {
         let a = r.setting("aspect").unwrap();
         assert!(a.valid(&serde_json::json!("original")) && a.valid(&serde_json::json!("21:9")) && !a.valid(&serde_json::json!("9:16")));
         assert_eq!(r.setting("projection").unwrap().conf_values().len(), 5);
+        assert!(r.json_key("gpu_denoise").is_some_and(|k| k.request && k.table && !k.export));
+        assert!(r.json_key("temporal_denoise").is_some_and(|k| k.export && !k.table));
+    }
+
+    /// Each setting the table reads (registry `gpu`) is a key of the settings JSON the table reads, and every key has
+    /// an example of its kind
+    #[test]
+    fn the_settings_json_has_each_setting() {
+        let r = repo_registry();
+        for s in &r.settings {
+            if let Some(g) = &s.gpu {
+                // (chromatic: the settings' own, the table's gpu_chromatic made of it)
+                let k = r.json_key(g).unwrap_or_else(|| panic!("{PATH}: setting {} says gpu {g}, not a settings_json key", s.key));
+                assert!(k.table || g == "chromatic", "{g}: the table reads it");
+            }
+            if s.exported && s.key != "orientation" && s.key != "view" {
+                assert!(r.json_key(&s.key).is_some() || s.gpu.as_deref().and_then(|g| r.json_key(g)).is_some(), "{PATH}: exported setting {} not in settings_json", s.key);
+            }
+        }
+        for k in &r.settings_json {
+            assert!(k.example.is_some(), "{}: no example", k.key);
+            assert!(k.table || k.export || k.request, "{}: read by nobody", k.key);
+            if k.request { assert!(!k.export, "{}: a request key isn't the export's", k.key); }
+        }
     }
 }

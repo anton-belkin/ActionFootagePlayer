@@ -76,7 +76,7 @@ local print_all = os.getenv("PRINT")
 for _, c in ipairs(doc.cases) do
     local own = c.own ~= NULL and c.own or nil
     local d = c.doc ~= NULL and c.doc or nil
-    local _, rendered = t.render_settings(d, own, doc.defaults)
+    local _, rendered = t.render_settings(d, own, c.defaults or doc.defaults)
     checks = checks + 1
     if print_all then print(c.name .. ": " .. show(rendered)) end
     if c.want and show(rendered) ~= show(c.want) then

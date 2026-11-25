@@ -7,6 +7,7 @@
   env              every AFP_* environment variable, where the product reads or sets it, and where rigs/tests do
   export-flags     every option gyroflow-export takes (its argument match), the first line of its --help text, and
                    who passes it by name
+  settings-json    every key of the settings JSON (registry.json settings_json): who reads it, the flags it stands for
 
 Each list sits between <!-- BEGIN GENERATED: <name> --> and <!-- END GENERATED: <name> --> in contracts.md.
   python3 tools/gen_reference.py           rewrites them
@@ -203,7 +204,26 @@ def export_flags():
     return out
 
 
-SECTIONS = {"script-messages": script_messages, "user-data": user_data, "env": env, "export-flags": export_flags}
+def settings_json():
+    import json
+    reg = json.loads(read("mpv/scripts/workspace/registry.json"))
+    out = ["| Key | Takes | Read by | Stands for | What |", "|---|---|---|---|---|"]
+    for k in reg["settings_json"]:
+        takes = " \\| ".join(k["values"]) if k.get("values") else k["kind"]
+        if "min" in k or "max" in k:
+            takes += f" {k.get('min', '')}–{k.get('max', '')}"
+        who = [w for w, on in (("table", k.get("table")), ("export", k.get("export"))) if on]
+        who = ", ".join(who) or "—"
+        if k.get("request"):
+            who += " (request: playback adds it)"
+        what = (k.get("about") or "") + (f" Not the export's: {k['not']}" if k.get("not") else "")
+        out.append(f"| `{k['key']}` | {takes} | {who} | {', '.join(f'`{f}`' for f in k.get('cli', [])) or '—'} | {what.replace('|', chr(92) + '|').strip()} |")
+    out.append("")
+    out.append(f"{len(reg['settings_json'])} keys, from `mpv/scripts/workspace/registry.json` `settings_json`.")
+    return out
+
+
+SECTIONS = {"script-messages": script_messages, "user-data": user_data, "env": env, "export-flags": export_flags, "settings-json": settings_json}
 
 
 def render(doc):

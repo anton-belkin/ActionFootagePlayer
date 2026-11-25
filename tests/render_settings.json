@@ -36,6 +36,18 @@
     { "name": "the underwater colour off in the source (saved whole): not in the recipe", "doc": { "source": { "curve": "auto", "uw": false, "uw_highlights": false, "uw_strength": 0.6 } }, "own": null,
       "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal", "curve": "auto"} },
     { "name": "the underwater colour on in the source: in the recipe", "doc": { "source": { "uw": true, "uw_highlights": true, "uw_strength": 0.6 } }, "own": null,
-      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal", "uw": true, "uw_highlights": true, "uw_strength": 0.6} }
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal", "uw": true, "uw_highlights": true, "uw_strength": 0.6} },
+    { "name": "#317: the lens under water by default (gyroflow.conf's), where the source doesn't say", "doc": { "view": { "view": "wide" } }, "own": null,
+      "defaults": { "view": "normal", "level": "medium", "horizon_lock": "no", "chromatic": true, "aspect": "original", "orientation": "as-is",
+                    "projection": "linear", "lens": "corrected", "denoise": true, "denoise_strong": false, "preset_horizon": "yes", "underwater": "yes" },
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "wide", "underwater": "yes"} },
+    { "name": "#317: the source's own over the default; auto by default stays out (the recipe's hash as before)", "doc": { "source": { "underwater": "no" } }, "own": null,
+      "defaults": { "view": "normal", "level": "medium", "horizon_lock": "no", "chromatic": true, "aspect": "original", "orientation": "as-is",
+                    "projection": "linear", "lens": "corrected", "denoise": true, "denoise_strong": false, "preset_horizon": "yes", "underwater": "yes" },
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal", "underwater": "no"} },
+    { "name": "#317: auto by default: nothing added", "doc": null, "own": null,
+      "defaults": { "view": "normal", "level": "medium", "horizon_lock": "no", "chromatic": true, "aspect": "original", "orientation": "as-is",
+                    "projection": "linear", "lens": "corrected", "denoise": true, "denoise_strong": false, "preset_horizon": "yes", "underwater": "auto" },
+      "want": {"aspect": "original", "chromatic": true, "denoise": true, "denoise_strong": false, "horizon_lock": "no", "lens": "corrected", "level": "medium", "orientation": "as-is", "projection": "linear", "view": "normal"} }
   ]
 }

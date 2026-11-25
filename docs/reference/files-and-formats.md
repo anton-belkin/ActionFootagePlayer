@@ -476,7 +476,8 @@ Read/written by `workspace/main.lua` (the batch block, `render_moments`) and `li
   own mpv. `platform.lua` `save_options` rewrites keys in place and keeps the rest. Old VapourSynth keys in
   `gyroflow.conf` (`gpu`, `workers`, `max_fps`, …) are read and ignored.
 - **`render-defaults.json`:** `$GYROFLOW_DATA/render-defaults.json`, written by the gyroflow plugin each start when it
-  changed: `{ v: 1, defaults: {…}, edges, edges_blur, temporal_denoise, preset }`. The Library reads it for a render's
+  changed: `{ v: 1, defaults: {…}, edges, edges_blur, temporal_denoise, preset }` (`defaults.underwater`: gyroflow.conf's
+  lens under water for a source that doesn't say, yes, no or auto). The Library reads it for a render's
   recipe (`renders.rs` `player_defaults`; `AFL_PLAYER_DEFAULTS` overrides), else works the defaults out of
   `gyroflow.conf` as the player would (`defaults_of`; shared cases `tests/gyroflow_conf_cases.json`).
 - **`setup-offered`:** an empty marker in `<player data>/` once the setup was offered (`macos/player.sh`).

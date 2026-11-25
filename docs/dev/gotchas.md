@@ -148,6 +148,17 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 - **`tools/one_off/photos_to_links.py --move-renders`** puts the old photos in `_Renders/Photos/<path>`, which Clear
   the render cache keeps (not `<hash>.<profile>`) but Share never finds. Change that step before it's run.
 - **A shell variable holding arguments:** zsh doesn't split `$o` into words. Use `${=o}`, or pass arguments one by one.
+- **Comparing two exports frame by frame:** the HEVC export (VideoToolbox's real-time mode) isn't reproducible: the
+  same command twice gives other frames (PSNR ~50 dB), and so do the pipes. Compare with `--prores` on the GPU path,
+  which is (every frame's hash equal). gyroflow-export outside the app finds Homebrew's ffmpeg, which has no
+  libplacebo, and takes the pipes: point it at the app's with `GYROFLOW_TOOLS=<app>/Contents/Helpers`.
+- **A setting for an export is a key of the settings JSON, never a flag** (`--settings`; registry.json
+  `settings_json`; [contracts](../reference/contracts.md#the-settings)). `tests/settings_json_test.py` fails on a flag
+  a key stands for in the player's Lua; `gyroflow-export`'s test `every_key_the_export_takes_is_read` fails on a key
+  the registry lists and `apply_settings` doesn't read. mpv's `utils.format_json` writes an empty table as `[]`:
+  `--settings []` is read as `{}`.
+- **The player's request is the video itself as `project` when there's no project.** gyroflow-export takes a
+  `.gyroflow` only from the settings, and finds the clip's own project otherwise, as it always did.
 
 ## Motion measured from the picture (.afp-motion)
 

@@ -1,7 +1,7 @@
 # Contracts between processes
 Covers: `mpv/scripts/workspace/main.lua`, `mpv/scripts/gyroflow/{main,export,ahead}.lua`, `library/src/{main,index,seen,share}.rs`, `catalog/src/live.rs`, `vs-gyroflow/src/{gpu_table.rs,bin/*.rs}`, `tools/stream/`, `tools/nas-helper/`
 
-Checked against 295101c (2026-11-25).
+Checked against 295101c (2026-11-25); the settings JSON on its branch (2026-11-25).
 
 What one process hands another: request files, status files, lines on a socket, JSON on stdout. The files a project
 keeps on disk (sidecars, links, `Project.afproject`, the catalog) are in [files-and-formats.md](files-and-formats.md);
@@ -155,6 +155,37 @@ Written by the player (`write_status`) at start, every 0.5 s while running, and 
 
 Between computers there is no channel: each reads the others' journals in `.afp/catalog/` on the share.
 
+## The settings
+
+One JSON object says how a clip is shown: what the warp does, the clean-up, Ctrl+j, the colour and look, a 360
+camera's sphere, an export's own choices. It's built once and taken as it is by everyone who renders the clip:
+
+- **Built by** the gyroflow plugin for the clip playing (`gyroflow/main.lua` `gpu_settings`, published as
+  `user-data/gyroflow/settings` and in `render_args`' dump), and by `gyroflow/settings.lua` `of_view` for a saved
+  view (a moment's, a clip of the Project tab, a Library recipe's `view`). `export.lua` `export_settings` is the one
+  function every route makes its settings with: the plugin's own, or `of_view`'s; the dlogm plugin's look and colour
+  over the clip playing's (`as_it_looks`); the export's choices over both (`exportsettings.lua` `apply`).
+- **Taken by** `gyroflow-gpu-table`: its request is the settings' keys it reads (`settings.lua` `request`) with what
+  only playback adds (below, "request"); and by `gyroflow-export --settings <json|file|->` for every export, photo,
+  Live Photo, moment preview, 360 export and Ctrl+j's measuring (`apply_settings` in `gyroflow-export.rs`).
+- **Through** the Library's batches and renders (the recipe's `view` goes to `export-batch` and `photo-at`, which
+  make it into settings with `of_view`) and the NAS stream (`render_args`' dump: `render.user_data`, the table's
+  request, and `render.settings`, what it's made of).
+- **Rules:** missing keys mean the default. Flags after `--settings` change what it set (the command line, Finder's
+  Quick Actions). A key the export doesn't know is left alone (another reader's); a key it reads with a wrong value is
+  an error. No program of ours passes a flag a key stands for (`tests/settings_json_test.py`). `project` may be the
+  video itself (a clip without a project): the export then finds the clip's own project as it always did. `lens: off`
+  is nothing done (the table is never asked then). The clean-up comes as the clip's switch (`denoise`), how much
+  (`temporal_denoise`), its Stronger and the grain kept; a photo is cleaned up from 5 frames each side where the
+  denoise is on, else none, unless `still_radius` says. `translation` takes Ctrl+j's jerks out where they're computed
+  for the clip, on the GPU path; elsewhere it's left out without an error (`--with-translation` insists).
+- **Checked** by `tests/settings_cases.json`: a saved view's settings (`tests/settings_json_test.lua`) set the same
+  options as the flags the player passed before (`gyroflow-export` tests `settings_set_what_their_flags_did`); every
+  key the registry says the export reads is read (`every_key_the_export_takes_is_read`); the table's own key list is
+  the registry's (`gpu_table.rs` `the_request_is_the_settings_json_s`).
+
+The keys are generated [below](#the-settings-keys).
+
 ## The player and `gyroflow-gpu-table`
 
 `mpv/scripts/gyroflow/main.lua` (`player_args`, `gpu_user_data`, `gpu_table`, `gpu_ahead`),
@@ -173,6 +204,12 @@ On the socket: one line in, `{"json": "<the request, as a JSON string>", "out": 
 reply below.
 
 ### The request
+
+The [settings](#the-settings)' keys the table reads, plus what only playback adds (`gyroflow/main.lua`
+`gpu_user_data`, `gpu_table`): the video's size, `gpu_chromatic` (the settings' `chromatic` unless this screen skips
+it, `chromatic_skip`), `gpu_denoise` (`denoise` where `temporal_denoise` isn't off), `gpu_translation` (gyroflow.conf
+`translation`: the jerks in the shader where computed, on and off by its PARAM), `translation_rev`, `lookahead`, and
+the stretch asked for.
 
 | Key | Meaning | Geometry? |
 |---|---|---|
@@ -199,7 +236,7 @@ reply below.
 | `start`, `until` | Stretch of motion data asked for (s into the clip); without `until`, 20 s | — |
 | `urgent` | Playback waits for it (a seek): read at full speed | — |
 | `full` | All the motion data at once | — |
-| `lookahead`, `chromatic` | Sent by `player_args`; not read by the table any more | — |
+| `lookahead`, `translation_rev` | Sent; not read by the table (in its cache keys, as every key is) | — |
 
 The server keeps up to four loaded clips, keyed by `PLAYER_GEOMETRY_KEYS` plus the project's, preset's and motion
 file's stamps and the lens state. A request that changes only non-geometry keys rewrites the shader alone (~40 ms).
@@ -236,7 +273,12 @@ mpv's list via `gyroflow-shader` to dlogm.
 
 ## gyroflow-export as a subprocess
 
-`mpv/scripts/gyroflow/export.lua`. Flags are listed [below](#gyroflow-export-flags).
+`mpv/scripts/gyroflow/export.lua`. What it renders comes as one JSON, `--settings` ([The settings](#the-settings));
+the other flags are the job's: what to make (`--photo`, `--live`, `--preview`, `--360`, `--reframe`, `--youtube`),
+which part (`--from`, `--to`, `--alone`, `--whole`, `--at`), where (`--output`, `--out`), its link and dates, crop
+mode's `--camera` and `--crop`, the player's frame (`--image`, `--picture`). Flags are listed
+[below](#gyroflow-export-flags); the ones a settings key stands for stay for the command line and Finder's Quick
+Actions.
 
 - **Progress:** `--progress <file>`, JSON rewritten twice a second: `{pid, done, total, fps, eta, background, partial}`
   (`partial`: the unfinished file); `{pid, stage: "measuring", …}` while it measures; `{pid, translation: <%>}` for
@@ -574,11 +616,11 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `gyroflow/chromatic_available` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/chromatic_skip` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/crop` | `mpv/scripts/gyroflow/crop.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/view360/main.lua` |
-| `gyroflow/defaults` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua`, `mpv/scripts/workspace/transform.lua` |
+| `gyroflow/defaults` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/main.lua`, `mpv/scripts/workspace/transform.lua` |
 | `gyroflow/denoise` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/denoise_strong` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/edges` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
-| `gyroflow/edges_blur` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
+| `gyroflow/edges` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/main.lua` |
+| `gyroflow/edges_blur` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/main.lua` |
 | `gyroflow/export_settings` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/exporter` | `mpv/scripts/gyroflow/export.lua` | `mpv/scripts/workspace/main.lua` |
 | `gyroflow/exporting` | `mpv/scripts/gyroflow/export.lua` | — |
@@ -588,7 +630,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `gyroflow/gpu` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/gpu_delay` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/gyroflow/export.lua` and 4 more |
 | `gyroflow/headings360` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
-| `gyroflow/horizon_lock` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/horizon_lock` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/kind` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/last_export` | `mpv/scripts/gyroflow/export.lua` | — |
 | `gyroflow/lens` | `mpv/scripts/gyroflow/main.lua` | — |
@@ -608,11 +650,12 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `gyroflow/resolution` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/rig360` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
 | `gyroflow/rotation` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/session` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/transform.lua` |
+| `gyroflow/session` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/transform.lua` |
+| `gyroflow/settings` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/source_aspect` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/spherical` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
 | `gyroflow/still` | `mpv/scripts/gyroflow/still.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `gyroflow/temporal_denoise` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
+| `gyroflow/temporal_denoise` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/main.lua` |
 | `gyroflow/translation` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/translation_progress` | `mpv/scripts/gyroflow/main.lua` | — |
 | `gyroflow/underwater` | `mpv/scripts/gyroflow/main.lua` | — |
@@ -717,6 +760,70 @@ A key read with nothing listed as its writer is covered by a key above or below 
 
 75 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
+### The settings' keys
+<!-- BEGIN GENERATED: settings-json -->
+<!-- Made by tools/gen_reference.py: don't edit by hand -->
+
+| Key | Takes | Read by | Stands for | What |
+|---|---|---|---|---|
+| `project` | path | table, export | `--project` | The Gyroflow project the clip plays with; without one, the video itself (gyroflow-export: a .gyroflow only, else it finds the clip's own) |
+| `preset` | path | table, export | — | The preset a clip without a project is stabilized with |
+| `fov` | number | table, export | `--fov` | Gyroflow's FOV in place of the project's |
+| `level` | weak \| medium \| strong | table, export | `--level` |  |
+| `wide` | bool | table, export | `--wide` | The wider view (Ctrl+g) |
+| `horizon_lock` | number 0–100 | table, export | `--horizon-lock` | Absent: the project's or preset's |
+| `underwater` | yes \| no \| auto \| project | table, export | `--underwater` |  |
+| `trim_start` | number | table | — | Not the export's: the export's part is the job's (--from, --to, --alone, --whole) |
+| `trim_end` | number | table | — | Not the export's: the job's, as trim_start |
+| `alone` | bool | table | — | Not the export's: the job's, as trim_start |
+| `time_offset` | number | table | — | Not the export's: a moment playing as a video of its own; the export's --from |
+| `rotation` | number | table, export | `--rotation` |  |
+| `aspect` | string | table, export | `--aspect` | The frame's W:H as it shows |
+| `projection` | number 0–4 | table, export | `--projection` | Gyroflow's output projection, 0-4 |
+| `lens` | stabilized \| recorded \| only \| off | table, export | `--lens-recorded`, `--lens-only`, `--no-stabilize` | What the warp does: stabilized, stabilized with the lens as recorded, the lens alone; off: nothing (the table is never asked then) |
+| `interpolation` | bilinear \| bspline \| bicubic \| lanczos \| ewa | table, export | `--gpu-interpolation` | The GPU warp's (bicubic: bicubic9); absent, the export's by the frame rate, as the player's |
+| `engine_interpolation` | bilinear \| bicubic \| lanczos | export | `--interpolation` | The export's pipes path's warp (the quality preset's); absent, Lanczos |
+| `edges` | off \| sphere \| smooth | table, export | `--edges` |  |
+| `edges_blur` | number | table, export | `--edges-blur` |  |
+| `chromatic` | bool | export | `--chromatic` | The water's colour fringes taken out (Ctrl+a), the clip's; the table's gpu_chromatic is it unless this screen skips it |
+| `denoise` | bool | export | `--denoise` | The temporal denoise on for the clip (Ctrl+p) |
+| `temporal_denoise` | full \| light \| off | export | `--denoise` | How much of it: this computer's, a recipe's, a quality preset's |
+| `denoise_strong` | bool | export | `--denoise-strong` |  |
+| `denoise_grain` | number 0–1 | export | `--grain` | How much grain the clean-up keeps (gyroflow.conf still_grain) |
+| `still_radius` | number 0–7 | export | `--radius` | A photo cleaned up from this many frames each side; absent: 5 where the denoise is on, else 0 |
+| `translation` | bool | export | `--with-translation` | Ctrl+j's sideways jerks taken out, where they're computed for the clip (the export: on the GPU path) |
+| `curve` | string | export | `--curve` | The log curve (a registry curve, or none); absent: from the metadata |
+| `uw` | bool | export | `--uw-color` | The underwater colour on a clip with no curve |
+| `uw_strength` | number 0–1 | export | `--uw-strength` |  |
+| `uw_highlights` | bool | export | `--uw-highlights` |  |
+| `uw_params` | array | export | `--uw-params` | The underwater colour's numbers as the player has them now: dr, db, k, ev |
+| `sdr` | maker \| nbcu | export | `--sdr`, `--nbcu` | In SDR: by the maker's LUT or by NBCU's conversion; absent: HDR |
+| `sdr_image` | maker \| nbcu \| macos | export | `--sdr-image` | A photo's SDR image |
+| `dv_rpu` | path | export | `--dv-rpu` |  |
+| `dv_live_l1` | bool | export | `--dv-live-l1` |  |
+| `resolution` | string | export | `--resolution` | The export setting size |
+| `encode` | fast \| quality | export | `--encode` |  |
+| `sphere_width` | number | export | `--sphere-width` | A 360 camera's sphere width (gyroflow.conf sphere_width; 0: the default) |
+| `stitching_distance` | number | export | — | Where a 360 camera's lenses' seam is right, in metres (gyroflow.conf; 0: the camera's own) |
+| `heading` | travel \| camera \| north \| world | export | `--heading` | What straight ahead follows in a 360 export |
+| `input_width` | number | table (request: playback adds it) | — | The video's size |
+| `input_height` | number | table (request: playback adds it) | — |  |
+| `version` | number | table (request: playback adds it) | — | The source's version; a change reloads |
+| `gpu_chromatic` | bool | table (request: playback adds it) | — | chromatic, unless this screen skips it (chromatic_skip) |
+| `gpu_denoise` | bool | table (request: playback adds it) | — | denoise, where temporal_denoise isn't off |
+| `gpu_translation` | bool | table (request: playback adds it) | — | The translation compensation in the shader where computed (gyroflow.conf translation); on and off by its PARAM |
+| `translation_rev` | number | — (request: playback adds it) | — | How often Ctrl+j computed it this session: not read, a new request (and cache key) once it's computed |
+| `gpu_sphere` | bool | table (request: playback adds it) | — | The sphere edge fill allowed (default true) |
+| `moment_end` | number | table (request: playback adds it) | — | A moment's end in its clip: only its part's motion read |
+| `start` | number | table (request: playback adds it) | — |  |
+| `until` | number | table (request: playback adds it) | — |  |
+| `urgent` | bool | table (request: playback adds it) | — |  |
+| `full` | bool | table (request: playback adds it) | — |  |
+| `lookahead` | number | — (request: playback adds it) | — | Sent, not read any more |
+
+54 keys, from `mpv/scripts/workspace/registry.json` `settings_json`.
+<!-- END GENERATED: settings-json -->
+
 ### gyroflow-export flags
 <!-- BEGIN GENERATED: export-flags -->
 <!-- Made by tools/gen_reference.py: don't edit by hand -->
@@ -724,32 +831,33 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | Flag | Takes | What (from `--help`) | Passed by name from |
 |---|---|---|---|
 | `--fingerprint` | <file> | each file's fingerprint, as a link keeps its original's | `mpv/scripts/workspace/main.lua` |
-| `--curve` | <curve> | the log curve | `mpv/scripts/gyroflow/export.lua` |
-| `--uw-color` | <yes\|no> | the player's underwater colour (#273 | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
-| `--uw-strength` | <0..1> | its strength, between the camera's colour (0) and the correction (1, the default) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
-| `--uw-highlights` | <yes\|no> | the light end stretched into HDR's room (2.5x SDR white for the camera's white); no by default | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
-| `--uw-params` | <dr,db,k,ev> | its numbers as given (the player's at the frame shown), for every frame, not measured | `mpv/scripts/gyroflow/export.lua` |
-| `--sdr` |  | D-Log M to Rec.709 (DJI's LUT) instead of HLG | `macos/player.sh`, `mpv/scripts/gyroflow/export.lua`, `windows/launcher/src/main.rs` |
+| `--settings` | <json\|file\|-> | the settings JSON the player builds (docs/reference/contracts.md, "The settings"; its keys | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/gyroflow/settings.lua`, `mpv/scripts/workspace/main.lua` |
+| `--curve` | <curve> | the log curve | — |
+| `--uw-color` | <yes\|no> | the player's underwater colour (#273 | — |
+| `--uw-strength` | <0..1> | its strength, between the camera's colour (0) and the correction (1, the default) | — |
+| `--uw-highlights` | <yes\|no> | the light end stretched into HDR's room (2.5x SDR white for the camera's white); no by default | — |
+| `--uw-params` | <dr,db,k,ev> | its numbers as given (the player's at the frame shown), for every frame, not measured | — |
+| `--sdr` |  | D-Log M to Rec.709 (DJI's LUT) instead of HLG | `macos/player.sh`, `windows/launcher/src/main.rs` |
 | `--nbcu` |  | to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve); an HDR file that isn't log through NBCU's HLG or PQ -> SDR | `mpv/scripts/gyroflow/export.lua` |
-| `--no-stabilize` |  | the color conversion only, as a clip plays with the stabilization off | `mpv/scripts/gyroflow/export.lua` |
-| `--lens-only` |  | the lens corrected (and --projection), nothing smoothed | `mpv/scripts/gyroflow/export.lua` |
-| `--lens-recorded` |  | stabilized with the lens left as recorded (no lens correction, no projection) | `mpv/scripts/gyroflow/export.lua` |
-| `--horizon-lock` | <%> | the horizon lock's amount (0-100, 0 off) instead of the project's or preset's | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--underwater` | <yes\|no\|auto\|project> | the lens under water or not (Gyroflow's "Lens is underwater"), or as the camera says over the clip, the default: its In water / Out of water (Osmo Action 6), … | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--wide` |  | the gyroflow plugin's wider view (Ctrl+g) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--level` | <level> | for a video without a project, the stabilization's level | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
+| `--no-stabilize` |  | the color conversion only, as a clip plays with the stabilization off | — |
+| `--lens-only` |  | the lens corrected (and --projection), nothing smoothed | — |
+| `--lens-recorded` |  | stabilized with the lens left as recorded (no lens correction, no projection) | — |
+| `--horizon-lock` | <%> | the horizon lock's amount (0-100, 0 off) instead of the project's or preset's | `mpv/scripts/gyroflow/main.lua` |
+| `--underwater` | <yes\|no\|auto\|project> | the lens under water or not (Gyroflow's "Lens is underwater"), or as the camera says over the clip, the default: its In water / Out of water (Osmo Action 6), … | `mpv/scripts/gyroflow/main.lua` |
+| `--wide` |  | the gyroflow plugin's wider view (Ctrl+g) | `mpv/scripts/gyroflow/main.lua` |
+| `--level` | <level> | for a video without a project, the stabilization's level | `mpv/scripts/gyroflow/main.lua` |
 | `--fov` | <x> | Gyroflow's FOV (Advanced) instead of the project's | — |
-| `--rotation` | <deg> | the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of the project's rotation; not stabilized, ffmpeg's transpose | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--aspect` | <W:H> | the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16 | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--projection` | <p> | Gyroflow's output projection | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `--edges` | <mode> | what fills the edges the stabilized frame leaves | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
-| `--edges-blur` | <%> | blur of the edge fill, % of the frame height (default 2) | `mpv/scripts/gyroflow/export.lua` |
-| `--denoise` | <off\|light\|full> | the temporal denoise as the player's GPU path plays it (Ctrl+p; its shader, warp.glsl's dn_ passes) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
-| `--denoise-strong` |  | the denoise's Stronger (the clip's transform | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
-| `--chromatic` | <yes\|no> | the water's color fringes taken out where the lens is under water (Ctrl+a; the player's chromatic.glsl), yes by default; no | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
+| `--rotation` | <deg> | the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of the project's rotation; not stabilized, ffmpeg's transpose | `mpv/scripts/gyroflow/main.lua` |
+| `--aspect` | <W:H> | the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16 | `mpv/scripts/gyroflow/main.lua` |
+| `--projection` | <p> | Gyroflow's output projection | `mpv/scripts/gyroflow/main.lua` |
+| `--edges` | <mode> | what fills the edges the stabilized frame leaves | — |
+| `--edges-blur` | <%> | blur of the edge fill, % of the frame height (default 2) | — |
+| `--denoise` | <off\|light\|full> | the temporal denoise as the player's GPU path plays it (Ctrl+p; its shader, warp.glsl's dn_ passes) | — |
+| `--denoise-strong` |  | the denoise's Stronger (the clip's transform | — |
+| `--chromatic` | <yes\|no> | the water's color fringes taken out where the lens is under water (Ctrl+a; the player's chromatic.glsl), yes by default; no | — |
 | `--prores` |  | ProRes 422 HQ instead of HEVC 10-bit | — |
-| `--dv-rpu` | <file> | HLG as Dolby Vision 8.4 (PQ as 8.1 | `mpv/scripts/gyroflow/export.lua` |
-| `--dv-live-l1` |  | with --dv-rpu | `mpv/scripts/gyroflow/export.lua` |
+| `--dv-rpu` | <file> | HLG as Dolby Vision 8.4 (PQ as 8.1 | — |
+| `--dv-live-l1` |  | with --dv-rpu | — |
 | `--youtube` | <look> | for YouTube | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/exportkind.lua`, `mpv/scripts/workspace/main.lua` |
 | `--youtube-lut` | <full\|data> | the LUT's levels | — |
 | `--from` | <time> | start at this time (seconds, or m:ss) | `library/src/share.rs`, `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
@@ -763,37 +871,37 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--cover` | <time> | a flipbook's cover art (its icon) | `mpv/scripts/workspace/main.lua` |
 | `--link` | <json> | the link to the original the player keeps in an export (an MP4 key, ch.actionfootageplayer.link | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
 | `--dates` | <time> | its date, ISO 8601 with the time zone (2026-10-22T15:28:42+02:00) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/moments.lua` |
-| `--project` | <file> | stabilize with this Gyroflow project instead of the video's own (one video only) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
+| `--project` | <file> | stabilize with this Gyroflow project instead of the video's own (one video only) | — |
 | `--force` |  | replace an existing output instead of skipping the video | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/main.lua` |
-| `--interpolation` |  | bilinear \| bicubic \| lanczos (default lanczos) | `mpv/scripts/gyroflow/exportsettings.lua` |
+| `--interpolation` |  | bilinear \| bicubic \| lanczos (default lanczos) | — |
 | `--encoder` | <name> | ffmpeg's HEVC encoder, e.g. hevc_nvenc, hevc_qsv, hevc_amf, hevc_vaapi, libx265 (default: VideoToolbox on macOS, else the first of these that works) | — |
 | `--resolution` | <r> | the output's short side at most | `mpv/scripts/gyroflow/exportsettings.lua` |
 | `--encode` | <fast\|quality> | fast (the default) | `mpv/scripts/gyroflow/exportsettings.lua` |
 | `--gpu` | <auto\|on\|off> | the GPU path | — |
-| `--gpu-interpolation` | <i> | its warp's interpolation | `mpv/scripts/gyroflow/exportsettings.lua` |
+| `--gpu-interpolation` | <i> | its warp's interpolation | — |
 | `--with-translation` |  | the translation compensation kept for the clip (the player's Ctrl+j), on the GPU path | — |
 | `--progress` | <file> | write the progress there as JSON, twice a second | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/view360/main.lua` |
 | `--control` | <file> | read stop / background / normal from this file while running (for Windows, which has no SIGUSR1/SIGUSR2) | `mpv/scripts/gyroflow/export.lua` |
 | `--photo` | <time> | the frame at that time as a still instead, with a gain map where there's an HDR look | `mpv/scripts/gyroflow/export.lua` |
 | `--translation` |  | the hand's sideways jerks computed for each video instead of exporting it, and kept for | `mpv/scripts/gyroflow/main.lua` |
-| `--radius` | <n> | clean it up from n frames on each side (0-7, default 5; 0 | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
+| `--radius` | <n> | clean it up from n frames on each side (0-7, default 5; 0 | — |
 | `--grain` | <x> | how much of its grain the clean-up keeps (0-1, default 0.25) | — |
 | `--camera` | <yaw,pitch,roll,zoom> | the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua; a video export takes it too) | `mpv/scripts/gyroflow/crop.lua`, `mpv/scripts/gyroflow/export.lua` |
 | `--crop` | <x,y,w,h> | the part of the frame to keep, in shares of its width and height (0-1; a video export's too), of the frame as --rotation and --aspect have it | `mpv/scripts/gyroflow/export.lua` |
 | `--image` | <file.png> | the photo's frame as the player rendered it on the GPU (its warp, crop mode's camera, the look in HLG) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/exportsettings.lua` |
 | `--picture` | <image> | a still's frame as given (the player's frame as shown, an SDR picture) | `mpv/scripts/gyroflow/export.lua` |
-| `--sdr-image` | <maker\|nbcu\|macos> | the SDR image | `mpv/scripts/gyroflow/export.lua` |
+| `--sdr-image` | <maker\|nbcu\|macos> | the SDR image | — |
 | `--format` | <heic\|jpeg> | HEIC (macOS: afp-photo) or Ultra HDR JPEG (the default elsewhere) | `mpv/scripts/gyroflow/export.lua` |
 | `--quality` | <0-100> | the image's quality (default 92) | — |
 | `--live` |  | with the motion around it, 1.5 s on each side, as the export plays it (--sdr, --nbcu, --dv-rpu say how; at most 1920 wide or high) | `mpv/scripts/gyroflow/export.lua` |
 | `--360` |  | a stabilized 360 video | `mpv/scripts/gyroflow/export.lua` |
 | `--reframe` | <keys> | a flat video looking along the head's keyframes, "t:yaw,pitch,roll,fov;..." (seconds of the clip, degrees | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/view360/main.lua` |
 | `--measure-hold` |  | with --reframe recording | `mpv/scripts/view360/main.lua` |
-| `--heading` | <mode> | what straight ahead follows | `mpv/scripts/gyroflow/export.lua` |
+| `--heading` | <mode> | what straight ahead follows | — |
 | `--sphere-width` | <px> | the sphere's width (default 5760; the 360 video's size, its height half of it) | — |
 | `--size` | <WxH> | a reframe's size (default 1920x1080) | `mpv/scripts/gyroflow/export.lua` |
 | `--view` | <p> | a reframe's projection | — |
 | `--background` |  | start at background priority (SIGUSR1 / SIGUSR2 switch it later) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/view360/main.lua`, `mpv/scripts/workspace/main.lua` |
 
-71 flags, from the argument match in `vs-gyroflow/src/bin/gyroflow-export.rs`; the full text is `gyroflow-export --help`.
+72 flags, from the argument match in `vs-gyroflow/src/bin/gyroflow-export.rs`; the full text is `gyroflow-export --help`.
 <!-- END GENERATED: export-flags -->
