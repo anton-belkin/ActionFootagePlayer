@@ -1157,7 +1157,10 @@ async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Res
     // In the background: the window never waits on it (a share can take seconds)
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Value {
-    probes.lock().unwrap().since(since)
+    let mut p = probes.lock().unwrap();
+    // A lens changed in the player (its lens database, not the project's files: no catalog change says so)
+    p.lens_list_check();
+    p.since(since)
 }).await.map_err(|e| e.to_string())
 }
 

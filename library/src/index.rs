@@ -17,7 +17,7 @@
 // ("Generated/2026-11-10 14-32 Moments/Turtle.afplink.mp4", "_Moments/Reef/Turtle.afplink.mp4").
 
 use serde_json::{ json, Value };
-use std::collections::{ HashMap, HashSet, VecDeque };
+use std::collections::{ BTreeMap, BTreeSet, HashMap, HashSet, VecDeque };
 use std::fs::File;
 use std::io::{ Read, Seek, SeekFrom };
 use std::path::{ Path, PathBuf };
@@ -755,6 +755,8 @@ pub struct Probes {
     version: u64,
     pub tool: Option<PathBuf>,
     pub busy: bool,
+    /// The player's lens database as last looked at (lens_list_check): None, not looked at yet
+    lenses_seen: Option<(String, BTreeMap<String, String>)>,
 }
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
@@ -762,14 +764,42 @@ pub type SharedProbes = Arc<Mutex<Probes>>;
 /// The user's own lens list (vs-gyroflow's lens_pick::user_file, the same place): what tells its versions apart, ""
 /// when there's none. The probe's answer about a clip's lens is worked out with it, so it's kept only while that stays
 /// the same (lens_pick::user_file_stamp)
-pub fn lens_list_stamp() -> String {
+fn curated_lenses_file() -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let file = env("AFP_CURATED_LENSES").or_else(|| {
+    env("AFP_CURATED_LENSES").or_else(|| {
         let base = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
                    else if cfg!(windows) { env("APPDATA")? }
                    else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
         Some(base.join("ActionFootagePlayer").join("curated_lenses.json"))
-    });
+    })
+}
+
+/// The player's own lens database (lens_db's user folder): each lens file's name -> its size and time
+pub fn lens_dir_entries() -> BTreeMap<String, String> {
+    let Some(d) = curated_lenses_file().and_then(|f| Some(f.parent()?.join("lenses"))) else { return BTreeMap::new() };
+    std::fs::read_dir(&d).into_iter().flatten().flatten().filter_map(|e| {
+        let m = e.metadata().ok()?;
+        Some((e.file_name().to_string_lossy().into_owned(), format!("{}:{:?}", m.len(), m.modified().ok())))
+    }).collect()
+}
+
+/// The cameras whose lenses differ between two looks at the lens database (`dir` its folder): a lens file read for its
+/// camera_brand and camera_model, a removed one named for it ("GoPro_HERO4_Black-wide-….json": "GoPro HERO4 Black")
+pub fn lens_cameras_changed(before: &BTreeMap<String, String>, now: &BTreeMap<String, String>, dir: Option<&Path>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let names: BTreeSet<&String> = before.keys().chain(now.keys()).collect();
+    for n in names {
+        if before.get(n) == now.get(n) { continue; }
+        let from_file = dir.and_then(|d| read_json(&d.join(n))).map(|v| format!("{} {}", v["camera_brand"].as_str().unwrap_or(""), v["camera_model"].as_str().unwrap_or("")).trim().to_string())
+            .filter(|c| !c.is_empty());
+        let camera = from_file.unwrap_or_else(|| n.split('-').next().unwrap_or("").replace('_', " ").trim().to_string());
+        if !camera.is_empty() && !out.contains(&camera) { out.push(camera); }
+    }
+    out
+}
+
+pub fn lens_list_stamp() -> String {
+    let file = curated_lenses_file();
     let list = file.as_ref().and_then(|f| std::fs::metadata(f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
         .unwrap_or_default();
     // And the player's own lens database beside it (vs-gyroflow's lens_db::user_stamp, the same): a lens assigned to a
@@ -827,7 +857,9 @@ impl Probes {
     /// comes again. How many are asked again
     pub fn lens_saved_for(&mut self, camera: &str, before: &str, whole: Option<(&str, &str)>) -> usize {
         let now = lens_list_stamp();
-        let key = |c: &str| c.to_lowercase().replace(' ', "");
+        // This change is known: lens_list_check doesn't take it for the player's
+        self.lenses_seen = Some((now.clone(), lens_dir_entries()));
+        let key = |c: &str| c.to_lowercase().replace([' ', '_'], "");
         let mut again = Vec::new();
         let mut patched = Vec::new();
         for (p, e) in self.known.iter_mut() {
@@ -848,6 +880,19 @@ impl Probes {
         first.extend(rest);
         self.queue = first;
         again.len()
+    }
+    /// The lens database changed by something other than this Library (the player's lens dialog: Use for the mode,
+    /// Forget, Estimate kept): the clips of the cameras whose lenses changed asked again, as when the Library saves
+    /// one (lens_saved_for). How many are asked again
+    pub fn lens_list_check(&mut self) -> usize {
+        let now = lens_list_stamp();
+        let Some((before, entries)) = self.lenses_seen.clone() else { self.lenses_seen = Some((now, lens_dir_entries())); return 0 };
+        if before == now { return 0; }
+        let entries_now = lens_dir_entries();
+        let dir = curated_lenses_file().and_then(|f| Some(f.parent()?.join("lenses")));
+        let cameras = lens_cameras_changed(&entries, &entries_now, dir.as_deref());
+        self.lenses_seen = Some((now, entries_now));
+        cameras.iter().map(|c| self.lens_saved_for(c, &before, None)).sum()
     }
     /// What's known that changed after `since`: (version now, path -> answer, how many wait)
     pub fn since(&self, since: u64) -> Value {
@@ -1118,6 +1163,25 @@ pub(crate) mod tests {
         assert!(queued.contains(&paths[0]) && queued.contains(&paths[1]) && !queued.contains(&paths[2]));
         assert_eq!(p.known[&paths[2]].2, now);
         assert_eq!(p.known[&paths[3]].2, "older");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The player's lens dialog changed the lens database: the cameras of the lens files that came, changed or went
+    #[test]
+    fn lens_cameras_changed_in_the_player() {
+        let dir = std::env::temp_dir().join(format!("afl-lensdir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("GoPro_HERO7_Black-linear-2704x1520-59940.json"), br#"{"camera_brand":"GoPro","camera_model":"HERO7 Black"}"#).unwrap();
+        let m = |l: &[(&str, &str)]| l.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<BTreeMap<_, _>>();
+        let before = m(&[("GoPro_HERO4_Black-wide-1920x1080-59940.json", "1:a"), ("DJI_Action6-x.json", "1:a")]);
+        let now = m(&[("DJI_Action6-x.json", "1:a"), ("GoPro_HERO7_Black-linear-2704x1520-59940.json", "2:b")]);
+        assert_eq!(lens_cameras_changed(&before, &now, Some(&dir)), vec!["GoPro HERO4 Black".to_string(), "GoPro HERO7 Black".to_string()]);
+        assert!(lens_cameras_changed(&now, &now, Some(&dir)).is_empty());
+        // A camera named either way is the same one (lens_saved_for)
+        let mut p = Probes::default();
+        p.known.insert("/x/A.MP4".into(), (1, 1, "l".into(), json!({ "camera": "GoPro HERO4 Black" })));
+        p.known.insert("/x/B.MP4".into(), (1, 1, "l".into(), json!({ "camera": "DJI Osmo Action 6" })));
+        assert_eq!(p.lens_saved_for("GoPro_HERO4 Black", "l", None), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
