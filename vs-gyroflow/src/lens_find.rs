@@ -62,6 +62,11 @@ pub struct Kept {
     pub no_translation: bool,
     pub estimate: Option<Tried>,
     pub doubts: Vec<String>,
+    /// Found with Quick on (stopped at the first lens that fits), and how many lenses it left untried then
+    #[serde(default)]
+    pub quick: bool,
+    #[serde(default)]
+    pub untried: usize,
 }
 
 /// Where a clip's findings are kept
@@ -183,8 +188,10 @@ fn other_lens_mod(brand: &str, model: &str, lens_mode: &str, names: &[&str]) -> 
     names.iter().any(|n| max_word(n)) && !lens_mode.to_ascii_lowercase().contains("max")
 }
 
-/// Find: the known lenses tried on three parts of the clip. `progress`: 0-1
-pub fn find(path: &Path, progress: &(dyn Fn(f64) + Sync), stop: &(dyn Fn() -> bool + Sync)) -> Result<Kept, String> {
+/// Find: the known lenses tried on three parts of the clip, nearest first. `quick`: stopped at the first that fits (a
+/// "good" verdict, with a readout: its own or measured), else every one tried and the nearest of those that fit taken
+/// (Gyroflow's Auto). `progress`: 0-1; `partial`: what's found so far, after each lens (the dialogs show it as it comes)
+pub fn find(path: &Path, quick: bool, progress: &(dyn Fn(f64) + Sync), stop: &(dyn Fn() -> bool + Sync), partial: &dyn Fn(&Kept)) -> Result<Kept, String> {
     let v = video(path)?;
     let candidates = candidates_for(&v);
     if candidates.is_empty() { return Err(format!("{} {}: no known lens of this camera to try", v.camera.0, v.camera.1)); }
@@ -196,24 +203,45 @@ pub fn find(path: &Path, progress: &(dyn Fn(f64) + Sync), stop: &(dyn Fn() -> bo
     }
     let media = media(path);
     let current = media[0];
-    let known = lfv::find_known(&fragments, &candidates, &media, current, stop, &|p| progress(0.6 + 0.4 * p));
-    if stop() { return Err("cancelled".into()); }
-    let tried: Vec<Tried> = known.tried.iter().zip(&candidates).enumerate().map(|(i, (r, c))| {
-        let m = r.matching();
-        Tried {
-            n: i.to_string(), name: c.label(), verdict: verdict_name(m.verdict).into(), fits: r.accepted || matches!(m.verdict, Verdict::Good | Verdict::Single),
-            refraction: r.refraction(), medium_sure: r.medium_sure, readout_ms: m.readout_ms, readout_measured: m.readout_measured,
-            moved: m.moved, limit: m.limit,
-            profile: profile_of(c, &v, m.readout_ms).and_then(|p| p.get_json().ok()).and_then(|j| serde_json::from_str(&j).ok()),
-        }
-    }).collect();
     let mut k = read_kept(path).unwrap_or_default();
     k.clip = v.path.clone();
     k.mode = crate::lens_db::ModeKey::of(&v.path, &v.clip).describe();
-    k.accepted = known.accepted.map(|i| i.to_string());
-    k.fragments_with_scene = known.fragments_with_scene;
-    k.no_translation = known.no_translation;
-    k.tried = tried;
+    k.quick = quick;
+    k.tried.clear();
+    k.accepted = None;
+    k.untried = 0;
+    // One lens at a time, each told on its own (what's found so far shown as it comes, and Quick stops early)
+    let mut known = lfv::KnownProfiles::default();
+    for (i, c) in candidates.iter().enumerate() {
+        let n = candidates.len() as f64;
+        let one = lfv::find_known(&fragments, std::slice::from_ref(c), &media, current, stop, &|p| progress(0.6 + 0.4 * (i as f64 + p) / n));
+        if stop() { return Err("cancelled".into()); }
+        let Some(r) = one.tried.into_iter().next() else { continue };
+        known.fragments_with_scene = known.fragments_with_scene.max(one.fragments_with_scene);
+        known.no_translation |= one.no_translation;
+        let m = r.matching();
+        let good = m.verdict == Verdict::Good;
+        k.tried.push(Tried {
+            n: i.to_string(), name: c.label(), verdict: verdict_name(m.verdict).into(), fits: good || m.verdict == Verdict::Single,
+            refraction: r.refraction(), medium_sure: r.medium_sure, readout_ms: m.readout_ms, readout_measured: m.readout_measured,
+            moved: m.moved, limit: m.limit,
+            profile: profile_of(c, &v, m.readout_ms).and_then(|p| p.get_json().ok()).and_then(|j| serde_json::from_str(&j).ok()),
+        });
+        known.tried.push(r);
+        k.fragments_with_scene = known.fragments_with_scene;
+        k.no_translation = known.no_translation;
+        // Kept as it goes, for the lens dialogs to show what's found so far (gyroflow-optical --lenses)
+        write_kept(path, &k);
+        partial(&k);
+        // Good enough: it fits, with a readout to correct the rolling shutter by
+        if quick && good && m.readout_ms.is_some() {
+            k.untried = candidates.len() - i - 1;
+            break;
+        }
+    }
+    // The nearest of those that fit (Quick: the one it stopped at)
+    k.accepted = (0..known.tried.len()).filter(|i| known.tried[*i].matching().verdict == Verdict::Good)
+        .min_by(|a, b| known.tried[*a].matching().moved.total_cmp(&known.tried[*b].matching().moved)).map(|i| i.to_string());
     write_kept(path, &k);
     Ok(k)
 }
@@ -291,5 +319,75 @@ mod tests {
         assert!(!super::other_lens_mod("GoPro", "HERO12 Black", "Linear", &["GoPro_HERO12 Black_Linear_4K", "", ""]));
         assert!(!super::other_lens_mod("GoPro", "MAX", "", &gx0020));
         assert!(!super::other_lens_mod("DJI", "OsmoAction6", "Wide", &["DJI Max wide", "", ""]));
+    }
+}
+
+/// A lens as the dialogs compare names: "GoPro_HERO4 Black_Medium__2.7k_..._23.98fps - estimated from footage" and
+/// "GoPro HERO4 Black Medium 2.7k ..._23.98fps, built in" are the same one
+fn same_name(name: &str) -> String {
+    let mut s = name.to_lowercase().replace('_', " ");
+    for tail in [" - estimated from footage", ", built in", ", estimated from footage", ", assigned", ", found in the footage, readout measured",
+                 ", found in the footage", " (scaled)", " (cropped)"] {
+        if let Some(i) = s.find(tail) { s.truncate(i); }
+    }
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The lenses to choose from for a clip's mode, as the Library's and the player's lens dialog show them (`gyroflow-optical
+/// --lenses`): the lens in use, then each lens with what Find or Estimate said of it on this clip (its verdict, its
+/// readout, measured or its own) and how it's used: {"keep": n} (one found: kept with the readout measured, lens_find::keep)
+/// or {"assign": id} (one of the mode's: lens_pick::assign). The ones found first, then those not tried
+pub fn choices(path: &Path) -> Result<serde_json::Value, String> {
+    use serde_json::json;
+    let p = path.to_string_lossy().into_owned();
+    let info = crate::probe::lens_info(&p).ok_or("the clip can't be read")?;
+    if info.from == "file" {
+        return Ok(json!({ "path": p, "camera": info.camera, "mode": info.mode_key, "in_file": true, "now": { "name": info.lens, "from": "file" }, "lenses": [] }));
+    }
+    let v = video(path)?;
+    let now_pick = crate::lens_pick::for_clip(&v.path, &v.clip, false);
+    let now = json!({ "name": info.lens, "from": info.from, "readout_ms": now_pick.as_ref().and_then(|p| p.profile.frame_readout_time).map(f64::abs) });
+    let now_name = same_name(&info.lens);
+    let cands = crate::lens_pick::candidates(&v.path, &v.clip, 24);
+    let source = |c: &crate::lens_pick::Candidate| if !c.local { "Gyroflow’s database" } else if c.label.ends_with(", built in") { "built into the player" } else { "the player’s own" };
+    let k = read_kept(path);
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    if let Some(k) = &k {
+        let row = |t: &Tried, estimated: bool| {
+            let cand = cands.iter().find(|(c, _)| same_name(&c.label) == same_name(&t.name)).map(|(c, _)| c);
+            let used = if t.profile.is_some() { json!({ "keep": t.n }) } else if let Some(c) = cand { json!({ "assign": c.id }) } else { serde_json::Value::Null };
+            json!({ "name": if estimated { "Estimated from this clip".to_string() } else { cand.map(|c| c.label.clone()).unwrap_or_else(|| t.name.replace('_', " ")) },
+                    "about": if estimated { t.name.clone() } else { String::new() },
+                    "source": if estimated { "estimated from this clip" } else { cand.map(source).unwrap_or("Gyroflow’s database") },
+                    "verdict": t.verdict, "fits": t.fits, "readout_ms": t.readout_ms.map(f64::abs), "readout_measured": t.readout_measured,
+                    "moved": t.moved, "limit": t.limit, "refraction": t.refraction, "medium_sure": t.medium_sure,
+                    "in_use": !estimated && same_name(&t.name) == now_name, "use": used })
+        };
+        if let Some(e) = &k.estimate { rows.push(row(e, true)); }
+        for t in &k.tried { seen.insert(same_name(&t.name)); rows.push(row(t, false)); }
+    }
+    // Gyroflow's database has the built-in ones too (lens_profiles#41 is in it since v43): the player's own copy shown
+    let file_key = |id: &str| { let f = id.rsplit(['/', ':']).next().unwrap_or(id); same_name(&f.split('#').next().unwrap_or(f).trim_end_matches(".json").replace(' ', "_")).replace(' ', "") };
+    let local_keys: std::collections::HashSet<String> = cands.iter().filter(|(c, _)| c.local).map(|(c, _)| file_key(&c.id)).collect();
+    for (c, prof) in &cands {
+        if !c.local && local_keys.contains(&file_key(&c.id)) { continue; }
+        if !seen.insert(same_name(&c.label)) { continue; }
+        rows.push(json!({ "name": c.label, "source": source(c), "verdict": "untried", "fits": false,
+                          "readout_ms": prof.frame_readout_time.filter(|r| *r != 0.0).map(f64::abs), "readout_measured": false,
+                          "exact": c.exact, "in_use": same_name(&c.label) == now_name, "use": { "assign": c.id } }));
+    }
+    Ok(json!({ "path": p, "camera": info.camera, "mode": info.mode_key, "in_file": false, "now": now, "lenses": rows,
+               "found": k.as_ref().map(|k| json!({ "quick": k.quick, "untried": k.untried, "accepted": k.accepted, "fragments_with_scene": k.fragments_with_scene,
+                                                     "estimated": k.estimate.is_some(), "tried": k.tried.len() })) }))
+}
+
+#[cfg(test)]
+mod names {
+    #[test]
+    fn same_lens_by_either_name() {
+        assert_eq!(super::same_name("GoPro_HERO4 Black_Medium__2.7k_16by9_2704x1520-23.98fps - estimated from footage"),
+                   super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps, built in"));
+        assert_ne!(super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps"), super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-29.97fps"));
     }
 }

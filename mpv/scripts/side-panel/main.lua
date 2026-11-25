@@ -44,6 +44,8 @@ local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
 -- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
 local notify = require 'notify'
+-- The lens dialog (Source › Lens for the mode › Choose…), one of the panel's popovers
+local lensdlg = require 'lensdialog'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -435,24 +437,17 @@ local function source_part(u, x, w, y)
             u:text(x + w, y + 9 * s, v, { align = 6, size = 12, color = r[2]:find("^No ready lens") and C.saved or C.dim })
             y = y + 22 * s
         end
-        -- A lens chosen by hand for the clip's whole mode (the player's own lens database): its camera's lenses, the ones
-        -- made for exactly this mode first (gyroflow-probe --lens's candidates)
+        -- The lens for the clip's whole mode, chosen in the lens dialog (lensdialog.lua: the mode's lenses, with Find and
+        -- Estimate run on this clip, as the Library's); not for a clip whose camera wrote its lens into the file
         local cands = type(l.candidates) == "table" and l.candidates or {}
-        if not project and #cands > 0 then
-            local pick_rows = {}
-            for _, c in ipairs(cands) do
-                local label = tostring(c.label or c.id)
-                if #label > 52 then label = label:sub(1, 50):gsub("[\194-\244][\128-\191]*$", "") .. "…" end
-                pick_rows[#pick_rows + 1] = { kind = c.id, label = (c.exact and "● " or "") .. label,
-                                              note = c["local"] and "the player's own" or (c.readout and "Gyroflow's" or "Gyroflow's, no readout"),
-                                              cmd = "script-message-to gyroflow assign-lens " .. string.format("%q", c.id) }
-            end
-            if (l.lens or ""):find(", assigned$") then
-                pick_rows[#pick_rows + 1] = { kind = "forget", label = "Forget the lens assigned to this mode", cmd = "script-message-to gyroflow forget-lens" }
-            end
-            y = u:select_row(x, w, y + 4 * s, "lens-pick", "Lens for the mode", pick_rows, nil, { text = (l.from or "") == "" and "Choose…" or "Another…" })
+        local in_file = l.from == "file" or l.lens == "in the file"
+        if not project and not in_file and (l.camera or "") ~= "" then
+            u:text(x, y + 4 * s + 14 * s, "Lens for the mode", { size = 13 })
+            local bw = 110 * s
+            u:button(x + w - bw, bw, y + 4 * s, "lens-choose", "Choose…", function() lensdlg.open(); set_popover(lensdlg.ID) end)
+            y = y + 4 * s + 34 * s
             y = u:caption(x, w, y, ((l.from or "") == "" and "No ready lens: none is made for exactly this mode, with its readout. " or "")
-                .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode") .. (measured and ". Measure the motion again after" or ""))
+                .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode"))
         end
         if not known and g.lens and #cands == 0 then
             y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected")
@@ -1957,7 +1952,13 @@ local function draw(w, h, s, hovered, final)
     end
     rail_button(0, "support", "Support", function() choose("support") end, open and tab == "support", h - (8 + 36) * s)
     -- The list open over it all; closed when what it's for isn't there any more (another tab, the export started)
-    local where = u:popover(t0 + 8 * s, h - 8 * s, seen)
+    local where
+    if popover == lensdlg.ID then
+        u.pending = nil
+        where = lensdlg.draw(u, state("gyroflow") or {}, w - width(s), h, t0, function() set_popover(nil) end)
+    else
+        where = u:popover(t0 + 8 * s, h - 8 * s, seen)
+    end
     shown_list = u.shown_list
     if not where and popover then set_popover(nil) end
     return u
@@ -2103,6 +2104,11 @@ end
 local function wheel(dir)
     return function(info)
         if info.event == "up" then return end
+        -- The lens dialog scrolls its list
+        if popover == lensdlg.ID then
+            if dir == 1 or dir == -1 then lensdlg.wheel(dir) end
+            return render()
+        end
         -- The list open closes as the panel scrolls; over the video (the mouse is the panel's while it's open), that's all
         if popover then
             set_popover(nil)
@@ -2181,6 +2187,7 @@ end
 local LIST_KEYS = { { "UP", "popover-up" }, { "DOWN", "popover-down" }, { "ENTER", "popover-enter" }, { "KP_ENTER", "popover-kp-enter" } }
 
 local function list_move(dir)
+    if popover == lensdlg.ID then lensdlg.move(dir); return update() end
     local l = shown_list
     if not l then return end
     local rows = {}
@@ -2196,6 +2203,10 @@ local function list_move(dir)
 end
 
 local function list_enter()
+    if popover == lensdlg.ID then
+        if lensdlg.enter() then set_popover(nil) end
+        return update()
+    end
     local l = shown_list
     local at = popover_focus
     if l and at == nil then at = l.chosen end

@@ -1881,6 +1881,24 @@ async fn keep_found_lens(probes: State<'_, index::SharedProbes>, path: String, n
     }).await.map_err(|e| e.to_string())?
 }
 
+/// The lenses to choose from for a clip's mode, with what Find and Estimate said of each on it (gyroflow-optical --lenses:
+/// vs-gyroflow's lens_find::choices), for the lens dialog
+#[tauri::command]
+async fn lens_choices(path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let tool = optical_tool()?;
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--lenses").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't list a clip's lenses: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
 async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
@@ -2576,6 +2594,8 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         request["clips"] = json!(clips);
         request["redo"] = json!(options.get("redo").and_then(Value::as_bool).unwrap_or(false));
         if kind.starts_with("lens-") { request["action"] = json!(kind.trim_start_matches("lens-").to_string() + "-lens"); }
+        // Find stopped at the first lens that fits (the lens dialog's Quick, on by default)
+        if kind == "lens-find" { request["quick"] = json!(options.get("quick").and_then(Value::as_bool).unwrap_or(true)); }
     }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
@@ -2908,7 +2928,7 @@ fn main() {
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, set_comment, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens, assign_lens, keep_found_lens,
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens, assign_lens, keep_found_lens, lens_choices,
                                                  rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share,
                                                  journal::journal_write, journal::journal_hello])
         .on_window_event(move |window, event| {

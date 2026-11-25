@@ -7,10 +7,15 @@
 -- How far it is: user-data/gyroflow/measuring, the fraction done (false when nothing is measured), for the side panel,
 -- and a card. The measuring goes on while the clip plays; another clip opened meanwhile doesn't stop it.
 --
--- Also the lens chosen in the side panel for the clip's whole mode (script messages assign-lens <id>, forget-lens).
+-- Also the lens chosen in the side panel for the clip's whole mode (script messages assign-lens <id>, forget-lens), and
+-- the panel's lens dialog (side-panel/lensdialog.lua), the Library's in the player: lens-dialog (the mode's lenses,
+-- gyroflow-optical --lenses, in user-data/gyroflow/lenses), lens-find / lens-estimate (run on the clip playing, how far
+-- in user-data/gyroflow/lens_job, the list read again as lenses are tried), lens-quick (Find stopped at the first lens
+-- that fits: gyroflow.conf lens_quick, on by default), lens-use keep <n> | assign <id> (the lens kept for the mode, then
+-- the clip measured again where its motion is measured from the picture or it has none), lens-forget.
 --
 --   require('measure').setup(env), env: { source = function() -> the plugin's current source, path = clip_path,
---                                         again = play_again, notify = mp.notify }
+--                                         again = play_again, notify = mp.notify, options = the plugin's options }
 
 local mp = require 'mp'
 local utils = require 'mp.utils'
@@ -109,6 +114,95 @@ function M.setup(env)
         if id and id ~= "" then lens_command({ PROBE, "--assign-lens", id }, "Lens kept for this mode") end
     end)
     mp.register_script_message("forget-lens", function()
+        lens_command({ PROBE, "--forget-lens" }, "Lens taken away from this mode")
+    end)
+
+    -- The lens dialog's
+    local o = env.options or {}
+    local lens_job = nil
+    local function publish(k, v) mp.set_property_native("user-data/gyroflow/" .. k, v) end
+    publish("lens_quick", o.lens_quick ~= false)
+    local function read_lenses(path)
+        mp.command_native_async({ name = "subprocess", args = { OPTICAL, "--lenses", path }, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
+            if env.path() ~= path then return end
+            local out = r and utils.parse_json((r.stdout or ""):match("[^\n]*") or "") or nil
+            publish("lenses", type(out) == "table" and out or { error = "its lenses couldn't be read" })
+        end)
+    end
+    mp.register_event("file-loaded", function() publish("lenses", false); if not lens_job then publish("lens_job", false) end end)
+    mp.register_script_message("lens-dialog", function()
+        local path = env.path()
+        if not path or path:find("://", 1, true) then return end
+        publish("lenses", false)
+        read_lenses(path)
+    end)
+    mp.register_script_message("lens-quick", function()
+        o.lens_quick = not (o.lens_quick ~= false)
+        publish("lens_quick", o.lens_quick)
+        platform.save_options("gyroflow", { { "lens_quick", o.lens_quick and "yes" or "no" } })
+    end)
+    local function lens_run(action)
+        if lens_job then return end
+        local path = env.path()
+        if not path or path:find("://", 1, true) then return end
+        local dir = platform.temp_dir()
+        local tag = string.format("mpv-lens-%d-%d", utils.getpid(), math.floor(mp.get_time() * 1000))
+        local request, status = utils.join_path(dir, tag .. ".json"), utils.join_path(dir, tag .. "-status.json")
+        local f = io.open(request, "w")
+        if not f then return env.notify({ id = "gyroflow:lens", kind = "error", title = "The lens couldn't be found", detail = "can't write " .. request }) end
+        f:write(utils.format_json({ action = action, clips = { path }, quick = o.lens_quick ~= false, status = status }))
+        f:close()
+        local kind = action == "estimate-lens" and "estimate" or "find"
+        lens_job = { kind = kind, state = "running", fraction = 0 }
+        publish("lens_job", lens_job)
+        local seen = ""
+        local poll = mp.add_periodic_timer(0.5, function()
+            local sf = io.open(status, "r")
+            if not sf then return end
+            local st = utils.parse_json(sf:read("*a") or "")
+            sf:close()
+            if type(st) ~= "table" then return end
+            lens_job.fraction = tonumber(st.fraction) or lens_job.fraction
+            publish("lens_job", lens_job)
+            -- A lens more tried: the list read again, with what's found so far
+            local r = type(st.results) == "table" and st.results[1] or nil
+            local sig = r and (tostring(type(r.tried) == "table" and #r.tried or 0) .. (r.estimate and "e" or "")) or ""
+            if sig ~= seen and env.path() == path then seen = sig; read_lenses(path) end
+        end)
+        mp.command_native_async({ name = "subprocess", args = { OPTICAL, "--batch", request }, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
+            poll:kill()
+            local sf = io.open(status, "r")
+            local st = sf and utils.parse_json(sf:read("*a") or "") or nil
+            if sf then sf:close() end
+            os.remove(request); os.remove(status)
+            local res = type(st) == "table" and type(st.results) == "table" and st.results[1] or nil
+            local err = type(res) == "table" and res.error or (not res and (r and (r.stderr or ""):match("([^\n]+)\n?$")) or nil)
+            lens_job = nil
+            publish("lens_job", { kind = kind, state = err and "failed" or "done", message = err and tostring(err) or nil })
+            if env.path() == path then read_lenses(path) end
+        end)
+    end
+    mp.register_script_message("lens-find", function() lens_run("find-lens") end)
+    mp.register_script_message("lens-estimate", function() lens_run("estimate-lens") end)
+    -- The lens chosen kept for the whole mode; the clip measured again with it where its motion is the picture's or it
+    -- has none (a clip with gyro waiting for a lens plays from its gyro now)
+    mp.register_script_message("lens-use", function(how, what)
+        local path = env.path()
+        if not path or path:find("://", 1, true) or not what then return end
+        local args = how == "keep" and { OPTICAL, "--keep-lens", path, what } or { PROBE, "--assign-lens", path, what }
+        mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
+            local out = r and utils.parse_json((r.stdout or ""):match("[^\n]*") or "") or nil
+            if not (r and r.status == 0 and type(out) == "table" and not out.error) then
+                return env.notify({ id = "gyroflow:lens", kind = "error", title = "The lens couldn't be kept", detail = type(out) == "table" and tostring(out.error) or "" })
+            end
+            env.notify({ id = "gyroflow:lens", kind = "done", seconds = 4, title = "Lens kept for this mode", detail = tostring(out.mode or "") })
+            if env.path() ~= path then return end
+            local source = env.source()
+            local own = source and (source.kind == "project" or (source.kind == "default" and not source.optical))
+            if own then env.again() else start() end
+        end)
+    end)
+    mp.register_script_message("lens-forget", function()
         lens_command({ PROBE, "--forget-lens" }, "Lens taken away from this mode")
     end)
 end

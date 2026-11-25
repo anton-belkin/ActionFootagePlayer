@@ -34,6 +34,10 @@ async function start() {
   const page = await open({ views: v, commands: Object.assign({}, app.commands, {
     lens_info: (a) => { lensAsked.push(a.path); return { candidates: [{ id: "db:1", label: "GoPro HERO7 Black Wide HS EIS 4K", exact: true, readout: true }] }; },
     assign_lens: (a) => ({ lens: "GoPro HERO7 Black Wide", mode: "the mode", again: 3, asked: a }),
+    keep_found_lens: () => ({ lens: "GoPro HERO7 Black Wide, found", mode: "the mode", again: 3 }),
+    lens_choices: (a) => ({ path: a.path, mode: "GoPro HERO7 Black · wide · hseis · 3840x2160 · 29.97 fps", now: { name: "", from: "" }, found: null, lenses: [
+      { name: "GoPro HERO7 Black Wide HS EIS 4K 59.94", source: "the player’s own", verdict: "untried", fits: false, readout_ms: null, in_use: false, use: { assign: "db:2" } },
+      { name: "GoPro HERO7 Black Wide HS EIS 4K 29.97", source: "Gyroflow’s database", verdict: "good", fits: true, readout_ms: 8.1, readout_measured: true, moved: 2, limit: 15, in_use: false, use: { keep: "0" } }] }),
   }) });
   opened.push(page);
   app.attach(page);
@@ -59,15 +63,16 @@ test("one clip: every attribute says what it is now", async () => {
   assert.equal(rowOf(page, "Recorded").val, "SDR");
   assert.equal(rowOf(page, "Log curve").sel, "From the clip: not log");
   assert.equal(rowOf(page, "Underwater color").sel, "Off");
-  assert.equal(rowOf(page, "Lens").sel, "No ready lens");
+  assert.equal(rowOf(page, "Lens").val, "No ready lens");
+  assert.ok(page.$('#side [data-a="lenssheet"]'), "Choose lens…");
   assert.equal(rowOf(page, "Lens type").cls, "na", "no lens types for a GoPro");
   assert.equal(rowOf(page, "Under water").sel, "Not set: No");
   assert.equal(rowOf(page, "Motion data").val, "None: stabilized in the camera");
   assert.match(rowOf(page, "Motion data").prov, /HyperSmooth/);
   assert.match(rowOf(page, "Motion data").prov, /needs a lens first/, "no Stabilize optically without a lens");
-  // The lenses of its mode, asked once (the clip itself isn't read otherwise)
-  await page.until(() => page.$$("#src-lens option").length > 1, 1000, "the mode's lenses");
-  assert.deepEqual(lensAsked, ["/F/" + B]);
+  // The mode's lenses are the lens dialog's (Choose lens…): the clip isn't read for them here
+  await new Promise((r) => setTimeout(r, 50));
+  assert.deepEqual(lensAsked, []);
   assert.equal(page.$$("#side .savebar .btn.pri[disabled]").length, 1, "nothing to save yet");
 });
 
@@ -96,16 +101,41 @@ test("several clips: Mixed, and a change only where it applies", async () => {
   assert.deepEqual(by[C], { underwater: "yes", lens_type: "normal" });
 });
 
-test("a lens chosen for one mode is the mode's: assigned on Save", async () => {
+test("a lens is chosen in the lens dialog: Choose lens…, one click selects, Use keeps it for the mode", async () => {
   const { page } = await start();
   page.select(B);
-  await page.until(() => page.$$("#src-lens option").length > 1, 1000, "the mode's lenses");
-  choose(page, "lens", "db:1");
-  assert.match(page.text("#side .savebar .what"), /Lens for every clip of GoPro HERO7 Black · wide/);
-  page.click('#side [data-a="srcapply"]');
+  page.click('#side [data-a="lenssheet"]');
+  await page.until(() => page.calls("lens_choices").length === 1, 1000, "the mode's lenses asked");
+  await page.until(() => page.$$('#sheet [data-a="lenspick"]').length === 2, 1000, "the lenses listed");
+  assert.match(page.text("#sheet h2"), /Lens for GoPro HERO7 Black · wide/);
+  // The one that fits first, and the Quick switch on by default
+  assert.match(page.$$('#sheet [data-a="lenspick"]')[0].textContent, /fits/);
+  assert.equal(page.$('#sheet [data-a="lensquick"]').checked, true);
+  assert.ok(page.$('#sheet [data-a="lensuse"]').disabled, "nothing chosen yet");
+  page.click('#sheet [data-a="lenspick"][data-v="1"]');
+  assert.ok(page.$('#sheet [data-a="lenspick"][data-v="1"]').classList.contains("on"));
+  page.click('#sheet [data-a="lensuse"]');
   await page.until(() => page.calls("assign_lens").length === 1, 1000, "assign_lens");
-  assert.deepEqual(page.calls("assign_lens")[0].args, { path: "/F/" + B, id: "db:1" });
-  await page.until(() => !page.get("LENS_ASSIGNING[" + JSON.stringify("/F/" + B) + "]"), 1000, "the lens kept");
+  assert.deepEqual(page.calls("assign_lens")[0].args, { path: "/F/" + B, id: "db:2" });
+  await page.until(() => page.get("S.sheet") === null, 1000, "the dialog closed");
+  await new Promise((r) => setTimeout(r, 30));
+});
+
+test("the lens dialog runs Find with Quick, and a found lens is kept with its readout", async () => {
+  const { page } = await start();
+  page.select(B);
+  page.click('#side [data-a="lenssheet"]');
+  await page.until(() => page.$$('#sheet [data-a="lenspick"]').length === 2, 1000, "the lenses listed");
+  page.click('#sheet [data-a="lensfind"]');
+  await page.until(() => page.calls("add_job").length === 1, 1000, "Find queued");
+  const job = page.calls("add_job")[0].args;
+  assert.equal(job.kind, "lens-find");
+  assert.equal(job.options.quick, true);
+  page.click('#sheet [data-a="lenspick"][data-v="0"]');
+  page.click('#sheet [data-a="lensuse"]');
+  await page.until(() => page.calls("keep_found_lens").length === 1, 1000, "keep_found_lens");
+  assert.deepEqual(page.calls("keep_found_lens")[0].args, { path: "/F/" + B, n: "0" });
+  await page.until(() => page.get("S.sheet") === null, 1000, "the dialog closed");
   await new Promise((r) => setTimeout(r, 30));
 });
 

@@ -457,8 +457,17 @@ lens assigned to this mode** takes it away. `gyroflow-probe --lens <clip>` shows
 the clip's mode (`mode_key`) and the lenses to choose from (`candidates`); `--assign-lens <clip> <id>` and
 `--forget-lens <clip>` do the same as the panel.
 
-**Find lens / Estimate lens** (Library, Stabilize, on the selected clips; Gyroflow's own "lens from the video",
-gyroflow/gyroflow#1296):
+**The lens dialog.** Source → Lens → **Choose lens…** in the Library, and Source → Lens for the mode → **Choose…** in
+the player's side panel, open the same dialog: the lenses of the clip's camera mode, each with what Find and Estimate
+said of it on the clip (fits / not checked / not reliable / doesn't fit / not tried, its readout, how far the lens
+moved), **Find lens** and **Estimate lens** run from there on the clip (the player runs them itself, no Library needed),
+and **Use and measure again** (or **Use for this mode** for a clip with gyro). One click selects a lens; in the player
+Up/Down move, Enter uses it, Esc closes. `gyroflow-optical --lenses <clip>` prints what it lists.
+
+**Find lens / Estimate lens** (Gyroflow's own "lens from the video", gyroflow/gyroflow#1296):
+- **Quick** (on by default; the dialog's switch, remembered; `gyroflow.conf` `lens_quick` in the player; `--quick` on
+  the command line): Find stops at the first lens that fits, a "good" verdict with a readout, trying the nearest
+  first (the lens in use, then those made for this frame size, then others). GOPR1585: 5 s instead of 15.
 - **Find lens** tries the known lenses of each clip's camera on three parts of it, in air and under water. Where a lens
   has no readout, it measures one on the clip. About 15 s a clip.
 - **Estimate lens** makes a lens and its readout from one clip, then checks it on the other parts of the clip. Under a

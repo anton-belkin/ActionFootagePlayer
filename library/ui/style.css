@@ -347,6 +347,21 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 body.waiting,body.waiting *{cursor:progress}
 /* Locations from Apple Photos (geo.rs): one compact sheet for the selection */
 .sheet.geosheet{max-width:560px}
+.sheet.lenssheet{max-width:680px}
+.sheet.lenssheet .sb{max-height:72vh;overflow:auto}
+.sheet.lenssheet .sb>*{flex:none}
+.lensbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lensbar .switch{margin-left:4px}
+.lensprog{display:flex;flex-direction:column;gap:4px}
+.albumlist.lensrows{max-height:none;overflow:visible}
+.lensrows .albumrow{flex:none}
+.lensrows .albumrow{align-items:flex-start;width:100%}
+.lensrows .albumrow span:first-of-type{white-space:normal;overflow:visible}
+.lensrows .albumrow b{display:block;font-weight:600;line-height:1.35}
+.lensrows .albumrow .sub{display:block;margin-top:2px}
+.lensrows .albumrow .pill{margin-top:2px}
+.lensrows .rad{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);margin-top:3px;flex:none}
+.lensrows .on .rad{border:4px solid var(--accent)}
 .sheet.geosheet .sb{max-height:72vh;overflow:auto}
 .geomax{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto;gap:8px;align-items:center}
 .geomax input{width:100%}

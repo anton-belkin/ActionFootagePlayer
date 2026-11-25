@@ -95,6 +95,7 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
+--   lens_quick=yes  the lens dialog's Find lens stops at the first lens that fits (Quick); no: tries every one
 --   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) wherever mpv can (mpv 0.42 or the
 --                app's, vo=gpu-next): macOS, Windows and Linux (tried on all three); no: always through VapourSynth
 --   gpu_flush=auto  an mpv without the app's patch 0015 keeps every shader the GPU path has had until its window
@@ -223,7 +224,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "", lens_quick = true }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -2872,4 +2873,4 @@ end
 
 -- Ctrl+m: the clip's motion measured from its picture into its .afp-motion (measure.lua), then played again with it.
 -- Not a local here: this chunk has as many as Lua allows
-require('measure').setup({ source = function() return current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify })
+require('measure').setup({ source = function() return current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify, options = o })

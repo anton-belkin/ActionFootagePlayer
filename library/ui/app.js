@@ -1282,28 +1282,19 @@ function sourceBody(c) {
     if (inFile && !findable) {
       ctl = srcVal(names.size === 1 ? esc(names.keys().next().value) : "<i>Mixed</i>");
       prov = esc(LENS_FROM.file + " · the camera’s own calibration of " + (flat.length === 1 ? "this clip" : "each clip") + ", which " + (flat.length === 1 ? "it plays" : "they play") + " with: no lens is chosen, found or estimated for it");
-    } else if (modeKey && !reading) {
-      const cands = lensCandidates(modeKey, flat[0].path);
-      const cur = lensName(flat[0]);
-      const assigned = flat.some((it) => /, assigned$/.test(String((lensOf(it) || {}).lens || "")));
-      const opts = [["", names.size === 1 ? cur : "Mixed: leave as is"]].concat((cands || []).map((x) => [x.id, (x.exact ? "● " : "") + String(x.label || x.id).replace(/_/g, " ") + (x.local ? " · the player’s own" : x.readout ? "" : " · no readout")]))
-        .concat(assigned ? [["-", "Forget the lens chosen for this mode"]] : []);
-      ctl = '<select id="src-lens" data-a="srcset" data-v="lens" aria-label="Lens">' + opts.map((x) => '<option value="' + esc(x[0]) + '"' + ((d.lens || "") === x[0] ? " selected" : "") + '>' + esc(x[1]) + '</option>').join("") + '</select>';
-      const others = clipsOfMode(modeKey);
-      prov = esc(froms.size === 1 ? LENS_FROM[froms.keys().next().value] : tallyText(froms, (x) => lc(LENS_FROM[x]))) + (assigned ? " " + HAND : "") +
-        esc(" · a lens chosen is kept for every clip of " + modeKey + (others > flat.length ? " (" + others + " in this project)" : "")) + (cands === null ? esc(" · reading its lenses…") : "");
-      if (d.lens) extra += '<div class="was">Was: ' + esc(cur) + '</div>';
     } else {
+      // The lens, where it comes from, and Choose lens… (lenses.js: the lens dialog, with Find and Estimate in it)
       ctl = srcVal(names.size === 1 ? esc(names.keys().next().value) : "<i>Mixed</i>");
-      prov = esc(names.size > 1 ? tallyText(froms, (x) => lc(LENS_FROM[x])) : froms.size === 1 ? LENS_FROM[froms.keys().next().value] : "") +
-        (reading ? esc(" · " + reading + " not read yet") : modes.size > 1 ? esc(" · a lens is chosen for one mode at a time: select clips of one mode") : gf ? esc(" · its Gyroflow project’s plays") : "");
+      const assigned = flat.some((it) => lensFrom(it) === "own");
+      const others = modeKey ? clipsOfMode(modeKey) : 0;
+      prov = esc(names.size > 1 ? tallyText(froms, (x) => lc(LENS_FROM[x])) : froms.size === 1 ? LENS_FROM[froms.keys().next().value] : "") + (assigned ? " " + HAND : "") +
+        (reading ? esc(" · " + reading + " not read yet") : gf ? esc(" · its Gyroflow project’s plays")
+          : modes.size > 1 ? esc(" · a lens is chosen for one mode at a time: select clips of one mode")
+          : esc(" · kept for every clip of " + modeKey + (others > flat.length ? " (" + others + " in this project)" : "")));
       if (one && one.gyroflow) extra += projectLensHtml(one);
+      if (findable && !gf) extra += '<div class="btns"><button type="button" class="btn sm" data-a="lenssheet"' + (modeKey && !reading ? "" : " disabled") + '>Choose lens…</button></div>' +
+        (inFile ? '<div class="prov">' + esc("Left out: " + inFile + (inFile === 1 ? " clip" : " clips") + " with the lens in the file") + '</div>' : "");
     }
-    if (findable) extra += '<div class="btns"><button type="button" class="btn sm" data-a="job" data-v="lens-find">Find lens' + (findable > 1 ? " for " + findable + " clips" : "") + '</button>' +
-      '<button type="button" class="btn sm" data-a="job" data-v="lens-estimate"' + (findable === 1 ? "" : " disabled") + ' title="From one clip: the one with the best view, the camera moving through a still scene">Estimate lens</button></div>' +
-      '<div class="prov">Find: the camera’s known lenses tried on the clip, the readout measured; Estimate: a lens made from one clip' +
-      (inFile ? esc(" · left out: " + inFile + (inFile === 1 ? " clip" : " clips") + " with the lens in the file") : "") + '</div>';
-    extra += lensFindResults();
     h += srcRow("Lens", ctl, prov, d.lens ? "chg" : names.size > 1 ? "mixed" : "", extra);
   }
   const typed = flat.filter((it) => lensTypesOf(it).length);
@@ -1806,6 +1797,7 @@ function renderSheet() {
   if (S.sheet === "take" && S.take) { el.innerHTML = renderTake(); return; }
   if (S.sheet === "album") { el.innerHTML = renderAlbumSheet(); return; } // albums.js
   if (S.sheet === "share") { el.innerHTML = renderShareSheet(); return; } // share.js
+  if (S.sheet === "lens") { el.innerHTML = renderLensSheet(); return; } // lenses.js
   if (S.sheet === "geo") { el.innerHTML = renderGeo(); return; }
   if (S.sheet === "geoask") { el.innerHTML = renderGeoAsk(); return; }
   if (S.sheet === "geodenied") { el.innerHTML = renderGeoDenied(); return; }
@@ -2902,6 +2894,7 @@ async function poll() {
   }
   renderQueueOnly();
   shareTick(); // share.js
+  lensTick(); // lenses.js
   $("ask").hidden = !s.close_asked;
   closing(!!s.close_waits);
   renderMoving(s.moving);
@@ -3102,6 +3095,12 @@ document.addEventListener("click", async (e) => {
     case "trash": return deleteSelection();
     case "share": return askShare(); // share.js
     case "sharego": return shareGo(v);
+    case "lenssheet": return openLensSheet(); // lenses.js
+    case "lensfind": return lensRun("lens-find");
+    case "lensestimate": return lensRun("lens-estimate");
+    case "lenspick": if (S.lens) { S.lens.chosen = +v; renderSheet(); } return;
+    case "lensuse": return lensUse();
+    case "lensforget": return lensForget();
     case "albumadd": return askAlbum("add");
     case "albummove": return askAlbum("move");
     case "albumout": return albumOut();
@@ -3193,6 +3192,7 @@ document.addEventListener("change", (e) => {
   // The sheet of Photos' places: which one the clips too far get, and whether locations set already stay
   if (a === "geopick") { S.geoPick = el.value; geoSlid(); return; }
   if (a === "geokeep") { S.geoKeep = el.checked; geoSlid(); return; }
+  if (a === "lensquick") { S.lensQuick = el.checked; remember("afl.lensQuick", el.checked ? "1" : "0"); return; }
   if (a === "sharesetting") { shareSetting(el.dataset.v, el.value); renderSheet(); renderSide(); return; }
   if (a === "sharelook") { if (S.share) { S.share.look = el.value === "SDR" ? "SDR" : "HDR"; S.share.sel = shareSel(S.share.list, S.share.look); remember("afl.share.look", S.share.look); renderSheet(); renderSide(); } return; }
   if (a === "fopt") setOpt(v, el.checked);
