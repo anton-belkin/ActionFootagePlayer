@@ -127,10 +127,15 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 
 ## Exports and photos
 
+- **gyroflow-export is a folder** (`vs-gyroflow/src/bin/gyroflow-export/`): `main.rs` holds every `use` and `mod`, and
+  each part starts with `use super::*;`, so the parts call each other by bare names; what another part uses is
+  `pub(crate)`. A new flag goes into `options.rs` (`USAGE` and `parse_args`' match: `tools/gen_reference.py` and the
+  guard tests read them there), a new key of the settings JSON into its `apply_settings`. `include_str!` paths are
+  relative to the part's file: one `../` more than from `src/bin/`.
 - **`gyroflow-export --photo` on a clip inside a project writes into the project's `_Stills`**, whatever `--output`
   says. With `--force` it replaces Anton's own still of that clip and time.
   - Why: photos go to `--out <folder>`, else `<project>/_Stills`, else `stabilized/` beside the clip
-    (`out_dir_for` in `gyroflow-export.rs`). `--output` is for one video only.
+    (`out_dir_for` in `gyroflow-export/photo.rs`). `--output` is for one video only.
   - Do: pass `--out <scratch folder>`, never `--force` against his Library, and read the `-> path` it prints on the
     first run before looping. Or copy the clip outside any project.
 - **Keep the export's shader to iterate without rebuilding:** `AFP_GPU_KEEP=1 AFP_TIMES=1 gyroflow-export …` keeps
@@ -138,7 +143,7 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 - **Comparing an export's frame with ffmpeg's `-ss`:** put the time a quarter frame before the frame
   (`tests/uw_export_check.py`). The exporter rounds `t * fps`; `-ss` takes the first frame at or after.
 - **Old GoPro H.264 is `yuvj420p` in a stream tagged `tv`.** It is full range; read it so, as mpv does
-  (`gyroflow-export.rs`, `full_range`).
+  (`gyroflow-export/source.rs`, `full_range`).
 - **AVAssetWriter's default timescale is 600.** Video and metadata times get rounded (a Live Photo's still time lands
   mid-frame). Set `mediaTimeScale` to the track's `naturalTimeScale` (`macos/photo.swift`). Validate Live Photo pairs
   with `PHLivePhoto.request(withResourceFileURLs:)`.

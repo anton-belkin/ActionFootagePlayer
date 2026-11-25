@@ -13,12 +13,13 @@ From the repository's folder: python3 tests/render_keys_test.py"""
 import json
 import re
 
-from twins import Checks, block, read
+from twins import Checks, block, files, read
 
 c = Checks("render keys")
 reg = json.loads(read("mpv/scripts/workspace/registry.json"))
 plugin = read("mpv/scripts/gyroflow/main.lua")
-export_rs = read("vs-gyroflow/src/bin/gyroflow-export.rs")
+# gyroflow-export, all its parts (src/bin/gyroflow-export/: options.rs parses the command line and --settings)
+export_rs = "\n".join(read(f) for f in files("vs-gyroflow/src/bin/gyroflow-export", [".rs"]))
 
 GROUPS = {"bundle", "uw", "input", "opts"}
 KINDS = {"enum", "bool", "number", "ratio", "curve"}

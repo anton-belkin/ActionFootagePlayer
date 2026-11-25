@@ -326,6 +326,11 @@ other than `gpu-next`, plays as recorded with a card saying why. Details: [../de
    video plays. The `  -> <file>` line on stderr names the result; `export.lua` notes it in the catalog.
 
 Photos (`--photo`, `still.rs`, `photo.rs`, `afp-photo` for HEIC) and moments (`--preview still`) are the same tool.
+Its source is `vs-gyroflow/src/bin/gyroflow-export/`: `main.rs` (the uses, `main()`, stop and background),
+`options.rs` (`--help`'s text, the flags, `--settings`' `apply_settings`), `video.rs` (an export: the pipes path, and
+the branch to the GPU path), `gpu.rs`, `post.rs` (the player's shaders over the engine's frames), `photo.rs` (photos,
+Live and Motion Photos), `sphere.rs` (360), `preview.rs`, `color.rs`, `encode.rs`, `source.rs`, `dates.rs`,
+`translation.rs`, `tests.rs`.
 Details: [../design/export-gpu-path.md](../design/export-gpu-path.md), [../design/export-settings.md](../design/export-settings.md).
 
 ## Log curves and looks

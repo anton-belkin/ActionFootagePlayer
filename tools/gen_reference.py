@@ -153,11 +153,12 @@ def env():
 
 
 # ---------------------------------------------------------------- gyroflow-export flags
-EXPORT = "vs-gyroflow/src/bin/gyroflow-export.rs"
+# Its parts (src/bin/gyroflow-export/): the argument match and --help's text are options.rs's, --fingerprint main.rs's
+EXPORT = "vs-gyroflow/src/bin/gyroflow-export"
 
 
 def export_flags():
-    text = read(EXPORT)
+    text = "\n".join(read(f) for f in files(EXPORT, [".rs"]))
     usage = re.search(r'const USAGE: &str = "(.*?)";\n', text, re.S).group(1).replace('\\"', '"')
     help_line, cur = {}, None
     for line in usage.splitlines():
@@ -200,7 +201,7 @@ def export_flags():
         what = what.replace("|", "\\|")
         out.append(f"| `{flag}` | {takes.replace('|', chr(92) + '|')} | {what} | {cell(callers.get(flag, []), 4)} |")
     out.append("")
-    out.append(f"{len(flags)} flags, from the argument match in `{EXPORT}`; the full text is `gyroflow-export --help`.")
+    out.append(f"{len(flags)} flags, from the argument match in `{EXPORT}/options.rs`; the full text is `gyroflow-export --help`.")
     return out
 
 
