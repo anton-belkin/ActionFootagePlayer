@@ -180,7 +180,7 @@ async function shareGo(dest) {
     await poll();
   } catch (e) { s.busy = false; renderSheet(); showError(String(e)); }
 }
-// The queue was read again (app.js's poll): the sheet follows its job
+// The queue was read again (loading.js's poll): the sheet follows its job
 function shareTick() { if (S.sheet === "share" && S.share && S.share.folder) renderSheet(); }
 
 // A share's job in Tasks: each item and how it went

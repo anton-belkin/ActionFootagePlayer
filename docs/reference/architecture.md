@@ -110,7 +110,9 @@ each other at once ([contracts.md](contracts.md#the-live-channel-library-and-pla
 | `tags.rs` | Tags and culling (twin of `tags.lua`) |
 | `albums.rs`, `changed.rs`, `checks.rs`, `geo.rs`, `takein.rs`, `thumbs.rs`, `journal.rs`, `perf.rs` | Albums, pinpoint updates, Check/Find moved files, locations from Apple Photos and GPS, Take in, thumbnails, the journal, the perf rig |
 
-`library/ui/` is the page: `app.js` (the window), `tiles.js`, `albums.js` + `albumviews.js` + `timeline.js` +
+`library/ui/` is the page: the window's own scripts, which were one `app.js` (`state.js`: what they share, `S` and the
+data read; `items.js`, `drawing.js`, `source.js`, `checks.js`, `project.js`, `navigate.js`, `menu.js`, `places.js`,
+`keys.js`, `loading.js`; `app.js`: the page's events and its start), `tiles.js`, `albums.js` + `albumviews.js` + `timeline.js` +
 `map.js`, `culling.js`, `share.js`, `lenses.js`, `writes.js` + `changes.js` (screen first, disk after), `history.js`,
 `journal.js`, `atstart.js`. `library/ui-tests/` runs the page in jsdom against a mock (`npm test`); `library/tests/`
 holds the headless-Chrome screenshot scripts.
@@ -118,15 +120,17 @@ holds the headless-Chrome screenshot scripts.
 In the page:
 
 - **Script order** (`ui/index.html`): `journal`, `writes`, `changes`, `albums`, `tiles`, `albumviews`, `timeline`,
-  `map`, `culling`, `atstart`, `share`, `lenses`, `history`, `app` last. A script may use a later one's names only
-  inside functions.
+  `map`, `culling`, `atstart`, `share`, `lenses`, `history`, then the window's own: `state`, `items`, `drawing`, `source`,
+  `checks`, `project`, `navigate`, `menu`, `places`, `keys`, `loading`, `app` last. They are classic scripts: their
+  top-level names are shared, and a script may use a later one's names only inside functions (a function declared
+  in a later file isn't there yet while an earlier one loads).
 - **Albums** are folders: one album name stands for `_Clips/<name>`, `_Moments/<name>` and `_Stills/<name>`
   (`albums.js` `albumShown`, `albumRealDirs`); what's added from the Library goes to `_Clips/<name>`. A new kind of
   item is a source in `ALBUM_SOURCES` and a line in `ALBUM_KINDS`. "My albums" is a place in the page only.
 - **Views inside Albums that aren't folders** (Timeline, Map, My albums, the media types) are entries of `ALBUM_VIEWS`
   (`[id, label, draw, items, meta]`; `draw: null` lets `renderMain` draw). Such a view is `S.view = "footage"` with
   `S.path[0]` its label behind `AV_MARK` (a zero-width space), so a user's album named "Timeline" stays an album.
-- **Dates and places** are each item's `when` and `geo` (`app.js` `deriveItems`, `deriveGeo`): an original's
+- **Dates and places** are each item's `when` and `geo` (`items.js` `deriveItems`, `places.js` `deriveGeo`): an original's
   recording time; a moment's or photo link's is its clip's start + `in` / `t`; a rendered photo's its mtime. A place
   is the original's `location`, else the camera's GPS named through `places.json`; moments and photos take their
   clip's. A trip (`timeline.js` `tlModel`) is two days or more in a row at one wider place, one empty day allowed.
@@ -478,7 +482,7 @@ catalog/
   examples/rig.rs, Dockerfile  the NAS-side rig, the catalog's own image
 library/
   src/                         the Library's Rust side (main.rs, index.rs, renders.rs, …)
-  ui/                          the page (app.js, tiles.js, albums.js, share.js, …); ui/vendor/ third-party JS
+  ui/                          the page (state.js … app.js, tiles.js, albums.js, share.js, …); ui/vendor/ third-party JS
   ui-tests/                    the page in jsdom against a mock (npm test)
   tests/                       headless-Chrome screenshot scripts and their mocks
   tauri.conf.json, capabilities/, icons/, build.rs

@@ -1,5 +1,5 @@
 "use strict";
-// Source settings as a list of the source's attributes (../ui/app.js sourceBody, Anton 2026-11-24): each shows what
+// Source settings as a list of the source's attributes (../ui/source.js sourceBody, Anton 2026-11-24): each shows what
 // the clips selected have now (one value, or Mixed), a change is written by Save for the clips it applies to (a lens
 // type only where the camera has types, the underwater colour only for a plain SDR clip), nothing is read from the
 // clips to show it (the index's probe, its lens_info), Stabilize optically is in its Motion data row (no tab of its

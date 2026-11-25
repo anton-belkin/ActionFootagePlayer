@@ -220,8 +220,11 @@ docs/design/library-management.md §9 and docs/design/catalog-safeguards.md have
 ## The Library page
 
 - **`lenses.js` loads before `app.js`** (`library/ui/index.html`), so it must not touch `S` at load time.
+- **The window's own scripts (`state.js` … `app.js`, once one `app.js`) share their top-level names.** A `let` that
+  more than one of them uses goes into `state.js`, not into the file that first needed it. A function declared in a
+  later file can't be called while an earlier one loads (only from inside a function): within one file it could.
 - **In jsdom, run the page's scripts with `vm.Script(...).runInContext(dom.getInternalVMContext())`,** not
-  `window.eval`: `app.js`'s top-level `const`s must be shared between scripts. Stub `Element.prototype.scrollIntoView`
+  `window.eval`: the scripts' top-level `const`s (`state.js`'s `S`, …) must be shared between them. Stub `Element.prototype.scrollIntoView`
   and `CSS.escape` (`library/ui-tests/page.js` does).
 - **jsdom runs the page's scripts as one,** so a script that uses a later script's name at load time passes there and
   fails in the real window. Only headless Chrome (the shot scripts) catches it. The order is `ui/index.html`'s.

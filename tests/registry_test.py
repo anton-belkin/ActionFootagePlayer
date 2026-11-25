@@ -40,7 +40,7 @@ READERS = {
     "library/src/index.rs": RUST,
     "library/src/checks.rs": RUST,
     "library/ui/share.js": JS,
-    "library/ui/app.js": JS,
+    "library/ui/source.js": JS,
     "library/ui/albums.js": JS,
     "library/ui-tests/lists.js": r'"registry\.json"',
     "library/ui-tests/page.js": r'require\("\./lists"\)',

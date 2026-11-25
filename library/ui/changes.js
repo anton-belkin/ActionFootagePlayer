@@ -411,7 +411,7 @@ Writes.define("renamealbum", {
   send: (a) => ["rename_album", { paths: a.folders.map((f) => f.path), name: a.name }],
 });
 // A folder of the project's renamed (`from`, `to`: its paths in the project's folder; `name`: its new name), in a view's
-// draft: what's in it follows, with the pictures the window has of it (app.js's thumbFollows: the files are the same)
+// draft: what's in it follows, with the pictures the window has of it (state.js's thumbFollows: the files are the same)
 function folderRenamed(d, a) {
   {
     const move = (p) => (p === a.from ? a.to : p.startsWith(a.from + "/") ? a.to + p.slice(a.from.length) : p);
