@@ -22,6 +22,7 @@ async function page(opts) {
   const html = fs.readFileSync(path.join(ui, "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
   const dom = new JSDOM(html, { url: "http://localhost/", runScripts: "outside-only", pretendToBeVisual: true });
   const w = dom.window;
+  require("./lists").set(w);
   pages.push(w);
   w.Element.prototype.scrollIntoView = function () {};
   if (!w.CSS) w.CSS = { escape: (x) => String(x).replace(/["\\]/g, "\\$&") };

@@ -83,10 +83,18 @@ for try in 1 2 3; do
 done
 rm -rf "$stage"
 
+# A plugin zipped alone gets the shared lists beside its files (the workspace plugin's registry.lua and registry.json:
+# the curves, the export's settings; tests/packaging_test.py): require finds them in the plugin's own folder
+with_registry() {
+    git show HEAD:mpv/scripts/workspace/registry.lua > "$1/registry.lua"
+    git show HEAD:mpv/scripts/workspace/registry.json > "$1/registry.json"
+}
+
 gyroflow="mpv-gyroflow-$version-macos-arm64"
 rm -rf "dist/$gyroflow" "dist/$gyroflow.zip"
 mkdir -p "dist/$gyroflow/gyroflow"
 git archive HEAD mpv/scripts/gyroflow mpv/scripts/view360 | tar -x --strip-components 2 -C "dist/$gyroflow"
+with_registry "dist/$gyroflow/gyroflow"
 mv "dist/$gyroflow/gyroflow/underwater.gyroflow" "dist/$gyroflow/gyroflow/default.gyroflow"
 cp -p "dist/$name/bin/"* "dist/$gyroflow/gyroflow/"
 (cd "dist/$gyroflow" && zip -qry "../$gyroflow.zip" gyroflow view360)
@@ -96,6 +104,7 @@ dlogm="mpv-dlogm-$version"
 rm -rf "dist/$dlogm" "dist/$dlogm.zip"
 mkdir -p "dist/$dlogm/dlogm/shaders" "dist/$dlogm/dlogm/luts"
 git archive HEAD mpv/scripts/dlogm | tar -x --strip-components 2 -C "dist/$dlogm"
+with_registry "dist/$dlogm/dlogm"
 cp dist/dlogm_hlg.glsl "dist/$dlogm/dlogm/shaders/dlogm_hlg.glsl"
 git show HEAD:shaders/denoise.glsl > "dist/$dlogm/dlogm/shaders/denoise.glsl"
 git show HEAD:shaders/underwater_hlg.glsl > "dist/$dlogm/dlogm/shaders/underwater_hlg.glsl"
@@ -140,6 +149,7 @@ menu="mpv-footage-menu-$version"
 rm -rf "dist/$menu" "dist/$menu.zip"
 mkdir -p "dist/$menu"
 git archive HEAD mpv/scripts/footage-menu | tar -x --strip-components 2 -C "dist/$menu"
+with_registry "dist/$menu/footage-menu"
 (cd "dist/$menu" && zip -qr "../$menu.zip" footage-menu)
 rm -rf "dist/$menu"
 
@@ -147,6 +157,7 @@ panel="mpv-side-panel-$version"
 rm -rf "dist/$panel" "dist/$panel.zip"
 mkdir -p "dist/$panel"
 git archive HEAD mpv/scripts/side-panel | tar -x --strip-components 2 -C "dist/$panel"
+with_registry "dist/$panel/side-panel"
 (cd "dist/$panel" && zip -qr "../$panel.zip" side-panel)
 rm -rf "dist/$panel"
 

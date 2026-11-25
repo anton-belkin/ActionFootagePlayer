@@ -11,7 +11,7 @@
 //   moments  the moments, each with its link (the part of which clip, its own transform)
 //   stills   the photos (a Live Photo's .mov beside its still is the same photo)
 //   exports  the exports, with their link
-// Since 0.11 (docs/design/library-management.md §8) the project's own files are wherever they were put in its folder, found
+// Since 0.11 (docs/library-management.md §8) the project's own files are wherever they were put in its folder, found
 // by the link inside: Generated/<date> <time> <what>/ where a run made them, _Moments/ and the like from before, any
 // folder of one's own. Paths in footage are its tree's ("Day 1/A.MP4"); in the others the project folder's
 // ("Generated/2026-11-10 14-32 Moments/Turtle.afplink.mp4", "_Moments/Reef/Turtle.afplink.mp4").
@@ -25,9 +25,9 @@ use std::process::{ Command, Stdio };
 use std::sync::{ Arc, Mutex };
 
 pub const LINK_EXT: &str = ".afplink.mp4";
-pub const OWN_FOLDERS: [&str; 13] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
-                                     "_actionfootageplayer", "generated", "#recycle"];
-/// Where what's made goes since 0.11 (docs/design/library-management.md §8): Generated/<date> <time> <what>/
+/// A project's own folder, its name lower case: registry.json's own_folders, and the NAS's recycle bins
+pub fn own_folder(lower: &str) -> bool { crate::lists::get().own_folder(lower, true) }
+/// Where what's made goes since 0.11 (docs/library-management.md §8): Generated/<date> <time> <what>/
 pub const GENERATED: &str = "Generated";
 
 /// The footage's folders inside the project's own folder (a project next to its footage): its locations there
@@ -40,11 +40,11 @@ pub fn footage_dirs(root: &Path) -> Vec<PathBuf> {
 pub fn own_area(root: &Path, path: &Path, footage: &[PathBuf]) -> bool {
     let Ok(rel) = path.strip_prefix(root) else { return false };
     let top = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).unwrap_or_default();
-    if top.starts_with('_') || OWN_FOLDERS.contains(&top.as_str()) { return true; }
+    if top.starts_with('_') || own_folder(&top) { return true; }
     !footage.iter().any(|d| path.starts_with(d))
 }
 
-/// The project's own files of a view's kind, wherever they are in its folder (docs/design/library-management.md §8): every
+/// The project's own files of a view's kind, wherever they are in its folder (docs/library-management.md §8): every
 /// file of the project's folder that `keep` takes (its path in the project, its full path, whether it's in the own
 /// area), and the folders they're in, with the empty folders (a folder just made, to move things into). Among the footage only `.afplink.mp4` files are offered (not every clip read)
 fn own_files(root: &Path, keep: &mut dyn FnMut(&str, &Path, bool) -> bool) -> (Vec<(String, u64, i64)>, Vec<String>) {
@@ -256,52 +256,17 @@ pub fn keys_and_cover(path: &Path) -> (HashMap<String, String>, Option<Vec<u8>>)
     (keys, cover)
 }
 
-fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#34;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
-
-/// A photo's XMP packet, within the file's first 64 KiB (where vs-gyroflow's photo.rs and ImageIO put it)
-fn photo_xmp(path: &Path) -> Option<String> {
-    use std::io::Read;
-    let mut head = Vec::with_capacity(65536);
-    std::fs::File::open(path).ok()?.take(65536).read_to_end(&mut head).ok()?;
-    let s = String::from_utf8_lossy(&head);
-    let a = s.find("<x:xmpmeta")?;
-    let b = a + s[a..].find("</x:xmpmeta>")?;
-    Some(s[a..b].to_string())
-}
-
-/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/),
-/// an element as photo.rs writes it, or an attribute as ImageIO may
+/// A photo's link to its clip: `afp:link` in its XMP (afp-catalog's xmp.rs, the player's namespace,
+/// https://actionfootageplayer.ch/ns/1.0/)
 fn photo_link(path: &Path) -> Option<Value> {
-    let s = photo_xmp(path)?;
-    let text = if let Some(a) = s.find("<afp:link>") {
-        let from = a + "<afp:link>".len();
-        s[from..from + s[from..].find("</afp:link>")?].to_string()
-    } else {
-        let from = s.find("afp:link=\"")? + "afp:link=\"".len();
-        s[from..from + s[from..].find('"')?].to_string()
-    };
-    serde_json::from_str(&unescape(&text)).ok()
+    let xml = afp_catalog::xmp::of_file(path).ok()??;
+    serde_json::from_str(&afp_catalog::xmp::link(&xml)?).ok()
 }
 
 /// A photo's tags: `dc:subject` in its XMP (vs-gyroflow's afp-meta writes them), which Photos and Lightroom read as
 /// keywords
 pub fn photo_tags(path: &Path) -> Vec<String> {
-    let Some(s) = photo_xmp(path) else { return Vec::new() };
-    let Some(a) = s.find("<dc:subject") else { return Vec::new() };
-    let Some(len) = s[a..].find("</dc:subject>") else { return Vec::new() };
-    let mut out = Vec::new();
-    let mut rest = &s[a..a + len];
-    while let Some(i) = rest.find("<rdf:li") {
-        let Some(gt) = rest[i..].find('>') else { break };
-        let from = i + gt + 1;
-        let Some(to) = rest[from..].find("</rdf:li>") else { break };
-        let t = unescape(rest[from..from + to].trim());
-        if !t.is_empty() { out.push(t); }
-        rest = &rest[from + to..];
-    }
-    out
+    afp_catalog::xmp::of_file(path).ok().flatten().map(|x| afp_catalog::xmp::tags(&x)).unwrap_or_default()
 }
 
 pub fn link(path: &Path) -> Option<Value> {
@@ -434,7 +399,7 @@ fn footage(root: &Path, flat_previews: bool, only: Option<&[String]>) -> Value {
         let id = format!("l:{}", l.path);
         // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
         // aren't footage
-        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && own_folder(lower);
         let (dir, found) = if let Some(only) = only {
             let dir = if off { offline_dir(l) } else { match &l.dir { Some(d) => d.clone(), None => continue } };
             let found = only.iter().filter_map(|tree| {
@@ -574,7 +539,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
     };
     // Tags an older version kept for photos in the project's file, by their path in _Stills
     let photo_tags = if view == "stills" { read_json(&root.join("Project.afproject")).and_then(|d| d.get("photo_tags").cloned()).unwrap_or(json!({})) } else { json!({}) };
-    // The files of this view's kind, wherever they are (docs/design/library-management.md §8): moments and exports by the link
+    // The files of this view's kind, wherever they are (docs/library-management.md §8): moments and exports by the link
     // inside (an export of before 0.11 in _Exports without one too), photos with a link or in _Stills
     let mut links: HashMap<String, Value> = HashMap::new();
     let mut keep = |rel: &str, path: &Path, _: bool| {
@@ -662,7 +627,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
             }
             _ => {
                 it["kind"] = json!("export");
-                // Not tagged: a derivative (docs/design/tags-and-culling.md); tags an older version put in its link are left there
+                // Not tagged: a derivative (docs/tags-and-culling.md); tags an older version put in its link are left there
                 it["tags"] = json!([]);
                 it["link"] = l;
             }
@@ -689,7 +654,7 @@ fn walk_names(root: &Path, entries: &[(String, u64, i64)]) -> HashSet<String> {
     out
 }
 
-// ---------- renders (the player's render batch; docs/design/library-management.md, "Renders") ----------
+// ---------- renders (the player's render batch; docs/library-management.md, "Renders") ----------
 
 pub const RENDER_PROFILES: [&str; 2] = ["HDR", "SDR"];
 const RENDER_VERSION: u64 = 1;
@@ -1391,7 +1356,7 @@ pub(crate) mod tests {
         let m = scan(&root, "moments", false);
         assert_eq!(m["items"][0]["name"], json!("Turtle"));
         assert_eq!(m["items"][0]["dir"], json!("_Moments/Reef"));
-        // Anywhere in the project's folder, by the link inside (docs/design/library-management.md §8): a moment and a clip
+        // Anywhere in the project's folder, by the link inside (docs/library-management.md §8): a moment and a clip
         // preview a run left in Generated/, a moment moved into a folder of one's own and renamed; a folder just made
         let mk = |kind: &str| tests_mp4_with_link(&format!(r#"{{"v":1,"kind":"{kind}","clip":"Day 1/B.mov","in":1,"out":2}}"#));
         for d in ["Generated/2026-11-10 14-32 Moments", "Generated/2026-11-10 14-40 Clip previews/Day 1", "Mine/Best", "Empty"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
@@ -1654,5 +1619,63 @@ mod probe_version {
     fn the_probes_geotag_is_the_same() {
         let tool = source("bin/gyroflow-probe.rs");
         assert!(tool.contains(&format!("out[\"geotag\"] = {GEOTAG}.into();")), "gyroflow-probe.rs's \"geotag\" isn't {GEOTAG}");
+    }
+}
+
+/// The recipe of a moment's render as the player makes it (mpv/scripts/workspace/main.lua's render_recipe and its
+/// RENDER_VERSION) is render_recipe_of's: the same version, the same fields. A render the player made is current
+/// while its link's recipe is the moment's now, as either works it out
+#[cfg(test)]
+mod render_recipe_twin {
+    use super::*;
+
+    /// The keys of a Lua table constructor (`{ a = 1, b = { c = 2 }, ["in"] = 3 }`), nested ones as "b.c"
+    fn lua_keys(t: &str) -> Vec<String> {
+        let (mut out, mut stack, mut word, mut last): (Vec<String>, Vec<String>, String, Option<String>) = (Vec::new(), Vec::new(), String::new(), None);
+        let mut chars = t.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => { stack.push(last.take().unwrap_or_default()); word.clear(); }
+                '}' => { stack.pop(); if stack.is_empty() { break; } }
+                '=' if chars.peek() != Some(&'=') && !word.is_empty() => {
+                    let path: Vec<&str> = stack.iter().skip(1).map(String::as_str).chain([word.as_str()]).collect();
+                    out.push(path.join("."));
+                    last = Some(word.clone());
+                    word.clear();
+                }
+                '[' | '"' | ']' | ' ' | '\n' => {}
+                c if c.is_alphanumeric() || c == '_' => word.push(c),
+                _ => { word.clear(); if c == ',' { last = None; } }
+            }
+            if c == ',' { word.clear(); }
+        }
+        // A table's own key is its fields' parent ("clip" of "clip.hash")
+        let parents: Vec<String> = out.iter().filter_map(|k| k.rsplit_once('.').map(|(p, _)| p.to_string())).collect();
+        out.retain(|k| !parents.contains(k));
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn the_players_render_recipe_is_this_one() {
+        let lua = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/scripts/workspace/main.lua")).unwrap();
+        assert!(lua.contains(&format!("\nlocal RENDER_VERSION = {RENDER_VERSION}\n")), "workspace/main.lua's RENDER_VERSION isn't {RENDER_VERSION}");
+        let a = lua.find("\nlocal function render_recipe(").expect("workspace/main.lua's render_recipe");
+        let body = &lua[a..];
+        let t = &body[body.find("trimmed({").unwrap() + "trimmed(".len()..];
+        let lua_fields = lua_keys(t);
+        let link = json!({ "hash": "h", "size": 1, "in": 1.5, "out": 4.0, "stab": { "view": "wide" }, "alone": true });
+        let mut rust_fields = Vec::new();
+        fn paths(v: &Value, at: &str, out: &mut Vec<String>) {
+            for (k, x) in v.as_object().into_iter().flatten() {
+                let p = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                // a value of the link's or the clip's own file (stab, input) is one field, whatever it holds
+                if x.is_object() && k == "clip" { paths(x, &p, out) } else { out.push(p) }
+            }
+        }
+        paths(&render_recipe_of(&link, json!({ "curve": "dlogm" }), json!("fp"), "HDR"), "", &mut rust_fields);
+        rust_fields.sort();
+        assert_eq!(lua_fields, rust_fields, "the player's render_recipe and render_recipe_of hold other fields");
+        assert_eq!(lua_keys("{ v = 1, clip = { hash = l.hash, size = l.size }, [\"in\"] = l[\"in\"], x = a == b }"), ["clip.hash", "clip.size", "in", "v", "x"]);
     }
 }

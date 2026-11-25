@@ -33,8 +33,9 @@ M.KIND_FOLDER = { ["Clip previews"] = "_Clips", Moments = "_Moments", Photos = "
 -- What a project's footage is: videos, not the player's own folders
 M.FOOTAGE = { mp4 = true, mov = true }
 -- (and the photos' folder, whose Live Photos' .mov files aren't footage either)
-local OWN_FOLDERS = { _moments = true, _clips = true, _exports = true, _stills = true, _renders = true, _cache = true, moments = true,
-                      clips = true, exports = true, stabilized = true, _actionfootageplayer = true, generated = true }
+-- (registry.json's own_folders, lower case, as the Library and the catalog leave them out)
+local OWN_FOLDERS = {}
+for _, name in ipairs(require('registry').own_folders) do OWN_FOLDERS[name] = true end
 M.OWN_FOLDERS = OWN_FOLDERS
 
 -- The folder for what a run makes, in the project: <kind's folder>/Generated (what: "Clip previews", "Moments",

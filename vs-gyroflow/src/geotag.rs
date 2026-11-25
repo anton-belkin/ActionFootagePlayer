@@ -716,12 +716,9 @@ fn srt_beside_at(path: &Path, t: f64) -> Option<Fix> {
 /// the main one over its project's locations (workspace::own_file), else the other copies' files, else <clip>.afp.json
 pub fn sidecar_place(clip: &Path) -> Option<Fix> {
     use crate::workspace as ws;
-    let mut files = Vec::new();
-    if let Some(root) = ws::project_root(clip) {
-        let (main, others) = ws::own_file(clip, &ws::locations(&root));
-        files.push(main);
-        files.extend(others);
-    }
+    let (main, others) = ws::own_files(clip);
+    let mut files = vec![main];
+    files.extend(others);
     files.push(ws::sidecar_file(clip));
     files.iter().find_map(|f| {
         let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(f).ok()?).ok()?;

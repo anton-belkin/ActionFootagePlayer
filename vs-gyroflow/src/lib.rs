@@ -27,6 +27,7 @@ pub mod dispersion;
 pub mod water;
 pub mod prefetch;
 pub mod still;
+pub mod lists;
 pub mod levels;
 pub mod in_camera;
 pub mod smoothing;

@@ -2,7 +2,7 @@
 -- defaults (what was exported before them), and each one into gyroflow-export's arguments.
 -- From the repository's folder: luajit tests/exportsettings_test.lua
 
-package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path
+package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 local es = require 'exportsettings'
 
 local failures, checks = 0, 0

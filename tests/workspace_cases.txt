@@ -1,5 +1,6 @@
 # Cases for the workspace module, read by both of its versions: tests/workspace_test.lua (the mpv plugin's,
-# mpv/scripts/workspace/workspace.lua) and `cargo test` (gyroflow-export's, vs-gyroflow/src/workspace.rs).
+# mpv/scripts/workspace/workspace.lua) and `cargo test` in catalog/ (afp-catalog's catalog/src/workspace.rs, which
+# gyroflow-export and the Library use).
 #
 # case <name>      a new case: an empty folder (a temporary one; the Lua test fakes it), which is also the home folder
 # home <dir>       the home folder is <dir> in it instead
@@ -222,6 +223,20 @@ clip Inbox/A.MP4
   others Inbox/A.afp.json
 clip Archive/Action 6/A.MP4
   own Archive/Action 6/A.afp.json
+  others Inbox/A.afp.json
+
+case an own file of before view settings (<clip>.marks.json) counts: its copy's is the main one (written as .afp.json)
+tree
+  P/Project.afproject = {"id":"p","version":2,"locations":[{"at":"","path":"../Archive"},{"at":"","path":"../Inbox"}]}
+  Archive/x.afplocation = {"project":"../P","id":"p"}
+  Archive/A.MP4
+  Archive/A.marks.json
+  Inbox/x.afplocation = {"project":"../P","id":"p"}
+  Inbox/A.MP4
+  Inbox/A.afp.json
+clip Inbox/A.MP4
+  project P
+  own Archive/A.afp.json
   others Inbox/A.afp.json
 
 case a copies-only location first: its own file is the main one only when no other copy has one; then the archive's

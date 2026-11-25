@@ -53,7 +53,8 @@ says which commits are on top and why). The modules by area:
   `smooth.rs` (edge fill), `dispersion.rs` (fringes under water), `translation.rs` (Ctrl+j), `motion.rs` and
   `prefetch.rs` (motion data read in stretches), `smoothing.rs`, `levels.rs`.
 - **What a clip is:** `probe.rs`, `water.rs`, `in_camera.rs`, `markers.rs`, `geotag.rs`, `mp4meta.rs` (MP4 keys,
-  the link), `xmp.rs` (a photo's link and tags), `workspace.rs` (twin of `workspace.lua`).
+  the link), `xmp.rs` (a photo's link and tags), `workspace.rs` (re-exports `afp_catalog::workspace`, the one Rust copy of the
+  lookup that `workspace.lua` twins).
 - **Lenses:** `lens_pick.rs` (Gyroflow's database, the curated list in `resources/curated_lenses.json`, the user's
   list), `lens_db.rs` (the player's own database), `lens_find.rs` (Find and Estimate lens).
 - **Optical motion:** `optical.rs`, `measure.rs`, `afp_motion.rs` (`<stem>.afp-motion`).
@@ -88,7 +89,9 @@ Helpers that aren't Rust: `afp-scrub` (`tools/scrub/afp-scrub.c`, the seek-bar p
 
 `catalog/` (`afp-catalog`) keeps what's in a project's folder and locations, shared through `.afp/catalog/` on the
 share: each computer appends to its own journal (`journal.rs`), the Library folds snapshots (`snapshot.rs`,
-`catalog.rs`). `locations.rs` is the third twin of the workspace lookup. `live.rs` is how programs on one computer tell
+`catalog.rs`). `workspace.rs` is the one Rust copy of the workspace lookup and of a clip's own file (vs-gyroflow
+and the Library both use it; `workspace.lua` is its Lua twin), with `locations.rs`; `registry.rs` reads
+`mpv/scripts/workspace/registry.json`, the one list of curves, export choices, setting keys and own folders. `live.rs` is how programs on one computer tell
 each other at once ([contracts.md](contracts.md#the-live-channel-library-and-player-on-one-computer)). `care.rs` and
 `inspect.rs` are the safeguards ([../design/catalog-safeguards.md](../design/catalog-safeguards.md)). `finder.rs` writes Finder tags.
 `sim.rs` simulates a NAS for the tests in `catalog/tests/`. The design is
@@ -382,7 +385,8 @@ and later and HERO13 Black are taken for GP-Log by themselves (`dlogm/main.lua` 
 stops off and need Ctrl+l.
 
 Which curve a clip is in: DJI's `ColorMode`, GoPro's Protune `PTCL` with the camera and firmware
-(`dlogm/gopro_color.lua`), or Ctrl+l. The curve list is `dlogm/main.lua` `CURVES`; its twins are listed in
+(`dlogm/gopro_color.lua`), or Ctrl+l. The curve list is the registry's (`mpv/scripts/workspace/registry.json`), read by the player, gyroflow-export
+and the Library; what's still kept apart is listed in
 [../../CLAUDE.md](../../CLAUDE.md) ("Curves").
 
 ### Underwater colour

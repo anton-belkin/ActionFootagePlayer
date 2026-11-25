@@ -108,6 +108,8 @@ async function open(o) {
     event: { listen: (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); return Promise.resolve(() => {}); } },
     webview: { getCurrentWebview: () => ({ onDragDropEvent: () => {} }) },
   };
+  // The lists the app puts there before the page's scripts run (src/lists.rs page_script)
+  require("./lists").set(w);
   w.CSS = w.CSS || {};
   if (!w.CSS.escape) w.CSS.escape = (s) => String(s).replace(/[^a-zA-Z0-9_\-]/g, (c) => "\\" + c);
   w.Element.prototype.scrollIntoView = function () {};

@@ -51,7 +51,7 @@ local utils = {
 }
 package.loaded['mp'] = mp
 package.loaded['mp.utils'] = utils
-package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path
+package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 assert(loadfile("mpv/scripts/gyroflow/export.lua"))()
 
 -- The arguments of the last gyroflow-export run, as a string, and whether it has a run of them

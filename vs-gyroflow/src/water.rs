@@ -48,7 +48,7 @@ pub const WATER_REFRACTION: f64 = 1.33;
 /// the longer of the two (a project made from the picture has one refraction). None: nothing says (the project's or
 /// preset's stays)
 pub fn refraction_for(video: &std::path::Path) -> Option<f64> {
-    let said = std::fs::read_to_string(crate::workspace::sidecar_file(video)).ok()
+    let said = std::fs::read_to_string(crate::workspace::own_file_of(video)).ok()
         .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
         .and_then(|d| d.pointer("/source/underwater").and_then(|v| v.as_str()).map(String::from));
     match said.as_deref().and_then(Underwater::parse) {

@@ -20,6 +20,7 @@ const tick = (ms) => new Promise((r) => setTimeout(r, ms || 0));
   const html = fs.readFileSync(path.join(ui, "index.html"), "utf8").replace(/<script[^>]*><\/script>/g, "");
   const dom = new JSDOM(html, { url: "http://localhost/", runScripts: "outside-only", pretendToBeVisual: true });
   const w = dom.window;
+  require("./lists").set(w);
   w.Element.prototype.scrollIntoView = function () {};
   if (!w.CSS) w.CSS = { escape: (s) => String(s).replace(/["\\]/g, "\\$&") };
   const ctx = dom.getInternalVMContext();

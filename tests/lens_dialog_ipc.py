@@ -19,7 +19,7 @@ plugins = rig + "/app.app/Contents/Resources/plugins"
 for p in R.PLUGINS:
     src = os.path.join(REPO, "mpv/scripts", p)
     if os.path.isdir(src) and os.path.isdir(os.path.join(plugins, p)):
-        for f in glob.glob(os.path.join(src, "*.lua")): shutil.copy(f, os.path.join(plugins, p))
+        for f in glob.glob(os.path.join(src, "*.lua")) + glob.glob(os.path.join(src, "*.json")): shutil.copy(f, os.path.join(plugins, p))
 for b in R.BINARIES: shutil.copy(os.path.join(REPO, "vs-gyroflow/target/release", b), plugins + "/gyroflow")
 g = plugins + "/gyroflow/main.lua"; m = open(g).read()
 m = m.replace('"/usr/bin/open"', '"/usr/bin/true"').replace('if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end', 'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then return false end').replace('(vo == "" or vo:find("gpu-next", 1, true))', '(vo == "" or vo == "null" or vo:find("gpu-next", 1, true))')

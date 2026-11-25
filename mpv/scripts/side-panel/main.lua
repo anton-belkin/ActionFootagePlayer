@@ -61,7 +61,9 @@ local WEBSITE = "https://actionfootageplayer.ch"
 local REPO = "https://github.com/anton-belkin/ActionFootagePlayer"
 local REVEAL = platform == "darwin" and "Show in Finder" or platform == "windows" and "Show in Explorer" or "Open folder"
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
-local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
+-- The log curves, { id, name } in Ctrl+l's order: registry.json's (the workspace plugin's, beside this one)
+local CURVES = {}
+for _, c in ipairs(require('registry').curves) do if c.log then table.insert(CURVES, { c.id, c.name }) end end
 local CURVE_NAMES = { uw = "SDR, underwater colour" }
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 -- The aspects a frame can have (the Clip tab's output, Save frame's photo), in two rows

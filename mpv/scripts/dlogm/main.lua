@@ -143,15 +143,11 @@ local DATA = os.getenv("DLOGM_DATA")
 local DIRS = {}
 if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
 table.insert(DIRS, DIR)
--- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr)
-local CURVES = {
-    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl", maker = "DJI",
-      lut = "DJI's D-Log M to Rec.709 LUT 11.17, for the Osmo Action 6, downloaded from DJI's site at setup" },
-    { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
-    { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
-    { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
-    { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
-}
+-- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr, maker,
+-- maker_lut). registry.json's (the workspace plugin's, beside this one), which gyroflow-export and the Library read too
+local registry = require 'registry'
+local CURVES = {}
+for _, c in ipairs(registry.curves) do if c.log then table.insert(CURVES, c) end end
 -- NBCU's HDR -> SDR, by the transfer it takes
 local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl" }
 -- The noise reduction's shader
@@ -174,7 +170,7 @@ local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- Underwater colour (uwcolor.lua's switch): a plain SDR clip (GoPro's, not log) corrected and turned into HLG
 -- by its shader, then shown in the looks like a log curve. Not in Ctrl+l's round, never saved as the clip's curve
-local UW = { id = "uw", name = "Underwater colour", hdr = "shaders/underwater_hlg.glsl" }
+local UW = registry.curve("uw")
 CURVE.uw = UW
 local uwcolor = require 'uwcolor'
 
@@ -429,7 +425,7 @@ local function publish()
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
         look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
         sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise, dv = DV_OK,
-        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
+        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.maker_lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
         dv_own = hdr ~= nil and not curve and hdr.dv_signaled == true,
         -- What the file is, for the Source tab: its primaries, its Dolby Vision ("8.4", "8.1", "5", "" none)
         prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
