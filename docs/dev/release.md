@@ -83,7 +83,23 @@ a shader parameter change (0011), no vsync wait in a window (0013), `--video-joi
 unloading user shaders no longer listed (0015). libplacebo's 0001 adds the linearize helpers only to hooks that use
 them (docs/design/gpu-render.md, "Pipeline builds").
 
-## A trial build for Anton: tools/dev_app.sh
+## A trial build for Anton: from CI first
+
+Builds come from CI, not from this Mac (Anton, 2026-11-26: the Mac's memory is the bottleneck; the internet is fast).
+When CI has built the commit (every push to main; a PR's own run doesn't upload the app, so run the workflow for the
+branch by hand: `gh workflow run release.yml --ref <branch>`, which runs on GitHub's runners):
+
+```
+gh run download <run id> -n release-macos -D <scratch folder>      # ~1.5 GB, seconds here
+ditto -x -k <scratch folder>/ActionFootagePlayer-dev-<sha>-macos-arm64.zip <scratch folder>/x
+# the current apps to build/*-previous.app, then ditto x/ActionFootagePlayer.app and x/ActionFootageLibrary.app
+# into ~/Applications; delete the download
+```
+
+Then the Launch Services check below (other copies unregistered, an MP4 opens `~/Applications`'). The artifact may
+hold older commits' apps too: take the one named by the run's commit.
+
+## Building a trial app here: tools/dev_app.sh (only when CI hasn't built it)
 
 ```
 tools/build_mpv.sh            # once per worktree, or MPV_BIN=<another worktree>/build/mpv-afp/out/mpv
@@ -187,14 +203,13 @@ One Docker image for an x86-64 NAS: collaboration (the catalog watcher), the str
 and the Jellyfin links. User docs: [tools/nas-helper/README.md](../../tools/nas-helper/README.md) and
 [tools/stream/README.md](../../tools/stream/README.md).
 
-- **Build:** CI's `nas-helper` job, or by hand from the repository's top (slow under emulation on a Mac):
-
-  ```
-  docker build -f tools/nas-helper/Dockerfile --build-arg VERSION=<v> -t actionfootage-nas-helper:<v> .
-  ```
+- **Build:** CI's `nas-helper` job only (main and releases; a branch by `gh workflow run release.yml --ref <branch>`).
+  Never `docker build` it on the Mac or the NAS: both run out of memory (a build under emulation on the Mac crashed
+  Docker, 2026-11-25). The image is the run's `nas-helper` artifact, `ActionFootageNASHelper-<v>-linux-x86_64.tar.gz`.
 
   Fedora with RPM Fusion's ffmpeg, libplacebo and mpv built from source, the Rust binaries, the player's Lua.
-- **Install or update on the NAS:** copy the release's `.tar.gz` there, `docker load -i <file>`, change the image tag
+- **Install or update on the NAS** (Anton grants `sudo claude-grant docker`; measure disk I/O before and after): copy the
+  release's or the run's `.tar.gz` there, `docker load -i <file>`, change the image tag
   in the NAS's compose file, `docker compose up -d`, `docker logs -f afp-nas-helper`. `/data` and `/config` stay.
   Keep a copy of the compose file before you change it.
 - **Settings** are the container's environment (`AFP_*`, listed by `--help` and on `http://<nas>:8099/settings`).
