@@ -490,6 +490,70 @@ impl Clip {
 }
 
 /// The type the clip was given by hand: source.lens_type in its .afp.json
+/// How a lens given to one clip alone is told (Pick::local)
+pub const FOR_THIS_CLIP: &str = "for this clip only";
+
+/// A lens given to one clip alone (`source.lens` in its own file: {"name", "how", "from", "profile": Gyroflow's lens JSON
+/// with its readout}), tried on it before its mode's clips take it
+pub struct ClipLens { pub name: String, pub how: String, pub profile: LensProfile }
+
+pub fn clip_lens(path: &str) -> Option<ClipLens> {
+    let v = clip_lens_value(path)?;
+    let profile = LensProfile::from_json(&v.get("profile")?.to_string()).ok().filter(|p| p.fisheye_params.camera_matrix.len() == 3)?;
+    let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).map(String::from).unwrap_or_else(|| profile.get_display_name());
+    Some(ClipLens { name, how: v.get("how").and_then(|h| h.as_str()).unwrap_or_default().to_string(), profile })
+}
+
+fn clip_lens_value(path: &str) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    doc.pointer("/source/lens").filter(|v| v.is_object()).cloned()
+}
+
+/// What the clip's own lens is now, for the caches of what it plays with ("" without one)
+pub fn clip_lens_stamp(path: &str) -> String {
+    clip_lens_value(path).map(|v| { use std::hash::{ Hash, Hasher }; let mut h = std::collections::hash_map::DefaultHasher::new(); v.to_string().hash(&mut h); format!("{:016x}", h.finish()) })
+        .unwrap_or_default()
+}
+
+/// Everything a clip's lens is decided by, for the caches of what it plays with: its lens type, its own lens, the
+/// user's list and the player's own lens database
+pub fn lens_state_stamp(path: &str) -> String {
+    format!("{}|{}|{}", chosen_type(path).unwrap_or_default(), clip_lens_stamp(path), user_file_stamp())
+}
+
+/// A lens of the clip's mode (a `candidates` id) as a profile, and its label
+pub fn candidate_profile(path: &str, clip: &Clip, id: &str) -> Result<(LensProfile, String), String> {
+    candidates(path, clip, usize::MAX).into_iter().find(|(c, _)| c.id == id).map(|(c, p)| (p, c.label))
+        .ok_or_else(|| format!("{id}: not a lens of this clip's camera"))
+}
+
+/// The lens given to the clip alone written into its own file (`source.lens`), the file's other keys kept; None takes
+/// it away. The file written
+pub fn set_clip_lens(path: &str, lens: Option<(&LensProfile, &str, &str, &str)>) -> Result<std::path::PathBuf, String> {
+    let file = crate::workspace::sidecar_file(std::path::Path::new(path));
+    let had = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    if had.is_none() && lens.is_none() { return Ok(file); }
+    let mut doc = had.unwrap_or_else(|| serde_json::json!({ "format": "actionfootageplayer-clip", "version": 1 }));
+    if doc.get("format").and_then(|f| f.as_str()).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
+        return Err(format!("{}: not the player's file, left alone", file.display()));
+    }
+    if !doc["source"].is_object() { doc["source"] = serde_json::json!({}); }
+    match lens {
+        Some((profile, name, how, from)) => {
+            let mut prof: serde_json::Value = serde_json::from_str(&profile.get_json().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            // gyroflow-core calls a profile without one InvalidData (GOPR1585)
+            if prof["calibrator_version"].as_str().unwrap_or_default().is_empty() { prof["calibrator_version"] = format!("Action Footage Player, {how}").into(); }
+            doc["source"]["lens"] = serde_json::json!({ "name": name, "how": how, "from": from, "profile": prof });
+        }
+        None => { if let Some(o) = doc["source"].as_object_mut() { o.remove("lens"); } }
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, &file))
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(file)
+}
+
 pub fn chosen_type(path: &str) -> Option<String> {
     let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
     let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -558,6 +622,19 @@ pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pic
 
 /// `for_video`, for a clip Gyroflow may not know the camera of
 pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
+    // A lens given to this clip alone, to try it there before its mode's clips take it (source.lens in its own file):
+    // it, whatever the mode has; not over the camera's own lens in the file
+    if !in_file {
+        if let Some(l) = clip_lens(path) {
+            return Some(Pick { profile: l.profile, name: l.name, official: false, votes: (0, 0), exact: true, curated: None, focal_only: false,
+                               local: Some(FOR_THIS_CLIP.into()) });
+        }
+    }
+    for_mode(path, clip, in_file)
+}
+
+/// The lens of the clip's mode, a lens given to the clip alone aside
+pub fn for_mode(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
     let chosen = chosen_type(path);
     let ty = chosen.clone().or_else(|| recorded_type_named(&clip.camera, path, &clip.lens_mode)).or_else(|| default_type(&clip.camera));
     let typ = ty.and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t));

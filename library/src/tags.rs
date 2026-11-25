@@ -511,6 +511,9 @@ pub fn source_value_ok(key: &str, v: &Value) -> bool {
         // The underwater colour (the dlogm plugin's uwcolor.lua): on, the light end stretched, its strength 0..1
         "uw" | "uw_highlights" => v.is_boolean(),
         "uw_strength" => v.as_f64().is_some_and(|x| (0.0..=1.0).contains(&x)),
+        // A lens given to the clip alone, to try it before its mode's clips take it (vs-gyroflow's lens_pick::clip_lens):
+        // its name and Gyroflow's lens profile
+        "lens" => v.is_object() && v["profile"].is_object() && v["profile"]["fisheye_params"].is_object(),
         _ => false,
     }
 }

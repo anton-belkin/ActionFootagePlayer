@@ -446,8 +446,13 @@ local function source_part(u, x, w, y)
             local bw = 110 * s
             u:button(x + w - bw, bw, y + 4 * s, "lens-choose", "Choose…", function() lensdlg.open(); set_popover(lensdlg.ID) end)
             y = y + 4 * s + 34 * s
-            y = u:caption(x, w, y, ((l.from or "") == "" and "No ready lens: none is made for exactly this mode, with its readout. " or "")
-                .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode"))
+            if l.from == "clip" then
+                y = u:caption(x, w, y, "Tried on this clip only: its mode's other clips keep theirs. Choose… makes it the mode's, or forgets it",
+                              { color = C.saved })
+            else
+                y = u:caption(x, w, y, ((l.from or "") == "" and "No ready lens: none is made for exactly this mode, with its readout. " or "")
+                    .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode"))
+            end
         end
         if not known and g.lens and #cands == 0 then
             y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected")

@@ -35,6 +35,7 @@ async function start() {
     lens_info: (a) => { lensAsked.push(a.path); return { candidates: [{ id: "db:1", label: "GoPro HERO7 Black Wide HS EIS 4K", exact: true, readout: true }] }; },
     assign_lens: (a) => ({ lens: "GoPro HERO7 Black Wide", mode: "the mode", again: 3, asked: a }),
     keep_found_lens: () => ({ lens: "GoPro HERO7 Black Wide, found", mode: "the mode", again: 3 }),
+    try_lens: () => ({ lens: "GoPro HERO7 Black Wide HS EIS 4K 59.94" }),
     lens_choices: (a) => ({ path: a.path, mode: "GoPro HERO7 Black · wide · hseis · 3840x2160 · 29.97 fps", now: { name: "", from: "" }, found: null, lenses: [
       { name: "GoPro HERO7 Black Wide HS EIS 4K 59.94", source: "the player’s own", verdict: "untried", fits: false, readout_ms: null, in_use: false, use: { assign: "db:2" } },
       { name: "GoPro HERO7 Black Wide HS EIS 4K 29.97", source: "Gyroflow’s database", verdict: "good", fits: true, readout_ms: 8.1, readout_measured: true, moved: 2, limit: 15, in_use: false, use: { keep: "0" } }] }),
@@ -117,6 +118,22 @@ test("a lens is chosen in the lens dialog: Choose lens…, one click selects, Us
   page.click('#sheet [data-a="lensuse"]');
   await page.until(() => page.calls("assign_lens").length === 1, 1000, "assign_lens");
   assert.deepEqual(page.calls("assign_lens")[0].args, { path: "/F/" + B, id: "db:2" });
+  await page.until(() => page.get("S.sheet") === null, 1000, "the dialog closed");
+  await new Promise((r) => setTimeout(r, 30));
+});
+
+test("Try on this clip: the lens kept for the clip alone, the clip measured again; the mode's clips keep theirs", async () => {
+  const { page } = await start();
+  page.select(B);
+  page.click('#side [data-a="lenssheet"]');
+  await page.until(() => page.$$('#sheet [data-a="lenspick"]').length === 2, 1000, "the lenses listed");
+  page.click('#sheet [data-a="lenspick"][data-v="1"]');
+  page.click('#sheet [data-a="lenstry"]');
+  await page.until(() => page.calls("try_lens").length === 1, 1000, "try_lens");
+  assert.deepEqual(page.calls("try_lens")[0].args, { clip: B, path: "/F/" + B, how: "assign", what: "db:2" });
+  assert.equal(page.calls("assign_lens").length, 0, "not the mode's");
+  await page.until(() => page.calls("add_job").length === 1, 1000, "measured again");
+  assert.deepEqual(page.calls("add_job")[0].args.options, { clips: [B], redo: true });
   await page.until(() => page.get("S.sheet") === null, 1000, "the dialog closed");
   await new Promise((r) => setTimeout(r, 30));
 });

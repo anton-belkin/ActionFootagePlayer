@@ -11,8 +11,9 @@
 -- the panel's lens dialog (side-panel/lensdialog.lua), the Library's in the player: lens-dialog (the mode's lenses,
 -- gyroflow-optical --lenses, in user-data/gyroflow/lenses), lens-find / lens-estimate (run on the clip playing, how far
 -- in user-data/gyroflow/lens_job, the list read again as lenses are tried), lens-quick (Find stopped at the first lens
--- that fits: gyroflow.conf lens_quick, on by default), lens-use keep <n> | assign <id> (the lens kept for the mode, then
--- the clip measured again where its motion is measured from the picture or it has none), lens-forget.
+-- that fits: gyroflow.conf lens_quick, on by default), lens-use keep <n> | assign <id> | promote (the lens kept for the
+-- mode, then the clip measured again where its motion is measured from the picture or it has none), lens-try keep <n> |
+-- assign <id> (this clip alone takes it: source.lens in its own file, which wins over its mode's), lens-forget clip|mode.
 --
 --   require('measure').setup(env), env: { source = function() -> the plugin's current source, path = clip_path,
 --                                         again = play_again, notify = mp.notify, options = the plugin's options }
@@ -27,13 +28,17 @@ local OPTICAL = utils.join_path(mp.get_script_directory(), platform.exe("gyroflo
 local PROBE = utils.join_path(mp.get_script_directory(), platform.exe("gyroflow-probe"))
 
 function M.setup(env)
-    local job = nil
+    local job, again_after = nil, false
     local function measuring(v) mp.set_property_native("user-data/gyroflow/measuring", v) end
     measuring(false)
 
     local function start()
         if platform.photo_shown() then return end
-        if job then return env.notify({ id = "gyroflow:measure", kind = "info", seconds = 3, title = "Still measuring the motion…" }) end
+        -- One under way: this one after it (a lens tried or used meanwhile: measured with it then, not lost)
+        if job then
+            again_after = true
+            return env.notify({ id = "gyroflow:measure", kind = "info", seconds = 3, title = "Still measuring the motion…", detail = "measured again after it" })
+        end
         local path = env.path()
         if not path or path:find("://", 1, true) then return end
         local source = env.source()
@@ -73,6 +78,11 @@ function M.setup(env)
             poll:kill()
             job = nil
             measuring(false)
+            -- Asked again meanwhile: measured again now, with what it has now
+            if again_after then
+                again_after = false
+                mp.add_timeout(0.1, start)
+            end
             local s = io.open(status, "r")
             local st = s and utils.parse_json(s:read("*a") or "") or nil
             if s then s:close() end
@@ -184,25 +194,66 @@ function M.setup(env)
     end
     mp.register_script_message("lens-find", function() lens_run("find-lens") end)
     mp.register_script_message("lens-estimate", function() lens_run("estimate-lens") end)
-    -- The lens chosen kept for the whole mode; the clip measured again with it where its motion is the picture's or it
-    -- has none (a clip with gyro waiting for a lens plays from its gyro now)
-    mp.register_script_message("lens-use", function(how, what)
-        local path = env.path()
-        if not path or path:find("://", 1, true) or not what then return end
-        local args = how == "keep" and { OPTICAL, "--keep-lens", path, what } or { PROBE, "--assign-lens", path, what }
+    -- The clip played again with its lens as it is now: measured again with it first where its motion is the
+    -- picture's or it has none (a clip with gyro waiting for a lens plays from its gyro now)
+    local function after_lens(path, measure)
+        if env.path() ~= path then return end
+        local source = env.source()
+        local own = source and (source.kind == "project" or (source.kind == "default" and not source.optical))
+        if measure and not own then start() else env.again() end
+    end
+    -- Its own file written (a lens tried on it): noted to the project's catalog, as the player's other writes are
+    local function noted(file) if file then mp.commandv("script-message-to", "workspace", "catalog-note", file) end end
+    local function run(args, fail, done)
         mp.command_native_async({ name = "subprocess", args = args, capture_stdout = true, capture_stderr = true, playback_only = false }, function(_, r)
             local out = r and utils.parse_json((r.stdout or ""):match("[^\n]*") or "") or nil
             if not (r and r.status == 0 and type(out) == "table" and not out.error) then
-                return env.notify({ id = "gyroflow:lens", kind = "error", title = "The lens couldn't be kept", detail = type(out) == "table" and tostring(out.error) or "" })
+                return env.notify({ id = "gyroflow:lens", kind = "error", title = fail, detail = type(out) == "table" and tostring(out.error) or "" })
             end
+            done(out)
+        end)
+    end
+    -- Use for the mode: the lens chosen kept for the whole mode (promote: the one tried on this clip, taken away from
+    -- it then: the mode's is the same), the clip measured again with it
+    mp.register_script_message("lens-use", function(how, what)
+        local path = env.path()
+        if not path or path:find("://", 1, true) or not what then return end
+        if how == "promote" then
+            return run({ OPTICAL, "--promote-lens", path }, "The lens couldn't be given to the mode", function(out)
+                run({ OPTICAL, "--try-lens", path, "forget" }, "The clip's own lens couldn't be taken away", function(o2)
+                    noted(o2.file)
+                    env.notify({ id = "gyroflow:lens", kind = "done", seconds = 4, title = "Lens kept for this mode", detail = tostring(out.mode or "") })
+                    after_lens(path, false)
+                end)
+            end)
+        end
+        local args = how == "keep" and { OPTICAL, "--keep-lens", path, what } or { PROBE, "--assign-lens", path, what }
+        run(args, "The lens couldn't be kept", function(out)
             env.notify({ id = "gyroflow:lens", kind = "done", seconds = 4, title = "Lens kept for this mode", detail = tostring(out.mode or "") })
-            if env.path() ~= path then return end
-            local source = env.source()
-            local own = source and (source.kind == "project" or (source.kind == "default" and not source.optical))
-            if own then env.again() else start() end
+            after_lens(path, true)
         end)
     end)
-    mp.register_script_message("lens-forget", function()
+    -- Try on this clip: the lens kept for this clip alone (source.lens in its own file), the clip measured again with it
+    mp.register_script_message("lens-try", function(how, what)
+        local path = env.path()
+        if not path or path:find("://", 1, true) or not what then return end
+        run({ OPTICAL, "--try-lens", path, how, what }, "The lens couldn't be tried", function(out)
+            noted(out.file)
+            env.notify({ id = "gyroflow:lens", kind = "done", seconds = 4, title = "Trying the lens on this clip alone", detail = tostring(out.lens or "") })
+            after_lens(path, true)
+        end)
+    end)
+    -- Forget: the lens tried on this clip (back to its mode's, measured again with it), or the mode's chosen one
+    mp.register_script_message("lens-forget", function(which)
+        local path = env.path()
+        if not path or path:find("://", 1, true) then return end
+        if which == "clip" then
+            return run({ OPTICAL, "--try-lens", path, "forget" }, "The clip's own lens couldn't be taken away", function(out)
+                noted(out.file)
+                env.notify({ id = "gyroflow:lens", kind = "done", seconds = 4, title = "Back to the mode's lens" })
+                after_lens(path, true)
+            end)
+        end
         lens_command({ PROBE, "--forget-lens" }, "Lens taken away from this mode")
     end)
 end

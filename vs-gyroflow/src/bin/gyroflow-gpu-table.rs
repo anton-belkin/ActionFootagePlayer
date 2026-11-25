@@ -110,7 +110,9 @@ fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::P
     let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
     // The motion measured from the picture beside the clip, as it is now (made or measured again since)
     let measured = vs_gyroflow::afp_motion::stamp(std::path::Path::new(&project));
-    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}|{translation}|{measured}", serde_json::to_string(&sorted).ok()?))?;
+    // and the lens it's decided to have as it is now (its lens type, a lens given to it alone, the user's lenses)
+    let lens = vs_gyroflow::lens_pick::lens_state_stamp(&project);
+    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}|{translation}|{measured}|{lens}", serde_json::to_string(&sorted).ok()?))?;
     Some((base.with_extension("glsl"), base.with_extension("json")))
 }
 
@@ -347,6 +349,7 @@ fn geometry_key(j: &serde_json::Value) -> String {
     key.push(stamp("project"));
     key.push(stamp("preset"));
     key.push(j.get("project").and_then(|v| v.as_str()).map(|p| vs_gyroflow::afp_motion::stamp(std::path::Path::new(p))).unwrap_or_default());
+    key.push(j.get("project").and_then(|v| v.as_str()).map(vs_gyroflow::lens_pick::lens_state_stamp).unwrap_or_default());
     key.push(format!("version={}", j.get("version").map(|v| v.to_string()).unwrap_or_default()));
     key.join("|")
 }

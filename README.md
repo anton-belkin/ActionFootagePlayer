@@ -461,8 +461,14 @@ the clip's mode (`mode_key`) and the lenses to choose from (`candidates`); `--as
 the player's side panel, open the same dialog: the lenses of the clip's camera mode, each with what Find and Estimate
 said of it on the clip (fits / not checked / not reliable / doesn't fit / not tried, its readout, how far the lens
 moved), **Find lens** and **Estimate lens** run from there on the clip (the player runs them itself, no Library needed),
-and **Use and measure again** (or **Use for this mode** for a clip with gyro). One click selects a lens; in the player
-Up/Down move, Enter uses it, Esc closes. `gyroflow-optical --lenses <clip>` prints what it lists.
+**Try on this clip** (this clip alone takes it, measured again with it and played so; its mode's other clips keep
+theirs) and **Use for the mode** (every clip of the mode takes it; the selected ones measured again). A lens tried on a
+clip is kept in its own file (`source.lens` in `<clip>.afp.json`, with its readout) and wins over its mode's wherever
+its lens is decided: the probe, measuring, playing, the GPU table and exports. Source → Lens says "Tried on this clip
+only"; in the dialog **Use for the mode** makes it the mode's, **Forget the lens tried on this clip** goes back to the
+mode's. One click selects a lens; in the player Up/Down move, Enter uses it for the mode, Esc closes.
+`gyroflow-optical --lenses <clip>` prints what it lists; `--try-lens <clip> keep <n> | assign <id> | forget` and
+`--promote-lens <clip>` do the same from the command line.
 
 **Find lens / Estimate lens** (Gyroflow's own "lens from the video", gyroflow/gyroflow#1296):
 - **Quick** (on by default; the dialog's switch, remembered; `gyroflow.conf` `lens_quick` in the player; `--quick` on

@@ -46,7 +46,7 @@ function lensRows(d) {
   return all.filter((r) => tried(r) && fits(r)).concat(all.filter((r) => tried(r) && !fits(r)), all.filter((r) => !tried(r)));
 }
 
-const LENS_VERDICT = { good: ["ok", "fits"], single: ["ok", "fits, one part told"], unchecked: ["", "not checked"], loose: ["bad", "not reliable"], poor: ["bad", "doesn’t fit"], untried: ["", "not tried"] };
+const LENS_VERDICT = { clip: ["", "tried on this clip"], good: ["ok", "fits"], single: ["ok", "fits, one part told"], unchecked: ["", "not checked"], loose: ["bad", "not reliable"], poor: ["bad", "doesn’t fit"], untried: ["", "not tried"] };
 
 // The clips of the mode it would measure again (app.js's keptLensClips: the selected ones measured from the picture or
 // with no motion data)
@@ -69,7 +69,9 @@ function renderLensSheet() {
   let h = '<div class="scrim" data-a="scrim"><div class="sheet lenssheet" role="dialog" aria-modal="true" aria-labelledby="lensTitle">' +
     '<header><h2 id="lensTitle">Lens for ' + esc(l.mode) + '</h2><span class="sub wrap">' +
     esc("Kept for every clip of this mode" + (n ? ": " + n + " in this project" : "") + ".") +
-    (d && d.now ? " Now: <b>" + esc(String(d.now.name || "no ready lens").replace(/_/g, " ")) + "</b>" + esc((d.now.readout_ms ? ", readout " + d.now.readout_ms.toFixed(1) + " ms" : "") + ".") : "") + '</span></header><div class="sb">';
+    (d && d.now ? " Now: <b>" + esc(String(d.now.name || "no ready lens").replace(/_/g, " ")) + "</b>" + esc((d.now.readout_ms ? ", readout " + d.now.readout_ms.toFixed(1) + " ms" : "") + ".") : "") +
+    // A lens tried on this clip alone: its mode's named beside it
+    (d && d.clip_lens ? esc(" Its mode’s: " + String((d.mode_lens && d.mode_lens.name) || "no ready lens").replace(/_/g, " ") + ".") : "") + '</span></header><div class="sb">';
   h += '<div class="lensbar"><button type="button" class="btn sm" data-a="lensfind"' + (running ? " disabled" : "") + '>Find lens</button>' +
     '<button type="button" class="btn sm" data-a="lensestimate"' + (running ? " disabled" : "") + '>Estimate lens</button>' +
     '<label class="switch"><input type="checkbox" data-a="lensquick"' + (lensQuickOn() ? " checked" : "") + '> Quick: stop at the first lens that fits</label></div>';
@@ -86,7 +88,7 @@ function renderLensSheet() {
     const rows = lensRows(d);
     const f = d.found;
     const fits = (r) => r.fits || ["good", "single", "unchecked"].includes(r.verdict);
-    const groups = [["Fits this clip", rows.filter((r) => r.verdict !== "untried" && fits(r))], ["Tried, doesn’t fit", rows.filter((r) => r.verdict !== "untried" && !fits(r))],
+    const groups = [["Tried on this clip alone", rows.filter((r) => r.clip)], ["Fits this clip", rows.filter((r) => !r.clip && r.verdict !== "untried" && fits(r))], ["Tried, doesn’t fit", rows.filter((r) => r.verdict !== "untried" && !fits(r))],
       [f && f.quick && f.untried ? "Not tried (Quick stopped at the first that fits)" : "Not tried", rows.filter((r) => r.verdict === "untried")]];
     for (const [title, list] of groups) {
       if (!list.length) continue;
@@ -107,10 +109,15 @@ function renderLensSheet() {
   const chosen = d && l.chosen != null ? lensRows(d)[l.chosen] : null;
   const m = lensMeasureCount();
   const canUse = chosen && chosen.use && !l.busy && !running;
-  const forget = !!(d && d.now && d.now.from === "own");
-  h += '</div><footer>' + (forget ? '<button type="button" class="btn" data-a="lensforget"' + (l.busy ? " disabled" : "") + '>Forget the lens chosen for this mode</button>' : "") +
+  // Forget: the lens tried on this clip (back to its mode's), else the one chosen for the mode
+  const forget = d && d.clip_lens ? "Forget the lens tried on this clip" : d && d.now && d.now.from === "own" ? "Forget the lens chosen for this mode" : "";
+  const tried = chosen && chosen.clip;
+  const mm = tried ? Math.max(0, m - 1) : m;
+  h += '</div><footer>' + (forget ? '<button type="button" class="btn" data-a="lensforget"' + (l.busy ? " disabled" : "") + '>' + esc(forget) + '</button>' : "") +
     '<span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button>' +
-    '<button type="button" class="btn pri" data-a="lensuse"' + (canUse ? "" : " disabled") + '>' + (l.busy ? "Keeping…" : m ? "Use and measure " + (m === 1 ? "the clip" : m + " clips") + " again" : "Use for this mode") + '</button></footer>';
+    // Try it on this clip alone first (measured again with it, played), or make it the mode's
+    '<button type="button" class="btn" data-a="lenstry"' + (canUse && !tried ? "" : " disabled") + ' title="This clip alone takes it, to see it there before its mode’s clips do">Try on this clip</button>' +
+    '<button type="button" class="btn pri" data-a="lensuse"' + (canUse ? "" : " disabled") + '>' + (l.busy ? "Keeping…" : "Use for the mode" + (mm ? " and measure " + (mm === 1 ? "1 clip" : mm + " clips") + " again" : "")) + '</button></footer>';
   return h + '</div></div>';
 }
 
@@ -131,12 +138,35 @@ async function lensUse() {
   if (!r || !r.use || l.busy) return;
   l.busy = true; renderSheet();
   try {
-    const out = r.use.keep != null ? await invoke("keep_found_lens", { path: l.path, n: String(r.use.keep) }) : await invoke("assign_lens", { path: l.path, id: r.use.assign });
+    // The lens tried on this clip made the mode's (this clip measured with it already); else the one chosen
+    const out = r.use.promote ? await invoke("promote_lens", { clip: l.id, path: l.path })
+      : r.use.keep != null ? await invoke("keep_found_lens", { path: l.path, n: String(r.use.keep) }) : await invoke("assign_lens", { path: l.path, id: r.use.assign });
     for (const x of Object.keys(LENS_CANDIDATES)) delete LENS_CANDIDATES[x];
     toast(String(out.lens || r.name).replace(/_/g, " ") + " is the lens for " + (out.mode || l.mode));
-    await measureWithKept(l.path, l.mode);
+    await measureWithKept(l.path, l.mode, r.use.promote ? l.path : null);
     S.sheet = null; S.lens = null;
   } catch (e) { showError("The lens couldn’t be kept: " + e); l.busy = false; }
+  renderSheet(); renderSide();
+}
+
+// Try on this clip: the lens kept for this clip alone (its own file), the clip measured again with it where its motion
+// is the picture's or it has none, and played so in the player; the mode's clips keep theirs
+async function lensTry() {
+  const l = S.lens;
+  const r = l && l.data ? lensRows(l.data)[l.chosen] : null;
+  if (!r || !r.use || r.clip || l.busy) return;
+  l.busy = true; renderSheet();
+  try {
+    const how = r.use.keep != null ? "keep" : "assign", what = String(r.use.keep != null ? r.use.keep : r.use.assign);
+    await invoke("try_lens", { clip: l.id, path: l.path, how, what });
+    toast(String(r.name).replace(/_/g, " ") + ": tried on " + l.name + " alone");
+    const it = keptLensClips(l.path, l.mode).find((x) => x.path === l.path);
+    if (it) {
+      await invoke("add_job", { kind: "optical", options: { clips: [it.id], redo: true }, only: [it.id], label: it.name + ", with the lens tried" });
+      toast("Measuring " + it.name + " again with it");
+    }
+    S.sheet = null; S.lens = null;
+  } catch (e) { showError("The lens couldn’t be tried: " + e); l.busy = false; }
   renderSheet(); renderSide();
 }
 
@@ -144,7 +174,11 @@ async function lensForget() {
   const l = S.lens;
   if (!l || l.busy) return;
   l.busy = true; renderSheet();
-  try { await invoke("assign_lens", { path: l.path, id: null }); toast("The lens chosen for " + l.mode + " is forgotten"); l.chosen = null; }
+  try {
+    if (l.data && l.data.clip_lens) { await invoke("try_lens", { clip: l.id, path: l.path, how: "forget", what: null }); toast(l.name + " is back to its mode’s lens"); }
+    else { await invoke("assign_lens", { path: l.path, id: null }); toast("The lens chosen for " + l.mode + " is forgotten"); }
+    l.chosen = null;
+  }
   catch (e) { showError(String(e)); }
   l.busy = false;
   await lensReload();

@@ -178,7 +178,8 @@ fn main() {
     // The lens type given to the clip by hand decides its lens profile: an answer kept for another isn't this one
     // and so does the user's own curated list (lens_pick::user_file), as it is now
     // and the motion measured from the picture beside it (afp_motion.rs), as it is now
-    let build = format!("{build}|{}|{}|{}", vs_gyroflow::lens_pick::chosen_type(&path).unwrap_or_default(), vs_gyroflow::lens_pick::user_file_stamp(),
+    // and the lens given to the clip alone (lens_pick::clip_lens)
+    let build = format!("{build}|{}|{}|{}", vs_gyroflow::lens_pick::lens_state_stamp(&path), vs_gyroflow::lens_pick::user_file_stamp(),
                         vs_gyroflow::afp_motion::stamp(std::path::Path::new(&path)));
     if library {
         // Its answer has the lens of the Gyroflow project beside it too: kept while that project is as it is

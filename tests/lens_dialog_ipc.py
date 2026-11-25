@@ -64,6 +64,41 @@ try:
     print("measuring", pl.prop("user-data/gyroflow/measuring"), "lenses-own", os.listdir(rig + "/lenses-own"), flush=True)
     import json
     print("motion", json.loads(open(rig + "/clips/GOPR1585.afp-motion").readline()).get("readout_ms"), flush=True)
+    # Try on this clip: another lens of the mode (the 29.97 built-in) given to this clip alone, the clip measured again
+    # with it; then forgotten (back to the mode's)
+    def measured_lens():
+        return json.loads(open(rig + "/clips/GOPR1585.afp-motion").readline()).get("lens_name")
+    for _ in range(120):
+        if not pl.prop("user-data/gyroflow/measuring"): break
+        time.sleep(0.5)
+    before = os.path.getmtime(rig + "/clips/GOPR1585.afp-motion")
+    pl.cmd("script-message-to", "gyroflow", "lens-dialog"); time.sleep(2.0)
+    l = pl.prop("user-data/gyroflow/lenses") or {}
+    other = [r for r in l.get("lenses", []) if "29.97fps, built in" in r.get("name", "") and "assign" in (r.get("use") or {})]
+    assert other, "the 29.97 built-in lens isn't offered"
+    pl.cmd("script-message-to", "gyroflow", "lens-try", "assign", other[0]["use"]["assign"])
+    for _ in range(120):
+        t = os.path.getmtime(rig + "/clips/GOPR1585.afp-motion")
+        if t > before and not pl.prop("user-data/gyroflow/measuring") and "29.97" in (measured_lens() or ""): break
+        time.sleep(0.5)
+    own = json.load(open(rig + "/clips/GOPR1585.afp.json"))["source"].get("lens", {})
+    print("tried on the clip:", own.get("name"), "| measured with:", measured_lens(), flush=True)
+    assert "29.97" in (own.get("name") or "") and "29.97" in (measured_lens() or ""), "not measured with the lens tried"
+    time.sleep(2.0)
+    pl.cmd("script-message-to", "side_panel", "popover", ""); time.sleep(0.5)
+    shot("player-after-tried-source")
+    pl.cmd("script-message-to", "gyroflow", "lens-dialog")
+    pl.cmd("script-message-to", "side_panel", "popover", "lens-dialog"); time.sleep(2.5)
+    shot("player-after-tried-dialog")
+    pl.cmd("script-message-to", "side_panel", "popover", "")
+    before = os.path.getmtime(rig + "/clips/GOPR1585.afp-motion")
+    pl.cmd("script-message-to", "gyroflow", "lens-forget", "clip")
+    for _ in range(120):
+        if os.path.getmtime(rig + "/clips/GOPR1585.afp-motion") > before and not pl.prop("user-data/gyroflow/measuring") and "29.97" not in (measured_lens() or ""): break
+        time.sleep(0.5)
+    own = json.load(open(rig + "/clips/GOPR1585.afp.json"))["source"].get("lens")
+    print("forgotten:", own is None, "| measured with:", measured_lens(), flush=True)
+    assert own is None and "29.97" not in (measured_lens() or ""), "the clip's own lens wasn't taken away"
     print("log tail:", subprocess.run(["grep", "-a", "-i", "lens\\|measur", rig + "/mpv.log"], capture_output=True, text=True).stdout.splitlines()[-6:], flush=True)
 finally:
     pl.quit(); shutil.rmtree(rig, ignore_errors=True)

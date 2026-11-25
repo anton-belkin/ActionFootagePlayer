@@ -347,12 +347,23 @@ pub fn choices(path: &Path) -> Result<serde_json::Value, String> {
     let v = video(path)?;
     let now_pick = crate::lens_pick::for_clip(&v.path, &v.clip, false);
     let now = json!({ "name": info.lens, "from": info.from, "readout_ms": now_pick.as_ref().and_then(|p| p.profile.frame_readout_time).map(f64::abs) });
-    let now_name = same_name(&info.lens);
+    // A lens given to this clip alone: shown first, its mode's lens named beside it
+    let own = crate::lens_pick::clip_lens(&v.path);
+    let mode_pick = crate::lens_pick::for_mode(&v.path, &v.clip, false);
+    let mode_lens = json!({ "name": mode_pick.as_ref().map(|p| p.label()), "readout_ms": mode_pick.as_ref().and_then(|p| p.profile.frame_readout_time).map(f64::abs) });
+    let now_name = if own.is_some() { String::new() } else { same_name(&info.lens) };
     let cands = crate::lens_pick::candidates(&v.path, &v.clip, 24);
     let source = |c: &crate::lens_pick::Candidate| if !c.local { "Gyroflow’s database" } else if c.label.ends_with(", built in") { "built into the player" } else { "the player’s own" };
     let k = read_kept(path);
     let mut rows: Vec<serde_json::Value> = Vec::new();
     let mut seen = std::collections::HashSet::new();
+    if let Some(l) = &own {
+        // Shown once: not again among the mode's lenses
+        seen.insert(same_name(&l.name));
+        rows.push(json!({ "name": l.name, "source": format!("for this clip only, {}", if l.how.is_empty() { "chosen" } else { &l.how }),
+                          "verdict": "clip", "fits": true, "readout_ms": l.profile.frame_readout_time.filter(|r| *r != 0.0).map(f64::abs),
+                          "readout_measured": false, "in_use": true, "clip": true, "use": { "promote": true } }));
+    }
     if let Some(k) = &k {
         let row = |t: &Tried, estimated: bool| {
             let cand = cands.iter().find(|(c, _)| same_name(&c.label) == same_name(&t.name)).map(|(c, _)| c);
@@ -377,7 +388,7 @@ pub fn choices(path: &Path) -> Result<serde_json::Value, String> {
                           "readout_ms": prof.frame_readout_time.filter(|r| *r != 0.0).map(f64::abs), "readout_measured": false,
                           "exact": c.exact, "in_use": same_name(&c.label) == now_name, "use": { "assign": c.id } }));
     }
-    Ok(json!({ "path": p, "camera": info.camera, "mode": info.mode_key, "in_file": false, "now": now, "lenses": rows,
+    Ok(json!({ "path": p, "camera": info.camera, "mode": info.mode_key, "in_file": false, "now": now, "mode_lens": mode_lens, "clip_lens": own.is_some(), "lenses": rows,
                "found": k.as_ref().map(|k| json!({ "quick": k.quick, "untried": k.untried, "accepted": k.accepted, "fragments_with_scene": k.fragments_with_scene,
                                                      "estimated": k.estimate.is_some(), "tried": k.tried.len() })) }))
 }
@@ -390,4 +401,43 @@ mod names {
                    super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps, built in"));
         assert_ne!(super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-23.98fps"), super::same_name("GoPro HERO4 Black Medium 2.7k 16by9 2704x1520-29.97fps"));
     }
+}
+
+/// A lens the dialogs offer, as a profile: one found on the clip (`how` "keep", `what` its n: with the readout measured)
+/// or one of the mode's (`how` "assign", `what` its candidates id). Its profile, name, how it came, where from
+pub fn lens_to_use(path: &Path, how: &str, what: &str) -> Result<(LensProfile, String, String, String), String> {
+    match how {
+        "keep" => {
+            let k = read_kept(path).ok_or("nothing found for this clip yet: Find lens or Estimate lens first")?;
+            let t = k.estimate.iter().chain(k.tried.iter()).find(|t| t.n == what).ok_or_else(|| format!("{what}: not one of what was found for this clip"))?;
+            let json = t.profile.as_ref().ok_or("that lens can't be kept as a profile of this clip's frame")?;
+            let profile = LensProfile::from_json(&json.to_string()).map_err(|e| e.to_string())?;
+            let how = if what == "estimate" { "estimated from footage" } else if t.readout_measured { "found in the footage, readout measured" } else { "found in the footage" };
+            Ok((profile, t.name.replace('_', " "), how.into(), format!("{} ({})", t.name, path.display())))
+        }
+        "assign" => {
+            let v = video(path)?;
+            let (profile, label) = crate::lens_pick::candidate_profile(&v.path, &v.clip, what)?;
+            Ok((profile, label, "chosen".into(), what.to_string()))
+        }
+        _ => Err(format!("{how}: keep or assign")),
+    }
+}
+
+/// A lens tried on this clip alone (lens_pick::set_clip_lens): its own file written
+pub fn try_on_clip(path: &Path, how: &str, what: &str) -> Result<(std::path::PathBuf, String), String> {
+    let (profile, name, how, from) = lens_to_use(path, how, what)?;
+    let file = crate::lens_pick::set_clip_lens(&path.to_string_lossy(), Some((&profile, &name, &how, &from)))?;
+    Ok((file, name))
+}
+
+/// The lens tried on this clip made its whole mode's (lens_db::assign); the clip's own stays until it's taken away
+pub fn promote(path: &Path) -> Result<(std::path::PathBuf, String, String), String> {
+    let p = path.to_string_lossy().into_owned();
+    let l = crate::lens_pick::clip_lens(&p).ok_or("this clip has no lens of its own to give its mode")?;
+    let v = video(path)?;
+    let key = crate::lens_db::ModeKey::of(&v.path, &v.clip);
+    let how = if l.how.is_empty() { "tried on a clip".to_string() } else { l.how.clone() };
+    let file = crate::lens_db::assign(&key, &l.profile, &how, &format!("{} (tried on {})", l.name, p))?;
+    Ok((file, key.describe(), l.name))
 }

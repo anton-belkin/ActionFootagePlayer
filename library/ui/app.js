@@ -1149,7 +1149,7 @@ function lensFrom(it) {
   if (l.lens === "in the file") return "file";
   return l.from === "file" ? "file" : (l.lens ? l.from || "database" : "");
 }
-const LENS_FROM = { project: "The Gyroflow project’s", file: "In the file", own: "The player’s own, for its mode", builtin: "Built into the player, for its mode", list: "From the curated list", database: "Gyroflow’s database", "": "No ready lens" };
+const LENS_FROM = { project: "The Gyroflow project’s", file: "In the file", clip: "Tried on this clip only", own: "The player’s own, for its mode", builtin: "Built into the player, for its mode", list: "From the curated list", database: "Gyroflow’s database", "": "No ready lens" };
 function lensName(it) {
   const l = lensOf(it);
   if (it.gyroflow) return l && l.project && l.project.lens ? String(l.project.lens).replace(/_/g, " ") : "The Gyroflow project’s";
@@ -1290,6 +1290,7 @@ function sourceBody(c) {
       prov = esc(names.size > 1 ? tallyText(froms, (x) => lc(LENS_FROM[x])) : froms.size === 1 ? LENS_FROM[froms.keys().next().value] : "") + (assigned ? " " + HAND : "") +
         (reading ? esc(" · " + reading + " not read yet") : gf ? esc(" · its Gyroflow project’s plays")
           : modes.size > 1 ? esc(" · a lens is chosen for one mode at a time: select clips of one mode")
+          : froms.size === 1 && froms.has("clip") ? esc(" · its mode’s other clips keep theirs; Choose lens… makes it the mode’s, or forgets it")
           : esc(" · kept for every clip of " + modeKey + (others > flat.length ? " (" + others + " in this project)" : "")));
       if (one && one.gyroflow) extra += projectLensHtml(one);
       if (findable && !gf) extra += '<div class="btns"><button type="button" class="btn sm" data-a="lenssheet"' + (modeKey && !reading ? "" : " disabled") + '>Choose lens…</button></div>' +
@@ -1526,8 +1527,8 @@ function keptLensClips(path, mode) {
   const sel = ctx().selItems.filter(ofMode);
   return (sel.length ? sel : all.filter((it) => it.path === path)).filter(measurable);
 }
-async function measureWithKept(path, mode) {
-  const clips = keptLensClips(path, mode);
+async function measureWithKept(path, mode, except) {
+  const clips = keptLensClips(path, mode).filter((it) => it.path !== except);
   if (!clips.length) return;
   const label = (clips.length === 1 ? clips[0].name : clips.length + " clips") + ", with the lens kept";
   await invoke("add_job", { kind: "optical", options: { clips: clips.map((it) => it.id), redo: true }, only: clips.map((it) => it.id), label });
@@ -3100,6 +3101,7 @@ document.addEventListener("click", async (e) => {
     case "lensestimate": return lensRun("lens-estimate");
     case "lenspick": if (S.lens) { S.lens.chosen = +v; renderSheet(); } return;
     case "lensuse": return lensUse();
+    case "lenstry": return lensTry();
     case "lensforget": return lensForget();
     case "albumadd": return askAlbum("add");
     case "albummove": return askAlbum("move");

@@ -1899,6 +1899,64 @@ async fn lens_choices(path: String) -> Result<Value, String> {
     }).await.map_err(|e| e.to_string())?
 }
 
+/// A lens tried on one clip alone before its whole mode takes it (the lens dialog's Try on this clip): `how` "keep" (one
+/// Find or Estimate found, `what` its n) or "assign" (one of the mode's, `what` its id), its profile from
+/// gyroflow-optical --lens-for, kept in the clip's own file (`source.lens`, set_source: noted to the catalog); "forget"
+/// takes it away. The clip's probe read again
+#[tauri::command]
+async fn try_lens(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clip: String, path: String, how: String, what: Option<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let lens = if how == "forget" { Value::Null } else {
+            let tool = optical_tool()?;
+            let mut cmd = Command::new(&tool);
+            cmd.arg("--lens-for").arg(&path).arg(&how).arg(what.as_deref().unwrap_or_default()).stdin(Stdio::null()).stderr(Stdio::null());
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+            let out = cmd.output().map_err(|e| e.to_string())?;
+            let v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+                .ok_or("This ActionFootagePlayer can't try a lens on one clip: update it")?;
+            if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+            v
+        };
+        let name = lens["name"].clone();
+        let change: serde_json::Map<String, Value> = [("lens".to_string(), lens)].into_iter().collect();
+        let problems = tags::set_source(&root, &[(clip.clone(), change)]);
+        if let Some(p) = problems.first() { return Err(p.clone()); }
+        probes.lock().unwrap().forget(&[path.clone()]);
+        Ok(json!({ "lens": name }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// The lens tried on a clip made its whole mode's (gyroflow-optical --promote-lens: the player's own lens database), and
+/// taken away from the clip's own file (the mode's is the same now). The camera's clips are read again
+#[tauri::command]
+async fn promote_lens(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clip: String, path: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let tool = optical_tool()?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--promote-lens").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't give a clip's lens to its mode: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        let change: serde_json::Map<String, Value> = [("lens".to_string(), Value::Null)].into_iter().collect();
+        let problems = tags::set_source(&root, &[(clip, change)]);
+        if let Some(p) = problems.first() { return Err(p.clone()); }
+        let camera = probes.lock().unwrap().get(&path).and_then(|a| a["camera"].as_str().map(String::from)).unwrap_or_default();
+        probes.lock().unwrap().forget(&[path.clone()]);
+        let again = if camera.is_empty() { 0 } else { probes.lock().unwrap().lens_saved_for(&camera, &before, None) };
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
 async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
@@ -2928,7 +2986,7 @@ fn main() {
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, set_comment, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens, assign_lens, keep_found_lens, lens_choices,
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens, assign_lens, keep_found_lens, lens_choices, try_lens, promote_lens,
                                                  rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share,
                                                  journal::journal_write, journal::journal_hello])
         .on_window_event(move |window, event| {

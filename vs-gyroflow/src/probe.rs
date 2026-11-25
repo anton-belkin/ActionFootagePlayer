@@ -203,7 +203,8 @@ pub struct LensInfo {
     /// default for the clip's camera, mode and size (`project_lens_answer`)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<serde_json::Value>,
-    /// Where the lens comes from: "file", "own" (the player's own database: estimated or assigned), "builtin" (one built
+    /// Where the lens comes from: "file", "clip" (given to this clip alone, to try it: source.lens in its own file), "own"
+    /// (the player's own database: estimated or assigned), "builtin" (one built
     /// into the player, lens_profiles#41), "list" (the curated
     /// list), "database" (Gyroflow's, made for exactly this clip), "" for no ready lens
     pub from: String,
@@ -276,6 +277,7 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let pick = chosen_lens(path, &clip, in_file);
     let focal_only = pick.as_ref().is_some_and(|p| p.focal_only);
     let from = match &pick {
+        Some(p) if p.local.as_deref() == Some(lens_pick::FOR_THIS_CLIP) => "clip",
         Some(p) if p.local.as_deref() == Some("built in") => "builtin",
         Some(p) if p.local.is_some() => "own",
         Some(p) if p.curated.is_some() => "list",

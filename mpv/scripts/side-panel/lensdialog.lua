@@ -16,19 +16,19 @@ M.ID = "lens-dialog"
 local C = ui.C
 local chosen, scroll, rows_now, max_scroll = nil, 0, {}, 0
 
-local VERDICT = { good = { "ok", "fits" }, single = { "ok", "fits, one part told" }, unchecked = { "", "not checked" },
+local VERDICT = { clip = { "", "tried on this clip" }, good = { "ok", "fits" }, single = { "ok", "fits, one part told" }, unchecked = { "", "not checked" },
                   loose = { "bad", "not reliable" }, poor = { "bad", "doesn't fit" }, untried = { "", "not tried" } }
 local OK_BG, OK_FG, BAD_BG, BAD_FG = "273B1F", "8AD16F", "123D3D", "4AA6F0"
 
 local function fits(r) return r.fits or r.verdict == "good" or r.verdict == "single" or r.verdict == "unchecked" end
 
--- In the dialog's order: what fits, what was tried and doesn't, what wasn't tried
+-- In the dialog's order: the lens tried on this clip alone, what fits, what was tried and doesn't, what wasn't tried
 local function ordered(list)
-    local a, b, c = {}, {}, {}
+    local t, a, b, c = {}, {}, {}, {}
     for _, r in ipairs(list or {}) do
-        if r.verdict == "untried" then c[#c + 1] = r elseif fits(r) then a[#a + 1] = r else b[#b + 1] = r end
+        if r.clip then t[#t + 1] = r elseif r.verdict == "untried" then c[#c + 1] = r elseif fits(r) then a[#a + 1] = r else b[#b + 1] = r end
     end
-    return a, b, c
+    return t, a, b, c
 end
 
 local function cmd(...) mp.commandv("script-message-to", "gyroflow", ...) end
@@ -38,15 +38,17 @@ function M.open()
     cmd("lens-dialog")
 end
 
--- The clip measured from the picture, or without motion data of its own: measured again with the lens used
-local function measurable(g)
-    return g.kind ~= "project" and (type(g.optical) == "table" or not g.motion)
-end
-
-local function use()
+-- Use for the mode: the one chosen (the lens tried on this clip: made the mode's); try: this clip alone takes it
+local function use(try)
     local r = chosen and rows_now[chosen]
     if not r or type(r.use) ~= "table" then return false end
-    if r.use.keep ~= nil then cmd("lens-use", "keep", tostring(r.use.keep)) else cmd("lens-use", "assign", tostring(r.use.assign)) end
+    if r.use.promote then
+        if try then return false end
+        cmd("lens-use", "promote", "-")
+        return true
+    end
+    local how, what = r.use.keep ~= nil and "keep" or "assign", tostring(r.use.keep ~= nil and r.use.keep or r.use.assign)
+    cmd(try and "lens-try" or "lens-use", how, what)
     return true
 end
 
@@ -93,8 +95,10 @@ function M.draw(u, g, w, h, t0, close)
     local title = "Lens for " .. (d and d.mode or "this clip")
     for _, l in ipairs(ui.wrap(title, cw, 16, s)) do u:text(x, y + 9 * s, l, { size = 16, bold = true }); y = y + 22 * s end
     local now = d and type(d.now) == "table" and d.now or {}
+    local mode_lens = type(d and d.mode_lens) == "table" and d.mode_lens or {}
     local sub = "Kept for every clip of this mode." .. ((now.name or "") ~= "" and (" Now: " .. tostring(now.name):gsub("_", " ")
         .. (now.readout_ms and string.format(", readout %.1f ms", now.readout_ms) or "") .. ".") or "")
+        .. ((d and d.clip_lens) and (" Its mode's: " .. tostring(mode_lens.name or "no ready lens"):gsub("_", " ") .. ".") or "")
     y = u:caption(x, cw, y + 2 * s, sub)
     -- Find, Estimate, Quick
     local bw = 112 * s
@@ -123,9 +127,9 @@ function M.draw(u, g, w, h, t0, close)
         y = u:caption(x, cw, list_top, "Reading its lenses…")
         list_bottom = y
     else
-        local a, b, c = ordered(d.lenses)
+        local t, a, b, c = ordered(d.lenses)
         local found = type(d.found) == "table" and d.found or {}
-        local groups = { { "Fits this clip", a }, { "Tried, doesn't fit", b },
+        local groups = { { "Tried on this clip alone", t }, { "Fits this clip", a }, { "Tried, doesn't fit", b },
                          { (found.quick and (found.untried or 0) > 0) and "Not tried (Quick stopped at the first that fits)" or "Not tried", c } }
         local saved_clip = u.clip
         u.clip = { x0, list_top, x0 + dw, list_bottom }
@@ -178,12 +182,18 @@ function M.draw(u, g, w, h, t0, close)
     u:box(x0, fy, dw, 1 * s, 0, C.divider)
     fy = fy + 12 * s
     local r = chosen and rows_now[chosen]
-    if now.from == "own" then u:button(x, 250 * s, fy, "lens-forget", "Forget the lens chosen for this mode", function() cmd("lens-forget"); close() end) end
-    local use_label = measurable(g) and "Use and measure again" or "Use for this mode"
+    -- Forget: the lens tried on this clip (back to its mode's), else the one chosen for the mode
+    local forget = (d and d.clip_lens) and "Forget the lens tried on this clip" or (now.from == "own" and "Forget the lens chosen for this mode" or nil)
+    if forget then u:button(x, 240 * s, fy, "lens-forget", forget, function() cmd("lens-forget", (d and d.clip_lens) and "clip" or "mode"); close() end) end
+    local can = not running and r and type(r.use) == "table"
+    local use_label = "Use for the mode"
     local uw = ui.text_width(use_label, 12, s, true) + 64 * s
-    u:button(x + cw - uw, uw, fy, "lens-use", use_label, function() if use() then close() end end,
-             { primary = true, key = "Enter", disabled = running or not (r and type(r.use) == "table") })
-    u:button(x + cw - uw - 8 * s - 110 * s, 110 * s, fy, "lens-cancel", "Cancel", close, { key = "Esc" })
+    u:button(x + cw - uw, uw, fy, "lens-use", use_label, function() if use(false) then close() end end, { primary = true, key = "Enter", disabled = not can })
+    -- Try it on this clip alone first: measured again with it, played so; its mode's clips keep theirs
+    local tw = 130 * s
+    u:button(x + cw - uw - 8 * s - tw, tw, fy, "lens-try", "Try on this clip", function() if use(true) then close() end end,
+             { disabled = not can or (r and r.clip) })
+    u:button(x + cw - uw - tw - 16 * s - 96 * s, 96 * s, fy, "lens-cancel", "Cancel", close, { key = "Esc" })
     local y1 = fy + 28 * s + 16 * s
     -- The card under it all, the video dimmed around it
     table.insert(u.events, card_at, string.format("{\\an7\\pos(0,0)\\shad0\\bord%.1f\\1c&H%s&\\1a&H00&\\3c&H%s&\\3a&H00&\\p1}%s{\\p0}",

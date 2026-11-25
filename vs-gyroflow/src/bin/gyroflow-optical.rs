@@ -26,6 +26,11 @@
 //                                                                       line each ({"path", "error"} without one)
 //   gyroflow-optical --lenses <video>                                    the lenses to choose from for its mode, with what Find and
 //                                                                         Estimate said of each on it (the lens dialogs)
+//   gyroflow-optical --try-lens <video> keep <n> | assign <id> | forget   a lens tried on this clip alone (source.lens in its
+//                                                                         own file, which wins over its mode's), or taken away
+//   gyroflow-optical --lens-for <video> keep <n> | assign <id>          that lens as {name, how, from, profile} (the Library
+//                                                                         writes it into the clip's own file itself)
+//   gyroflow-optical --promote-lens <video>                              the lens tried on it made its whole mode's
 //   gyroflow-optical --find-lens [--quick] <video>...                             each clip's lens found among the known ones of its
 //                                                                       camera (vs_gyroflow::lens_find::find), one JSON
 //                                                                       line each: lens_find::Kept, or {"path", "error"}
@@ -232,7 +237,7 @@ fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...\n       gyroflow-optical --find-lens [--quick] <video>...\n       gyroflow-optical --lenses <video>\n       gyroflow-optical --estimate-lens <video>\n       gyroflow-optical --keep-lens <video> <n>");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...\n       gyroflow-optical --find-lens [--quick] <video>...\n       gyroflow-optical --lenses <video>\n       gyroflow-optical --try-lens <video> keep <n> | assign <id> | forget\n       gyroflow-optical --lens-for <video> keep <n> | assign <id>\n       gyroflow-optical --promote-lens <video>\n       gyroflow-optical --estimate-lens <video>\n       gyroflow-optical --keep-lens <video> <n>");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
@@ -281,6 +286,41 @@ fn main() {
             let Some(a) = args.get(1) else { usage() };
             let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
             let out = vs_gyroflow::lens_find::choices(&p).unwrap_or_else(|e| json!({ "path": a, "error": e }));
+            println!("{out}");
+            std::process::exit(if out["error"].is_null() { 0 } else { 1 });
+        }
+        // A lens of the dialogs as its profile (the Library writes it into the clip's own file), tried on the clip alone
+        // (written here: the player's), or the one tried made the mode's
+        "--lens-for" | "--try-lens" => {
+            let (Some(a), Some(how)) = (args.get(1), args.get(2)) else { usage() };
+            let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+            let out = if args[0] == "--try-lens" && how == "forget" {
+                match vs_gyroflow::lens_pick::set_clip_lens(&p.to_string_lossy(), None) { Ok(f) => json!({ "file": f.display().to_string(), "forgotten": true }), Err(e) => json!({ "error": e }) }
+            } else {
+                let Some(what) = args.get(3) else { usage() };
+                if args[0] == "--try-lens" {
+                    match vs_gyroflow::lens_find::try_on_clip(&p, how, what) { Ok((f, name)) => json!({ "file": f.display().to_string(), "lens": name }), Err(e) => json!({ "error": e }) }
+                } else {
+                    match vs_gyroflow::lens_find::lens_to_use(&p, how, what) {
+                        Ok((profile, name, how, from)) => {
+                            let mut prof: Value = profile.get_json().ok().and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+                            if prof["calibrator_version"].as_str().unwrap_or_default().is_empty() { prof["calibrator_version"] = json!(format!("Action Footage Player, {how}")); }
+                            json!({ "name": name, "how": how, "from": from, "profile": prof })
+                        }
+                        Err(e) => json!({ "error": e }),
+                    }
+                }
+            };
+            println!("{out}");
+            std::process::exit(if out["error"].is_null() { 0 } else { 1 });
+        }
+        "--promote-lens" => {
+            let Some(a) = args.get(1) else { usage() };
+            let p = std::path::absolute(a).unwrap_or_else(|_| PathBuf::from(a));
+            let out = match vs_gyroflow::lens_find::promote(&p) {
+                Ok((file, mode, lens)) => json!({ "file": file.display().to_string(), "mode": mode, "lens": lens }),
+                Err(e) => json!({ "error": e }),
+            };
             println!("{out}");
             std::process::exit(if out["error"].is_null() { 0 } else { 1 });
         }
