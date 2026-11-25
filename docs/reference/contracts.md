@@ -1,5 +1,5 @@
 # Contracts between processes
-Covers: `mpv/scripts/workspace/{main,batch,renders}.lua`, `mpv/scripts/gyroflow/{main,export,ahead}.lua`, `library/src/{main,index,seen,share}.rs`, `catalog/src/live.rs`, `vs-gyroflow/src/{gpu_table.rs,bin/*.rs}`, `tools/stream/`, `tools/nas-helper/`
+Covers: `mpv/scripts/workspace/{main,batch,renders}.lua`, `mpv/scripts/gyroflow/{main,bundle,gpupath,export,ahead}.lua`, `library/src/{main,index,seen,share}.rs`, `catalog/src/live.rs`, `vs-gyroflow/src/{gpu_table.rs,bin/*.rs}`, `tools/stream/`, `tools/nas-helper/`
 
 Checked against 295101c (2026-11-25); the settings JSON on its branch (2026-11-25).
 
@@ -160,7 +160,7 @@ Between computers there is no channel: each reads the others' journals in `.afp/
 One JSON object says how a clip is shown: what the warp does, the clean-up, Ctrl+j, the colour and look, a 360
 camera's sphere, an export's own choices. It's built once and taken as it is by everyone who renders the clip:
 
-- **Built by** the gyroflow plugin for the clip playing (`gyroflow/main.lua` `gpu_settings`, published as
+- **Built by** the gyroflow plugin for the clip playing (`gyroflow/gpupath.lua` `gpu_settings`, published as
   `user-data/gyroflow/settings` and in `render_args`' dump), and by `gyroflow/settings.lua` `of_view` for a saved
   view (a moment's, a clip of the Project tab, a Library recipe's `view`). `export.lua` `export_settings` is the one
   function every route makes its settings with: the plugin's own, or `of_view`'s; the dlogm plugin's look and colour
@@ -188,7 +188,7 @@ The keys are generated [below](#the-settings-keys).
 
 ## The player and `gyroflow-gpu-table`
 
-`mpv/scripts/gyroflow/main.lua` (`player_args`, `gpu_user_data`, `gpu_table`, `gpu_ahead`),
+`mpv/scripts/gyroflow/bundle.lua` (`player_args`), `gpupath.lua` (`gpu_user_data`, `gpu_table`, `gpu_ahead`),
 `vs-gyroflow/src/bin/gyroflow-gpu-table.rs` (`player`, `serve`), `vs-gyroflow/src/gpu_table.rs` (`PlayerClip`,
 `motion_range`, `PLAYER_GEOMETRY_KEYS`).
 
@@ -205,7 +205,7 @@ reply below.
 
 ### The request
 
-The [settings](#the-settings)' keys the table reads, plus what only playback adds (`gyroflow/main.lua`
+The [settings](#the-settings)' keys the table reads, plus what only playback adds (`gyroflow/gpupath.lua`
 `gpu_user_data`, `gpu_table`): the video's size, `gpu_chromatic` (the settings' `chromatic` unless this screen skips
 it, `chromatic_skip`), `gpu_denoise` (`denoise` where `temporal_denoise` isn't off), `gpu_translation` (gyroflow.conf
 `translation`: the jerks in the shader where computed, on and off by its PARAM), `translation_rev`, `lookahead`, and
@@ -427,7 +427,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | dlogm | `dv-neutral` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | dlogm | `dv-reset` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | dlogm | `dv-trim` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/side-panel/main.lua` |
-| dlogm | `gyroflow-shader` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/gyroflow/main.lua` |
+| dlogm | `gyroflow-shader` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/gyroflow/shaders.lua` |
 | dlogm | `look` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | dlogm | `notify-answer` | `mpv/scripts/side-panel/notify_client.lua` | — |
 | dlogm | `remember` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
@@ -516,7 +516,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | view360 | `view360-tidy` | `mpv/scripts/view360/main.lua` | — |
 | view360 | `view360-undo` | `mpv/scripts/view360/main.lua` | — |
 | workspace | `autoplay` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
-| workspace | `catalog-note` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/gyroflow/measure.lua`, `mpv/scripts/highlights/main.lua` and 1 more |
+| workspace | `catalog-note` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/gyroflowapp.lua`, `mpv/scripts/gyroflow/measure.lua`, `mpv/scripts/highlights/main.lua` and 1 more |
 | workspace | `clips-folder` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `clips-stop` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | workspace | `cut-after` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua` |
@@ -526,7 +526,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | workspace | `init-project` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | workspace | `input-revert` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `input-save` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua`, `tests/sidepanel_test.lua` |
-| workspace | `input-set` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/gyroflow/main.lua` |
+| workspace | `input-set` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/gyroflow/controls.lua`, `mpv/scripts/gyroflow/framing.lua` |
 | workspace | `job-done` | `mpv/scripts/workspace/main.lua` | — |
 | workspace | `moment-alone` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | workspace | `moment-edit` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
@@ -609,68 +609,68 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `footage_menu` | — | `mpv/scripts/side-panel/main.lua` |
 | `footage_menu/loaded` | `mpv/scripts/footage-menu/main.lua` | — |
 | `gyroflow` | — | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/common.lua`, `mpv/scripts/workspace/main.lua` and 2 more |
-| `gyroflow/ask_when_slow` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/aspect` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/available` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/chromatic` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
-| `gyroflow/chromatic_available` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/chromatic_skip` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
-| `gyroflow/crop` | `mpv/scripts/gyroflow/crop.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/view360/main.lua` |
-| `gyroflow/defaults` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/batch.lua`, `mpv/scripts/workspace/transform.lua` |
-| `gyroflow/denoise` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/denoise_strong` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/edges` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/renders.lua` |
-| `gyroflow/edges_blur` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/renders.lua` |
+| `gyroflow/ask_when_slow` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/aspect` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/available` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/chromatic` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/chromatic_available` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/chromatic_skip` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/crop` | `mpv/scripts/gyroflow/crop.lua` | `mpv/scripts/gyroflow/denoise.lua`, `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/view360/main.lua` |
+| `gyroflow/defaults` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/batch.lua`, `mpv/scripts/workspace/transform.lua` |
+| `gyroflow/denoise` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/denoise_strong` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/edges` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/renders.lua` |
+| `gyroflow/edges_blur` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/renders.lua` |
 | `gyroflow/export_settings` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/exporter` | `mpv/scripts/gyroflow/export.lua` | `mpv/scripts/workspace/batch.lua`, `mpv/scripts/workspace/clippreviews.lua`, `mpv/scripts/workspace/common.lua` |
 | `gyroflow/exporting` | `mpv/scripts/gyroflow/export.lua` | — |
-| `gyroflow/file_rotation` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/filter` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/frame_aspect` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/gpu` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
-| `gyroflow/gpu_delay` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/gyroflow/export.lua` and 4 more |
-| `gyroflow/headings360` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
-| `gyroflow/horizon_lock` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/kind` | `mpv/scripts/gyroflow/main.lua` | — |
+| `gyroflow/file_rotation` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/filter` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/frame_aspect` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/gpu` | `mpv/scripts/gyroflow/camera360.lua`, `mpv/scripts/gyroflow/gpupath.lua`, `mpv/scripts/gyroflow/play.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/gpu_delay` | `mpv/scripts/gyroflow/denoise.lua` | `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/gyroflow/export.lua` and 4 more |
+| `gyroflow/headings360` | `mpv/scripts/gyroflow/camera360.lua`, `mpv/scripts/gyroflow/play.lua` | `mpv/scripts/view360/main.lua` |
+| `gyroflow/horizon_lock` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/kind` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `gyroflow/last_export` | `mpv/scripts/gyroflow/export.lua` | — |
-| `gyroflow/lens` | `mpv/scripts/gyroflow/main.lua` | — |
+| `gyroflow/lens` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `gyroflow/lens_job` | `mpv/scripts/gyroflow/measure.lua` | — |
-| `gyroflow/lens_mode` | `mpv/scripts/gyroflow/main.lua` | — |
+| `gyroflow/lens_mode` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `gyroflow/lens_quick` | `mpv/scripts/gyroflow/measure.lua` | — |
 | `gyroflow/lenses` | `mpv/scripts/gyroflow/measure.lua` | — |
-| `gyroflow/level` | `mpv/scripts/gyroflow/main.lua` | — |
+| `gyroflow/level` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `gyroflow/live_photo` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/workspace/batch.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/measuring` | `mpv/scripts/gyroflow/measure.lua` | — |
-| `gyroflow/motion` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/optical` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/orientation` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/project` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
-| `gyroflow/project_info` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/projection` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/resolution` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/rig360` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
-| `gyroflow/rotation` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/session` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/transform.lua` |
-| `gyroflow/settings` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/gyroflow/export.lua` |
-| `gyroflow/source_aspect` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/spherical` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/view360/main.lua` |
+| `gyroflow/motion` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/optical` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/orientation` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/project` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/project_info` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/projection` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/resolution` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/rig360` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/view360/main.lua` |
+| `gyroflow/rotation` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/session` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/transform.lua` |
+| `gyroflow/settings` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/source_aspect` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/spherical` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/view360/main.lua` |
 | `gyroflow/still` | `mpv/scripts/gyroflow/still.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua` |
-| `gyroflow/temporal_denoise` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/renders.lua` |
-| `gyroflow/translation` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/translation_progress` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/underwater` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/unstabilized` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/view` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/waiting` | `mpv/scripts/gyroflow/main.lua` | — |
-| `gyroflow/water` | `mpv/scripts/gyroflow/main.lua` | — |
+| `gyroflow/temporal_denoise` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/renders.lua` |
+| `gyroflow/translation` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/translation_progress` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/underwater` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/unstabilized` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/view` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/waiting` | `mpv/scripts/gyroflow/bundle.lua` | — |
+| `gyroflow/water` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `highlights` | `mpv/scripts/highlights/main.lua` | `mpv/scripts/side-panel/bar.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/momentsave.lua` |
 | `library-list` | `mpv/scripts/workspace/librarylist.lua` | `mpv/scripts/side-panel/main.lua` |
 | `osc/visibility` | — | `mpv/scripts/agent/main.lua` |
 | `side_panel/loaded` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/notify_client.lua` |
 | `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/main.lua`, `mpv/scripts/workspace/viewsave.lua` |
-| `uwcolor/defaults` | — | `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/workspace/transform.lua` |
+| `uwcolor/defaults` | — | `mpv/scripts/gyroflow/bundle.lua`, `mpv/scripts/workspace/transform.lua` |
 | `view360` | `mpv/scripts/view360/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/side-panel/scrub.lua` |
-| `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 10 more |
+| `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 13 more |
 | `workspace/clip` | — | `mpv/scripts/gyroflow/export.lua` |
 | `workspace/moments` | — | `library/src/main.rs` |
 
@@ -831,7 +831,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | Flag | Takes | What (from `--help`) | Passed by name from |
 |---|---|---|---|
 | `--fingerprint` | <file> | each file's fingerprint, as a link keeps its original's | `mpv/scripts/workspace/common.lua` |
-| `--settings` | <json\|file\|-> | the settings JSON the player builds (docs/reference/contracts.md, "The settings"; its keys | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/gyroflow/settings.lua`, `mpv/scripts/workspace/clippreviews.lua` |
+| `--settings` | <json\|file\|-> | the settings JSON the player builds (docs/reference/contracts.md, "The settings"; its keys | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/settings.lua`, `mpv/scripts/gyroflow/translation.lua`, `mpv/scripts/workspace/clippreviews.lua` |
 | `--curve` | <curve> | the log curve | — |
 | `--uw-color` | <yes\|no> | the player's underwater colour (#273 | — |
 | `--uw-strength` | <0..1> | its strength, between the camera's colour (0) and the correction (1, the default) | — |
@@ -842,14 +842,14 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--no-stabilize` |  | the color conversion only, as a clip plays with the stabilization off | — |
 | `--lens-only` |  | the lens corrected (and --projection), nothing smoothed | — |
 | `--lens-recorded` |  | stabilized with the lens left as recorded (no lens correction, no projection) | — |
-| `--horizon-lock` | <%> | the horizon lock's amount (0-100, 0 off) instead of the project's or preset's | `mpv/scripts/gyroflow/main.lua` |
-| `--underwater` | <yes\|no\|auto\|project> | the lens under water or not (Gyroflow's "Lens is underwater"), or as the camera says over the clip, the default: its In water / Out of water (Osmo Action 6), … | `mpv/scripts/gyroflow/main.lua` |
-| `--wide` |  | the gyroflow plugin's wider view (Ctrl+g) | `mpv/scripts/gyroflow/main.lua` |
-| `--level` | <level> | for a video without a project, the stabilization's level | `mpv/scripts/gyroflow/main.lua` |
+| `--horizon-lock` | <%> | the horizon lock's amount (0-100, 0 off) instead of the project's or preset's | — |
+| `--underwater` | <yes\|no\|auto\|project> | the lens under water or not (Gyroflow's "Lens is underwater"), or as the camera says over the clip, the default: its In water / Out of water (Osmo Action 6), … | — |
+| `--wide` |  | the gyroflow plugin's wider view (Ctrl+g) | — |
+| `--level` | <level> | for a video without a project, the stabilization's level | — |
 | `--fov` | <x> | Gyroflow's FOV (Advanced) instead of the project's | — |
-| `--rotation` | <deg> | the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of the project's rotation; not stabilized, ffmpeg's transpose | `mpv/scripts/gyroflow/main.lua` |
-| `--aspect` | <W:H> | the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16 | `mpv/scripts/gyroflow/main.lua` |
-| `--projection` | <p> | Gyroflow's output projection | `mpv/scripts/gyroflow/main.lua` |
+| `--rotation` | <deg> | the picture turned clockwise by 0, 90, 180 or 270 degrees (the camera on its side), in place of the project's rotation; not stabilized, ffmpeg's transpose | — |
+| `--aspect` | <W:H> | the output cut to this aspect ratio after the rotation, such as 16:9, 4:3, 1:1, 4:5, 9:16 | — |
+| `--projection` | <p> | Gyroflow's output projection | — |
 | `--edges` | <mode> | what fills the edges the stabilized frame leaves | — |
 | `--edges-blur` | <%> | blur of the edge fill, % of the frame height (default 2) | — |
 | `--denoise` | <off\|light\|full> | the temporal denoise as the player's GPU path plays it (Ctrl+p; its shader, warp.glsl's dn_ passes) | — |
@@ -864,7 +864,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--to` | <time> | end at this time | `library/src/share.rs`, `mpv/scripts/gyroflow/export.lua` |
 | `--out` | <folder> | write here instead of <project>/Exports (or stabilized/) | `library/src/index.rs`, `library/src/share.rs`, `mpv/scripts/gyroflow/export.lua` |
 | `--output` | <file> | write this file (one video only) | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/clippreviews.lua` |
-| `--alone` |  | --from to --to stabilized on its own | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/workspace/momentsave.lua` |
+| `--alone` |  | --from to --to stabilized on its own | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/momentsave.lua` |
 | `--whole` |  | with a project, its "only within the trim range" off, whatever it says | `mpv/scripts/gyroflow/export.lua` |
 | `--preview` |  | still  one frame, stabilized as with the options above, in SDR (the maker's LUT for D-Log M, else NBCU's conversion; HLG through NBCU's), held for --from to … | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/clippreviews.lua` |
 | `--at` | <time> | the frame's time (default: the middle of --from to --to); a flipbook's | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/workspace/clippreviews.lua` |
@@ -880,10 +880,10 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--gpu` | <auto\|on\|off> | the GPU path | — |
 | `--gpu-interpolation` | <i> | its warp's interpolation | — |
 | `--with-translation` |  | the translation compensation kept for the clip (the player's Ctrl+j), on the GPU path | — |
-| `--progress` | <file> | write the progress there as JSON, twice a second | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/view360/main.lua` |
+| `--progress` | <file> | write the progress there as JSON, twice a second | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/translation.lua`, `mpv/scripts/view360/main.lua` |
 | `--control` | <file> | read stop / background / normal from this file while running (for Windows, which has no SIGUSR1/SIGUSR2) | `mpv/scripts/gyroflow/export.lua` |
 | `--photo` | <time> | the frame at that time as a still instead, with a gain map where there's an HDR look | `mpv/scripts/gyroflow/export.lua` |
-| `--translation` |  | the hand's sideways jerks computed for each video instead of exporting it, and kept for | `mpv/scripts/gyroflow/main.lua` |
+| `--translation` |  | the hand's sideways jerks computed for each video instead of exporting it, and kept for | `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/gyroflow/translation.lua` |
 | `--radius` | <n> | clean it up from n frames on each side (0-7, default 5; 0 | — |
 | `--grain` | <x> | how much of its grain the clean-up keeps (0-1, default 0.25) | — |
 | `--camera` | <yaw,pitch,roll,zoom> | the camera turned and zoomed as crop mode has it (the gyroflow plugin's crop.lua; a video export takes it too) | `mpv/scripts/gyroflow/crop.lua`, `mpv/scripts/gyroflow/export.lua` |

@@ -393,7 +393,7 @@ both have one) differs is "measured on another clip" and not used.
 
 | Language | Read | Written |
 |---|---|---|
-| Lua | `gyroflow/main.lua`, `gyroflow/measure.lua`, `side-panel/main.lua` (whether there is one) | runs gyroflow-optical / gyroflow-export (Ctrl+m) |
+| Lua | `gyroflow/sources.lua`, `gyroflow/measure.lua`, `side-panel/main.lua` (whether there is one) | runs gyroflow-optical / gyroflow-export (Ctrl+m) |
 | Rust (vs-gyroflow) | `afp_motion.rs` `header_for`, `read_for`; `gyroflow-gpu-table`, `gyroflow-probe`, `lib.rs` | `afp_motion.rs` `MotionFile::write`; `gyroflow-optical`, `measure.rs`, `optical.rs` |
 | Rust (Library) | `index.rs`, `changed.rs` (a change re-probes) | through `gyroflow-optical` jobs |
 

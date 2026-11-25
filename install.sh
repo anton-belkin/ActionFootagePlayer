@@ -250,6 +250,18 @@ put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
 put mpv/scripts/gyroflow/measure.lua "$GYROFLOW/measure.lua" 644
 put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/dnstep.lua "$GYROFLOW/dnstep.lua" 644
+# The plugin's parts, which main.lua wires
+put mpv/scripts/gyroflow/sources.lua "$GYROFLOW/sources.lua" 644
+put mpv/scripts/gyroflow/framing.lua "$GYROFLOW/framing.lua" 644
+put mpv/scripts/gyroflow/denoise.lua "$GYROFLOW/denoise.lua" 644
+put mpv/scripts/gyroflow/translation.lua "$GYROFLOW/translation.lua" 644
+put mpv/scripts/gyroflow/bundle.lua "$GYROFLOW/bundle.lua" 644
+put mpv/scripts/gyroflow/shaders.lua "$GYROFLOW/shaders.lua" 644
+put mpv/scripts/gyroflow/gpupath.lua "$GYROFLOW/gpupath.lua" 644
+put mpv/scripts/gyroflow/camera360.lua "$GYROFLOW/camera360.lua" 644
+put mpv/scripts/gyroflow/play.lua "$GYROFLOW/play.lua" 644
+put mpv/scripts/gyroflow/controls.lua "$GYROFLOW/controls.lua" 644
+put mpv/scripts/gyroflow/gyroflowapp.lua "$GYROFLOW/gyroflowapp.lua" 644
 put mpv/scripts/gyroflow/gpu_hold.glsl "$GYROFLOW/gpu_hold.glsl" 644
 # The VapourSynth path's, from an install before it was taken out
 for f in $VAPOURSYNTH_FILES; do rm -f "$GYROFLOW/$f"; done

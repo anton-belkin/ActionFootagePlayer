@@ -7,7 +7,7 @@ says that's still kept apart, checked here:
   * each key gyroflow-export takes (exported, cli) is in its argument parser (the command line's), and is a key of the
     settings JSON it reads (settings_json, apply_settings) that a saved view's settings carry (gyroflow/settings.lua
     of_view; export.lua hands the settings, never the flag: tests/settings_json_test.py)
-  * each key's field in the warp's request (gpu) is in gyroflow/main.lua's player_args or gpu_settings
+  * each key's field in the warp's request (gpu) is in gyroflow/bundle.lua's player_args or gpupath.lua's gpu_settings
   * a key not exported says why (player_only)
 From the repository's folder: python3 tests/render_keys_test.py"""
 import json
@@ -17,7 +17,8 @@ from twins import Checks, block, read
 
 c = Checks("render keys")
 reg = json.loads(read("mpv/scripts/workspace/registry.json"))
-plugin = read("mpv/scripts/gyroflow/main.lua")
+# (main.lua: the options; bundle.lua: player_args; gpupath.lua: gpu_settings)
+plugin = "\n".join(read(f"mpv/scripts/gyroflow/{f}.lua") for f in ("main", "bundle", "gpupath"))
 export_rs = read("vs-gyroflow/src/bin/gyroflow-export.rs")
 
 GROUPS = {"bundle", "uw", "input", "opts"}
@@ -29,7 +30,7 @@ c.expect("each key once", len(keys) == len(set(keys)), str(keys))
 o = {}
 for k, v in re.findall(r'(\w+) = ("[^"]*"|true|false|-?[\d.]+)', re.search(r"\nlocal o = \{([^\n]*)", plugin).group(1)):
     o[k] = json.loads(v) if v not in ("true", "false") else v == "true"
-args = block(plugin, r"\nlocal function player_args\(source\)", "gyroflow/main.lua player_args") + re.search(r"\ngpu_settings = function\(source\)\n(.*?)\nend\n", plugin, re.S).group(1)
+args = block(plugin, r"\nlocal function player_args\(source\)", "gyroflow/bundle.lua player_args") + re.search(r"\ngpu_settings = function\(source\)\n(.*?)\nend\n", plugin, re.S).group(1)
 settings_lua = read("mpv/scripts/gyroflow/settings.lua")
 json_keys = {k["key"]: k for k in reg["settings_json"]}
 parsed = set(re.findall(r'"(--[a-z0-9-]+)"(?: \| "[^"]*")* =>', export_rs))

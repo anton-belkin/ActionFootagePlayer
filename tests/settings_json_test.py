@@ -16,7 +16,7 @@ REGISTRY = os.path.join(ROOT, "mpv", "scripts", "workspace", "registry.json")
 
 # file (from mpv/scripts) -> {flag: why it's there}
 ALLOWED = {
-    "gyroflow/main.lua": {
+    "gyroflow/gyroflowapp.lua": {
         "--underwater": "gyroflow-project's (PROJECT_WRITER), writing a Gyroflow project, not gyroflow-export's",
         "--level": "gyroflow-project's, as --underwater",
         "--wide": "gyroflow-project's, as --underwater",

@@ -10,7 +10,7 @@ local M = {}
 
 local reg = require 'registry'
 
--- The output projections, as Gyroflow numbers them (gyroflow/main.lua's PROJECTIONS); linear is the preset's own
+-- The output projections, as Gyroflow numbers them (gyroflow/framing.lua's PROJECTIONS); linear is the preset's own
 local PROJECTIONS = { stereographic = 1, equidistant = 2, equisolid = 3, orthographic = 4 }
 
 -- The keys the table reads (its request), and the export's
