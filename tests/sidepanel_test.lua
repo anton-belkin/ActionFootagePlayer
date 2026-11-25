@@ -487,9 +487,10 @@ expect("rule: 1 is a drop-down", ui.as_buttons({ { label = "A" } }, 260, 1), fal
 expect("rule: labels too long for a third of the row: a drop-down",
        ui.as_buttons({ { label = "Trail by direction" }, { label = "Frame's edge spread out" }, { label = "Background color" } }, 260, 1), false)
 expect("rule: a value off the list (1.5×): a drop-down", ui.as_buttons({ { label = "1×" }, { label = "2×" } }, 260, 1, { text = "1.5×" }), false)
-mp.set_property_native("user-data/gyroflow", { available = true, edges = "sphere", fps_limit = 0, resolution = "auto", temporal_denoise = "full" })
+mp.set_property_native("user-data/gyroflow", { available = true, edges = "sphere", resolution = "auto", temporal_denoise = "full" })
 messages.tab("quality")
-expect("Quality: the frame rate as buttons", find("fps:30") ~= nil, true)
+expect("Quality: the temporal denoise as buttons", find("denoise:light") ~= nil, true)
+expect("Quality: no frame rate (the VapourSynth path's)", find("fps") == nil, true)
 expect("Quality: the edges stay a drop-down (long labels)", find("edges") ~= nil and find("edges:smooth") == nil, true)
 expect("Quality: the size (five) a drop-down", find("size") ~= nil, true)
 

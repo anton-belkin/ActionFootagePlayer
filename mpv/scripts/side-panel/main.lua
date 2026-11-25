@@ -1165,7 +1165,11 @@ local function transform_part(u, x, w, y)
     -- project as it is), wider (its zoom left out), off (the project kept, not used)
     local views = choices(VIEWS, "script-message-to gyroflow view")
     local stab_key = keys["script-binding gyroflow/toggle"]
-    if not g.motion then
+    if type(g.unstabilized) == "string" then
+        -- Motion data the warp can't play with (a lens it doesn't have, this mpv): as recorded, and why
+        y = u:select_row(x, w, y, "view", "Stabilization", views, "off", { disabled = true, key = stab_key })
+        y = u:caption(x, w, y, g.unstabilized)
+    elseif not g.motion then
         y = u:select_row(x, w, y, "view", "Stabilization", views, "off", { disabled = true, key = stab_key })
         y = u:caption(x, w, y, "No motion data in this clip: it can be measured in the picture (optical flow)")
         if type(g.measuring) == "number" then
@@ -1262,8 +1266,8 @@ local function transform_part(u, x, w, y)
     local gpu = type(g.gpu) == "table"
     y = u:caption(x, w, y - 2 * s, none and ("Off on this computer (Performance & Quality)" .. (denoise_on and "" or "; off for this clip too"))
         or gpu and "Each frame from the frames around it, moved onto it, while it plays and paused. The picture shows that many frames later; the sound follows. Exports too"
-        or "The paused frame from the frames around it, moved onto it; exports each frame so")
-    -- Stronger: the clip's (its transform), on the GPU path
+        or "Only where it's stabilized; exports each frame so")
+    -- Stronger: the clip's (its transform)
     local saved_strong = nil
     if saved then saved_strong = saved.denoise_strong == true end
     y = u:switch(x, w, y, "strong", "Stronger, for a very noisy clip", g.denoise_strong == true, "script-message-to gyroflow denoise-strong toggle",
@@ -1283,7 +1287,7 @@ local function transform_part(u, x, w, y)
         y = u:button(x, w, y + 2 * s, "translation", "Measure for this clip", "script-binding gyroflow/translation")
         y = u:caption(x, w, y, "Up close, the hand's own jitter shakes the picture however well its turns are taken out. Measured once a clip (Osmo Action 6; about half the clip's length), kept")
     else
-        y = u:caption(x, w, y, "On the GPU path, for a clip shot up close")
+        y = u:caption(x, w, y, "For a clip shot up close")
     end
     return y
 end
@@ -1296,29 +1300,17 @@ local function quality_part(u, x, w, y)
     if not g or not g.available or not local_file(mp.get_property("path")) then
         return u:caption(x, w, y, "Only for a clip that's stabilized")
     end
-    y = u:caption(x, w, y, "Lighter settings for a GPU that doesn't keep up. Frame rate and size are kept for this computer as you pick them")
+    y = u:caption(x, w, y, "Lighter settings for a GPU that doesn't keep up, kept for this computer as you pick them")
     local function q(key) return "script-message-to gyroflow quality " .. key end
-    y = u:select_row(x, w, y + 6 * s, "fps", "Frame rate", choices({ { "0", "Every frame" }, { "30", "30 fps" }, { "15", "15 fps" } }, q("fps_limit")),
-                     tostring(g.fps_limit or 0))
-    y = u:caption(x, w, y, "How often the stabilized frame is rendered")
-    y = u:select_row(x, w, y + 4 * s, "size", "Size", choices({ { "auto", "Auto" }, { "display", "Screen" }, { "1080", "1080p" }, { "720", "720p" },
+    y = u:select_row(x, w, y + 6 * s, "size", "Size", choices({ { "auto", "Auto" }, { "display", "Screen" }, { "1080", "1080p" }, { "720", "720p" },
                                                                 { "video", "Video" } }, q("resolution")), tostring(g.resolution))
     y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
-    y = u:select_row(x, w, y + 4 * s, "paused", "Paused frame", choices({ { "off", "As played" }, { "auto", "Full size" } }, q("paused_full_size")),
-                     tostring(g.paused_full_size or "off"), { key = keys["script-binding gyroflow/full"] })
-    y = u:caption(x, w, y, "Full size: rendered again at the video's own size a moment after pausing (Ctrl+f does it once)")
     y = u:select_row(x, w, y + 4 * s, "denoise", "Temporal denoise", choices({ { "off", "Off" }, { "light", "Light" }, { "full", "Full" } }, q("temporal_denoise")),
                      tostring(g.temporal_denoise or "full"), { field = math.floor(w * 0.42) })
     y = u:caption(x, w, y, "Full: 5 frames on each side. Light: 3, a quarter lighter on the GPU and a little less clean. Off: none on this computer, whatever Transform's switch says")
     y = u:select_row(x, w, y + 4 * s, "edges", "Edges", choices({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" },
                                                                   { "off", "Background color" } }, "script-message-to gyroflow edges"), g.edges,
                      { key = keys["script-binding gyroflow/edges"], field = math.floor(w * 0.62) })
-    -- Only the sphere trail is written apart from the frames
-    local sphere = g.edges == "sphere"
-    y = u:select_row(x, w, y + 2 * s, "fill", "Edge fill rate", choices({ { "auto", "Auto" }, { "50", "50 %" }, { "25", "25 %" } }, q("edge_fill_rate")),
-                     tostring(g.edge_fill_rate or "auto"), { disabled = not sphere })
-    y = u:caption(x, w, y, sphere and "How many frames the edges' trail is written from; Auto: as the GPU has room"
-                               or "Only for edges filled by the trail")
     y = u:heading(x, w, y + 8 * s, "More")
     -- On this screen only, for smooth playback: the clip's transform keeps the fringes taken out (exports, photos)
     y = u:switch(x, w, y, "fringes-skip", "Skip color aberration correction", g.chromatic_skip == true,

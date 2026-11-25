@@ -1,5 +1,5 @@
 -- When the stabilization doesn't keep up: playback pauses and offers lighter settings, and the one picked sticks (in
--- gyroflow.conf): a lower frame rate (fps_limit), a smaller resolution (resolution), a lighter edge fill (edges), the
+-- gyroflow.conf): a smaller resolution (resolution), a lighter edge fill (edges), the
 -- color aberration correction skipped on this screen (chromatic_skip: the clip's transform keeps it, exports have it),
 -- a lighter temporal denoise or none (temporal_denoise).
 --
@@ -7,7 +7,7 @@
 -- power, and mpv drops frames to keep the picture with the sound. When it drops more than a tenth of them for more
 -- than SLOW_SECONDS seconds in a row, playing at normal speed with no seek or set-up in the GRACE seconds before,
 -- playback pauses and the choices come up (mp.input's list; with an mpv without it, a word on screen pointing to the
--- menu's Quality). Picking one sets it up and plays on; it asks again if that isn't enough. Closed
+-- menu's Quality). Picking one applies it and plays on; it asks again if that isn't enough. Closed
 -- without a pick, it asks again on the next clip; "Keep playing as it is" not until the player starts again;
 -- ask_when_slow=no never.
 --
@@ -46,17 +46,9 @@ mp.register_event("playback-restart", quiet)
 mp.register_event("file-loaded", function() asked = false end)
 mp.observe_property("pause", "bool", function(_, paused) if not paused then quiet() end end)
 
--- The lighter settings than the ones it has, most effective first: { label, { { key, value }, ... } }. As measured on a
--- 15 W laptop at its sustained power with a 4K60 clip: 30 fps with the frame's edge spread out, and 15 fps with any
--- fill, play every frame. 30 fps with the sphere trail doesn't help: the trail is written whenever a GPU worker is
--- free, so it takes the time the skipped frames leave, so the rate comes down with the lighter fill. Writing it from
--- fewer of the frames (edge_fill_rate 50 or 25 %, or 10) didn't change that there: ~45-55 % of the frames shown at
--- 30 fps whatever the rate, the GPU workers at 75-90 ms a frame either way, so it isn't offered here. In those runs
--- 30 fps with the frame's edge spread out showed only ~40 % too, and 15 fps with the sphere every frame: so 30 fps
--- stays first, the lighter loss, and if it isn't enough it asks again and 15 fps is next. The resolution
--- only counts above 1080p: below that the input's scaling costs the same. The color fringes under water last: their
--- cost wasn't measured (the shader didn't compile under D3D11 on that laptop), and they're kept as recorded in
--- gyroflow.conf like the other picks
+-- The lighter settings than the ones it has, most effective first: { label, { { key, value }, ... } }. The resolution
+-- only counts above 1080p. The color fringes under water late: their cost wasn't measured, and they're kept as
+-- recorded in gyroflow.conf like the other picks
 local function choices()
     local list = {}
     local function add(label, settings) table.insert(list, { label, settings }) end
@@ -69,16 +61,7 @@ local function choices()
         add("Auto size: at most 1080p while the temporal denoise is on", { { "resolution", "auto" } })
     end
     if dn == "full" then add("Lighter temporal denoise: 3 frames on each side", { { "temporal_denoise", "light" } }) end
-    local fps = mp.get_property_number("container-fps") or 0
-    local limit = o.fps_limit > 0 and o.fps_limit or fps
-    local can30, can15 = fps > 31 and limit > 30, fps > 16 and limit > 15
     local edges = hooks.edges()
-    if can30 and edges == "sphere" then
-        add("Play at 30 fps, the edges filled with the frame's edge spread out", { { "edges", "smooth" }, { "fps_limit", "30" } })
-    elseif can30 then
-        add("Play at 30 fps", { { "fps_limit", "30" } })
-    end
-    if can15 then add("Play at 15 fps", { { "fps_limit", "15" } }) end
     if edges == "sphere" then add("Edges filled with the frame's edge spread out", { { "edges", "smooth" } }) end
     if edges ~= "off" then add("No edge fill: the background color", { { "edges", "off" } }) end
     if side and side > 1080 then add("Render at 1080p", { { "resolution", "1080" } }) end
@@ -93,7 +76,7 @@ local function ask()
     mp.set_property_native("pause", true)
     if not input then
         mp.osd_message("Stabilization can't keep up: frames are being dropped.\n"
-            .. "Right click > Quality for a lower frame rate or resolution", 8)
+            .. "Right click > Quality for a lower resolution or a lighter denoise", 8)
         return
     end
     local labels = {}
@@ -106,7 +89,6 @@ local function ask()
         items = labels,
         submit = function(i)
             local c = list[i]
-            -- Playing on first: a set-up pauses through it and plays on once the first frame is through (main.lua)
             mp.set_property_native("pause", false)
             if c then
                 for _, s in ipairs(c[2]) do hooks.set(s[1], s[2]) end
@@ -137,7 +119,7 @@ local function check()
     end
 end
 
--- options: main.lua's (fps_limit, resolution, ask_when_slow); hooks: stabilizing() the stabilization is on,
+-- options: main.lua's (resolution, ask_when_slow); hooks: stabilizing() the stabilization is on,
 -- short_side() the short side it renders at, edges() the edge fill, chromatic() the color fringes are taken out where they can be, denoise()
 -- the temporal denoise while it plays (full, light, nil), set(key, value) applies and keeps a setting
 function M.init(options, h)

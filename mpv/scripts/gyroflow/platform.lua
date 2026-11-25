@@ -26,12 +26,6 @@ function M.photo_shown()
     return type(mp.get_property_native("user-data/afp/photo")) == "table"
 end
 
--- The VapourSynth plugin as cargo names it: libvs_gyroflow.dylib, libvs_gyroflow.so, vs_gyroflow.dll
-function M.library(base)
-    if M.windows then return base .. ".dll" end
-    return "lib" .. base .. (M.macos and ".dylib" or ".so")
-end
-
 function M.exe(base)
     return M.windows and (base .. ".exe") or base
 end
