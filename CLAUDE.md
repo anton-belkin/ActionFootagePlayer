@@ -117,6 +117,10 @@ sources has an allow-list for what it can't resolve, with why (add to it rather 
 
 ## Tests
 
+- **CI for Anton's branches and main runs on his Mac.** The `macos` and `tests` jobs run on the self-hosted runner
+  `anton-mac` (`~/actions-runner`, a service under his user, label `afp`). Releases (tags) and fork PRs run on
+  GitHub's macOS. The runner keeps its build folders between runs, so prefer CI over a build of your own in a worktree
+  (each worktree's `target/` costs 4-20 GB). It only runs while the Mac is awake and Anton is logged in.
 - **Everything CI runs, locally:**
 
   ```

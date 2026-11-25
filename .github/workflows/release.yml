@@ -26,14 +26,25 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-15
+    # Your own branches and main build on Anton's Mac (the self-hosted runner "anton-mac", label afp: its build folders
+    # kept between runs, its Homebrew as it is); releases (tags), forks and runs by hand on GitHub's macOS, whose
+    # Homebrew bottles give the app the oldest macOS it runs on
+    runs-on: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "afp"]') || 'macos-15' }}
     steps:
+      # On Anton's Mac: the build folders (target/, build/, node_modules/) kept, every other file not in git removed
       - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
+      - name: Tidy (Anton's Mac)
+        if: runner.environment == 'self-hosted'
+        run: git clean -ffd
 
       - name: Rust
+        if: runner.environment == 'github-hosted'
         run: rustup toolchain install stable --profile minimal && rustup default stable
 
       - uses: actions/cache@v4
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
@@ -47,6 +58,7 @@ jobs:
       # oldest runner that Homebrew has bottles for. Updated first: the runner's Homebrew is as old as its image, and
       # doesn't update itself there
       - name: Homebrew (ffmpeg, mpv's dependencies, mpv's build tools)
+        if: runner.environment == 'github-hosted'
         env:
           HOMEBREW_NO_INSTALL_CLEANUP: 1
           HOMEBREW_NO_INSTALLED_DEPENDENTS_CHECK: 1
@@ -58,12 +70,14 @@ jobs:
       # the script, or a Homebrew library it links (or the compiler) changes: it links them by their version
       - uses: actions/cache@v4
         id: mpv
+        if: runner.environment == 'github-hosted'
         with:
           path: build/mpv-afp/out
           key: mpv-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('tools/mpv.lock', 'tools/build_mpv.sh', 'tools/mpv-patches/*.patch', 'tools/libplacebo-patches/*.patch', 'build/mpv-deps.txt') }}
 
+      # On Anton's Mac: built where it was, ninja redoing only what changed
       - name: mpv
-        if: steps.mpv.outputs.cache-hit != 'true'
+        if: runner.environment == 'self-hosted' || steps.mpv.outputs.cache-hit != 'true'
         run: tools/build_mpv.sh --no-deps
 
       # Every tests/*_test.{lua,py,sh}, found by name (tools/run_tests.sh: a new test needs no list here), and
@@ -92,14 +106,25 @@ jobs:
   # safeguards and the many-computers random run, in release: slow otherwise), the Library's Rust tests, and its page
   # in jsdom against a mock of the app (library/ui-tests). Beside the build, so it adds no time to it
   tests:
-    runs-on: macos-15
+    # Your own branches and main build on Anton's Mac (the self-hosted runner "anton-mac", label afp: its build folders
+    # kept between runs, its Homebrew as it is); releases (tags), forks and runs by hand on GitHub's macOS, whose
+    # Homebrew bottles give the app the oldest macOS it runs on
+    runs-on: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted", "afp"]') || 'macos-15' }}
     steps:
+      # On Anton's Mac: the build folders (target/, build/, node_modules/) kept, every other file not in git removed
       - uses: actions/checkout@v4
+        with:
+          clean: ${{ runner.environment == 'github-hosted' }}
+      - name: Tidy (Anton's Mac)
+        if: runner.environment == 'self-hosted'
+        run: git clean -ffd
 
       - name: Rust
+        if: runner.environment == 'github-hosted'
         run: rustup toolchain install stable --profile minimal && rustup default stable
 
       - uses: actions/cache@v4
+        if: runner.environment == 'github-hosted'
         with:
           path: |
             ~/.cargo/registry
@@ -110,6 +135,7 @@ jobs:
           restore-keys: cargo-tests-${{ runner.os }}-${{ runner.arch }}-
 
       - uses: actions/setup-node@v4
+        if: runner.environment == 'github-hosted'
         with:
           node-version: 22
           cache: npm
