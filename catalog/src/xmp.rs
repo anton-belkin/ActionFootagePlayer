@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A photo's own metadata as read from its XMP packet (docs/library-management.md §8, "Photos carry what they
+// A photo's own metadata as read from its XMP packet (docs/design/library-management.md §8, "Photos carry what they
 // need"): its link to its clip (`afp:link`, the player's namespace, an element as vs-gyroflow's photo.rs writes it in a
 // JPEG, or an attribute as ImageIO may in a HEIC) and its tags (`dc:subject`, which Photos and Lightroom read as
 // keywords). The one copy of the reading: the catalog's look at a photo (inspect.rs), the Library's (index.rs) and

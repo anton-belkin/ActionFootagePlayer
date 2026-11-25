@@ -1,4 +1,4 @@
-"""An export's settings are registry.json's (mpv/scripts/workspace/registry.json, docs/export-settings.md): the player's
+"""An export's settings are registry.json's (mpv/scripts/workspace/registry.json, docs/design/export-settings.md): the player's
 exportsettings.lua, the Library's Share dialog (share.js) and its render recipe (renders.rs) read them there
 (tests/registry_test.py checks each does). What's still apart, checked here:
   * gyroflow-export takes each size (--resolution) and encoding (--encode): its own argument parser

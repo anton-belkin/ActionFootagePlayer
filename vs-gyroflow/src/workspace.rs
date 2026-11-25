@@ -1,4 +1,4 @@
-// Which project a clip belongs to, and where that project's files for it are (docs/moments-and-workspaces.md):
+// Which project a clip belongs to, and where that project's files for it are (docs/design/moments-and-workspaces.md):
 // afp-catalog's workspace.rs, the one Rust copy (the Library uses it too), with this computer's mounted shares read once
 // per process. The player's twin is the workspace plugin's workspace.lua; both run tests/workspace_cases.txt.
 

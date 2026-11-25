@@ -684,6 +684,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_JOURNAL_DIR` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/gyroflow_reload_ipc.py`, `tests/journal_mpv_test.sh`, `tests/journal_test.lua`, `tools/journal_report.py` and 1 more |
 | `AFP_JOURNAL_PARENT` | `library/src/main.rs`, `mpv/scripts/workspace/journal.lua` | — |
 | `AFP_LIBRARY` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
+| `AFP_LISTS` | `library/src/lists.rs`, `library/src/main.rs` | `library/ui-tests/lists.js`, `library/ui/albums.js`, `library/ui/app.js`, `library/ui/share.js` and 1 more |
 | `AFP_LIVE_PHOTOS` | — | `tests/live_photo_test.lua` |
 | `AFP_LOG_REQUESTS` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_MEASURE_CLIP` | `vs-gyroflow/src/measure.rs` | — |
@@ -714,7 +715,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-74 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+75 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### gyroflow-export flags
 <!-- BEGIN GENERATED: export-flags -->

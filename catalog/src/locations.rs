@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A project's locations (docs/library-management.md): where its footage is, each placed at a point of the project's
+// A project's locations (docs/design/library-management.md): where its footage is, each placed at a point of the project's
 // tree, in an order, the first that has a clip winning. The one Rust copy (the Library, afp-catalog, and gyroflow-export
 // through workspace.rs here, which finds a clip's project and own file over them); the player's twin is the workspace
 // plugin's workspace.lua: keep the two in step (their shared cases are tests/workspace_cases.txt, run by workspace.rs's
@@ -206,7 +206,7 @@ pub fn never_rename(project: &Path) -> bool {
         .is_some_and(|l| l.get("never_rename").and_then(Value::as_bool) == Some(true))
 }
 
-/// The tag stores this computer syncs with the library's own (docs/tags-and-culling.md): `tag_stores` ("finder") in
+/// The tag stores this computer syncs with the library's own (docs/design/tags-and-culling.md): `tag_stores` ("finder") in
 /// this computer's own file for the project, beside its other choices. Never in Project.afproject, which keeps only
 /// the locations (Anton, 2026-11-11): a Mac may show the tags in Finder while a Windows computer of the same library
 /// has no such store

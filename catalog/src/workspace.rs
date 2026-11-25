@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Which project a clip belongs to, and where that project's files for it are (docs/moments-and-workspaces.md):
+// Which project a clip belongs to, and where that project's files for it are (docs/design/moments-and-workspaces.md):
 // the one Rust copy, used by gyroflow-export and its tools (vs-gyroflow/src/workspace.rs re-exports it), the Library
 // (tags.rs's clip_own) and afp-catalog's own command line. The player's twin is mpv/scripts/workspace/workspace.lua;
 // both are tested over tests/workspace_cases.txt (this file's test below, tests/workspace_test.lua): keep them in step.
@@ -158,7 +158,7 @@ pub struct Own {
 }
 
 /// Where the own file of the clip at a path of the tree is, decided the same way on every computer
-/// (docs/library-management.md §8): the copies in the library's locations in their order, then the
+/// (docs/design/library-management.md §8): the copies in the library's locations in their order, then the
 /// copies-only ones and this computer's own; the main file is beside the first copy that has one (its .afp.json, or
 /// the .marks.json of before view settings); none has one: beside the first copy that isn't copies only (where the
 /// first save writes it). None: the path is in no location here
@@ -219,7 +219,7 @@ pub fn old_sidecar_file(own: &Path) -> PathBuf {
 /// How much of each end of a file its fingerprint reads
 pub const FINGERPRINT_PART: u64 = 1 << 20;
 
-/// A file's fingerprint, kept in a link with the original's path (docs/moments-and-workspaces.md, "The link
+/// A file's fingerprint, kept in a link with the original's path (docs/design/moments-and-workspaces.md, "The link
 /// inside"), to find the original again once it's been moved or renamed: SHA-256 (hex) of its first MiB followed by
 /// its last MiB, the two overlapping in a file under 2 MiB. Reads 2 MiB, not a 4 GB clip off a NAS; the link's size and
 /// creation time go with it. The same as `(head -c 1048576 f; tail -c 1048576 f) | shasum -a 256`
