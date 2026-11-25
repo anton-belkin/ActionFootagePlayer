@@ -73,13 +73,13 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 
 ## mpv and its Lua plugins
 
-- **Lua's 200 top-level locals.** `gyroflow/main.lua` is near the limit. `workspace/main.lua` is its plugin's wiring
-  only (see the next point).
+- **Lua's 200 top-level locals.** Both big plugins are modules now: `workspace/main.lua` and `gyroflow/main.lua` are
+  their wiring only (see the next point).
   - You see: "main function has more than 200 local variables" and the plugin doesn't load.
   - Do: put new code in a module of its own (`transform.lua`, `sidecar.lua`, `ahead.lua`, `measure.lua`), required
     without a new local where needed (`require('measure').setup(...)` in `gyroflow/main.lua`). Add the module to the
     packagers; `tests/packaging_test.py` checks it.
-- **The workspace plugin's parts share `W`** (`workspace/main.lua` makes it; each part is a module with
+- **The workspace and gyroflow plugins' parts share `W`** (each `main.lua` makes it; each part is a module with
   `install(W)`).
   - A part calls another's function through `W` as it runs (`local function refresh(...) return W.refresh(...) end`
     at its top), so parts install in any order; a value it keeps from `W` at install (`fs`, `catalog`, `cache`,
@@ -88,6 +88,9 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
     (`W.replace_state`), never `state = …`. "Another file by now" is `W.generation`, not a table compared.
   - Every event, key and script message is registered in `main.lua`, in the order they were when it was one file:
     a `file-loaded` handler's place there is the order it runs in.
+  - The gyroflow plugin's state more than one part changes as a clip plays is `S` (`W.S`: `S.view`, `S.gpu`,
+    `S.current_source`, `S.frame`…, listed in `gyroflow/main.lua`). A scalar two parts change goes there: kept from
+    `W` at install it would be a copy that never changes (a value is only kept when it's a table or a constant).
 - **Script messages and key bindings share one namespace.**
   - You see: a message does nothing (the Lens drop-down, #225).
   - Why: `mp.add_key_binding` registers its name as a script message too, and takes over a message of that name
@@ -100,12 +103,12 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
   next clip in the folder, and unload hooks fire again. Pass `--autocreate-playlist=no` for one-clip runs. A moment
   opened from `_Moments` plays the whole folder.
 - **Under `lavfi-complex`, mpv gives the tracks' decoders no hardware device.** `hwdec=videotoolbox` silently becomes
-  software decoding. Use `videotoolbox-copy` / `auto-copy` there (`gyroflow/main.lua`, 360 without `--video-join`).
+  software decoding. Use `videotoolbox-copy` / `auto-copy` there (`gyroflow/camera360.lua`, 360 without `--video-join`).
   mpv also decodes the tracks one after another in its playback thread: `vd-queue-enable=yes` gives each its own.
 - **A warp whose output shape isn't the source's** needs `file-local-options/video-aspect-override` set to the output's
-  W:H (`gyroflow/main.lua`), or mpv shows it in the source's shape.
+  W:H (`gyroflow/gpupath.lua` `gpu_apply`), or mpv shows it in the source's shape.
 - **In the grid (RGB) layout, `cscale=bilinear`.** mpv converts the whole source to RGB first; the app's Lanczos chroma
-  upscale took 10 ms of a 5.3K frame, and the warp resamples it anyway (`gyroflow/main.lua`).
+  upscale took 10 ms of a 5.3K frame, and the warp resamples it anyway (`gyroflow/gpupath.lua` `gpu_apply`).
 - **IPC socket paths over ~104 characters fail silently** on macOS. Use `/tmp/<short>.sock`.
 - **`display-names` adds a number:** "Built-in Retina Display (4251086178)". `--screen-name` wants the plain name.
   Strip `%s*%(%d+%)$` (`mpv/scripts/dlogm/main.lua`).
@@ -115,7 +118,7 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 - **LuaJIT's table order changes between runs.** Sort keys before hashing or comparing.
 - **Killing the app's shell wrapper leaves its mpv running.** Kill `Contents/Helpers/mpv` too.
 - **A stock mpv keeps every user shader it has loaded** until its window closes (~450 MB each with Ctrl+p). Our mpv's
-  patch 0015 drops unlisted ones. With another mpv, `gpu_flush` in `gyroflow/main.lua` remakes the window past
+  patch 0015 drops unlisted ones. With another mpv, `gpu_flush` in `gyroflow/shaders.lua` remakes the window past
   1.5 GB (4 GB: at once). For "slower over a session" reports, measure `footprint -p <pid>` across settings changes.
 - **A batch player (`AFP_BATCH`) must not take the agent's socket or `session.json`.** It doesn't now
   (`tests/agent_test.lua`); keep it so when changing `mpv/scripts/agent/main.lua` or `macos/player.sh`.
@@ -128,7 +131,7 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
   - Do: check `ioreg -n Root -d1 | grep CGSSessionScreenIsLocked` first. Test headless (`--vo=null`) when locked.
     The display sleeps after a few minutes without input; IPC commands don't count as input.
 - **An mpv older than 0.42 (Homebrew's 0.41.0) has no frame PTS for shaders**, so the GPU path is off and clips play
-  as recorded with a card (`mpv_has_pts` in `gyroflow/main.lua`). A trial app built without `tools/build_mpv.sh`
+  as recorded with a card (`mpv_has_pts` in `gyroflow/gpupath.lua`). A trial app built without `tools/build_mpv.sh`
   carries that mpv.
 - **The screen's HDR headroom:** `NSScreen.maximumPotentialExtendedDynamicRangeColorComponentValue` through
   `osascript -l JavaScript` (~0.3 s). The XDR says 16, an SDR screen 1.

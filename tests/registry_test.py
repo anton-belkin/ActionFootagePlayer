@@ -65,7 +65,7 @@ ALLOWED = {
                                                "checked against the registry by registry.rs's test",
     ("catalog/src/range.rs", "log curves"): "the same: a match giving each curve a name kept for good (Range::Log), "
                                             "checked by registry.rs's test",
-    ("mpv/scripts/gyroflow/main.lua", "the bundle's keys"): "not a list: the warp's request and the plugin's options, by key "
+    ("mpv/scripts/gyroflow/controls.lua", "the bundle's keys"): "not a list: the options Use as default writes, by key "
                                                             "(tests/render_keys_test.py checks them against the registry)",
 }
 sources = files("mpv/scripts", [".lua"]) + files("vs-gyroflow/src", [".rs"]) + files("catalog/src", [".rs"]) \

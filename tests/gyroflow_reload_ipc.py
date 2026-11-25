@@ -39,14 +39,18 @@ def make_rig(app, clip, table, lua):
         shutil.copy(f, rig + "/app.app/Contents/Resources/plugins/workspace")
     if table:
         shutil.copy(table, g + "/gyroflow-gpu-table")
-    main = open(g + "/main.lua").read()
+    # (in whichever of the plugin's modules has it: gyroflowapp.lua's Ctrl+e, gpupath.lua's gpu_missing)
     for a, b in [('"/usr/bin/open"', '"/usr/bin/true"'),
                  ('if vo ~= "" and not vo:find("gpu-next", 1, true) then',
                   'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then')]:
-        if a not in main:
-            sys.exit("main.lua changed: the test's patch doesn't apply: " + a)
-        main = main.replace(a, b)
-    open(g + "/main.lua", "w").write(main)
+        found = False
+        for f in glob.glob(g + "/*.lua"):
+            text = open(f).read()
+            if a in text:
+                open(f, "w").write(text.replace(a, b))
+                found = True
+        if not found:
+            sys.exit("the plugin changed: the test's patch doesn't apply: " + a)
     os.makedirs(rig + "/clips")
     subprocess.run(["cp", "-c", clip, rig + "/clips/a.MP4"], check=True)
     # Without motion data: the video alone, its first 12 s

@@ -182,7 +182,7 @@ impl Ctx {
 
 }
 
-/// What a render takes from this computer's player: what it wrote last (gyroflow/main.lua `publish`, every time it
+/// What a render takes from this computer's player: what it wrote last (gyroflow/bundle.lua `publish`, every time it
 /// starts, a batch too: <its data>/gyroflow/render-defaults.json, AFL_PLAYER_DEFAULTS to point elsewhere), else worked
 /// out from its gyroflow.conf (AFL_PLAYER_OPTS) as the player would. A batch tells what it would have used, and a
 /// share compares (main.rs `share_collect`)
@@ -205,7 +205,7 @@ fn player_defaults() -> Value {
     v
 }
 
-/// The player's defaults from its gyroflow.conf, as gyroflow/main.lua's `defaults_bundle` makes them (its options'
+/// The player's defaults from its gyroflow.conf, as gyroflow/bundle.lua's `defaults_bundle` makes them (its options'
 /// own defaults where the file doesn't say). The preset's horizon isn't known here: "no". The file is read as mpv's
 /// player/lua/options.lua reads it: a line starting with # is a comment, key=value split at the first =, nothing
 /// trimmed (a key with a space is another key, unknown), a boolean only yes or no (tests/gyroflow_conf_cases.json,

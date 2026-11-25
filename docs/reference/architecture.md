@@ -29,7 +29,7 @@ with `--script=` from `Contents/Resources/plugins/` (`macos/player.sh`; on Windo
 | Plugin | What it does | Notable modules |
 |---|---|---|
 | `workspace` | The project a clip belongs to, its moments, tags, clip previews, batch mode, the inbox from the Library | `main.lua` registers everything; its parts share `W`: `places.lua` (file calls, locations), `catalogtool.lua` (afp-catalog), `common.lua`, `trash.lua`, `momentlist.lua` (the clip's moments, chapters), `opening.lua` (what a file opens as), `momentsave.lua` (k, moment commands, export name, photo link), `clippreviews.lua` (and the project's counts), `cutout.lua` (Ctrl+x), `viewsave.lua` (Source/Transform Save, Autoplay), `marksjob.lua` (moments or photos of all marks), `renders.lua` (exports of all moments, renders), `tagging.lua`, `inbox.lua` (the Library's changes heard), `batch.lua` (`AFP_BATCH`). Plain Lua beside them: `workspace.lua` (project lookup, twin of `workspace.rs`), `projectfile.lua`, `projectcache.lua`, `sidecar.lua` (`<clip>.afp.json`), `transform.lua` (source and transform settings), `moments.lua`, `link.lua` (the MP4 link reader), `tags.lua`, `cut.lua` (Ctrl+x), `librarylist.lua` (a list from the Library as the playlist), `journal.lua` (responsiveness journal), `longpath.lua` (Windows MAX_PATH) |
-| `gyroflow` | Stabilization on the GPU path, export, photos, Save frame, crop mode, quality fallbacks | `main.lua`, `ahead.lua` (table kept ahead of playback), `export.lua` (runs `gyroflow-export`), `exportsettings.lua`, `still.lua` (Ctrl+p denoise switch), `dnstep.lua` (frame steps under the denoise), `quality.lua`, `crop.lua`, `gestures.lua`, `measure.lua` (Ctrl+m), `projectwatch.lua` (Ctrl+e), `platform.lua`, `gpu_hold.glsl`, `chromatic.glsl`, `underwater.gyroflow` |
+| `gyroflow` | Stabilization on the GPU path, export, photos, Save frame, crop mode, quality fallbacks | `main.lua` registers everything; its parts share `W` and `S` (the state they change): `sources.lua` (what a clip is stabilized with), `framing.lua` (the output's frame), `bundle.lua` (the transform, what's published), `controls.lua` (the keys and messages that change it), `play.lua` (a clip opening), `gpupath.lua` (the table, ahead of playback, applied), `shaders.lua` (the warp's files in mpv's list), `denoise.lua` (the denoise in step, frame steps), `translation.lua` (Ctrl+j), `camera360.lua` (a 360 camera's file), `gyroflowapp.lua` (Ctrl+e); `ahead.lua` (table kept ahead of playback), `export.lua` (runs `gyroflow-export`), `exportsettings.lua`, `still.lua` (Ctrl+p denoise switch), `dnstep.lua` (frame steps under the denoise), `quality.lua`, `crop.lua`, `gestures.lua`, `measure.lua` (Ctrl+m), `projectwatch.lua` (Ctrl+e), `platform.lua`, `gpu_hold.glsl`, `chromatic.glsl`, `underwater.gyroflow` |
 | `dlogm` | Log curves and looks: log → HDR, SDR looks, Dolby Vision, underwater colour | `main.lua`, `dji_color.lua`, `gopro_color.lua`, `video_color.lua` (the `colr` box), `uwcolor.lua` + `uw_estimate.lua`, `dv/` (shipped RPUs and their look) |
 | `view360` | 360° clips as a view to look around in, and the recorded view | `view360.glsl`, `view.lua` (its geometry in Lua), `recording.lua` |
 | `side-panel` | The settings panel beside the video, the navigation bar, cards and dialogs | `ui.lua`, `bar.lua` + `timeline.lua`, `notify.lua` + `notify_client.lua` (what other plugins load), `scrub.lua` (seek-bar pictures via `afp-scrub`), `tagchips.lua`, `lensdialog.lua`, `exportkind.lua`, `navkeys.lua` |
@@ -275,7 +275,7 @@ the player's own plugins how each file plays (`--script-opts-append=gyroflow-ren
    (planes mode), finding the frame by mpv's PTS. It renders at the size of the video's rectangle on screen, so it is
    the scaler. Inside it, as asked: the fringes under water, the edge fill (sphere or smooth), the temporal denoise
    (`dn_` passes, Ctrl+p), the translation compensation (Ctrl+j). Interpolation: Lanczos up to 31 fps, bicubic above
-   (`gyroflow/main.lua` `interpolation`). `gyroflow-gpu-table` assembles `warp.glsl`'s sections by mode: the player
+   (`gyroflow/framing.lua` `interpolation`). `gyroflow-gpu-table` assembles `warp.glsl`'s sections by mode: the player
    gets grid (RGB at `MAIN`, a table point every `--grid-step` px, 16 by default) when it needs RGB (fringes, the
    edge fill), else planes (`reply.mode`); `exact` is for checks. 33 rotation knots a frame (`--knots`) are at the
    noise floor. The table is a 16384-wide `rgba32f` texture (`gpu_table::MAX_TEX`): per frame 16 parameter texels and
@@ -297,7 +297,7 @@ other than `gpu-next`, plays as recorded with a card saying why. Details: [../de
 
 - **The tracks:** a 360 camera's two lens tracks are joined side by side, on the GPU by the app's mpv (`--video-join`,
   patch 0014), elsewhere by `lavfi-complex` `hstack` with copy decoding; each track is decoded on a thread of its own
-  (`vd-queue-enable=yes`, `gyroflow/main.lua`).
+  (`vd-queue-enable=yes`, `gyroflow/camera360.lua`).
 - **The sphere:** `gyroflow-gpu-table --sphere360`, 5760 wide by default (`sphere360::DEFAULT_WIDTH`;
   `gyroflow.conf` `sphere_width`), with the angles stamped under it for `view360.glsl`. `sphere360.rs` makes the same sphere for
   exports.
@@ -398,7 +398,7 @@ it HLG in Rec.2020, so every look takes it from there. `dlogm/uwcolor.lua` measu
 
 ## Gyroflow
 
-The gyroflow plugin (`gyroflow/main.lua`) asks `gyroflow-gpu-table` for the clip's warp: Gyroflow's own render of the
+The gyroflow plugin (`gyroflow/gpupath.lua`) asks `gyroflow-gpu-table` for the clip's warp: Gyroflow's own render of the
 project (smoothing, zoom, lens, horizon) as an mpv shader. Without a `.gyroflow` beside the video, `gyroflow-probe`
 decides whether the clip has its own motion data recorded with the camera's stabilization off (each camera's rule:
 `vs-gyroflow/src/probe.rs`), or a GoPro HERO12+ HyperSmooth record (`in_camera.rs`), or motion measured from the
