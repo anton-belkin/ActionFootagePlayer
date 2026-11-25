@@ -6,6 +6,7 @@
 !vs-gyroflow
 !luts
 !tools/cube_to_glsl.py
+!tools/make_hdr_lut.py
 !tools/stream
 !tools/nas-helper
 **/target

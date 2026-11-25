@@ -59,19 +59,21 @@ RUN cd vs-gyroflow && cargo build --release --locked \
  && mkdir -p /out && for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical; do \
         install -m 755 target/release/$f /out/$f && strip --strip-unneeded /out/$f; done
 
-# --- The player's plugins (the repository's Lua with the binaries above) and the shaders the stream renders with
+# --- The player's plugins (the repository's Lua with the binaries above) and the shaders the stream renders with: every
+# log curve's look to HLG (registry.json's curves, tools/stream/make_looks.py) where the dlogm plugin has it
 FROM base AS files
-COPY tools/cube_to_glsl.py /src/tools/
+COPY tools/cube_to_glsl.py tools/make_hdr_lut.py /src/tools/
+COPY tools/stream/make_looks.py /src/tools/stream/
 COPY shaders /src/shaders
 COPY luts /src/luts
 COPY mpv/scripts/workspace /opt/afp/player/workspace
+COPY mpv/scripts/workspace/registry.json /src/mpv/scripts/workspace/
 COPY mpv/scripts/gyroflow /opt/afp/player/gyroflow
 COPY mpv/scripts/dlogm /opt/afp/player/dlogm
 COPY --from=rust /out/ /opt/afp/player/gyroflow/
 RUN cd /src && mkdir -p /opt/afp/bin /opt/afp/player/dlogm/shaders \
  && mv /opt/afp/player/gyroflow/underwater.gyroflow /opt/afp/player/gyroflow/default.gyroflow \
- && python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube /opt/afp/bin/dlogm_hlg.glsl \
- && cp /opt/afp/bin/dlogm_hlg.glsl /opt/afp/player/dlogm/shaders/ \
+ && python3 -I tools/stream/make_looks.py /opt/afp/player/dlogm \
  && python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/3-NBCU_HLG2SDR_DL_v1.2.cube /opt/afp/player/dlogm/shaders/nbcu_hlg2sdr.glsl \
  && python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/5-NBCU_PQ2SDR_DL_v1.2.cube /opt/afp/player/dlogm/shaders/nbcu_pq2sdr.glsl \
  && ln -s ../player/gyroflow/gyroflow-gpu-table /opt/afp/bin/gyroflow-gpu-table \

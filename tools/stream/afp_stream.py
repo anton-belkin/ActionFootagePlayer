@@ -4,7 +4,8 @@
 # afp-stream: clips stabilized and in HDR, as HLS streams over the network (docs/design/gpu-render.md, "The streaming server").
 # Runs on the NAS (tools/stream/README.md): for each clip in the library folders, an HLS stream (HEVC Main10, HLG,
 # fMP4 segments) rendered on the GPU by afp-render as it's asked for, with the Gyroflow warp gyroflow-gpu-table writes
-# for it as the player plays it (below) and the D-Log M look for D-Log M clips.
+# for it as the player plays it (below), the look to HLG for a log clip (every log curve the player plays: registry.json's
+# curves) and, with AFP_DENOISE=player, the clip's temporal denoise.
 #
 #   GET /                      the clips, each with its stream (Safari plays HLS by itself)
 #   GET /playlist.m3u          every clip as a channel: Jellyfin's Live TV takes it as an M3U tuner
@@ -28,7 +29,8 @@
 # Environment: AFP_LIBRARY (folders, ':'-separated; default /clips), AFP_CACHE (/stream/cache), AFP_BIN (/stream: afp-render,
 # gyroflow-gpu-table, the shaders), AFP_PORT (8099), AFP_HEIGHT (1080), AFP_BITRATE (12M), AFP_CHROMATIC (0; 1: the water's
 # color fringes taken out, the RGB layout: 48 fps on the N100, not real time at 4K60), AFP_INTERP (bilinear, bspline,
-# bicubic, lanczos)
+# bicubic, lanczos), AFP_DENOISE (off; player: the clip's temporal denoise as the player has it, slower than real time
+# on the N100)
 import hashlib, html, json, math, os, re, shutil, subprocess, threading, time, urllib.parse
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import sys
@@ -62,6 +64,34 @@ PLAYER_CONFIG = os.environ.get("AFP_PLAYER_CONFIG", os.path.join(PLAYER, "config
 # Where the looks' shaders with their values set are written (BIN may be read-only)
 GENERATED = os.environ.get("AFP_GENERATED", BIN)
 ARGS = os.environ.get("AFP_ARGS", "/stream/args")
+# The clip's temporal denoise (warp.glsl's dn_ passes, after the warp) as the player plays it: player, where the clip has
+# it on (its denoise, how much: this NAS's gyroflow.conf temporal_denoise, its Stronger and grain), or off. Off by
+# default: on an N100 it's far from real time (the warp alone is ~15 ms of a 60 fps frame's 16.7; the denoise costs
+# more than the warp). A clip pre-rendered whole (/prerender) plays smoothly with it
+DENOISE = os.environ.get("AFP_DENOISE", "off")
+# Frames on each side of the shown one, by temporal_denoise (gyroflow/main.lua's DENOISE_FRAMES, gyroflow-export's)
+DENOISE_FRAMES = {"full": 5, "light": 3}
+
+
+def read_registry():
+    """The player's lists (mpv/scripts/workspace/registry.json): in the NAS Helper, with the player's plugins; else
+    the repository's"""
+    here = os.path.dirname(os.path.abspath(__file__))
+    for p in (os.path.join(PLAYER, "workspace", "registry.json"), os.path.join(here, "..", "..", "mpv", "scripts", "workspace", "registry.json")):
+        if os.path.exists(p):
+            with open(p) as f:
+                return json.load(f)
+    raise SystemExit(f"afp-stream: no registry.json in {PLAYER}/workspace")
+
+
+REGISTRY = read_registry()
+# A project's own folders, lower case (_Moments, _Exports, Generated, gyroflow-export's stabilized, …), and the NAS's
+# recycle bins: never footage (#128, #302)
+OWN_FOLDERS = set(REGISTRY["own_folders"])
+RECYCLE_BINS = set(REGISTRY["recycle_bins"])
+# The log curves the player plays, each with its look to HLG (its `hdr`: the dlogm plugin's shader, which the NAS
+# Helper's image bakes for every one of them, tools/stream/make_looks.py)
+LOG_CURVES = {c["id"]: c for c in REGISTRY["curves"] if c.get("log")}
 
 jobs = {}  # key -> {proc, dir, started}
 # When a player last asked for each clip's segments: a render nobody asks for any more (the player went to another
@@ -74,16 +104,31 @@ lock = threading.Lock()
 _clips = {"at": 0, "list": []}
 
 
+def walked(name, top):
+    """Whether clips() goes into a folder: not a hidden one, a recycle bin, nor one of the project's own (registry.json's
+    own_folders) at its top (the library's folder, or one with Project.afproject: the Library's and the player's rule),
+    except _Moments and _Clips (moments and clip previews); gyroflow-export's stabilized/ wherever it is (it's written
+    beside the clip)"""
+    lower = name.lower()
+    if name.startswith(".") or lower in RECYCLE_BINS:
+        return False
+    if lower in ("_moments", "_clips"):
+        return True
+    return lower != "stabilized" and not (top and lower in OWN_FOLDERS)
+
+
 def clips():
     """The library's videos: originals, and a project's moments (_Moments/) and clip previews (_Clips/), which link to
-    them. Other folders starting with _ (exports, stills) and hidden ones aren't. Listed again every 10 s at most"""
+    them. Other folders starting with _ (exports, stills), the project's own (walked) and hidden ones aren't. Listed
+    again every 10 s at most"""
     if time.time() - _clips["at"] < 10:
         return _clips["list"]
     out = []
     for root in LIBRARY:
         for d, dirs, files in os.walk(root):
-            dirs[:] = sorted(x for x in dirs if not x.startswith(".") and x != "#recycle")
             rel = os.path.relpath(d, root)
+            top = rel == "." or "Project.afproject" in files
+            dirs[:] = sorted(x for x in dirs if walked(x, top))
             parts = [] if rel == "." else rel.split(os.sep)
             under = [p for p in parts if p.startswith("_")]
             kind = "clip"
@@ -404,8 +449,10 @@ def shader_for(clip, out, i):
     reply = {}
     if render.get("stabilize") and render.get("user_data"):
         ud = dict(render["user_data"])
-        for k in ("plugin", "edges_control", "still_control", "workers", "fast", "width", "height", "gpu_denoise"):
+        for k in ("plugin", "edges_control", "still_control", "workers", "fast", "width", "height"):
             ud.pop(k, None)
+        # The denoise's passes in the warp where the stream does it (AFP_DENOISE=player), else none
+        ud["gpu_denoise"] = stream_denoise(i["args"]) is not None
         ud.update(input_width=ud.get("input_width") or w, input_height=ud.get("input_height") or h, interpolation=INTERP,
                   gpu_chromatic=bool(CHROMATIC and ud.get("gpu_chromatic")), edges="smooth" if ud.get("edges") == "sphere" else ud.get("edges", "smooth"))
         r = subprocess.run([os.path.join(BIN, "gyroflow-gpu-table"), "--player", json.dumps(ud), shader], capture_output=True, text=True)
@@ -427,13 +474,50 @@ def shader_for(clip, out, i):
     return reply
 
 
+def curve_shader(curve):
+    """A log curve's look to HLG (the dlogm plugin's shader for it, registry.json's `hdr`), None: not a log curve the
+    player plays, or its shader isn't there"""
+    c = LOG_CURVES.get(curve)
+    if not c or not c.get("hdr"):
+        return None
+    path = os.path.join(PLAYER, "dlogm", c["hdr"])
+    return path if os.path.exists(path) else None
+
+
+def denoise_of(args):
+    """The clip's temporal denoise as the player plays it, from the settings it builds (render.settings: denoise, how
+    much, its Stronger, the grain kept; the table's request where they're missing): {radius, strong, keep}, or None
+    (off for the clip, off on this NAS's player config, or not stabilized: the denoise follows the warp)"""
+    r = args.get("render") or {}
+    ud, s = r.get("user_data") or {}, r.get("settings") or {}
+    on = s["denoise"] if "denoise" in s else ud.get("gpu_denoise")
+    radius = DENOISE_FRAMES.get(s.get("temporal_denoise") or "full")
+    if not (r.get("stabilize") and on and radius):
+        return None
+    keep = s.get("denoise_grain")
+    return {"radius": radius, "strong": bool(s.get("denoise_strong")), "keep": float(0.25 if keep is None else keep)}
+
+
+def stream_denoise(args):
+    """The denoise the stream renders: the clip's, where AFP_DENOISE=player"""
+    return denoise_of(args) if DENOISE == "player" else None
+
+
 def fingerprint(clip):
     """What a clip's renders depend on: when it changes (what the player plays it with, its project saved in Gyroflow,
     the service's settings), what was rendered goes"""
     i = info(clip)
     a = i["args"]
     what = json.dumps({k: a.get(k) for k in ("clip", "offset", "length", "render", "dlogm", "deps")}, sort_keys=True)
-    return f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}{'2' if clip.get('look') == 'pq' else ''}|{hashlib.sha1(what.encode()).hexdigest()}"
+    fp = f"v4|{SEGMENT}|{INTERP}|{CHROMATIC}|{HEIGHT}|{BITRATE}|{clip.get('look', 'hlg')}{'2' if clip.get('look') == 'pq' else ''}|{hashlib.sha1(what.encode()).hexdigest()}"
+    # What renders differently since #315, only where it does: what was rendered before stays where nothing changed
+    curve = (a.get("dlogm") or {}).get("curve") or ""
+    if curve != "dlogm" and curve_shader(curve):
+        fp += f"|look:{curve}"
+    dn = stream_denoise(a)
+    if dn:
+        fp += f"|dn:{dn['radius']}:{int(dn['strong'])}:{dn['keep']:g}"
+    return fp
 
 
 def clip_dir(clip):
@@ -481,11 +565,22 @@ def start_render(clip, n, upto=None, background=False):
     height = min(HEIGHT, oh)
     width = int(round(height * ow / oh / 2)) * 2
     args = [os.path.join(BIN, "afp-render")]
-    # D-Log M, as the player's dlogm plugin takes it (its curve, by the camera's metadata or set by hand for the
-    # source): its look to HLG, as the player's hdr look. Other log curves have no look here yet: as recorded
+    # The temporal denoise, in the warp's shader (shader_for): the frame shown is `radius` frames behind the newest
+    # (afp-render -behind decodes that many before and after), with the player's values for its parameters
+    dn = stream_denoise(i["args"]) if reply.get("mode") != "scaled" else None
+    if dn:
+        args += ["-behind", str(dn["radius"])] + [x for k, v in (("gyroflow_dn_radius", dn["radius"]), ("gyroflow_dn_after", dn["radius"]),
+                                                                  ("gyroflow_dn_strong", int(dn["strong"])), ("gyroflow_dn_keep", dn["keep"]))
+                                                  for x in ("-set", f"{k}={v:g}")]
+    elif denoise_of(i["args"]) and DENOISE != "player":
+        log("the clip's temporal denoise left out of", clip["name"], "(AFP_DENOISE=off)")
+    # The log curve, as the player's dlogm plugin takes it (by the camera's metadata or set by hand for the source): its
+    # look to HLG, as the player's hdr look. A curve without one (the underwater colour, the player's per frame): as
+    # recorded, said in the log
     curve = (i["args"].get("dlogm") or {}).get("curve") or ""
-    if curve == "dlogm":
-        shaders.append(os.path.join(BIN, "dlogm_hlg.glsl"))
+    look = curve_shader(curve)
+    if look:
+        shaders.append(look)
         args.append("--hlg")
         # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10; highlights expanded
         m = LOOK.match(clip.get("look") or "hlg")
@@ -500,7 +595,7 @@ def start_render(clip, n, upto=None, background=False):
         elif base == "pq":
             args.append("--pq")
     elif curve:
-        log("no look for the curve", curve, "of", clip["name"])
+        log("no look for the curve", curve, "of", clip["name"], ": as recorded")
     # A moment's part: the clip's time from its in; the stream's time from 0, as mpv plays a moment
     off = i["offset"]
     args += ["-w", str(width), "-h", str(height), "-b", BITRATE, "-seg", str(SEGMENT), "-ss", f"{off + n * i['seg']:.6f}", "-start_number", str(n)]
@@ -667,7 +762,7 @@ def catalog_entry(c, i, base):
             "title": moment.get("name") or name, "clip": os.path.relpath(i["source"], c["project"]),
             "in": i["offset"], "duration": round(i["duration"], 3), "start": local_start(i),
             "stabilized": bool((a.get("render") or {}).get("stabilize")), "kind_of_stabilization": (a.get("render") or {}).get("kind"),
-            "look": "hdr" if (a.get("dlogm") or {}).get("curve") == "dlogm" else "",
+            "look": "hdr" if curve_shader((a.get("dlogm") or {}).get("curve") or "") else "",
             "stream": f"{base}/clip/{c['id']}/index.m3u8", "poster": f"{base}/poster/{c['id']}.jpg",
             # The cover's file as it is now (poster() makes it again when this changes): asked for again only then
             "poster_stamp": stamp(c["path"])}

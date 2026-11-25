@@ -29,14 +29,12 @@ SCANNERS = {
     # checks.rs walks with index.rs's walk (which skips . and # names)
     "library/src/checks.rs": {"list": "registry", "under": None, "dot": r"crate::index::walk\("},
     "mpv/scripts/workspace/moments.lua": {"list": "registry", "under": None, "dot": r'name:sub\(1, 1\) ~= "\."'},
-    # The NAS stream's catalog: _ folders are left out (_Moments and _Clips listed as moments and clip previews)
-    "tools/stream/afp_stream.py": {"list": None, "under": r'p\.startswith\("_"\)', "dot": r'x\.startswith\("\."\)'},
+    # The NAS stream's catalog: the project's own folders (registry.json's, walked()), and _ folders (_Moments and
+    # _Clips listed as moments and clip previews)
+    "tools/stream/afp_stream.py": {"list": "registry", "under": r'p\.startswith\("_"\)', "dot": r'name\.startswith\("\."\)'},
 }
 # Folders made that a scanner doesn't leave out yet: (scanner, folder) -> the issue
-KNOWN = {
-    ("tools/stream/afp_stream.py", "Generated"): "#302: Generated/ at a project's top (before 0.11) listed as footage by the NAS stream",
-    ("tools/stream/afp_stream.py", "stabilized"): "#302: the same, gyroflow-export's stabilized/",
-}
+KNOWN = {}
 
 made = {}  # folder -> [where]
 UNDER = re.compile(r'"(_[A-Z][A-Za-z]+)"')

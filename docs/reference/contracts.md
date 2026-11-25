@@ -378,6 +378,12 @@ What talks on it:
   `{clip, offset, length, moment {name, in, out, missing}, render {stabilize, kind, user_data}, dlogm {curve, look, log},
   title, duration}` and quits. `render.user_data` is the `gyroflow-gpu-table --player` request above; the stream passes
   it to `gyroflow-gpu-table` itself, then `afp-render` (`tools/stream/afp-render.c`) renders HLS.
+- **What the stream takes of it:** the look from `dlogm.curve` (any log curve in registry.json: the dlogm plugin's
+  `<curve>_hlg.glsl`, its `hdr`, which the image bakes for each with `tools/stream/make_looks.py`); the temporal
+  denoise from `render.settings` (`denoise`, `temporal_denoise`, `denoise_strong`, `denoise_grain`) when
+  `AFP_DENOISE=player`: `gpu_denoise` in the table's request, `afp-render -behind <frames> -set gyroflow_dn_…=<v>`
+  (the shown frame that many behind the newest, as gyroflow-export's GPU path renders it); the footage without the
+  project's own folders (registry.json's `own_folders` at a project's top, `stabilized/` anywhere).
 - **HTTP** (`AFP_PORT`, 8099): `/`, `/playlist.m3u`, `/clip/<id>/index.m3u8`, `/clip/<id>/<segment>`,
   `/watch/<id>`, `/prerender?folder=…&what=opening|whole` (only when asked), `/status`, `/catalog.json`,
   `/poster/<id>.jpg`, and `/settings` when it runs in the NAS Helper. `jellyfin.py` reads `/catalog.json`.
@@ -700,6 +706,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_COLLABORATION` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_COMPUTER_NAME` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_CURATED_LENSES` | `library/src/index.rs`, `vs-gyroflow/src/lens_pick.rs` | `tests/afp_motion_ipc.py`, `tests/lens_dialog_ipc.py` |
+| `AFP_DENOISE` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | `tests/stream_looks_test.py` |
 | `AFP_DJI_LUT` | `vs-gyroflow/src/youtube.rs` | — |
 | `AFP_EMPTY_THREADS` | `vs-gyroflow/src/bin/afp-cut.rs` | — |
 | `AFP_GENERATED` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
@@ -758,7 +765,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-75 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+76 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->
@@ -837,7 +844,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `--uw-strength` | <0..1> | its strength, between the camera's colour (0) and the correction (1, the default) | — |
 | `--uw-highlights` | <yes\|no> | the light end stretched into HDR's room (2.5x SDR white for the camera's white); no by default | — |
 | `--uw-params` | <dr,db,k,ev> | its numbers as given (the player's at the frame shown), for every frame, not measured | — |
-| `--sdr` |  | D-Log M to Rec.709 (DJI's LUT) instead of HLG | `macos/player.sh`, `windows/launcher/src/main.rs` |
+| `--sdr` |  | D-Log M to Rec.709 (DJI's LUT) instead of HLG | `macos/player.sh`, `tools/stream/afp_stream.py`, `windows/launcher/src/main.rs` |
 | `--nbcu` |  | to Rec.709 through NBCUniversal's HLG -> SDR conversion instead of HLG (any curve); an HDR file that isn't log through NBCU's HLG or PQ -> SDR | `mpv/scripts/gyroflow/export.lua` |
 | `--no-stabilize` |  | the color conversion only, as a clip plays with the stabilization off | — |
 | `--lens-only` |  | the lens corrected (and --projection), nothing smoothed | — |

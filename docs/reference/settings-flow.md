@@ -56,8 +56,8 @@ The paths:
 | Frame aspect | `view.aspect` (W:H landscape-wise or original); `conf:aspect` | `shown_aspect()` (`transform.concrete`) → `req.aspect` | `set.aspect`: the clip playing's `shown_aspect()`; a saved view's `frame_aspect`, worked out by the workspace plugin (`made_view_of`) | same | `stab.aspect` | `settings.aspect`; `frame_aspect` added by the player at render time | `user_data.aspect` |
 | Frame orientation | `view.orientation` (as-is, landscape, portrait); `conf:orientation` | folded into `shown_aspect()` | inside `--aspect` | same | `stab.orientation` | `settings.orientation` | inside `user_data.aspect` |
 | Water's colour fringes | `view.chromatic`; `conf:chromatic` | `set.chromatic` → `req.gpu_chromatic` (off when `conf:chromatic_skip`) | `set.chromatic` (`--chromatic`); never skipped | same; the screen grab (`gpu_frame`) is not used when skipped | `stab.chromatic` | `settings.chromatic` | **gap**: only with `AFP_CHROMATIC=1` (default off) |
-| Temporal denoise on or off | `view.denoise`; `conf:still` | `still.lua` → `set.denoise`; `req.gpu_denoise`, `PARAM gyroflow_dn_radius` | `set.denoise` with `set.temporal_denoise` (`--denoise <amount>`) | still: cleaned up where the settings' denoise is on (`still_radius` 0 otherwise); motion: as export | `stab.denoise` | `settings.denoise` | **gap**: `gpu_denoise` dropped (`afp_stream.py` pops it) |
-| Denoise Stronger | `view.denoise_strong`; `conf:denoise_strong` | `PARAM gyroflow_dn_strong`; `set.denoise_strong` | `set.denoise_strong` (`--denoise-strong`) | same | `stab.denoise_strong` | `settings.denoise_strong` | **gap** (no denoise) |
+| Temporal denoise on or off | `view.denoise`; `conf:still` | `still.lua` → `set.denoise`; `req.gpu_denoise`, `PARAM gyroflow_dn_radius` | `set.denoise` with `set.temporal_denoise` (`--denoise <amount>`) | still: cleaned up where the settings' denoise is on (`still_radius` 0 otherwise); motion: as export | `stab.denoise` | `settings.denoise` | with `AFP_DENOISE=player` (default off: slower than real time on the N100): `render.settings.denoise` → `user_data.gpu_denoise`, `afp-render -behind`; off, said in the log |
+| Denoise Stronger | `view.denoise_strong`; `conf:denoise_strong` | `PARAM gyroflow_dn_strong`; `set.denoise_strong` | `set.denoise_strong` (`--denoise-strong`) | same | `stab.denoise_strong` | `settings.denoise_strong` | `render.settings.denoise_strong` → `-set gyroflow_dn_strong` (with `AFP_DENOISE=player`) |
 | Gyroflow project | `<clip>.gyroflow` or `<clip.ext>.gyroflow`; a moment's own `<link>.gyroflow` | `req.project` | `--project` (`ud:project`) | same | own project beside the link; `--project`, `--alone`/`--whole` | `gyroflow` fingerprint in the recipe, else `preset` fingerprint | `user_data.project`; a dep of the cached answer |
 | Preset (no project) | `default.gyroflow` in `$GYROFLOW_DATA` or the plugin folder | `req.preset` | gyroflow-export finds it itself | same | same | `preset` fingerprint (from `render-defaults.json`) | the NAS player's own preset |
 
@@ -68,8 +68,8 @@ kept but not used.
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| Temporal denoise amount | `conf:temporal_denoise` (full, light, off) | `DENOISE_FRAMES` → `PARAM gyroflow_dn_radius`; off: none whatever `view.denoise`; `set.temporal_denoise` | `set.temporal_denoise` (a recipe's `opts.temporal_denoise` for a Library render; the quality preset may override: `exportsettings.lua` `apply`) | motion as export; the still is cleaned up as the settings say, a Library photo by its recipe's amount (#319) | this computer's at render time | `opts.temporal_denoise` (from `render-defaults.json` or `defaults_of`) | **gap** (no denoise) |
-| Grain kept | `conf:still_grain` (0.25) | `PARAM gyroflow_dn_keep`; `set.denoise_grain` | `set.denoise_grain` (`--grain`, #314) | same | this computer's at render time | this computer's at render time; **gap**: not in the recipe, so a changed grain doesn't make a new render | in `render.settings`; **gap** (no denoise, #315) |
+| Temporal denoise amount | `conf:temporal_denoise` (full, light, off) | `DENOISE_FRAMES` → `PARAM gyroflow_dn_radius`; off: none whatever `view.denoise`; `set.temporal_denoise` | `set.temporal_denoise` (a recipe's `opts.temporal_denoise` for a Library render; the quality preset may override: `exportsettings.lua` `apply`) | motion as export; the still is cleaned up as the settings say, a Library photo by its recipe's amount (#319) | this computer's at render time | `opts.temporal_denoise` (from `render-defaults.json` or `defaults_of`) | the NAS's own `/config/player` gyroflow.conf, in `render.settings.temporal_denoise` → `-behind`, `-set gyroflow_dn_radius` (with `AFP_DENOISE=player`) |
+| Grain kept | `conf:still_grain` (0.25) | `PARAM gyroflow_dn_keep`; `set.denoise_grain` | `set.denoise_grain` (`--grain`, #314) | same | this computer's at render time | this computer's at render time; **gap**: not in the recipe, so a changed grain doesn't make a new render | `render.settings.denoise_grain` → `-set gyroflow_dn_keep` (with `AFP_DENOISE=player`) |
 | Edge fill | `conf:edges` (sphere, smooth, off) | `edge_mode` → `req.edges` | `--edges` (quality preset may change it) | same | this computer's | `opts.edges` | **gap**: sphere becomes smooth |
 | Edge blur | `conf:edges_blur` | `req.edges_blur` | `--edges-blur` | same | this computer's | `opts.edges_blur` | `user_data.edges_blur` |
 | Sideways jerks (translation) | `conf:translation` (allowed); computed per clip by Ctrl+j into `translation.rs`'s cache; on/off per session (`trans.on`) | `req.gpu_translation`, `PARAM gyroflow_trans`; `set.translation` (allowed and on) | `set.translation`: taken where computed for the clip, on the GPU path (#313) | same, the clip playing | the clip playing's preview | **gap**: a session's toggle, not in bundle or recipe | **gap** |
@@ -83,7 +83,7 @@ Read and ignored: `still_radius`, `still_tolerance`, and the VapourSynth path's 
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| Log curve | `source.curve` (dlogm, dlog, gplog, gplog2, ilog); else the metadata | dlogm `CURVES` → `<curve>_hlg.glsl`; `ud`-like state in `user-data/dlogm/curve` | `--curve` (`none` when the look is off) | same | the original's | Source settings `SRC_CURVES`; `settings.curve` | **gap**: only dlogm has a look (`dlogm_hlg.glsl`); other curves play as recorded |
+| Log curve | `source.curve` (dlogm, dlog, gplog, gplog2, ilog); else the metadata | dlogm `CURVES` → `<curve>_hlg.glsl`; `ud`-like state in `user-data/dlogm/curve` | `--curve` (`none` when the look is off) | same | the original's | Source settings `SRC_CURVES`; `settings.curve` | `dlogm.curve` → the dlogm plugin's `<curve>_hlg.glsl` (registry.json's `hdr`, every log curve baked into the image by `make_looks.py`) |
 | Recorded turned | `source.rotation` (0, 90, 180, 270) | `frame.rotation` → `req.rotation` | `--rotation` | same | the original's | Source settings `SRC_TURNS`; `settings.rotation` | `user_data.rotation` |
 | Lens under water | `source.underwater` (auto, yes, no) | `underwater` → `req.underwater` (`water.rs`) | `--underwater` | same | the original's | Source settings `SRC_WATER`; `settings.underwater` | `user_data.underwater` |
 | Lens type | `source.lens_type` | read by `lens_pick.rs` wherever vs-gyroflow loads the clip | same (gyroflow-export reads the file) | same | same | Source settings "Lens type"; in `settings` (the whole `source` is copied) | read if the NAS sees the `.afp.json` |
@@ -107,7 +107,7 @@ left out there.
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| Look (hdr, dv, dvsdr, tonemap, nbcu, maker, off) | session; start look `dlogm.conf:hdr_screen`, `sdr_screen` | dlogm shaders and target | `--sdr` (maker), `--nbcu`, `--dv-rpu`; `--curve none` for off | still: `--sdr-image maker\|macos\|nbcu`; motion as export | preview is SDR | profile `look` (HDR, SDR, Photo); SDR → `req.sdr` → `--nbcu` | look variants by URL (hlg, sdr, pq), dlogm only |
+| Look (hdr, dv, dvsdr, tonemap, nbcu, maker, off) | session; start look `dlogm.conf:hdr_screen`, `sdr_screen` | dlogm shaders and target | `--sdr` (maker), `--nbcu`, `--dv-rpu`; `--curve none` for off | still: `--sdr-image maker\|macos\|nbcu`; motion as export | preview is SDR | profile `look` (HDR, SDR, Photo); SDR → `req.sdr` → `--nbcu` | look variants by URL (hlg, sdr, pq), every log curve |
 | SDR look for SDR exports | `user-data/dlogm/sdr_look` | n/a | Export SDR, `--youtube <look>` | n/a | n/a | always nbcu | n/a |
 | Dolby Vision trims | `$DLOGM_DATA/dv` (the user's), else `dv/nbcu_fit.rpu` | `macos-dovi-rpu-file` | `--dv-rpu` with the same file | motion only | n/a | **gap**: `export-batch` never passes `--dv-rpu`, though `renders.rs` `PROFILES` says the HDR look is HLG + Dolby Vision 8.4 | n/a |
 | Live L1 | `dlogm.conf:dv_live_l1` | `macos-dovi-live-l1` | `--dv-live-l1` | motion only | n/a | **gap**, as above | n/a |
@@ -159,7 +159,7 @@ The same logic in more than one language, from CLAUDE.md, with the test that fai
 | Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export/options.rs` `--curve`, `make_hdr_lut.py`, `source.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
 | Export choices | `exportsettings.lua` `CHOICES`, `share.js` `EXPORT_CHOICES`, `renders.rs` `EXPORT_CHOICES`, gyroflow-export `--resolution`/`--encode`, `still.rs` `MAX_RADIUS` | [export_choices_test.py](../../tests/export_choices_test.py) |
 | Underwater colour rule | `dlogm/uw_estimate.lua`, `vs-gyroflow/src/uwcolor.rs` (not in CLAUDE.md's list) | [uwcolor_cases.json](../../tests/uwcolor_cases.json), written by [uwcolor_test.lua](../../tests/uwcolor_test.lua), read by `uwcolor.rs` tests |
-| Project's own folders | `index.rs` `OWN_FOLDERS`, `inspect.rs` `OWN_FOLDERS`, `checks.rs` `OWN`, `moments.lua` `OWN_FOLDERS`, `afp_stream.py` | [project_folders_test.py](../../tests/project_folders_test.py) |
+| Project's own folders | `index.rs` `OWN_FOLDERS`, `inspect.rs` `OWN_FOLDERS`, `checks.rs` `OWN`, `moments.lua` `OWN_FOLDERS`, `afp_stream.py` `OWN_FOLDERS` (registry.json's, `walked`) | [project_folders_test.py](../../tests/project_folders_test.py) |
 | Script messages and bindings | every `script-message-to` and its `register_script_message` | [script_messages_test.py](../../tests/script_messages_test.py) |
 | user-data | every `user-data/<key>` read has a writer | [user_data_test.py](../../tests/user_data_test.py) |
 | The probe's answer | `gyroflow-probe --library`, `index.rs` `GEOTAG` | `index.rs` `geotag_goes_with_what_the_probe_answers` |
@@ -206,8 +206,10 @@ Then go through each step. Mark each one in the PR as *done*, *n/a because…*, 
    computer's option goes in `opts`. Keep the default out of the recipe (as `uw` and the export choices are), or
    every render's hash changes. Show or set it in Source settings or Share if the user needs it there. Add it to
    `render_keys_test.py` checks, or to its `PLAYER_ONLY` with why.
-7. **NAS stream.** `render_args` passes `user_data` through. Check `afp_stream.py`'s pops and overrides, and that a
-   file it depends on is in `deps`.
+7. **NAS stream.** `render_args` passes `user_data` through, and `settings` beside it. Check `afp_stream.py`'s pops
+   and overrides (`shader_for`), what it takes of the settings (`denoise_of`), what makes a render again
+   (`fingerprint`: add to it only where the pixels change, or every cached render on the NAS goes), and that a file it
+   depends on is in `deps`.
 8. **Twins.** Run every guard in the table above that the setting touches.
 
 ### Versions to raise
