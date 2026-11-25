@@ -744,8 +744,16 @@ fn voted_down((good, bad): (u32, u32)) -> bool {
 /// lens in the file stays unless the clip's lens type says otherwise. The frame readout time comes with it as
 /// Gyroflow's autoload takes it. Returns what was loaded
 pub fn apply(stab: &StabilizationManager, video: &str) -> Option<Pick> {
-    let id = stab.camera_id.read().clone()?;
-    let pick = for_video(video, &id, lens_in_file(stab))?;
+    let pick = match stab.camera_id.read().clone() {
+        Some(id) => for_video(video, &id, lens_in_file(stab))?,
+        // A camera Gyroflow doesn't read (a HERO3: no GPMF, telemetry-parser can't open it): the clip as the probe
+        // and the lens dialog see it (Clip::from_file, the camera named from its firmware), so the lens chosen for it
+        // or its mode is the one measured and played with (GOPR0587, 25 Nov 2026: "its lens isn't known")
+        None => {
+            let (size, fps) = { let p = stab.params.read(); (p.size, p.fps) };
+            for_clip(video, &Clip::from_file(video, size.0, size.1, fps), false)?
+        }
+    };
     if !load_into(stab, &pick) { return None; }
     log::info!("Lens profile: {}", pick.label());
     Some(pick)
@@ -999,6 +1007,26 @@ pub fn save_default(path: &str, clip: &Clip, lens: &ProjectLens) -> Result<Saved
 
 #[cfg(test)]
 mod tests {
+    // A camera Gyroflow doesn't read (no camera_id: a HERO3): the lens tried on the clip is applied all the same,
+    // with its readout (GOPR0587, 25 Nov 2026: measured as "its lens isn't known")
+    #[test]
+    fn a_lens_applied_where_gyroflow_knows_no_camera() {
+        let dir = std::env::temp_dir().join(format!("afp-apply-nocam-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("GOPR0587.MP4");
+        std::fs::write(&clip, b"").unwrap();
+        let profile: serde_json::Value = serde_json::from_str(include_str!("../resources/lenses/GoPro_HERO3_White___1080p_16by9_1920x1080-29.97fps.json")).unwrap();
+        std::fs::write(dir.join("GOPR0587.afp.json"), serde_json::json!({ "source": { "lens": { "name": "HERO3 White, built in", "how": "chosen", "profile": profile } } }).to_string()).unwrap();
+        let stab = super::manager();
+        { let mut p = stab.params.write(); p.size = (1920, 1080); p.fps = 29.97; }
+        assert!(stab.camera_id.read().is_none());
+        let pick = super::apply(&stab, &clip.to_string_lossy()).expect("the clip's own lens");
+        assert_eq!(pick.name, "HERO3 White, built in");
+        assert_eq!(stab.lens.read().fisheye_params.camera_matrix.len(), 3);
+        assert!(stab.params.read().frame_readout_time > 30.0, "its readout too");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]
