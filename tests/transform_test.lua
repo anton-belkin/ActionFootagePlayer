@@ -164,25 +164,34 @@ expect("denoise: its own kept", t.complete({ view = "wide", denoise = false }, {
 expect("denoise: an old bundle plays as the session", t.complete({ view = "wide" }, { view = "normal", denoise = false }).denoise, false)
 expect("denoise: not a boolean", t.complete({ denoise = "no" }, { denoise = true }).denoise, true)
 expect("denoise: a change is a change", t.status({ denoise = true }, { denoise = false }, false), "changed")
--- The underwater colour (uw, uw_highlights, uw_strength): a clip's own kept; an old bundle plays as the session; a
--- change is a change; not in what a render is made with
-b = t.complete({ view = "wide", uw = true, uw_strength = 0.4 }, { uw = false, uw_highlights = true, uw_strength = 1 })
-expect("uw: its own kept", b.uw, true)
-expect("uw: its strength kept", b.uw_strength, 0.4)
-expect("uw: highlights as the session", b.uw_highlights, true)
-expect("uw: an old bundle plays as the session", t.complete({ view = "wide" }, { uw = true, uw_highlights = false, uw_strength = 0.7 }).uw, true)
-expect("uw: strength out of range", t.complete({ uw_strength = 1.5 }, { uw_strength = 1 }).uw_strength, 1)
-expect("uw: strength not a number", t.complete({ uw_strength = "0.5" }, { uw_strength = 1 }).uw_strength, 1)
-expect("uw: a change is a change", t.status({ uw = false }, { uw = true }, false), "changed")
-expect("uw: strength changed", t.status({ uw_strength = 1 }, { uw_strength = 0.5 }, false), "changed")
+-- The underwater colour (uw, uw_highlights, uw_strength) is the source's (its input), not the bundle's: an old
+-- bundle's are left out of it; the source's go into a render's recipe as its other input does
+b = t.complete({ view = "wide", uw = true, uw_strength = 0.4 }, { view = "normal" })
+expect("uw: not a bundle's key", b.uw == nil and b.uw_strength == nil and b.view == "wide", true)
+expect("uw: an old bundle's not picked", t.pick({ uw = true }), nil)
+expect("uw: a change of it isn't the transform's", t.status({ view = "wide", uw = false }, { view = "wide", uw = true }, false), "saved")
 local bundle, rendered = t.render_settings({ view = { view = "wide", uw = true, uw_strength = 0.5 } }, nil, { view = "normal" })
-expect("uw: not in a render's bundle", bundle.uw == nil and bundle.uw_strength == nil, true)
-expect("uw: not in a render's recipe", rendered.uw == nil and rendered.uw_highlights == nil, true)
+expect("uw: an old bundle's not in a render's bundle", bundle.uw == nil and bundle.uw_strength == nil, true)
+expect("uw: an old bundle's not in a render's recipe", rendered.uw == nil and rendered.uw_highlights == nil, true)
+bundle, rendered = t.render_settings({ view = { view = "wide" }, source = { curve = "auto", uw = true, uw_strength = 0.5 } }, nil, { view = "normal" })
+expect("uw: the source's in a render's recipe", rendered.uw == true and rendered.uw_strength == 0.5 and bundle.uw == nil, true)
+bundle, rendered = t.render_settings({ view = { view = "wide" }, source = { curve = "auto", uw = false, uw_highlights = false, uw_strength = 1 } }, nil, { view = "normal" })
+expect("uw off in the source: not in the recipe (its hash as before)", rendered.uw == nil and rendered.uw_highlights == nil and rendered.uw_strength == nil, true)
+bundle, rendered = t.render_settings({ view = { view = "wide" } }, nil, { view = "normal", uw = true, uw_highlights = true, uw_strength = 0.8 })
+expect("uw: the source says nothing, the defaults' on", rendered.uw == true and rendered.uw_highlights == true and rendered.uw_strength == 0.8, true)
+bundle, rendered = t.render_settings({ source = { uw = false } }, nil, { view = "normal", uw = true, uw_strength = 0.8 })
+expect("uw: the source's off over the defaults' on", rendered.uw == nil and rendered.uw_strength == nil, true)
+local d = t.defaults(function(name)
+    if name == "user-data/gyroflow/defaults" then return { view = "normal" } end
+    if name == "user-data/uwcolor/defaults" then return { uw = true, uw_strength = 1 } end
+end)
+expect("defaults: both plugins'", d.view == "normal" and d.uw == true, true)
+expect("uw: never moved out of a view by itself", (function() local d = { view = { uw = true } }; t.migrate_source(d); return d.view.uw == true and d.source == nil end)(), true)
 local got = t.session(function(name)
-    if name == "user-data/gyroflow/session" then return { view = "wide", uw = "theirs" } end
+    if name == "user-data/gyroflow/session" then return { view = "wide" } end
     if name == "user-data/uwcolor/session" then return { uw = true } end
 end)
-expect("session: both plugins', the colour's own", got.view == "wide" and got.uw == true, true)
+expect("session: the gyroflow plugin's alone", got.view == "wide" and got.uw == nil, true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

@@ -102,7 +102,7 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/ahead.lua \
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
@@ -112,7 +112,8 @@ install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/tele
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
-install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/scrub.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
 install -m 644 mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
@@ -124,6 +125,14 @@ install -m 644 mpv/scripts/sdr-check/main.lua "$sdrcheck/"
 swiftc -O -target arm64-apple-macos12 macos/sdr-check.swift -o "$sdrcheck/sdr-check"
 # gyroflow-export --photo's HEIC with a gain map (Core Image), next to it
 swiftc -O -target arm64-apple-macos12 macos/photo.swift -o "$gyroflow/afp-photo"
+# The seek bar's pictures (tools/scrub/afp-scrub.c), on the libav libraries mpv links: with BUNDLE_RUNTIME, that
+# prefix's ffmpeg (bundle_runtime.py copies them in and relinks it), which it must have; else this Mac's, and without
+# them the bar has no pictures
+if [ -n "${BUNDLE_RUNTIME:-}" ]; then
+    FFMPEG_PREFIX="$BUNDLE_RUNTIME/opt/ffmpeg" tools/scrub/build.sh "$gyroflow/afp-scrub"
+else
+    tools/scrub/build.sh "$gyroflow/afp-scrub" || echo "No afp-scrub: the seek bar will have no pictures" >&2
+fi
 
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
@@ -143,5 +152,8 @@ sign() { codesign --force -s - "$1" 2>&1 | { grep -v "replacing existing signatu
 for f in "$gyroflow/libvs_gyroflow.dylib" "$gyroflow/gyroflow-probe" "$gyroflow/gyroflow-project" "$gyroflow/gyroflow-gpu-table" "$gyroflow/gyroflow-export" "$gyroflow/afp-rpu" "$gyroflow/afp-cut" "$gyroflow/afp-meta" "$gyroflow/afp-catalog" "$gyroflow/gyroflow-optical" \
           "$gyroflow/afp-photo" "$sdrcheck/sdr-check"; do
     sign "$f"
+done
+for f in "$gyroflow/afp-scrub"; do
+    [ ! -f "$f" ] || sign "$f"
 done
 sign "$app"

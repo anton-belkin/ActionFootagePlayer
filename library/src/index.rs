@@ -17,7 +17,7 @@
 // ("Generated/2026-11-10 14-32 Moments/Turtle.afplink.mp4", "_Moments/Reef/Turtle.afplink.mp4").
 
 use serde_json::{ json, Value };
-use std::collections::{ HashMap, HashSet, VecDeque };
+use std::collections::{ BTreeMap, BTreeSet, HashMap, HashSet, VecDeque };
 use std::fs::File;
 use std::io::{ Read, Seek, SeekFrom };
 use std::path::{ Path, PathBuf };
@@ -356,16 +356,31 @@ pub fn clip_preview_relative(relative: &str, flat: bool) -> String {
     out.join("/")
 }
 
-/// A clip's camera-made quick-look file beside it: <stem>.LRF / .THM, GoPro's GL<rest>.LRV of a GX<rest>/GH<rest>
-/// clip. An empty or cut-short one (the camera stopped before writing it) isn't one
-pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
-    let dir = clip.parent()?;
-    let stem = clip.file_stem()?.to_string_lossy().into_owned();
-    let mut names: Vec<String> = ["LRF", "lrf", "THM", "thm"].iter().map(|e| format!("{stem}.{e}")).collect();
+/// The names a clip's camera-made low-resolution copy (its sidecar) may have beside it, in the order looked for: DJI's
+/// <stem>.LRF; GoPro HERO5 and later: GL<rest>.LRV of a GX<rest>/GH<rest> clip; GoPro HERO3/4: <stem>.LRV of a
+/// GOPR<n>/GP<ch><n> clip. The player's seek-bar pictures look for the same (mpv/scripts/side-panel/scrub.lua):
+/// tests/scrub_sidecar_cases.txt holds both to it
+pub fn low_res_names(stem: &str) -> Vec<String> {
+    let mut names: Vec<String> = ["LRF", "lrf"].iter().map(|e| format!("{stem}.{e}")).collect();
     if stem.len() > 2 && (stem.starts_with("GX") || stem.starts_with("GH")) {
         names.push(format!("GL{}.LRV", &stem[2..]));
         names.push(format!("GL{}.lrv", &stem[2..]));
     }
+    if stem.starts_with("GOPR") || (stem.len() > 2 && stem.starts_with("GP")) {
+        names.push(format!("{stem}.LRV"));
+        names.push(format!("{stem}.lrv"));
+    }
+    names
+}
+
+/// A clip's camera-made quick-look file beside it: its sidecar (low_res_names), or the camera's .THM before GoPro's
+/// LRV. An empty or cut-short one (the camera stopped before writing it) isn't one
+pub fn camera_thumb(clip: &Path) -> Option<PathBuf> {
+    let dir = clip.parent()?;
+    let stem = clip.file_stem()?.to_string_lossy().into_owned();
+    let mut names = low_res_names(&stem);
+    // The .THM (a still) after the .LRF, before GoPro's LRV (a video), as it has been
+    names.splice(2..2, ["THM", "thm"].iter().map(|e| format!("{stem}.{e}")));
     names.into_iter().map(|n| dir.join(n)).find(|p| crate::seen::size(p).is_some_and(|s| s >= 1024))
 }
 
@@ -743,7 +758,7 @@ fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 4;
+pub const GEOTAG: u64 = 9;
 
 #[derive(Default)]
 pub struct Probes {
@@ -755,6 +770,25 @@ pub struct Probes {
     version: u64,
     pub tool: Option<PathBuf>,
     pub busy: bool,
+    /// The player's lens database as last looked at (lens_list_check): None, not looked at yet
+    lenses_seen: Option<(String, BTreeMap<String, String>)>,
+    /// path -> its own file's and measured motion's stamps when its answer was worked out (beside_stamp)
+    beside: HashMap<String, String>,
+}
+
+/// What else of a clip its probe answer is worked out from: its own file beside it (source.lens, a lens tried on it)
+/// and its motion measured from the picture (.afp-motion), each as the project's catalog has it ("-": not there). No
+/// question to the share: None when the catalog doesn't know them (the answer is then taken as it is)
+pub fn beside_stamp(clip: &str) -> Option<String> {
+    let p = Path::new(clip);
+    let mut out = Vec::new();
+    for ext in ["afp.json", "afp-motion"] {
+        match crate::seen::file(&p.with_extension(ext))? {
+            Some(f) => out.push(format!("{}:{}", f.size, crate::seen::seconds(f.mtime))),
+            None => out.push("-".into()),
+        }
+    }
+    Some(out.join("|"))
 }
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
@@ -762,16 +796,51 @@ pub type SharedProbes = Arc<Mutex<Probes>>;
 /// The user's own lens list (vs-gyroflow's lens_pick::user_file, the same place): what tells its versions apart, ""
 /// when there's none. The probe's answer about a clip's lens is worked out with it, so it's kept only while that stays
 /// the same (lens_pick::user_file_stamp)
-pub fn lens_list_stamp() -> String {
+fn curated_lenses_file() -> Option<PathBuf> {
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let file = env("AFP_CURATED_LENSES").or_else(|| {
+    env("AFP_CURATED_LENSES").or_else(|| {
         let base = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
                    else if cfg!(windows) { env("APPDATA")? }
                    else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
         Some(base.join("ActionFootagePlayer").join("curated_lenses.json"))
-    });
-    file.and_then(|f| std::fs::metadata(&f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
-        .unwrap_or_default()
+    })
+}
+
+/// The player's own lens database (lens_db's user folder): each lens file's name -> its size and time
+pub fn lens_dir_entries() -> BTreeMap<String, String> {
+    let Some(d) = curated_lenses_file().and_then(|f| Some(f.parent()?.join("lenses"))) else { return BTreeMap::new() };
+    std::fs::read_dir(&d).into_iter().flatten().flatten().filter_map(|e| {
+        let m = e.metadata().ok()?;
+        Some((e.file_name().to_string_lossy().into_owned(), format!("{}:{:?}", m.len(), m.modified().ok())))
+    }).collect()
+}
+
+/// The cameras whose lenses differ between two looks at the lens database (`dir` its folder): a lens file read for its
+/// camera_brand and camera_model, a removed one named for it ("GoPro_HERO4_Black-wide-….json": "GoPro HERO4 Black")
+pub fn lens_cameras_changed(before: &BTreeMap<String, String>, now: &BTreeMap<String, String>, dir: Option<&Path>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let names: BTreeSet<&String> = before.keys().chain(now.keys()).collect();
+    for n in names {
+        if before.get(n) == now.get(n) { continue; }
+        let from_file = dir.and_then(|d| read_json(&d.join(n))).map(|v| format!("{} {}", v["camera_brand"].as_str().unwrap_or(""), v["camera_model"].as_str().unwrap_or("")).trim().to_string())
+            .filter(|c| !c.is_empty());
+        let camera = from_file.unwrap_or_else(|| n.split('-').next().unwrap_or("").replace('_', " ").trim().to_string());
+        if !camera.is_empty() && !out.contains(&camera) { out.push(camera); }
+    }
+    out
+}
+
+pub fn lens_list_stamp() -> String {
+    let file = curated_lenses_file();
+    let list = file.as_ref().and_then(|f| std::fs::metadata(f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
+        .unwrap_or_default();
+    // And the player's own lens database beside it (vs-gyroflow's lens_db::user_stamp, the same): a lens assigned to a
+    // mode changes the answers of that mode's clips
+    let mut own: Vec<String> = file.and_then(|f| Some(f.parent()?.join("lenses"))).map(|d| std::fs::read_dir(d).into_iter().flatten().flatten()
+        .filter_map(|e| { let m = e.metadata().ok()?; Some(format!("{}:{}:{:?}", e.file_name().to_string_lossy(), m.len(), m.modified().ok())) }).collect())
+        .unwrap_or_default();
+    own.sort();
+    if own.is_empty() { list } else { format!("{list}|{}", own.join("|")) }
 }
 
 /// A file's size and time: as the project's catalog has it (no question to the share for each clip: thousands of
@@ -788,22 +857,33 @@ impl Probes {
         let Some(v) = read_json(file) else { return };
         for (k, e) in v.as_object().into_iter().flatten() {
             let (Some(s), Some(m)) = (e["s"].as_u64(), e["m"].as_i64()) else { continue };
-            // An answer from before the probe knew drones' names and places (geotag.rs): asked again
-            if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
-            self.known.insert(k.clone(), (s, m, e["l"].as_str().unwrap_or_default().to_string(), e["v"].clone()));
+            // An answer from an older probe (GEOTAG raised: the probe tells more now) is asked again, and shown until
+            // then: dropping it left every clip "reading…" with no length, camera or mode for as long as the whole
+            // project took to read again (Anton, 2026-11-24)
+            let old = e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG;
+            let lenses = if old { "\u{0}again".to_string() } else { e["l"].as_str().unwrap_or_default().to_string() };
+            self.known.insert(k.clone(), (s, m, lenses, e["v"].clone()));
+            if let Some(b) = e["b"].as_str() { self.beside.insert(k.clone(), b.to_string()); }
         }
     }
     pub fn save(&self, file: &Path) {
-        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, l, v))| (k.clone(), json!({ "s": s, "m": m, "l": l, "v": v }))).collect();
+        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, l, v))| {
+            let mut e = json!({ "s": s, "m": m, "l": l, "v": v });
+            if let Some(b) = self.beside.get(k) { e["b"] = json!(b); }
+            (k.clone(), e)
+        }).collect();
         if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
         let tmp = file.with_extension("tmp");
         if std::fs::write(&tmp, serde_json::to_vec(&Value::Object(m)).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, file); }
     }
-    /// Asked for these clips: the ones not known (or changed since, or known with another lens list) are queued
+    /// Asked for these clips: the ones not known (or changed since, or known with another lens list, or their own file
+    /// or measured motion changed: a lens tried on one in the player, the clip measured again) are queued
     pub fn want(&mut self, paths: &[String]) {
         let lenses = lens_list_stamp();
         for p in paths {
             let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, l, _)), Some((s2, m2))) => *s == s2 && *m == m2 && *l == lenses, _ => false };
+            // An answer kept from before this was noted has none: taken as it is until it's worked out again
+            let fresh = fresh && match (self.beside.get(p), beside_stamp(p)) { (Some(b), Some(now)) => *b == now, _ => true };
             if !fresh && self.queued.insert(p.clone()) { self.queue.push_back(p.clone()); }
         }
     }
@@ -819,7 +899,9 @@ impl Probes {
     /// comes again. How many are asked again
     pub fn lens_saved_for(&mut self, camera: &str, before: &str, whole: Option<(&str, &str)>) -> usize {
         let now = lens_list_stamp();
-        let key = |c: &str| c.to_lowercase().replace(' ', "");
+        // This change is known: lens_list_check doesn't take it for the player's
+        self.lenses_seen = Some((now.clone(), lens_dir_entries()));
+        let key = |c: &str| c.to_lowercase().replace([' ', '_'], "");
         let mut again = Vec::new();
         let mut patched = Vec::new();
         for (p, e) in self.known.iter_mut() {
@@ -841,6 +923,19 @@ impl Probes {
         self.queue = first;
         again.len()
     }
+    /// The lens database changed by something other than this Library (the player's lens dialog: Use for the mode,
+    /// Forget, Estimate kept): the clips of the cameras whose lenses changed asked again, as when the Library saves
+    /// one (lens_saved_for). How many are asked again
+    pub fn lens_list_check(&mut self) -> usize {
+        let now = lens_list_stamp();
+        let Some((before, entries)) = self.lenses_seen.clone() else { self.lenses_seen = Some((now, lens_dir_entries())); return 0 };
+        if before == now { return 0; }
+        let entries_now = lens_dir_entries();
+        let dir = curated_lenses_file().and_then(|f| Some(f.parent()?.join("lenses")));
+        let cameras = lens_cameras_changed(&entries, &entries_now, dir.as_deref());
+        self.lenses_seen = Some((now, entries_now));
+        cameras.iter().map(|c| self.lens_saved_for(c, &before, None)).sum()
+    }
     /// What's known that changed after `since`: (version now, path -> answer, how many wait)
     pub fn since(&self, since: u64) -> Value {
         let mut out = serde_json::Map::new();
@@ -861,6 +956,7 @@ impl Probes {
             self.version += 1;
             let v = self.version;
             self.known.insert(path.to_string(), (s, m, lens_list_stamp(), answer));
+            match beside_stamp(path) { Some(b) => { self.beside.insert(path.to_string(), b); } None => { self.beside.remove(path); } }
             self.log.push((v, path.to_string()));
         }
     }
@@ -889,6 +985,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
         };
         let stamp_before = stamp(&path);
         let lenses = lens_list_stamp();
+        let beside_before = beside_stamp(&path);
         let mut cmd = Command::new(&tool);
         cmd.arg("--library").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
         #[cfg(windows)]
@@ -901,6 +998,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
             p.version += 1;
             let v = p.version;
             p.known.insert(path.clone(), (s, m, lenses, answer));
+            match beside_before { Some(b) => { p.beside.insert(path.clone(), b); } None => { p.beside.remove(&path); } }
             p.log.push((v, path));
         }
         p.busy = false;
@@ -1039,6 +1137,41 @@ pub fn thumb_bytes(path: &Path, cache: &Path) -> Option<Vec<u8>> {
 pub(crate) mod tests {
     use super::*;
 
+    // The sidecar's names, as the player's seek bar has them (tests/scrub_sidecar_cases.txt, also read by
+    // tests/scrub_test.lua)
+    #[test]
+    fn sidecar_names_as_the_player_has_them() {
+        let cases = include_str!("../../tests/scrub_sidecar_cases.txt");
+        let mut n = 0;
+        for line in cases.lines().filter(|l| !l.starts_with('#') && l.contains(" -> ")) {
+            let (clip, want) = line.split_once(" -> ").unwrap();
+            let stem = clip.rsplit_once('.').unwrap().0;
+            let want: Vec<String> = if want == "-" { vec![] } else { want.split('|').map(String::from).collect() };
+            assert_eq!(low_res_names(stem), want, "{clip}");
+            n += 1;
+        }
+        assert!(n >= 5);
+    }
+
+    // The quick-look file: the .LRF, else the .THM, else GoPro's LRV (HERO3/4's too)
+    #[test]
+    fn camera_thumb_order() {
+        let dir = std::env::temp_dir().join(format!("afl-camera-thumb-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let big = vec![b'x'; 2048];
+        std::fs::write(dir.join("GOPR1030.LRV"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GOPR1030.MP4")).unwrap().file_name().unwrap(), "GOPR1030.LRV");
+        std::fs::write(dir.join("GOPR1030.THM"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GOPR1030.MP4")).unwrap().file_name().unwrap(), "GOPR1030.THM");
+        std::fs::write(dir.join("GL010057.LRV"), &big).unwrap();
+        assert_eq!(camera_thumb(&dir.join("GX010057.MP4")).unwrap().file_name().unwrap(), "GL010057.LRV");
+        // Cut short: not one
+        std::fs::write(dir.join("DJI_1_D.LRF"), b"x").unwrap();
+        assert!(camera_thumb(&dir.join("DJI_1_D.MP4")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     // A folder renamed (an album, an album in it) or a file moved: the pictures kept for what's in it are found at the
     // new paths, not made again (Anton, 2026-11-18: a renamed album's previews grey for a long time)
     #[test]
@@ -1110,6 +1243,44 @@ pub(crate) mod tests {
         assert!(queued.contains(&paths[0]) && queued.contains(&paths[1]) && !queued.contains(&paths[2]));
         assert_eq!(p.known[&paths[2]].2, now);
         assert_eq!(p.known[&paths[3]].2, "older");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // An answer from an older probe: shown at once, and asked again when its clip is wanted
+    #[test]
+    fn older_answers_shown_until_asked_again() {
+        let dir = std::env::temp_dir().join(format!("afl-older-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("A.MP4");
+        std::fs::write(&clip, b"clip").unwrap();
+        let path = clip.display().to_string();
+        let (s, m) = stamp(&path).unwrap();
+        let file = dir.join("probes.json");
+        std::fs::write(&file, json!({ &path: { "s": s, "m": m, "l": "", "v": { "geotag": GEOTAG - 1, "duration": 12.5 } } }).to_string()).unwrap();
+        let mut p = Probes::default();
+        p.load(&file);
+        assert_eq!(p.get(&path).unwrap()["duration"], 12.5, "shown until its new answer comes");
+        p.want(&[path.clone()]);
+        assert_eq!(p.queue.len(), 1, "asked again");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // The player's lens dialog changed the lens database: the cameras of the lens files that came, changed or went
+    #[test]
+    fn lens_cameras_changed_in_the_player() {
+        let dir = std::env::temp_dir().join(format!("afl-lensdir-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("GoPro_HERO7_Black-linear-2704x1520-59940.json"), br#"{"camera_brand":"GoPro","camera_model":"HERO7 Black"}"#).unwrap();
+        let m = |l: &[(&str, &str)]| l.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<BTreeMap<_, _>>();
+        let before = m(&[("GoPro_HERO4_Black-wide-1920x1080-59940.json", "1:a"), ("DJI_Action6-x.json", "1:a")]);
+        let now = m(&[("DJI_Action6-x.json", "1:a"), ("GoPro_HERO7_Black-linear-2704x1520-59940.json", "2:b")]);
+        assert_eq!(lens_cameras_changed(&before, &now, Some(&dir)), vec!["GoPro HERO4 Black".to_string(), "GoPro HERO7 Black".to_string()]);
+        assert!(lens_cameras_changed(&now, &now, Some(&dir)).is_empty());
+        // A camera named either way is the same one (lens_saved_for)
+        let mut p = Probes::default();
+        p.known.insert("/x/A.MP4".into(), (1, 1, "l".into(), json!({ "camera": "GoPro HERO4 Black" })));
+        p.known.insert("/x/B.MP4".into(), (1, 1, "l".into(), json!({ "camera": "DJI Osmo Action 6" })));
+        assert_eq!(p.lens_saved_for("GoPro_HERO4 Black", "l", None), 1);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

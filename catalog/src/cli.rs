@@ -86,8 +86,7 @@ pub fn project_for(file: &Path) -> Option<PathBuf> {
             let n = e.file_name().to_string_lossy().into_owned();
             if !n.ends_with(crate::locations::LOCATION_EXT) { continue; }
             let Some(v) = crate::locations::read_json(&e.path()) else { continue };
-            let Some(p) = v.get("project").and_then(Value::as_str).and_then(|p| crate::locations::place(p, d, None, &mounts)) else { continue };
-            if p.join(crate::locations::PROJECT_FILE).is_file() { return Some(p); }
+            if let Some(p) = crate::locations::pointer_project(&v, d, &mounts) { return Some(p); }
         }
         dir = d.parent();
     }

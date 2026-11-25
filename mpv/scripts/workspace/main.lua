@@ -69,7 +69,8 @@
 --   saving          a moment's name while it's being saved
 --   cutting         while a part is cut out: { name, part, parts }
 --   export          when an export plays: { name, original (nil: not found), in, out }
---   input           the source's input saved in its own file: { curve, rotation, underwater } (transform.lua); input_now:
+--   input           the source's input saved in its own file: { curve, rotation, underwater, uw, uw_highlights,
+--                   uw_strength } (transform.lua); input_now:
 --                   as it's shown when changed and not saved; input_status: saved, changed, none (nothing saved)
 --   view            the transform bundle saved for it that plays (a moment's or clip preview's own, else the source's);
 --                   absent: the session's plays (the gyroflow plugin's). saved: what's saved where Save writes
@@ -96,6 +97,18 @@
 -- characters, here and in the plugins that read or write beside the clip (gyroflow, dlogm, highlights, dji-telemetry).
 
 local mp = require 'mp'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 -- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
 pcall(function()
     package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
@@ -193,8 +206,13 @@ fs.files = function(p)
     listed[p] = info and names and { names = names, mtime = info.mtime, at = mp.get_time() } or nil
     return names
 end
+-- Kept a few seconds: a lookup asks for them per share path (workspace.lua's place) and the project cache once per
+-- answer it checks (projectcache.lua), a run of /sbin/mount each (in fs: no local, 200 is the limit)
 fs.mounts = function()
+    local kept = fs.mounts_kept
+    if kept and mp.get_time() - kept.at < 10 then return kept.list end
     local out = {}
+    fs.mounts_kept = { list = out, at = mp.get_time() }
     -- Shares reached otherwise than mounted from the network (a container on the NAS itself, where they're its own
     -- folders, bound in): AFP_SHARES="//NAS/photo=/shares/photo;//NAS/DJI_Inbox=/shares/DJI_Inbox" (afp-stream)
     for src, dir in (os.getenv("AFP_SHARES") or ""):gmatch("(//[^=;]+)=([^;]+)") do out[#out + 1] = { source = src, dir = dir } end
@@ -214,6 +232,10 @@ fs.mounts = function()
     end
     return out
 end
+-- The Library's records of this computer's projects, by id (where each one's folder is here): a pointer whose path
+-- doesn't reach its project finds it there (workspace.lua's known)
+fs.projects_dir = (windows and os.getenv("APPDATA") or macos and (os.getenv("HOME") or "") .. "/Library/Application Support"
+                   or os.getenv("XDG_CONFIG_HOME") or (os.getenv("HOME") or "") .. "/.config") .. "/ActionFootage/projects"
 local ws = workspace.new(fs)
 -- The project a clip's folder is in, kept between the player's runs (each Library double click is a new one) while the
 -- folders and files it was found from are as they were: a stat each instead of the lookup (no local: 200 is the limit)
@@ -1116,12 +1138,8 @@ end
 local function current_view()
     local g = mp.get_property_native("user-data/gyroflow")
     if type(g) ~= "table" then return copy(state.saved) end
-    local u = mp.get_property_native("user-data/uwcolor")
-    u = type(u) == "table" and u or {}
     local v = {}
-    for _, k in ipairs(transform.KEYS) do
-        if transform.COLOR_KEYS[k] then v[k] = u[k] else v[k] = g[k] end
-    end
+    for _, k in ipairs(transform.KEYS) do v[k] = g[k] end
     -- The gyroflow plugin's `lens` is the lens profile; the bundle's lens (corrected, as recorded) is its lens_mode
     v.lens = g.lens_mode
     if g.kind == "project" then
@@ -1800,6 +1818,14 @@ local function next_clip()
         table.insert(args, "--at"); table.insert(args, table.concat(list, ","))
         table.insert(args, "--cover"); table.insert(args, list[1])
     end
+    -- The underwater colour, where the clip has it on (its source's input, else uwcolor.conf's): in it, as it plays
+    do
+        local _, rendered = transform.render_settings(sidecar.read(c.file), nil, transform.defaults(mp.get_property_native))
+        if rendered.uw == true then
+            for _, a in ipairs({ "--uw-color", "yes", "--uw-strength", string.format("%.2f", tonumber(rendered.uw_strength) or 1),
+                                 "--uw-highlights", rendered.uw_highlights == true and "yes" or "no" }) do table.insert(args, a) end
+        end
+    end
     table.insert(args, "--link")
     table.insert(args, utils.format_json({ v = 1, kind = "clip", clip = c.relative, size = c.size, roots = { job.project } }))
     table.insert(args, c.file)
@@ -2456,7 +2482,7 @@ local function cut_out(a, b)
     local snapshot = {
         clip = state.clip, name = name, stem = stem, ext = ext, dir = ws.parent(state.clip), exe = exe, lrf = lrf,
         size = info and info.size, created = state.created, project = state.project, relative = state.relative,
-        moments = state.moments or {}, pos = mp.get_property_number("time-pos"), parts = parts,
+        moments = state.moments or {}, pos = shown_time(), parts = parts,
     }
     input.select({
         prompt = "Cut " .. clock(a) .. "–" .. (b >= duration - 0.001 and "end" or clock(b)) .. " out of " .. name .. "? Kept: "
@@ -2481,11 +2507,11 @@ mp.add_key_binding("Ctrl+x", "cut-out", function()
     cut_out(a, b)
 end)
 mp.register_script_message("cut-before", function()
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if t then cut_out(0, t) end
 end)
 mp.register_script_message("cut-after", function()
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if t then cut_out(t, mp.get_property_number("duration") or t) end
 end)
 
@@ -2583,7 +2609,6 @@ end)
 mp.register_script_message("view-revert", function()
     if not state.saved then return end
     mp.commandv("script-message-to", "gyroflow", "apply-view", utils.format_json(state.saved))
-    mp.commandv("script-message-to", "dlogm", "uw-apply-view", utils.format_json(state.saved))
     mp.osd_message("Transform as saved", 1.5)
 end)
 
@@ -2595,15 +2620,19 @@ mp.register_script_message("view-auto", function()
     mp.osd_message(auto_save and "Auto save on: the transform is saved as it's changed, this session" or "Auto save off", 3)
 end)
 
--- The source's input as it's shown (input-set <curve|rotation|underwater> <value>, the dlogm and gyroflow plugins', as
--- they apply a change): for viewing until Save on the Source tab (input-save) writes it into the source's own file,
--- whole, and so for every moment and clip preview of it. Transform's Save doesn't touch it
-local INPUT_DEFAULTS = { curve = "auto", rotation = 0, underwater = "auto" }
-local INPUT_ORDER = { "curve", "rotation", "underwater" }
+-- The source's input as it's shown (input-set <curve|rotation|underwater|uw|uw_highlights|uw_strength> <value>, the
+-- dlogm and gyroflow plugins', as they apply a change): for viewing until Save on the Source tab (input-save) writes
+-- it into the source's own file, whole, and so for every moment and clip preview of it. Transform's Save doesn't touch
+-- it. The underwater colour's keys: where the source has none, uwcolor.conf's (the dlogm plugin's defaults)
+local INPUT_DEFAULTS = { curve = "auto", rotation = 0, underwater = "auto", uw = false, uw_highlights = false, uw_strength = 1 }
+local INPUT_ORDER = { "curve", "rotation", "underwater", "uw", "uw_highlights", "uw_strength" }
 local function input_pack(from)
     local pack = {}
+    local u = mp.get_property_native("user-data/uwcolor")
+    local uw_defaults = type(u) == "table" and type(u.defaults) == "table" and u.defaults or {}
     for k, d in pairs(INPUT_DEFAULTS) do
         pack[k] = (from or {})[k]
+        if pack[k] == nil then pack[k] = uw_defaults[k] end
         if pack[k] == nil then pack[k] = d end
     end
     return pack
@@ -2621,7 +2650,9 @@ local function input_place()
 end
 mp.register_script_message("input-set", function(key, value)
     if INPUT_DEFAULTS[key] == nil or not input_place() then return end
-    if key == "rotation" then value = tonumber(value) or 0 end
+    if key == "rotation" then value = tonumber(value) or 0
+    elseif key == "uw_strength" then value = tonumber(value) or 1
+    elseif key == "uw" or key == "uw_highlights" then value = value == "yes" or value == "true" end
     state.input_now = state.input_now or input_pack(state.input)
     state.input_now[key] = value
     state.input_status = input_status()
@@ -2650,6 +2681,12 @@ mp.register_script_message("input-revert", function()
     if tostring(now.curve) ~= tostring(saved.curve) then mp.commandv("script-message-to", "dlogm", "curve", tostring(saved.curve)) end
     if tostring(now.rotation) ~= tostring(saved.rotation) then mp.commandv("script-message-to", "gyroflow", "rotate", tostring(saved.rotation)) end
     if tostring(now.underwater) ~= tostring(saved.underwater) then mp.commandv("script-message-to", "gyroflow", "underwater", tostring(saved.underwater)) end
+    for _, k in ipairs({ "uw", "uw_highlights", "uw_strength" }) do
+        if tostring(now[k]) ~= tostring(saved[k]) then
+            local v = saved[k]
+            mp.commandv("script-message-to", "dlogm", "uw-set", k, type(v) == "boolean" and (v and "yes" or "no") or string.format("%.2f", tonumber(v) or 1))
+        end
+    end
     mp.osd_message("Input as saved", 1.5)
 end)
 
@@ -2797,7 +2834,7 @@ end
 local function made_view_of(file, movie, own)
     -- `own`: a moment's own bundle, which it keeps whatever the source's is now (transform.render_settings: the
     -- Library's recipe works it out the same way)
-    local bundle, rendered = transform.render_settings(sidecar.read(file), own, mp.get_property_native("user-data/gyroflow/defaults"))
+    local bundle, rendered = transform.render_settings(sidecar.read(file), own, transform.defaults(mp.get_property_native))
     -- The frame's W:H for this source: its ratio turned for its orientation and the source's shape, upright (the
     -- file's turn and the input's)
     local w, h = movie and movie.width, movie and movie.height
@@ -3601,7 +3638,7 @@ local function heard(msg)
                 lens_loaded = now
                 if not state.moment and not state.offset and state.clip then
                     mp.msg.info("lens type " .. tostring(now) .. " from the Library: the clip loaded again")
-                    wanted = { file = state.clip, ["in"] = mp.get_property_number("time-pos") }
+                    wanted = { file = state.clip, ["in"] = shown_time() }
                     mp.commandv("loadfile", state.clip, "replace")
                 else
                     mp.msg.info("lens type changed in the Library: the clip plays with it when opened again")

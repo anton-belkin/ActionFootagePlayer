@@ -1,0 +1,12 @@
+# The camera's low-resolution copy beside a clip (its sidecar), as both rules have it: the Library's
+# (library/src/index.rs, low_res_names(), camera_thumb()) and the player's seek-bar pictures
+# (mpv/scripts/side-panel/scrub.lua, sidecar_names()). Read by `cargo test` in library/ and tests/scrub_test.lua.
+#
+# <clip file name> -> <the names looked for, in order, | between them>; "-" for none
+DJI_20261022152841_0068_D.MP4 -> DJI_20261022152841_0068_D.LRF|DJI_20261022152841_0068_D.lrf
+DJI_0063.MOV -> DJI_0063.LRF|DJI_0063.lrf
+GX010057.MP4 -> GX010057.LRF|GX010057.lrf|GL010057.LRV|GL010057.lrv
+GH011234.MP4 -> GH011234.LRF|GH011234.lrf|GL011234.LRV|GL011234.lrv
+GOPR1030.MP4 -> GOPR1030.LRF|GOPR1030.lrf|GOPR1030.LRV|GOPR1030.lrv
+GP011030.MP4 -> GP011030.LRF|GP011030.lrf|GP011030.LRV|GP011030.lrv
+IMG_1234.MOV -> IMG_1234.LRF|IMG_1234.lrf

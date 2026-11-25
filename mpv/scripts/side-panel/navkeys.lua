@@ -13,8 +13,8 @@ local M = {}
 function M.bindings(mac)
     local clip = mac and "Meta+" or "Ctrl+"
     return {
-        { "Alt+LEFT", "frame-back-step" },
-        { "Alt+RIGHT", "frame-step" },
+        { "Alt+LEFT", "script-binding gyroflow/frame-back" },
+        { "Alt+RIGHT", "script-binding gyroflow/frame-on" },
         { clip .. "LEFT", "playlist-prev" },
         { clip .. "RIGHT", "playlist-next" },
     }

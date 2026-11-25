@@ -40,12 +40,15 @@ pub struct Pick {
     pub curated: Option<String>,
     /// A focal length alone (no distortion): nothing in the picture to correct, only what the stabilization needs
     pub focal_only: bool,
+    /// From the player's own database (lens_db.rs): how it got there ("estimated from footage", "assigned")
+    pub local: Option<String>,
 }
 
 impl Pick {
     /// What the player says it is: its name, then official or its stars, and "nearest" when it isn't made for exactly
     /// this resolution, frame rate and stabilization; a curated one: its type and name
     pub fn label(&self) -> String {
+        if let Some(how) = &self.local { return format!("{}, {}", self.name, if how.is_empty() { "the player's own" } else { how }); }
         if let Some(t) = &self.curated { return format!("{t}, from the curated list: {}", self.name); }
         let (good, bad) = self.votes;
         let how = if self.official { "official".to_string() }
@@ -90,6 +93,9 @@ fn db() -> &'static LensProfileDatabase {
         db
     })
 }
+
+/// Gyroflow's lens database as the player has it (bundled), for whoever needs it whole (lens_find.rs)
+pub fn database() -> &'static LensProfileDatabase { db() }
 
 /// The votes, by the profile's checksum (Gyroflow's: LensProfileDatabase::load_all)
 fn votes() -> &'static HashMap<String, (u32, u32)> {
@@ -140,7 +146,7 @@ fn aspect(w: usize, h: usize) -> f64 { w as f64 / h.max(1) as f64 }
 
 // How a qualifying profile ranks: larger is better, compared in order
 #[derive(PartialEq, PartialOrd)]
-struct Rank { not_voted_down: bool, exact: bool, same_eis: bool, size: i64, fps: i64, official: bool, stars: f64 }
+struct Rank { not_voted_down: bool, exact: bool, same_eis: bool, readout: bool, size: i64, fps: i64, official: bool, stars: f64 }
 
 // How near a profile's value is to the clip's, larger is nearer: minus the ratio's log in percent (0 within 1 %);
 // unknown (0) is the farthest
@@ -184,6 +190,7 @@ fn pick_in(db: &LensProfileDatabase, votes: &HashMap<String, (u32, u32)>, id: &C
             let rank = Rank {
                 not_voted_down: !(good + bad >= 3 && (good as f64) < 0.3 * n),
                 exact: !pid.is_empty() && pid == wanted,
+                readout: p.frame_readout_time.is_some_and(|r| r != 0.0),
                 same_eis: !eis.is_empty() && !pid.is_empty() && pid.ends_with(&eis),
                 // The long sides: a turned profile is the same one
                 size: nearness(p.calib_dimension.w.max(p.calib_dimension.h) as f64, w.max(h) as f64),
@@ -193,7 +200,7 @@ fn pick_in(db: &LensProfileDatabase, votes: &HashMap<String, (u32, u32)>, id: &C
             };
             if best.as_ref().is_none_or(|(r, _)| rank > *r) {
                 let exact = rank.exact;
-                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact, curated: None, focal_only: false }));
+                best = Some((rank, Pick { profile: p, name: name.clone(), official, votes: (good, bad), exact, curated: None, focal_only: false, local: None }));
             }
         }
     }
@@ -337,8 +344,11 @@ pub fn user_file() -> Option<std::path::PathBuf> {
 /// What tells the user's list's versions apart (its path, size and time), "" when there's none: for an answer worked
 /// out with it to be kept only while it stays the same
 pub fn user_file_stamp() -> String {
-    user_file().and_then(|f| std::fs::metadata(&f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
-        .unwrap_or_default()
+    let list = user_file().and_then(|f| std::fs::metadata(&f).ok().map(|m| format!("{}|{}|{:?}", f.display(), m.len(), m.modified().ok())))
+        .unwrap_or_default();
+    // And the player's own lens database beside it (lens_db.rs): a lens assigned to a mode changes the answer too
+    let own = crate::lens_db::user_stamp();
+    if own.is_empty() { list } else { format!("{list}|{own}") }
 }
 
 fn parse_list(text: &str, dir: Option<&std::path::Path>) -> Result<HashMap<String, CuratedCamera>, String> {
@@ -439,23 +449,39 @@ pub struct Clip {
     pub lens_mode: String,
     pub width: usize,
     pub height: usize,
+    /// Its frame rate (0 when not known)
+    pub fps: f64,
     pub id: Option<CameraIdentifier>,
+    /// How the camera stabilized the picture itself where Gyroflow's identifier doesn't say (a DJI's EIS:
+    /// probe::stabilized_in_camera, "" for off), None where it says or nothing does
+    pub in_camera: Option<String>,
 }
 
 impl Clip {
     pub fn from_id(path: &str, id: &CameraIdentifier) -> Clip {
-        Clip { camera: camera_name(&id.brand, &id.model, path), lens_mode: id.lens_info.clone(), width: id.video_width, height: id.video_height, id: Some(id.clone()) }
+        // Gyroflow's identifier says nothing of a DJI's EIS: as the camera's own metadata says it (read for it: a clip
+        // loaded by the plugin has only its identifier here)
+        let in_camera = if id.additional.is_empty() && id.brand == "DJI" { crate::probe::in_camera_of(path) } else { None };
+        Clip::with(path, id, in_camera)
+    }
+    fn with(path: &str, id: &CameraIdentifier, in_camera: Option<String>) -> Clip {
+        Clip { camera: camera_name(&id.brand, &id.model, path), lens_mode: id.lens_info.clone(), width: id.video_width, height: id.video_height,
+               fps: id.fps as f64 / 1000.0, id: Some(id.clone()), in_camera }
     }
     /// From telemetry-parser's reading of the file and the video's size and rate
     pub fn from_input(path: &str, input: &gyroflow_core::telemetry_parser::Input, width: usize, height: usize, fps: f64) -> Clip {
         match CameraIdentifier::from_telemetry_parser(input, width, height, fps) {
-            Ok(id) => Clip::from_id(path, &id),
-            Err(_) => Clip { camera: camera_name(&input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or(""), path), width, height, ..Default::default() },
+            // The camera's own stabilization from what's read already (Clip::from_id would read the file for it)
+            Ok(id) => {
+                let in_camera = if id.additional.is_empty() { crate::probe::stabilized_in_camera(&input.camera_type(), input.samples.as_deref().unwrap_or_default()) } else { None };
+                Clip::with(path, &id, in_camera)
+            }
+            Err(_) => Clip { camera: camera_name(&input.camera_type(), input.camera_model().map(|s| s.as_str()).unwrap_or(""), path), width, height, fps, ..Default::default() },
         }
     }
     /// A clip Gyroflow doesn't read: by what its file says alone
-    pub fn from_file(path: &str, width: usize, height: usize) -> Clip {
-        Clip { camera: camera_name("", "", path), width, height, ..Default::default() }
+    pub fn from_file(path: &str, width: usize, height: usize, fps: f64) -> Clip {
+        Clip { camera: camera_name("", "", path), width, height, fps, ..Default::default() }
     }
     /// Its lens type: the one given by hand, else the one recorded, else its camera's default
     pub fn lens_type(&self, path: &str) -> Option<String> {
@@ -464,6 +490,70 @@ impl Clip {
 }
 
 /// The type the clip was given by hand: source.lens_type in its .afp.json
+/// How a lens given to one clip alone is told (Pick::local)
+pub const FOR_THIS_CLIP: &str = "for this clip only";
+
+/// A lens given to one clip alone (`source.lens` in its own file: {"name", "how", "from", "profile": Gyroflow's lens JSON
+/// with its readout}), tried on it before its mode's clips take it
+pub struct ClipLens { pub name: String, pub how: String, pub profile: LensProfile }
+
+pub fn clip_lens(path: &str) -> Option<ClipLens> {
+    let v = clip_lens_value(path)?;
+    let profile = LensProfile::from_json(&v.get("profile")?.to_string()).ok().filter(|p| p.fisheye_params.camera_matrix.len() == 3)?;
+    let name = v.get("name").and_then(|n| n.as_str()).filter(|n| !n.is_empty()).map(String::from).unwrap_or_else(|| profile.get_display_name());
+    Some(ClipLens { name, how: v.get("how").and_then(|h| h.as_str()).unwrap_or_default().to_string(), profile })
+}
+
+fn clip_lens_value(path: &str) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
+    let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
+    doc.pointer("/source/lens").filter(|v| v.is_object()).cloned()
+}
+
+/// What the clip's own lens is now, for the caches of what it plays with ("" without one)
+pub fn clip_lens_stamp(path: &str) -> String {
+    clip_lens_value(path).map(|v| { use std::hash::{ Hash, Hasher }; let mut h = std::collections::hash_map::DefaultHasher::new(); v.to_string().hash(&mut h); format!("{:016x}", h.finish()) })
+        .unwrap_or_default()
+}
+
+/// Everything a clip's lens is decided by, for the caches of what it plays with: its lens type, its own lens, the
+/// user's list and the player's own lens database
+pub fn lens_state_stamp(path: &str) -> String {
+    format!("{}|{}|{}", chosen_type(path).unwrap_or_default(), clip_lens_stamp(path), user_file_stamp())
+}
+
+/// A lens of the clip's mode (a `candidates` id) as a profile, and its label
+pub fn candidate_profile(path: &str, clip: &Clip, id: &str) -> Result<(LensProfile, String), String> {
+    candidates(path, clip, usize::MAX).into_iter().find(|(c, _)| c.id == id).map(|(c, p)| (p, c.label))
+        .ok_or_else(|| format!("{id}: not a lens of this clip's camera"))
+}
+
+/// The lens given to the clip alone written into its own file (`source.lens`), the file's other keys kept; None takes
+/// it away. The file written
+pub fn set_clip_lens(path: &str, lens: Option<(&LensProfile, &str, &str, &str)>) -> Result<std::path::PathBuf, String> {
+    let file = crate::workspace::sidecar_file(std::path::Path::new(path));
+    let had = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
+    if had.is_none() && lens.is_none() { return Ok(file); }
+    let mut doc = had.unwrap_or_else(|| serde_json::json!({ "format": "actionfootageplayer-clip", "version": 1 }));
+    if doc.get("format").and_then(|f| f.as_str()).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
+        return Err(format!("{}: not the player's file, left alone", file.display()));
+    }
+    if !doc["source"].is_object() { doc["source"] = serde_json::json!({}); }
+    match lens {
+        Some((profile, name, how, from)) => {
+            let mut prof: serde_json::Value = serde_json::from_str(&profile.get_json().map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+            // gyroflow-core calls a profile without one InvalidData (GOPR1585)
+            if prof["calibrator_version"].as_str().unwrap_or_default().is_empty() { prof["calibrator_version"] = format!("Action Footage Player, {how}").into(); }
+            doc["source"]["lens"] = serde_json::json!({ "name": name, "how": how, "from": from, "profile": prof });
+        }
+        None => { if let Some(o) = doc["source"].as_object_mut() { o.remove("lens"); } }
+    }
+    let tmp = file.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::to_string_pretty(&doc).unwrap_or_default()).and_then(|_| std::fs::rename(&tmp, &file))
+        .map_err(|e| format!("{}: {e}", file.display()))?;
+    Ok(file)
+}
+
 pub fn chosen_type(path: &str) -> Option<String> {
     let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
     let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -514,29 +604,139 @@ fn load_profile(p: &Profile, dir: Option<&std::path::Path>, w: usize, h: usize) 
     }
 }
 
-/// The profile for a video as the player takes it: its type's curated profile (`Clip::lens_type`), else, unless the
-/// lens is in the file, the database's pick. None: the lens in the file, or nothing. `id` is Gyroflow's camera
-/// identifier, `in_file` whether the file has its own lens
+/// The profile for a video as the player takes it; None: the lens in the file, or no ready lens. `id` is Gyroflow's
+/// camera identifier, `in_file` whether the file has its own lens. In this order (docs/optical-without-gyroflow.md §5.2):
+/// 1. the lens type the clip was given by hand (source.lens_type), where the curated list has a profile for it;
+/// 2. the lens in the file (the camera's own), unless the curated list's type for the mode recorded has a profile and
+///    isn't `file_first`;
+/// 3. the player's own database (lens_db.rs): a profile estimated from footage or assigned for exactly this camera,
+///    mode, in-camera stabilization, size and frame rate;
+/// 4. the curated list's type for the mode the camera recorded (or the camera's default type): what was chosen for it;
+/// 5. Gyroflow's database, only where a profile is for exactly this clip (its identifier: camera, mode, size, frame
+///    rate, in-camera stabilization), has the rolling shutter's readout, and isn't voted down (Anton, 2026-11-24: a
+///    lens is reliable only when everything matches, the readout included; the nearest one is a start for finding the
+///    lens, not the lens). Else none: no ready lens
 pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pick> {
     for_clip(path, &Clip::from_id(path, id), in_file)
 }
 
 /// `for_video`, for a clip Gyroflow may not know the camera of
 pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
+    // A lens given to this clip alone, to try it there before its mode's clips take it (source.lens in its own file):
+    // it, whatever the mode has; not over the camera's own lens in the file
+    if !in_file {
+        if let Some(l) = clip_lens(path) {
+            return Some(Pick { profile: l.profile, name: l.name, official: false, votes: (0, 0), exact: true, curated: None, focal_only: false,
+                               local: Some(FOR_THIS_CLIP.into()) });
+        }
+    }
+    for_mode(path, clip, in_file)
+}
+
+/// The lens of the clip's mode, a lens given to the clip alone aside
+pub fn for_mode(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
     let chosen = chosen_type(path);
     let ty = chosen.clone().or_else(|| recorded_type_named(&clip.camera, path, &clip.lens_mode)).or_else(|| default_type(&clip.camera));
-    if let Some(t) = ty.and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t)) {
-        let file_first = in_file && t.file_first && chosen.as_deref() != Some(t.id.as_str());
-        if let Some(p) = t.profile_for(clip.width, clip.height).filter(|_| !file_first) {
+    let typ = ty.and_then(|t| lens_types(&clip.camera).into_iter().find(|x| x.id == t));
+    let by_hand = typ.as_ref().is_some_and(|t| chosen.as_deref() == Some(t.id.as_str()));
+    // The player's own database: not over the camera's own lens in the file
+    let local = if in_file { None } else { crate::lens_db::find(&crate::lens_db::ModeKey::of(path, clip)) };
+    if let Some(t) = &typ {
+        let file_first = in_file && t.file_first && !by_hand;
+        if let Some(p) = t.profile_for(clip.width, clip.height).filter(|_| !file_first && (by_hand || local.is_none())) {
             let focal_only = matches!(p, Profile::Focal { .. });
             match load_profile(p, t.dir.as_deref(), clip.width, clip.height) {
-                Ok((profile, name, official)) => return Some(Pick { profile, name, official, votes: (0, 0), exact: false, curated: Some(t.label.clone()), focal_only }),
+                Ok((profile, name, official)) => return Some(Pick { profile, name, official, votes: (0, 0), exact: false, curated: Some(t.label.clone()), focal_only, local: None }),
                 Err(e) => log::error!("Curated lenses, {} {}: {e}", clip.camera, t.id),
             }
         }
     }
     if in_file { return None; }
-    pick(clip.id.as_ref()?)
+    if let Some(l) = local {
+        let name = l.label().trim_end_matches(&format!(", {}", l.how)).to_string();
+        return Some(Pick { profile: l.profile, name, official: false, votes: (0, 0), exact: true, curated: None, focal_only: false, local: Some(l.how) });
+    }
+    pick(clip.id.as_ref()?).filter(|p| p.exact && p.profile.frame_readout_time.is_some_and(|r| r != 0.0) && !voted_down(p.votes))
+}
+
+/// A lens a clip can be given by hand (`candidates`): its id for `assign` ("local:<file>", "db:<key>#<n>"), how it's
+/// shown, from the player's own database or Gyroflow's, made for exactly the clip's mode, with a readout
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct Candidate {
+    pub id: String,
+    pub label: String,
+    pub local: bool,
+    pub exact: bool,
+    pub readout: bool,
+}
+
+/// The lenses of the clip's camera to choose from, nearest first: the player's own database, then Gyroflow's, of the
+/// same aspect; the ones made for exactly the clip's mode and those with a readout before the rest. At most `limit`
+pub fn candidates(path: &str, clip: &Clip, limit: usize) -> Vec<(Candidate, LensProfile)> {
+    let key = crate::lens_db::ModeKey::of(path, clip);
+    let cam = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
+    let mut out: Vec<(Candidate, LensProfile)> = crate::lens_db::all().iter().filter(|l| cam(&l.key.camera) == cam(&clip.camera)).map(|l| {
+        (Candidate { id: format!("local:{}", l.name), label: l.label(), local: true,
+                     exact: l.key.fits(&key), readout: l.profile.frame_readout_time.is_some_and(|r| r != 0.0) }, l.profile.clone())
+    }).collect();
+    out.sort_by_key(|(c, _)| !c.exact);
+    if clip.width == 0 || clip.height == 0 { out.truncate(limit); return out; }
+    // Gyroflow's: by the camera's name as its list has it, where Gyroflow knows the camera, else as the player names it
+    let query = match &clip.id {
+        Some(id) => format!("{} {}", id.brand, id.model.replace("HERO12", "HERO11").replace("HERO13", "HERO11").replace("Black Mini", "Black")),
+        None => clip.camera.clone(),
+    };
+    let wanted = clip.id.as_ref().map(|id| normalized(&id.get_identifier_for_autoload())).unwrap_or_default();
+    let prefix = split_identifier(&wanted).map(|(p, _)| p.to_string()).unwrap_or_default();
+    let db = db();
+    let votes = votes();
+    let mut found: Vec<((bool, bool, bool, bool, i64, i64, bool, i64), Candidate, LensProfile)> = Vec::new();
+    for (name, dbkey, crc, official, _, _, _) in db.search(&query, &Default::default(), 0, 0) {
+        if dbkey.ends_with(".gyroflow") { continue; }
+        let Some(parent) = db.get_by_id(&dbkey) else { continue };
+        let (good, bad) = votes.get(&crc).copied().unwrap_or((0, 0));
+        for (n, p) in parent.get_all_matching_profiles().into_iter().enumerate() {
+            if p.has_interpolations() || p.fisheye_params.camera_matrix.len() != 3 { continue; }
+            let hs = if p.input_horizontal_stretch > 0.01 { p.input_horizontal_stretch } else { 1.0 };
+            let vs = if p.input_vertical_stretch > 0.01 { p.input_vertical_stretch } else { 1.0 };
+            let pa = aspect(p.calib_dimension.w, p.calib_dimension.h) * vs / hs;
+            let (va, vt) = (aspect(clip.width, clip.height), aspect(clip.height, clip.width));
+            if (pa / va - 1.0).abs() > 0.01 && (pa / vt - 1.0).abs() > 0.01 { continue; }
+            let pid = normalized(&p.identifier);
+            let exact = !pid.is_empty() && pid == wanted;
+            let readout = p.frame_readout_time.is_some_and(|r| r != 0.0);
+            let same_mode = !prefix.is_empty() && profile_prefix(&p) == prefix;
+            let stars = if good + bad == 0 { 25 } else { (50.0 * good as f64 / (good + bad) as f64).round() as i64 };
+            let rank = (!voted_down((good, bad)), exact, same_mode, readout,
+                        nearness(p.calib_dimension.w.max(p.calib_dimension.h) as f64, clip.width.max(clip.height) as f64),
+                        nearness(p.fps, clip.fps), official, stars);
+            let how = if official { "official".to_string() } else if good + bad == 0 { "no votes".into() } else { format!("{:.1}★", 5.0 * good as f64 / (good + bad) as f64) };
+            let label = format!("{name} ({how}{})", if readout { "" } else { ", no readout" });
+            found.push((rank, Candidate { id: format!("db:{dbkey}#{n}"), label, local: false, exact: exact && readout, readout }, p));
+        }
+    }
+    found.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+    out.extend(found.into_iter().map(|(_, c, p)| (c, p)));
+    // Made for exactly the clip's mode first, the player's own before Gyroflow's among the rest as they were
+    out.sort_by_key(|(c, _)| !c.exact);
+    out.truncate(limit);
+    out
+}
+
+/// The lens `id` (a `candidates` id) kept as the lens of the clip's whole mode in the player's own database
+/// (lens_db::assign): from now on every clip of the same camera, mode, in-camera stabilization, size and frame rate
+/// takes it. The file written and the mode
+pub fn assign(path: &str, clip: &Clip, id: &str) -> Result<(std::path::PathBuf, crate::lens_db::ModeKey, String), String> {
+    let (c, profile) = candidates(path, clip, usize::MAX).into_iter().find(|(c, _)| c.id == id)
+        .ok_or_else(|| format!("{id}: not a lens of this clip's camera"))?;
+    let key = crate::lens_db::ModeKey::of(path, clip);
+    let file = crate::lens_db::assign(&key, &profile, "assigned", &format!("{} ({})", c.label, c.id))?;
+    Ok((file, key, c.label))
+}
+
+/// Mostly voted down by Gyroflow's users: under 30 % good of 3 votes or more
+fn voted_down((good, bad): (u32, u32)) -> bool {
+    good + bad >= 3 && (good as f64) < 0.3 * (good + bad) as f64
 }
 
 /// Loads the profile the player takes for the video at `video` (`for_video`) into a manager that has it loaded
@@ -544,21 +744,41 @@ pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
 /// lens in the file stays unless the clip's lens type says otherwise. The frame readout time comes with it as
 /// Gyroflow's autoload takes it. Returns what was loaded
 pub fn apply(stab: &StabilizationManager, video: &str) -> Option<Pick> {
-    let id = stab.camera_id.read().clone()?;
-    let pick = for_video(video, &id, lens_in_file(stab))?;
-    let json = pick.profile.get_json().ok()?;
+    let pick = match stab.camera_id.read().clone() {
+        Some(id) => for_video(video, &id, lens_in_file(stab))?,
+        // A camera Gyroflow doesn't read (a HERO3: no GPMF, telemetry-parser can't open it): the clip as the probe
+        // and the lens dialog see it (Clip::from_file, the camera named from its firmware), so the lens chosen for it
+        // or its mode is the one measured and played with (GOPR0587, 25 Nov 2026: "its lens isn't known")
+        None => {
+            let (size, fps) = { let p = stab.params.read(); (p.size, p.fps) };
+            for_clip(video, &Clip::from_file(video, size.0, size.1, fps), false)?
+        }
+    };
+    if !load_into(stab, &pick) { return None; }
+    log::info!("Lens profile: {}", pick.label());
+    Some(pick)
+}
+
+/// `pick` loaded into `stab` with its readout (params.frame_readout_time): false when it couldn't be
+pub(crate) fn load_into(stab: &StabilizationManager, pick: &Pick) -> bool {
+    let Ok(json) = pick.profile.get_json() else { return false };
+    // gyroflow-core loads a profile and then calls it InvalidData when its calibrator_version is empty (the built-in
+    // ones were, GOPR1585): loaded all the same, it's used, with its readout. Given up only when nothing loaded
     if let Err(e) = stab.load_lens_profile(&json) {
-        log::warn!("Lens profile {}: {e:?}", pick.name);
-        return None;
+        if stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
+            log::warn!("Lens profile {}: {e:?}", pick.name);
+            return false;
+        }
+        log::info!("Lens profile {}: loaded, though gyroflow-core said {e:?}", pick.name);
     }
-    let (fr, frd) = { let lens = stab.lens.read(); (lens.frame_readout_time, lens.frame_readout_direction) };
+    // The readout the profile has, as picked (the loaded lens has it too, unless the load stopped short)
+    let (fr, frd) = { let lens = stab.lens.read(); (pick.profile.frame_readout_time.or(lens.frame_readout_time), pick.profile.frame_readout_direction.or(lens.frame_readout_direction)) };
     if let Some(fr) = fr {
         let mut params = stab.params.write();
         params.frame_readout_time = fr.abs();
         params.frame_readout_direction = frd.unwrap_or(if fr < 0.0 { gyroflow_core::stabilization_params::ReadoutDirection::BottomToTop } else { gyroflow_core::stabilization_params::ReadoutDirection::TopToBottom });
     }
-    log::info!("Lens profile: {}", pick.label());
-    Some(pick)
+    true
 }
 
 // ---- A Gyroflow project's lens kept in the user's list, for every clip of its camera, mode and size ----
@@ -787,6 +1007,26 @@ pub fn save_default(path: &str, clip: &Clip, lens: &ProjectLens) -> Result<Saved
 
 #[cfg(test)]
 mod tests {
+    // A camera Gyroflow doesn't read (no camera_id: a HERO3): the lens tried on the clip is applied all the same,
+    // with its readout (GOPR0587, 25 Nov 2026: measured as "its lens isn't known")
+    #[test]
+    fn a_lens_applied_where_gyroflow_knows_no_camera() {
+        let dir = std::env::temp_dir().join(format!("afp-apply-nocam-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("GOPR0587.MP4");
+        std::fs::write(&clip, b"").unwrap();
+        let profile: serde_json::Value = serde_json::from_str(include_str!("../resources/lenses/GoPro_HERO3_White___1080p_16by9_1920x1080-29.97fps.json")).unwrap();
+        std::fs::write(dir.join("GOPR0587.afp.json"), serde_json::json!({ "source": { "lens": { "name": "HERO3 White, built in", "how": "chosen", "profile": profile } } }).to_string()).unwrap();
+        let stab = super::manager();
+        { let mut p = stab.params.write(); p.size = (1920, 1080); p.fps = 29.97; }
+        assert!(stab.camera_id.read().is_none());
+        let pick = super::apply(&stab, &clip.to_string_lossy()).expect("the clip's own lens");
+        assert_eq!(pick.name, "HERO3 White, built in");
+        assert_eq!(stab.lens.read().fisheye_params.camera_matrix.len(), 3);
+        assert!(stab.params.read().frame_readout_time > 30.0, "its readout too");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     #[test]
@@ -820,7 +1060,7 @@ mod tests {
         let ids = |c: &CuratedCamera| c.types.iter().map(|t| t.id.clone()).collect::<Vec<_>>();
         assert_eq!(ids(&base[&camera_key("DJI Osmo Action 6")]), ["wide", "normal"]);
         assert!(!base.contains_key(&camera_key("GoPro HERO7 Black")));
-        assert_eq!(ids(&base[&camera_key("GoPro HERO4 Black")]), ["wide"]);
+        assert_eq!(ids(&base[&camera_key("GoPro HERO4 Black")]), ["wide", "medium"]);
         // Drones record no mode: a default type, with a focal length alone
         for drone in ["DJI Mini 4 Pro", "DJI Mavic Pro", "DJI Mavic Air 2"] {
             let c = &base[&camera_key(drone)];
@@ -961,7 +1201,7 @@ mod tests {
         // SAFETY: no other test reads this variable or the user's list
         unsafe { std::env::set_var("AFP_CURATED_LENSES", &list); }
         let video = dir.join("GX010001.MP4").display().to_string();
-        let clip = Clip { camera: "GoPro HERO7 Black".into(), lens_mode: "Wide".into(), width: 1920, height: 1080, id: None };
+        let clip = Clip { camera: "GoPro HERO7 Black".into(), lens_mode: "Wide".into(), width: 1920, height: 1080, fps: 59.94, id: None, in_camera: None };
         let hero7 = db().get_by_id("gopro-hero7black-wide-1920x1080@59940-hseis").unwrap().get_json_value().unwrap();
         let lens = lens_of_project(&serde_json::json!({ "calibration_data": hero7 })).unwrap();
         let k = list_key(&video, &clip).unwrap();
@@ -1008,6 +1248,25 @@ mod tests {
         // As from_telemetry_parser makes it
         id.identifier = normalized(&format!("{}-{}-{}-{}-{}x{}@{}-{}", id.brand, id.model, id.lens_model, id.lens_info, w, h, fps, eis));
         id
+    }
+
+    // Anton's rule (2026-11-24): a lens is taken by itself only when it's made for exactly the clip's mode, readout
+    // included; the nearest one is a start for finding it (candidates), not the lens
+    #[test]
+    fn only_an_exact_lens_is_taken() {
+        let path = "/nowhere/GX010001.MP4";
+        // HERO7 4K 59.94 Wide with HyperSmooth: the player's own (estimated from Anton's footage)
+        let p = for_clip(path, &Clip::from_id(path, &camera("HERO7 Black", "Wide", 3840, 2160, 59940, "HS EIS")), false).expect("the built-in one");
+        assert_eq!(p.local.as_deref(), Some("built in"), "{}", p.label());
+        // At 23.976 fps there's none made for it: no ready lens, the nearest ones to choose from
+        let clip = Clip::from_id(path, &camera("HERO7 Black", "Wide", 1920, 1080, 23976, "HS EIS"));
+        assert!(for_clip(path, &clip, false).is_none());
+        let c = candidates(path, &clip, 10);
+        assert!(!c.is_empty() && c.iter().all(|(c, _)| !c.exact));
+        assert!(c.iter().any(|(c, _)| c.id.starts_with("db:")), "Gyroflow's HERO7 profiles offered");
+        // The lens in the file wins over the player's own
+        let own = Clip::from_id(path, &camera("HERO7 Black", "Wide", 3840, 2160, 59940, "HS EIS"));
+        assert!(for_clip(path, &own, true).is_none());
     }
 
     // Against the database built into gyroflow-core and the votes in resources/: what the player picks for clips that

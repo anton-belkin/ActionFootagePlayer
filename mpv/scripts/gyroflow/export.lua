@@ -307,6 +307,18 @@ local function as_it_plays(args, sdr, photo, live, s)
     elseif curve then
         table.insert(args, "--curve"); table.insert(args, curve)
     end
+    -- The underwater colour (curve uw, the dlogm plugin's uwcolor.lua): its strength and highlights; for a photo (and
+    -- its motion) the numbers its shader has now, the frame as it shows, else gyroflow-export measures them as it plays
+    if curve == "uw" and look ~= "off" then
+        local u = mp.get_property_native("user-data/uwcolor") or {}
+        table.insert(args, "--uw-strength"); table.insert(args, string.format("%.2f", tonumber(u.uw_strength) or 1))
+        table.insert(args, "--uw-highlights"); table.insert(args, u.uw_highlights == true and "yes" or "no")
+        local o = photo and mp.get_property_native("glsl-shader-opts") or {}
+        local n = { tonumber(o.uw_dr), tonumber(o.uw_db), tonumber(o.uw_k), tonumber(o.uw_ev) }
+        if #n == 4 then
+            table.insert(args, "--uw-params"); table.insert(args, string.format("%.4f,%.4f,%.4f,%.4f", n[1], n[2], n[3], n[4]))
+        end
+    end
     local sdr_look = sdr and mp.get_property_native("user-data/dlogm/sdr_look") or look
     if photo then
         local image = look == "maker" and "maker" or (look == "hdr" and platform.macos) and "macos" or "nbcu"
@@ -361,6 +373,13 @@ end
 local function view_args(args, v, s)
     local function add(k, x) table.insert(args, k); if x ~= nil then table.insert(args, tostring(x)) end end
     if v.curve and v.curve ~= "auto" then add("--curve", v.curve) end
+    -- The underwater colour, as the source's input has it (a moment: its original's): gyroflow-export gives it to a plain SDR clip
+    -- (neither log nor HDR) as the dlogm plugin does; measured there as it plays
+    if v.uw == true then
+        add("--uw-color", "yes")
+        if type(v.uw_strength) == "number" then add("--uw-strength", string.format("%.2f", v.uw_strength)) end
+        add("--uw-highlights", v.uw_highlights == true and "yes" or "no")
+    end
     -- The lens apart from the stabilization: off with the lens corrected is the lens alone, as recorded while on keeps
     -- it (a bundle from before the lens was a key: off was as recorded)
     local lens = v.lens or (v.view == "off" and "as-recorded" or "corrected")
@@ -546,7 +565,7 @@ local function start_360(path, how)
     local look = {}
     as_it_plays(look, false, false, false)
     for i, a in ipairs(look) do
-        if a == "--curve" then table.insert(args, a); table.insert(args, look[i + 1])
+        if a == "--curve" or a == "--uw-strength" or a == "--uw-highlights" then table.insert(args, a); table.insert(args, look[i + 1])
         elseif a == "--sdr" or a == "--nbcu" then table.insert(args, a) end
     end
     if how == "flat" then
@@ -781,13 +800,15 @@ local function gpu_frame()
     return { "--image", file }, file
 end
 
--- The time of the frame on screen: on the GPU path with the denoise, up to its delay before time-pos, not before where
--- it last started (main.lua's dn_sync, user-data/gyroflow/gpu_delay)
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
     local t = mp.get_property_number("time-pos")
     local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
     if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
-    local restart = (d.restart and d.restart >= 0) and math.min(d.restart, t) or t
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
     return math.max(restart, t - d.delay)
 end
 

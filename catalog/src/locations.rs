@@ -154,6 +154,38 @@ pub fn local_file(id: &str) -> Option<PathBuf> {
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| base.join("ActionFootage/projects").join(format!("{id}.json")))
 }
 
+/// This computer's own file for the project notes where its folder is here ("project"), as it's opened: a location's
+/// .afplocation whose path doesn't reach the project (its share mounted by another name of the NAS) finds it there,
+/// by its id (pointer_project; the player's workspace.lua and gyroflow-export do the same)
+pub fn note_here(project: &Path) {
+    let Some(id) = read_json(&project.join(PROJECT_FILE)).and_then(|d| d.get("id").and_then(Value::as_str).map(str::to_string)) else { return };
+    let Some(file) = local_file(&id) else { return };
+    let mut doc = read_json(&file).filter(Value::is_object).unwrap_or_else(|| json!({ "locations": [] }));
+    let here = project.display().to_string();
+    if doc.get("project").and_then(Value::as_str) == Some(here.as_str()) { return; }
+    doc["project"] = json!(here);
+    if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
+    let _ = std::fs::write(&file, serde_json::to_vec_pretty(&doc).unwrap());
+}
+
+/// Whether the project at a folder is the one of that id
+fn is_project(dir: &Path, id: &str) -> bool {
+    read_json(&dir.join(PROJECT_FILE)).is_some_and(|d| d.get("id").and_then(Value::as_str) == Some(id))
+}
+
+/// The project an .afplocation (in `dir`) names: only the one of its id (a pointer with none names none), at its path
+/// (its hosts: the NAS's other names), else where this computer's own file for that id says it is. None: none
+pub fn pointer_project(pointer: &Value, dir: &Path, mounts: &[(String, PathBuf)]) -> Option<PathBuf> {
+    let id = pointer.get("id").and_then(Value::as_str).filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))?;
+    let placed = pointer.get("project").and_then(Value::as_str).and_then(|p| place(p, dir, pointer.get("hosts"), mounts))
+        .filter(|p| is_project(p, id));
+    placed.or_else(|| {
+        let mine = read_json(&local_file(id)?)?;
+        let p = PathBuf::from(mine.get("project").and_then(Value::as_str).filter(|p| !p.is_empty())?);
+        is_project(&p, id).then_some(p)
+    })
+}
+
 /// "I never rename my footage" (Project settings, this computer's choices, kept in its own file): a clip's name counts
 /// when it's looked for (checks.rs's find_clip)
 pub fn never_rename(project: &Path) -> bool {
@@ -243,8 +275,10 @@ pub fn write_pointers(project: &Path, list: &[Location], gone: &[Location], moun
     for l in list.iter().filter(|l| !l.local) {
         let Some(dir) = &l.dir else { problems.push(format!("{}: not reachable, its {name} wasn't written", l.name)); continue };
         if dir == project { continue; }
-        let pointer = json!({ "format": "actionfootage-location", "version": 1, "project": path_for(project, dir, mounts),
-                              "id": doc.get("id"), "at": l.at, "name": l.name });
+        let mut pointer = json!({ "format": "actionfootage-location", "version": 1, "project": path_for(project, dir, mounts),
+                                  "id": doc.get("id"), "at": l.at, "name": l.name });
+        // The NAS's other names (the project's hosts), so the pointer reaches the project whichever it's mounted by
+        if let Some(h) = doc.get("hosts").filter(|h| h.as_object().is_some_and(|o| !o.is_empty())) { pointer["hosts"] = h.clone(); }
         let file = dir.join(&name);
         let tmp = dir.join(format!("{name}.tmp"));
         if let Err(e) = std::fs::write(&tmp, serde_json::to_vec_pretty(&pointer).unwrap()).and_then(|_| std::fs::rename(&tmp, &file)) {
@@ -304,6 +338,24 @@ mod tests {
         assert_eq!(in_location("Day 1/A.MP4", &l[1]), Some(a.join("Day 1/A.MP4")));
         write_pointers(&p, &l[..1], &l[1..2], &[]);
         assert!(!a.join("P.afplocation").exists());
+        let _ = std::fs::remove_dir_all(&top);
+    }
+
+    #[test]
+    fn pointers_carry_hosts_and_count_by_id() {
+        let top = std::env::temp_dir().join(format!("afl-ptr-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let (p, a) = (top.join("SSD/P"), top.join("HDD/Footage"));
+        for d in [&p, &a] { std::fs::create_dir_all(d).unwrap(); }
+        std::fs::write(p.join(PROJECT_FILE), r#"{"id":"p-1","hosts":{"DISKSTATIONDXP":["192.168.50.186"]},"locations":[{"name":"Archive","at":"","path":"../../HDD/Footage"}]}"#).unwrap();
+        assert!(write_pointers(&p, &locations(&p, &[]), &[], &[]).is_empty());
+        let ptr = read_json(&a.join("P.afplocation")).unwrap();
+        assert_eq!(ptr["hosts"], json!({ "DISKSTATIONDXP": ["192.168.50.186"] }));
+        assert_eq!(ptr["id"], json!("p-1"));
+        assert_eq!(pointer_project(&ptr, &a, &[]), Some(p.clone()));
+        // Another project in its place, or a pointer with no id: none (this computer has no record of p-0)
+        assert_eq!(pointer_project(&json!({ "project": "../../SSD/P", "id": "p-0" }), &a, &[]), None);
+        assert_eq!(pointer_project(&json!({ "project": "../../SSD/P" }), &a, &[]), None);
         let _ = std::fs::remove_dir_all(&top);
     }
 }

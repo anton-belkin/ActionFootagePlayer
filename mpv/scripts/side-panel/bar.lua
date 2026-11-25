@@ -18,16 +18,20 @@ local TRACK = 21
 local ROW = 47
 local BUTTON = 30
 -- The buttons whose key is written under them (navkeys.lua's: the arrows with a modifier), as a reminder
-local HINTED = { ["playlist-prev"] = true, ["playlist-next"] = true, ["frame-back-step"] = true, ["frame-step"] = true }
+local HINTED = { ["playlist-prev"] = true, ["playlist-next"] = true, ["script-binding gyroflow/frame-back"] = true, ["script-binding gyroflow/frame-on"] = true }
 local MAC = (mp.get_property("platform") or "") == "darwin"
 local HINT_SIZE = 10
 -- How near (points) a click must be to a mark to land on it
 M.SNAP = 7
+-- How far (points) the mouse moves, held on the track, before it's a drag (keyframes as it moves) and not a click
+M.MOVED = 3
+-- The track held: where it was pressed, and whether it has moved since (a drag)
+M.press_x, M.moved = nil, false
 
 -- What it shows, read from the player and the plugins
 function M.snapshot()
     local st = {
-        pos = mp.get_property_number("time-pos"),
+        pos = tl.shown_time(mp.get_property_number("time-pos"), mp.get_property_native("user-data/gyroflow/gpu_delay")),
         duration = mp.get_property_number("duration"),
         pause = mp.get_property_native("pause"),
         speed = mp.get_property_number("speed", 1),
@@ -121,10 +125,10 @@ local function buttons(st, remaining)
         { id = "prev", icon = "prev", tip = "Previous clip", cmd = "playlist-prev", disabled = st.n <= 0, keep = 3, group = "left" },
         { id = "play", icon = st.pause and "play" or "pause", tip = st.pause and "Play" or "Pause", cmd = "cycle pause", keep = inf, group = "left" },
         { id = "next", icon = "next", tip = "Next clip", cmd = "playlist-next", disabled = st.n >= st.count - 1, keep = 3, group = "left", gap = 10 },
-        { id = "fback", icon = "fback", tip = "A frame back", cmd = "frame-back-step", keep = 4, group = "left", small = true },
+        { id = "fback", icon = "fback", tip = "A frame back", cmd = "script-binding gyroflow/frame-back", keep = 4, group = "left", small = true },
         { id = "time", text = time, tip = remaining and "Time left: click for the time" or "Click for the time left",
           cmd = "time", keep = inf, group = "left", wide = "-" .. tl.clock(d or 0) .. (d and (" / " .. tl.clock(d, 0)) or "") },
-        { id = "ffwd", icon = "ffwd", tip = "A frame on", cmd = "frame-step", keep = 4, group = "left", small = true },
+        { id = "ffwd", icon = "ffwd", tip = "A frame on", cmd = "script-binding gyroflow/frame-on", keep = 4, group = "left", small = true },
         { id = "mprev", icon = "mprev", tip = "Previous mark", cmd = "script-binding highlights/prev", keep = 5, group = "right" },
         { id = "mark", icon = "mark", tip = "Mark here (on a mark: remove it)", cmd = "script-binding highlights/mark", keep = 5, group = "right" },
         { id = "mnext", icon = "mnext", tip = "Next mark", cmd = "script-binding highlights/next", keep = 5, group = "right", gap = 10 },
@@ -154,7 +158,8 @@ end
 -- Draws the bar into u at the bottom of a window h high, from x0 to x1 (pixels). opts: docked (opaque, below the
 -- video), hover (the id under the mouse), mouse ({ x, y }), dragging, drag_t (the time it's dragged to), remaining (the
 -- time left shown), keys (the commands' keys, for the tips), toggle_time (a function: the time's click), seek (a
--- function(t, exact): the track clicked or dragged)
+-- function(t, exact): the track dragged (exact false), let go or clicked (true)), preview (a function(t, x, x0, x1,
+-- top): the mouse over the track at time t, x; returns the place of the picture shown for it, { x, y, w, h })
 function M.draw(u, x0, x1, h, st, opts)
     local s = u.s
     local top = h - M.HEIGHT * s
@@ -213,6 +218,11 @@ function M.draw(u, x0, x1, h, st, opts)
             local t = snap and snap.t or tl.t_of(opts.mouse.x, tx0, tx1, d)
             local label = tl.clock(t) .. (snap and ("  " .. snap.title) or "")
             local mx = X(t)
+            -- The picture at that time above the bubble (scrub.lua), a frame round it while it's there
+            local pic = opts.preview and opts.preview(t, mx, x0, x1, top)
+            if pic then
+                u:box(pic.x - 2 * s, pic.y - 2 * s, pic.w + 4 * s, pic.h + 4 * s, 5, C.card, { border = 1 * s, border_color = C.line })
+            end
             u:box(mx - 0.75 * s, ty - 9 * s, 1.5 * s, 18 * s, 0, C.text, { alpha = "30" })
             local bw = ui.text_width(label, 12, s) + 16 * s
             local bx = math.min(math.max(mx - bw / 2, x0 + 4 * s), x1 - bw - 4 * s)
@@ -220,15 +230,25 @@ function M.draw(u, x0, x1, h, st, opts)
             u:box(bx, by, bw, 24 * s, 6, C.card, { border = 1 * s, border_color = C.line })
             u:text(bx + bw / 2, by + 12 * s, label, { align = 5, size = 12, color = C.text })
         end
-        -- Held and dragged: keyframes as it moves (fast), the exact frame where it's let go; near a mark, on the mark
+        -- Held and dragged: keyframes as it moves (fast), the exact frame where it's let go; near a mark, on the mark.
+        -- A click alone (the mouse not moved from where it was pressed) is the exact seek only: a keyframe sought on the
+        -- press flashed before the exact frame on a slow clip. The picture (scrub.lua) follows the mouse all along
         if opts.seek then
             local function at(mx)
                 local snap = tl.snap(mx, st.items, st.ab_a, st.ab_b, tx0, tx1, d, M.SNAP * s)
                 return snap and snap.t or tl.t_of(mx, tx0, tx1, d)
             end
             u:hit(tx0 - 8 * s, ty - 14 * s, tx1 - tx0 + 16 * s, 26 * s, "bar:track", {
-                drag = function(mx) opts.seek(at(mx), false) end,
-                release = function(mx) opts.seek(at(mx), true) end,
+                drag = function(mx)
+                    if M.press_x == nil then M.press_x = mx return end
+                    if not M.moved and math.abs(mx - M.press_x) < M.MOVED * s then return end
+                    M.moved = true
+                    opts.seek(at(mx), false)
+                end,
+                release = function(mx)
+                    M.press_x, M.moved = nil, false
+                    opts.seek(at(mx), true)
+                end,
             })
         end
     end

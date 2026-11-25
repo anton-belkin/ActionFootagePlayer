@@ -22,13 +22,22 @@
       ]
     },
     "GoPro HERO4 Black": {
-      "recorded": {},
+      "recorded": {
+        "0": "wide",
+        "2": "medium"
+      },
       "types": [
         {
           "id": "wide",
           "label": "Wide",
-          "profile": "GoPro/GoPro_HERO4 Black___2.7k_16by9_2704x1520-59.94fps.json",
-          "note": "Gyroflow's HERO4 Black profiles don't say their mode; most were likely shot in Wide, the default. This one (2.7K 59.94, by Mike Petrichenko) is the best voted (18 good, 10 bad, 2026-11). Others to try: 2.7K 29.97 by Arseny Troyan (- 2: 17/11), by AsA (9/6). Modes 0, 2, 4 (likely Wide, Medium, Narrow) are left unnamed until Anton checks clips with them"
+          "profile": null,
+          "note": "udta SETT lens mode 0 (markers::hero4_lens_mode). Its lens comes from the player's own database for exactly the clip's size and frame rate (resources/lenses: 1080p 59.94, 2.7K 59.94, 4K 29.97, estimated from Anton's footage, lens_profiles#41), else none: no ready lens. Gyroflow's HERO4 Black profiles don't say their mode and have no readout. Before 2026-11-24 this type had Mike Petrichenko's 2.7K 59.94 profile, and SETT codes weren't named"
+        },
+        {
+          "id": "medium",
+          "label": "Medium",
+          "profile": null,
+          "note": "udta SETT lens mode 2: 2.7K Medium is a 1:1 window of the 4K sensor (f about 1770 px). Its lens from the player's own database (2.7K at 23.98, 29.97, 59.94, estimated from Anton's footage), else none. Code 4 (Narrow?) isn't named: no clip of it was estimated"
         }
       ]
     },

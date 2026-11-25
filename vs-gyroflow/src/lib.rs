@@ -29,6 +29,7 @@ pub mod water;
 pub mod prefetch;
 pub mod still;
 pub mod levels;
+pub mod in_camera;
 pub mod smoothing;
 pub mod motion;
 pub mod dovi;
@@ -38,6 +39,7 @@ pub mod markers;
 pub mod mp4meta;
 pub mod cut;
 pub mod photo;
+pub mod uwcolor;
 pub mod xmp;
 pub mod stamp;
 pub mod rig;
@@ -53,6 +55,11 @@ pub mod gpu_table;
 pub mod user_shader;
 pub mod translation;
 pub mod optical;
+pub mod afp_motion;
+pub mod tools;
+pub mod lens_db;
+pub mod lens_find;
+pub mod measure;
 pub use levels::Level;
 pub use water::Underwater;
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -442,6 +449,8 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     let stab = lens_pick::manager();
     let url = filesystem::path_to_url(project);
     let mut motion = None;
+    // Motion measured from the picture: the refraction it was measured with is the one it plays with
+    let mut measured_motion = false;
     let project_json = if is_project_file(project) {
         let data = std::fs::read(project).map_err(|e| format!("Can't read {project}: {e}"))?;
         let mut json: serde_json::Value = serde_json::from_slice(&data).map_err(|e| format!("Can't load {project}: {e}"))?;
@@ -464,10 +473,25 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
         // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
         lens_pick::apply(&stab, project);
+        // Motion measured from the picture, kept beside the clip (afp_motion.rs): what it plays with when its own motion
+        // data is none or of no use (the camera stabilized the picture), as gyro would be. Its lens, readout and
+        // refraction come with it, after the preset: the motion was measured with them. Left aside where the clip's own
+        // motion data plays (afp_motion::own_motion_plays), as the probe decides
+        let measured_beside = !lens_only && afp_motion::path_for(std::path::Path::new(project)).is_file();
+        let measured = if !measured_beside { None } else if afp_motion::own_motion_plays(std::path::Path::new(project)) {
+            log::info!("{project}: its own motion data plays; the motion measured from the picture beside it is left aside");
+            None
+        } else {
+            match afp_motion::read_for(std::path::Path::new(project)) {
+                Some(Ok(m)) => Some(m),
+                Some(Err(e)) => { log::warn!("{project}: its measured motion isn't used: {e}"); None }
+                None => None,
+            }
+        };
         if lens_only && stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
             return Err(format!("{project}: no lens profile to correct the lens with"));
         }
-        if !lens_only && !stab.gyro.read().has_motion() {
+        if !lens_only && measured.is_none() && !stab.gyro.read().has_motion() {
             return Err(format!("{project} has no project and no motion data"));
         }
         if let Some(preset) = preset {
@@ -475,10 +499,20 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
             stab.import_gyroflow_file(&filesystem::path_to_url(preset), false, |_| (), Arc::new(AtomicBool::new(false)), true)
                 .map_err(|e| format!("Can't load preset {preset}: {e:?}"))?;
         }
+        if let Some(measured) = &measured {
+            let t = std::time::Instant::now();
+            let applied = afp_motion::apply(&stab, measured).map_err(|e| format!("{project}: its measured motion: {e}"))?;
+            log::info!("{project}: motion measured from the picture ({}, lens {}, {}), set up in {:.0} ms{}", measured.header.measured.how,
+                measured.header.lens_name, if measured.header.in_water() { "in water" } else { "in air" }, t.elapsed().as_secs_f64() * 1000.0,
+                if applied.in_context { "" } else { "; its rolling shutter part was measured with another lens or timing, left out" });
+            // All of it is here: nothing of the file's own to read as it plays, only the level to follow
+            m.freeze();
+            measured_motion = true;
+        }
         if lens_only {
             log::info!("{project}: the lens alone, nothing smoothed");
         } else {
-            log::info!("{project}: own motion data, default preset");
+            if measured.is_none() { log::info!("{project}: own motion data, default preset"); }
             motion = Some(m);
         }
         None
@@ -486,6 +520,8 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     // Project gyro transforms (including LPF) are restored after the video's motion data is loaded,
     // so apply them before smoothing (same as the frei0r plugin)
     stab.recompute_gyro();
+    // Motion measured from the picture has no gravity in it, so no horizon to lock: none, whatever the preset says
+    let horizon_lock = if measured_motion { Some(0.0) } else { horizon_lock };
     if let Some(amount) = horizon_lock {
         // The project's roll, pitch and turn settings stay; only the amount is the player's
         let h = stab.smoothing.read().horizon_lock.clone();
@@ -493,6 +529,7 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     }
     // The camera's In water / Out of water is in the video: a project's, or the one being played
     let video = if is_project_file(project) { filesystem::url_to_path(&stab.input_file.read().url) } else { project.to_string() };
+    let underwater = if measured_motion { Underwater::Project } else { underwater };
     water::apply(&stab, underwater, &video, motion.as_deref());
     if let Some(m) = &motion { m.set_underwater(underwater, &video); }
     Ok((stab, project_json, motion))
@@ -590,8 +627,9 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
             let geometry = motion::Geometry::of(&stab, still);
             motion::restabilize(&stab, &geometry, level);
             stab.recompute_undistortion();
-            log::info!("{project}: the frame covers FOV {still:.3} held still; {} at FOV {:.3}, margin {:.1}°", level.name(), level.fov(still),
-                geometry.smoothing(level).margin.to_degrees());
+            log::info!("{project}: the frame covers FOV {still:.3} held still; {} at FOV {:.3}, margin {:.1}°{}", level.name(), geometry.fov(level),
+                geometry.smoothing(level).margin.to_degrees(),
+                if geometry.crop_share < 1.0 { format!(", on top of the camera's stabilization ({:.0} % of the crop)", geometry.crop_share * 100.0) } else { String::new() });
             geometry
         });
         if level_geometry.is_none() {
@@ -619,7 +657,7 @@ pub fn prepare(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Opti
                 }
                 Some(g) => {
                     log::info!("{project}: wider view at FOV {fov:.3}");
-                    let mut params: Vec<ComputeParams> = Level::ALL.iter().map(|l| wide_view(&base, set_fov.unwrap_or(l.fov(g.still_fov)))).collect();
+                    let mut params: Vec<ComputeParams> = Level::ALL.iter().map(|l| wide_view(&base, set_fov.unwrap_or(g.fov(*l)))).collect();
                     params.push(wide);
                     // Measured as it plays: with what's ahead unknown, the edge fill is ready wherever it shows
                     let frames = base.frame_count.max(1);

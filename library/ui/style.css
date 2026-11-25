@@ -347,6 +347,21 @@ input[type=search]::-webkit-search-cancel-button{-webkit-appearance:none}
 body.waiting,body.waiting *{cursor:progress}
 /* Locations from Apple Photos (geo.rs): one compact sheet for the selection */
 .sheet.geosheet{max-width:560px}
+.sheet.lenssheet{max-width:680px}
+.sheet.lenssheet .sb{max-height:72vh;overflow:auto}
+.sheet.lenssheet .sb>*{flex:none}
+.lensbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.lensbar .switch{margin-left:4px}
+.lensprog{display:flex;flex-direction:column;gap:4px}
+.albumlist.lensrows{max-height:none;overflow:visible}
+.lensrows .albumrow{flex:none}
+.lensrows .albumrow{align-items:flex-start;width:100%}
+.lensrows .albumrow span:first-of-type{white-space:normal;overflow:visible}
+.lensrows .albumrow b{display:block;font-weight:600;line-height:1.35}
+.lensrows .albumrow .sub{display:block;margin-top:2px}
+.lensrows .albumrow .pill{margin-top:2px}
+.lensrows .rad{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted);margin-top:3px;flex:none}
+.lensrows .on .rad{border:4px solid var(--accent)}
 .sheet.geosheet .sb{max-height:72vh;overflow:auto}
 .geomax{display:grid;grid-template-columns:auto minmax(120px,1fr) auto auto;gap:8px;align-items:center}
 .geomax input{width:100%}
@@ -471,3 +486,26 @@ img.t90{transform:translate(-50%,-50%) rotate(90deg)}
 img.t270{transform:translate(-50%,-50%) rotate(270deg)}
 .tile .th img.t90,.tile .th img.t270,.ith img.t90,.ith img.t270{object-fit:contain}
 .ith{position:relative}
+/* Source Settings: the source's attributes, each with what it is now, a choice to change it and where it comes from */
+.pane[data-tab="source"] .attrs{padding:4px 16px 12px;display:flex;flex-direction:column}
+.agrp{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:14px 0 2px}
+.attr{display:grid;grid-template-columns:112px minmax(0,1fr);gap:3px 10px;align-items:start;padding:6px 0;border-top:1px solid var(--line2)}
+.agrp+.attr{border-top:0}
+.attr .an{font-size:12px;color:var(--fg2);padding-top:7px;line-height:1.25}
+.attr .ac{display:flex;flex-direction:column;gap:4px;min-width:0}
+.attr select{border:1px solid var(--line);border-radius:7px;padding:5px 8px;min-height:30px;background:var(--surface);min-width:0;width:100%}
+.attr select:disabled{opacity:.6}
+.attr .val{padding-top:7px;font-size:12.5px;color:var(--fg);line-height:1.3;overflow-wrap:anywhere}
+.attr .prov{font-size:11.5px;color:var(--muted);line-height:1.35;overflow-wrap:anywhere}
+.attr.chg select{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent-line)}
+.attr.chg .an{color:var(--accent-deep);font-weight:600}
+.attr .was{font-size:11.5px;color:var(--accent-deep)}
+.attr.mixed select{font-style:italic;color:var(--fg2)}
+.attr.na .an,.attr.na .prov{opacity:.6}
+.attr .btns{margin-top:2px}
+.attr .rng{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg2)}
+.attr .rng input{flex:1;min-width:0;width:60px}
+.attr .lensresults{margin-top:4px}
+.hand{display:inline-block;font-size:10.5px;line-height:14px;padding:0 5px;border-radius:4px;background:var(--accent-soft);color:var(--accent-deep);border:1px solid var(--accent-line);margin-left:2px;vertical-align:1px}
+.savebar{position:sticky;bottom:0;margin-top:auto;background:var(--surface);border-top:1px solid var(--line);padding:10px 16px 12px;display:flex;flex-direction:column;gap:6px}
+.savebar .what{font-size:12px;color:var(--fg2)}

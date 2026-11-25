@@ -214,6 +214,35 @@ pub fn own_file(clip: &Path, locations: &[Location]) -> (PathBuf, Vec<PathBuf>) 
     (main, found)
 }
 
+/// The folder of the Library's own record of each project on this computer, by its id ("project": its folder here)
+pub fn projects_dir() -> Option<PathBuf> {
+    if let Some(d) = PROJECTS_DIR_FOR_TESTS.lock().unwrap().clone() { return d; }
+    let base = if cfg!(windows) { std::env::var_os("APPDATA").map(PathBuf::from) }
+               else if cfg!(target_os = "macos") { std::env::var_os("HOME").map(|h| PathBuf::from(h).join("Library/Application Support")) }
+               else { std::env::var_os("XDG_CONFIG_HOME").map(PathBuf::from).or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config"))) };
+    base.map(|b| b.join("ActionFootage").join("projects"))
+}
+static PROJECTS_DIR_FOR_TESTS: std::sync::Mutex<Option<Option<PathBuf>>> = std::sync::Mutex::new(None);
+
+/// A pointer's id: an .afplocation counts only for the project of its id (none: it counts for none), so a path that
+/// reaches another project (a share mounted from elsewhere, a project made again in its place) is never taken
+fn pointer_id(p: &serde_json::Value) -> Option<&str> {
+    p.get("id").and_then(|x| x.as_str()).filter(|x| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// Whether the project at a folder is the one of that id
+fn is_project(where_: &Path, id: &str) -> bool {
+    read_json(&where_.join(PROJECT_FILE)).is_some_and(|d| d.get("id").and_then(|x| x.as_str()) == Some(id))
+}
+
+/// A pointer's project where this computer last had it open (projects_dir), when the pointer's path doesn't reach it
+/// (a share mounted by another name of the NAS than the pointer has: 24 Nov 2026). None: none
+fn known(id: &str) -> Option<PathBuf> {
+    let mine = read_json(&projects_dir()?.join(format!("{id}.json")))?;
+    let where_ = PathBuf::from(mine.get("project").and_then(|x| x.as_str()).filter(|x| !x.is_empty())?);
+    is_project(&where_, id).then_some(where_)
+}
+
 fn projects_in(dir: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     if dir.join(PROJECT_FILE).is_file() || dir.join(LEGACY_DIR).is_dir() { out.push(dir.to_path_buf()); }
@@ -223,8 +252,11 @@ fn projects_in(dir: &Path) -> Vec<PathBuf> {
     names.sort();
     for n in names {
         let Some(p) = read_json(&dir.join(&n)) else { continue };
-        let Some(where_) = p.get("project").and_then(|x| x.as_str()).and_then(|x| place(x, dir, p.get("hosts"))) else { continue };
-        if where_.join(PROJECT_FILE).is_file() && !out.iter().any(|o| same(o, &where_)) { out.push(where_); }
+        let Some(id) = pointer_id(&p) else { continue };
+        let placed = p.get("project").and_then(|x| x.as_str()).and_then(|x| place(x, dir, p.get("hosts")))
+            .filter(|w| is_project(w, id));
+        let Some(where_) = placed.or_else(|| known(id)) else { continue };
+        if !out.iter().any(|o| same(o, &where_)) { out.push(where_); }
     }
     out
 }
@@ -360,9 +392,12 @@ mod tests {
                 name = rest.to_string();
                 in_tree = false;
                 *MOUNTS_FOR_TESTS.lock().unwrap() = None;
+                *PROJECTS_DIR_FOR_TESTS.lock().unwrap() = Some(None);
                 clip = None;
             } else if let Some(rest) = line.strip_prefix("home ") {
                 home = base.join(rest);
+            } else if let Some(rest) = line.strip_prefix("known ") {
+                *PROJECTS_DIR_FOR_TESTS.lock().unwrap() = Some(Some(base.join(rest)));
             } else if let Some(rest) = line.strip_prefix("mount ") {
                 let (src, dir) = rest.split_once(' ').unwrap();
                 MOUNTS_FOR_TESTS.lock().unwrap().get_or_insert_with(Vec::new).push((src.to_string(), base.join(dir)));
@@ -383,7 +418,7 @@ mod tests {
                 if let Some((name, text)) = rel.split_once(" = ") {
                     let p = base.join(name);
                     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-                    std::fs::write(p, text).unwrap();
+                    std::fs::write(p, text.replace("@/", &format!("{}/", base.display()))).unwrap();
                 } else if let Some(dir) = rel.strip_suffix('/') {
                     std::fs::create_dir_all(base.join(dir)).unwrap();
                 } else {

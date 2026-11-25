@@ -40,6 +40,18 @@ end)
 mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.title or "") .. (t.detail and ("\n" .. t.detail) or ""), t.kind == "working" and 60 or 4) end end
 mp.ask = mp.ask or function() return false end
 local utils = require 'mp.utils'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 -- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
 do
@@ -253,7 +265,7 @@ local function mark()
         if not path or path:find("://", 1, true) then return mp.osd_message("Marks are for a clip on this computer or the NAS", 2) end
         return mp.osd_message("Marks: this clip is still loading", 2)
     end
-    local pos = mp.get_property_number("time-pos")
+    local pos = shown_time()
     if not pos then return end
     -- In the clip's time
     pos = pos + found.offset
@@ -328,7 +340,7 @@ end
 
 mp.add_key_binding("Ctrl+]", "next", function()
     if not found or #found.marks == 0 then return no_marks(1) end
-    local pos = mp.get_property_number("time-pos", 0)
+    local pos = shown_time() or 0
     for i = 1, #found.marks do
         if landing(i) > pos + 0.5 then return go(i) end
     end
@@ -337,7 +349,7 @@ end)
 
 mp.add_key_binding("Ctrl+[", "prev", function()
     if not found or #found.marks == 0 then return no_marks(-1) end
-    local pos = mp.get_property_number("time-pos", 0)
+    local pos = shown_time() or 0
     for i = #found.marks, 1, -1 do
         if landing(i) < pos - AGAIN then return go(i) end
     end
