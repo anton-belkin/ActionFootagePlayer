@@ -501,11 +501,12 @@ fn update_doc(root: &Path, change: impl FnOnce(&mut serde_json::Map<String, Valu
     let mut doc = read_doc(root);
     let map = doc.as_object_mut().ok_or("not an object")?;
     map.insert("format".into(), json!(FORMAT));
-    // This Library's version (afp_catalog::project::VERSION), never lowered: older ones then refuse the project
+    // This Library's version (afp_catalog::project::VERSION), never lowered: older ones then refuse the project. Set
+    // after the change, so no change can lower it (saving locations wrote 2 here, over the 4 it had been raised to)
     let v = map.get("version").and_then(Value::as_u64).unwrap_or(1).max(afp_catalog::project::VERSION);
-    map.insert("version".into(), json!(v));
     if !map.get("settings").is_some_and(Value::is_object) { map.insert("settings".into(), json!({})); }
     change(map);
+    map.insert("version".into(), json!(v));
     let tmp = file.with_extension("afproject.tmp");
     std::fs::write(&tmp, serde_json::to_vec(&doc).map_err(|e| e.to_string())?).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &file).map_err(|e| format!("{}: {e}", file.display()))
@@ -1273,7 +1274,7 @@ async fn save_locations(shared: State<'_, Shared>, list: Vec<Value>, hosts: Opti
         })).collect();
         project_id(&root)?;
         update_doc(&root, |d| {
-            if clean.is_empty() { d.remove("locations"); } else { d.insert("locations".into(), json!(clean)); d.insert("version".into(), json!(2)); }
+            if clean.is_empty() { d.remove("locations"); } else { d.insert("locations".into(), json!(clean)); }
             if let Some(h) = &hosts { if h.as_object().is_some_and(|o| !o.is_empty()) { d.insert("hosts".into(), h.clone()); } else { d.remove("hosts"); } }
             // A folder per run in Generated/ (the player reads it): written only when on
             match generated_runs { Some(true) => { d.insert("generated_runs".into(), json!(true)); } Some(false) => { d.remove("generated_runs"); } None => {} }
@@ -1394,7 +1395,7 @@ fn move_to(root: &Path, dest: &Path, progress: &dyn Fn(Moving)) -> Result<Vec<St
         }
         moved.push(name.to_string());
     }
-    update_doc(dest, |d| { d.insert("locations".into(), json!(list)); d.insert("version".into(), json!(2)); })?;
+    update_doc(dest, |d| { d.insert("locations".into(), json!(list)); })?;
     let after: Vec<locations::Location> = locations::locations(dest, &mounts).into_iter().filter(|l| !l.local).collect();
     // The pointers of before (the old folder's name) out, the new ones in
     for l in &all {
@@ -4097,5 +4098,34 @@ mod live_e2e {
         *seen::SEEN.write().unwrap() = None;
         let _ = std::fs::remove_dir_all(&base);
         let _ = std::fs::remove_dir_all(&home);
+    }
+}
+
+#[cfg(test)]
+mod project_version {
+    use super::*;
+
+    /// Writing the project never lowers its version: saving locations wrote "version": 2 over the 4 update_doc had
+    /// raised it to, so older programs (the NAS Helper's catalog among them) would take the project again (#249)
+    #[test]
+    fn writing_the_project_never_lowers_its_version() {
+        let root = std::env::temp_dir().join(format!("afp-version-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let version = |root: &Path| read_doc(root).get("version").and_then(Value::as_u64);
+        let now = afp_catalog::project::VERSION;
+        // An older project is raised to this Library's version
+        std::fs::write(root.join(PROJECT_FILE), r#"{"format":"actionfootage-project","version":2,"id":"v"}"#).unwrap();
+        update_doc(&root, |_| {}).unwrap();
+        assert_eq!(version(&root), Some(now));
+        // A change that writes an older version (what saving locations and moving the project did) can't lower it
+        update_doc(&root, |d| { d.insert("locations".into(), json!([{"name": "A", "at": "", "path": "../A"}])); d.insert("version".into(), json!(2u64)); }).unwrap();
+        assert_eq!(version(&root), Some(now));
+        assert!(read_doc(&root).get("locations").is_some_and(Value::is_array));
+        // No code writes a fixed version into the project but update_doc
+        let src = include_str!("main.rs");
+        let fixed = ["\"version\".into(), json!(", "2)"].concat();
+        assert!(!src.contains(&fixed), "a fixed project version is written somewhere");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
