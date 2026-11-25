@@ -153,7 +153,9 @@ to it rather than around it).
 - **CI for Anton's branches and main runs on his Mac.** The `macos` and `tests` jobs run on the self-hosted runner
   `anton-mac` (`~/actions-runner`, a service under his user, label `afp`). Releases (tags) and fork PRs run on
   GitHub's macOS. The runner keeps its build folders between runs, so prefer CI over a build of your own in a worktree
-  (each worktree's `target/` costs 4-20 GB). It only runs while the Mac is awake and Anton is logged in.
+  (each worktree's `target/` costs 4-20 GB). It only runs while the Mac is awake and Anton is logged in. Required on
+  a PR: `macos` and `tests`. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
+  merge, check `main`'s run (`gh run list --branch main`) and fix a break there in its own PR.
 - **Everything CI runs, locally:**
 
   ```
