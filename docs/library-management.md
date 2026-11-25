@@ -1155,6 +1155,18 @@ Anton, 2026-11-09:
   own file (`source`, its other keys kept), as the player's Source tab saves them. *Auto* for the lens under water only
   where the camera records when it's in the water (the probe's `water`, vs-gyroflow's water.rs); a camera that doesn't
   gets No, and the tab says so.
+- **Source settings as a list of the source's attributes** (Anton, 2026-11-24; replaces the fields above). Each
+  attribute shows what the selected clips have now, or Mixed with how many have which; choosing another value marks
+  it changed (Was: …) and **Save** writes every change, for all of them, only where it applies (a lens type where the
+  camera has types, the underwater colour for a plain SDR clip). Camera (and the turn it was recorded with), Color
+  (as recorded, the log curve, the underwater colour: the source's now, it takes out what the camera put in and plays
+  in HDR), Lens (the lens and where it comes from, a lens chosen for one mode on Save — the player's own database,
+  every clip of the mode —, Find / Estimate lens, the lens type, the lens under water), Motion data (gyro in the file,
+  measured from the picture, a Gyroflow project, none; **Stabilize optically** and **Measure again** start at once:
+  the Stabilize part is gone). Nothing selected: nothing shown but what to do. Nothing is read from the clips to show
+  it: the index keeps the lens with the rest of the probe (`gyroflow-probe --library`'s `lens_info`, read again when a
+  lens is chosen, kept or a lens type set). Every attribute is a filter in Filters › Source. Info only shows.
+  Pictures: docs/img/library-source/.
 
 ## Open questions
 

@@ -44,6 +44,8 @@ local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
 -- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
 local notify = require 'notify'
+-- The lens dialog (Source › Lens for the mode › Choose…), one of the panel's popovers
+local lensdlg = require 'lensdialog'
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -267,7 +269,7 @@ local function passport(d, g, t, h)
         elseif d.hdr and d.hdr ~= "" then table.insert(parts, "HDR (" .. d.hdr:upper() .. ")")
         else table.insert(parts, "not log") end
     end
-    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or g.motion and "gyro" or "no motion data") end
+    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or type(g.optical) == "table" and "motion from the picture" or g.motion and "gyro" or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry")
     elseif t and type(t.subtitles) == "table" and t.subtitles.camera then table.insert(parts, "camera data as subtitles") end
     if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
@@ -300,6 +302,34 @@ local TURNS = { { 0, "As is" }, { 90, "90° ↻" }, { 180, "180°" }, { 270, "90
 local grade_open, grade_for = false, nil
 local WATER = { { "auto", "Auto" }, { "yes", "Yes" }, { "no", "No" } }
 
+-- The source's input (the log curve, the turn, the lens under water, the underwater colour): for viewing as it's
+-- changed, saved into the source's own file with Save (for all its moments and clips). What the saved values are,
+-- while something differs from them (the dots), else nil
+local function input_card(u, x, w, y, ws, path)
+    local s = u.s
+    local own = local_file(path) and ws and ws.clip and not ws.export
+    local saved_in = own and ws.input or nil
+    local status = own and ws.input_status or nil
+    local at = y
+    local ix, iw = x + 10 * s, w - 20 * s
+    y = at + 8 * s
+    y = u:heading(ix, iw, y, "Input")
+    if not own then
+        y = u:caption(ix, iw, y - 4 * s, "Not saved: this file isn't a source")
+    else
+        y = u:caption(ix, iw, y - 4 * s, status == "changed" and "Changed for viewing. The dot marks what's saved"
+            or status == "saved" and "Saved in the source, for all its moments and clips"
+            or "Nothing saved: as the file says", status == "changed" and { color = C.text } or nil)
+        local ihalf = (iw - 8 * s) / 2
+        u:button(ix, ihalf, y, "input-save", "Save to the source", "script-message-to workspace input-save",
+                 { primary = status == "changed", disabled = status ~= "changed" })
+        y = u:button(ix + ihalf + 8 * s, ihalf, y, "input-revert", "Revert to saved", "script-message-to workspace input-revert",
+                     { disabled = status ~= "changed" })
+    end
+    u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
+    return y + 10 * s, status == "changed" and (saved_in or {}) or nil
+end
+
 local function source_part(u, x, w, y)
     local s = u.s
     local path = mp.get_property("path")
@@ -319,31 +349,8 @@ local function source_part(u, x, w, y)
     if ws and ws.moment and not ws.moment.missing then
         y = u:button(x, w, y, "whole", "Open the whole clip at " .. clock(ws.moment["in"]), "script-message-to workspace open-original")
     end
-    -- The input: for viewing as it's changed, saved into the source's own file with Save (for all its moments and clips)
-    local own = local_file(path) and ws and ws.clip and not ws.export
-    local saved_in = own and ws.input or nil
-    local status = own and ws.input_status or nil
-    local at = y + 6 * s
-    local ix, iw = x + 10 * s, w - 20 * s
-    y = at + 8 * s
-    y = u:heading(ix, iw, y, "Input")
-    if not own then
-        y = u:caption(ix, iw, y - 4 * s, "Not saved: this file isn't a source")
-    else
-        y = u:caption(ix, iw, y - 4 * s, status == "changed" and "Changed for viewing. The dot marks what's saved"
-            or status == "saved" and "Saved in the source, for all its moments and clips"
-            or "Nothing saved: as the file says", status == "changed" and { color = C.text } or nil)
-        local ihalf = (iw - 8 * s) / 2
-        u:button(ix, ihalf, y, "input-save", "Save to the source", "script-message-to workspace input-save",
-                 { primary = status == "changed", disabled = status ~= "changed" })
-        y = u:button(ix + ihalf + 8 * s, ihalf, y, "input-revert", "Revert to saved", "script-message-to workspace input-revert",
-                     { disabled = status ~= "changed" })
-    end
-    u:box(x, at, w, y - at + 4 * s, 8, C.card, { fill = false, border = 1 * s, border_color = C.line })
-    y = y + 10 * s
-    -- A saved value's dot, only while something differs from it
-    local changed = status == "changed"
-    local saved_input = changed and (saved_in or {}) or nil
+    local saved_input
+    y, saved_input = input_card(u, x, w, y + 6 * s, ws, path)
 
     if d then
         y = u:heading(x, w, y + 4 * s, "Color")
@@ -369,10 +376,24 @@ local function source_part(u, x, w, y)
             for _, c in ipairs(CURVES) do
                 if c[1] ~= d.recorded then rows[#rows + 1] = { kind = c[1], label = c[2], cmd = "script-message-to dlogm curve " .. c[1] } end
             end
-            local chosen = d.curve == d.recorded and "auto" or d.curve
+            local chosen = (d.curve == d.recorded or d.curve == "uw") and "auto" or d.curve
             y = u:select_row(x, w, y + 6 * s, "curve", "Log curve", rows, chosen, {
                 key = keys["script-binding dlogm/curve"], saved = saved_curve,
                 text = chosen == "auto" and (d.recorded ~= "" and (CURVE_NAMES[d.recorded] or d.recorded) or "None, not log") or nil })
+        end
+        -- The underwater colour, the source's too (uwcolor.lua): for a plain SDR clip; its strength and what it measures
+        -- on its own tab
+        local c = state("uwcolor")
+        if type(c) == "table" and (c.ok or c.active) then
+            local now = not c.uw and "off" or c.uw_highlights and "bright" or "on"
+            local was = saved_input and (saved_input.uw ~= true and "off" or saved_input.uw_highlights and "bright" or "on") or nil
+            y = u:select_row(x, w, y + 4 * s, "uw-pick", "Underwater colour", {
+                { kind = "off", label = "Off", cmd = "script-message-to dlogm uw-set uw no" },
+                { kind = "on", label = "On", cmd = "script-message-to dlogm uw-set uw_highlights no; script-message-to dlogm uw-set uw yes" },
+                { kind = "bright", label = "On, brighter highlights", cmd = "script-message-to dlogm uw-set uw_highlights yes; script-message-to dlogm uw-set uw yes" },
+            }, now, { key = keys["script-binding dlogm/uw-toggle"], saved = was })
+            y = u:caption(x, w, y, c.uw and string.format("Strength %d %% (its tab). Plays in HDR: the colour and the light stretched past SDR's",
+                math.floor((c.uw_strength or 1) * 100 + 0.5)) or "Takes out the green and brown the camera put in under water")
         end
     end
 
@@ -391,29 +412,71 @@ local function source_part(u, x, w, y)
         y = u:heading(x, w, y + 8 * s, "Lens")
         local l = type(g.lens) == "table" and g.lens or {}
         local known = g.available == true
+        -- Motion measured from the picture (<stem>.afp-motion): the lens and water it was measured with are its own. Its
+        -- lens's name as short as it reads: a tool's prefix ("lens_refine own:") and ".json" left out, the end kept
+        local measured = type(g.optical) == "table" and g.optical or nil
+        local measured_lens = measured and tostring(measured.lens or ""):gsub("^[^:]*:", ""):gsub("%.json$", ""):gsub("_", " ") or ""
+        if #measured_lens > 30 then measured_lens = "…" .. measured_lens:sub(-29) end
         local rows = { { "Camera", (l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or (g.lens and "unknown" or "…") },
-                       { "Profile", project and "From the project" or (not g.lens and "…") or l.lens == "in the file" and "From the file"
+                       { "Profile", project and "From the project" or measured and (measured_lens ~= "" and measured_lens or "As measured with")
+                           or (not g.lens and "…") or l.lens == "in the file" and "From the file"
                            or (l.lens or "") ~= "" and (l.lens:gsub("_", " "))
                            -- No profile: the lens type it was recorded in (or given) when it's named, and the camera's own
                            -- number for the mode, for trying lenses on it
-                           or l.type_label and ("Unknown (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("Unknown (mode " .. l.mode .. ")") or "Unknown" },
-                       { "Motion data", project and "Gyroflow project" or g.motion and "Gyro, in-camera stabilization off"
+                           or l.type_label and ("No ready lens (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("No ready lens (mode " .. l.mode .. ")") or "No ready lens" },
+                       { "Motion data", project and "Gyroflow project" or measured and ("Measured from the picture" .. (measured.in_water and ", in water" or ", in air"))
+                           or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
         for _, r in ipairs(rows) do
+            -- A value too long for the row beside its label (a profile's whole name): its end, where the mode is
+            local v = r[2]
+            if #v > 36 then
+                local from = #v - 33
+                while from <= #v and v:byte(from) >= 0x80 and v:byte(from) < 0xC0 do from = from + 1 end
+                v = "…" .. v:sub(from)
+            end
             u:text(x, y + 9 * s, r[1], { size = 13 })
-            u:text(x + w, y + 9 * s, r[2], { align = 6, size = 12, color = r[2]:find("^Unknown") and C.saved or C.dim })
+            u:text(x + w, y + 9 * s, v, { align = 6, size = 12, color = r[2]:find("^No ready lens") and C.saved or C.dim })
             y = y + 22 * s
         end
-        if not known and g.lens then
-            y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected. Picking one by hand comes later")
+        -- The lens for the clip's whole mode, chosen in the lens dialog (lensdialog.lua: the mode's lenses, with Find and
+        -- Estimate run on this clip, as the Library's); not for a clip whose camera wrote its lens into the file
+        local cands = type(l.candidates) == "table" and l.candidates or {}
+        local in_file = l.from == "file" or l.lens == "in the file"
+        if not project and not in_file and (l.camera or "") ~= "" then
+            u:text(x, y + 4 * s + 14 * s, "Lens for the mode", { size = 13 })
+            local bw = 110 * s
+            u:button(x + w - bw, bw, y + 4 * s, "lens-choose", "Choose…", function() lensdlg.open(); set_popover(lensdlg.ID) end)
+            y = y + 4 * s + 34 * s
+            if l.from == "clip" then
+                y = u:caption(x, w, y, "Tried on this clip only: its mode's other clips keep theirs. Choose… makes it the mode's, or forgets it",
+                              { color = C.saved })
+            else
+                y = u:caption(x, w, y, ((l.from or "") == "" and "No ready lens: none is made for exactly this mode, with its readout. " or "")
+                    .. "A lens chosen is kept for every clip of " .. tostring(l.mode_key or "this mode"))
+            end
         end
-        local water = (not project and index_of(WATER, g.underwater)) and g.underwater or nil
+        if not known and g.lens and #cands == 0 then
+            y = u:caption(x, w, y, "Without a lens profile the lens can't be corrected")
+        end
+        -- Measured motion plays in the medium it was measured in: that one shown
+        local water = measured and (measured.in_water and "yes" or "no") or (not project and index_of(WATER, g.underwater)) and g.underwater or nil
         y = u:select_row(x, w, y + 6 * s, "water", "Under water", choices(WATER, "script-message-to gyroflow underwater"), water,
                          { key = keys["script-binding gyroflow/above-water"], disabled = project or not known, text = project and "Project's" or nil,
                            saved = saved_input and (saved_input.underwater or "auto") or nil })
-        y = u:caption(x, w, y, project and "As defined in the Gyroflow project" or not known and "Needs a known lens"
+        y = u:caption(x, w, y, project and "As defined in the Gyroflow project"
+            or measured and ("The motion was measured " .. (measured.in_water and "in water" or "in air") .. ": it plays so. A change here is kept for when it's measured again")
+            or not known and "Needs a known lens"
             or ("Auto uses the camera's telemetry" .. (g.water and "" or " (this camera doesn't record it: the preset's)")
                 .. ". For a flat port (the camera's own glass, a flat housing); behind a dome port pick No"))
+        if measured then
+            if type(g.measuring) == "number" then
+                y = u:caption(x, w, y + 2 * s, string.format("Measuring the motion again… %d %%", math.floor(g.measuring * 100)))
+            else
+                y = u:button(x, w, y + 2 * s, "measure-again", "Measure the motion again", "script-binding gyroflow/measure-motion",
+                             { key = keys["script-binding gyroflow/measure-motion"] })
+            end
+        end
         y = u:button(x, w, y + 2 * s, "edit-lens", "Edit in Gyroflow…", "script-binding gyroflow/edit", { key = keys["script-binding gyroflow/edit"] })
     end
 
@@ -1052,7 +1115,7 @@ end
 local function filtering_note(g) return (g.filter or "") ~= "" end
 
 -- Where the transform is defined (a bundle saved for it, else the session's), Save, Revert, Use as default, Auto save,
--- a moment's or clip preview's own settings: the Transform's, and the underwater colour's (part of the same bundle)
+-- a moment's or clip preview's own settings
 local function view_card(u, x, w, y, ws)
     local s = u.s
     local status = ws and ws.view_status
@@ -1104,7 +1167,13 @@ local function transform_part(u, x, w, y)
     local stab_key = keys["script-binding gyroflow/toggle"]
     if not g.motion then
         y = u:select_row(x, w, y, "view", "Stabilization", views, "off", { disabled = true, key = stab_key })
-        y = u:caption(x, w, y, "No motion data in this clip: Gyroflow can find it in the picture (optical flow)")
+        y = u:caption(x, w, y, "No motion data in this clip: it can be measured in the picture (optical flow)")
+        if type(g.measuring) == "number" then
+            y = u:caption(x, w, y, string.format("Measuring the motion… %d %%", math.floor(g.measuring * 100)))
+        else
+            y = u:button(x, w, y, "measure", "Measure motion from the picture", "script-binding gyroflow/measure-motion",
+                         { key = keys["script-binding gyroflow/measure-motion"] })
+        end
         if g.waiting then y = u:caption(x, w, y, "Waiting for the project from Gyroflow…")
         else y = u:button(x, w, y, "edit", "Stabilize in Gyroflow…", "script-binding gyroflow/edit", { key = edit }) end
     else
@@ -1121,8 +1190,10 @@ local function transform_part(u, x, w, y)
         y = u:select_row(x, w, y + 2 * s, "level", "Level", choices(LEVELS, "script-message-to gyroflow level"), g.level,
                          { key = keys["script-binding gyroflow/level"], disabled = off, saved = saved and saved.level or nil })
         y = u:caption(x, w, y, LEVEL_NOTES[g.level] or "")
-        y = u:select_row(x, w, y + 2 * s, "horizon", "Horizon", choices(HORIZONS, "script-message-to gyroflow horizon-lock"), g.horizon_lock,
-                         { disabled = off, saved = saved and saved.horizon_lock or nil })
+        local optical = type(g.optical) == "table"
+        y = u:select_row(x, w, y + 2 * s, "horizon", "Horizon", choices(HORIZONS, "script-message-to gyroflow horizon-lock"), optical and "no" or g.horizon_lock,
+                         { disabled = off or optical, saved = (not optical and saved) and saved.horizon_lock or nil })
+        if optical then y = u:caption(x, w, y, "Motion measured from the picture has no gravity in it: no horizon to lock") end
     end
 
     -- The lens, apart from the stabilization: corrected in a projection, or as recorded; it needs a lens profile. Over a
@@ -1137,7 +1208,8 @@ local function transform_part(u, x, w, y)
     else
         local l = type(g.lens) == "table" and g.lens or {}
         local what = ((l.camera or "") ~= "" and (l.camera:gsub("^%s+", "")) or "The lens") .. (l.lens == "in the file" and " (from the file)" or "")
-        local water = g.underwater == "yes" and ", under water" or g.underwater == "auto" and ", under water as the camera says" or ", above water"
+        local water = type(g.optical) == "table" and (g.optical.in_water and ", under water (as measured)" or ", above water (as measured)")
+            or g.underwater == "yes" and ", under water" or g.underwater == "auto" and ", under water as the camera says" or ", above water"
         if project then
             what, water = chosen == "project" and "As the Gyroflow project has it" or "The project's lens correction, in this projection in place of its own", ""
         end
@@ -1287,11 +1359,11 @@ local function water_part(u, x, w, y)
     local c, ws = state("uwcolor"), state("workspace")
     if type(c) ~= "table" then return u:caption(x, w, y, "Needs the dlogm plugin") end
     if not local_file(mp.get_property("path")) then return u:caption(x, w, y, "Nothing plays") end
-    local saved = ws and type(ws.saved) == "table" and ws.saved or nil
     y = u:caption(x, w, y, "For plain SDR clips filmed under water (GoPro and the like): the green and the brown mud taken out, "
-                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. Part of the clip's transform",
+                  .. "the water blue and never purple, as light as Action 6's footage, shown in HDR. The source's, as its log curve",
                   { color = C.label })
-    y = view_card(u, x, w, y + 6 * s, ws)
+    local saved
+    y, saved = input_card(u, x, w, y + 6 * s, ws, mp.get_property("path"))
     local on = c.uw == true
     y = u:switch(x, w, y, "uw-on", "Correct underwater colour", on, "script-message-to dlogm uw-set uw toggle", keys["script-binding dlogm/uw-toggle"],
                  nil, saved and saved.uw)
@@ -1887,7 +1959,13 @@ local function draw(w, h, s, hovered, final)
     end
     rail_button(0, "support", "Support", function() choose("support") end, open and tab == "support", h - (8 + 36) * s)
     -- The list open over it all; closed when what it's for isn't there any more (another tab, the export started)
-    local where = u:popover(t0 + 8 * s, h - 8 * s, seen)
+    local where
+    if popover == lensdlg.ID then
+        u.pending = nil
+        where = lensdlg.draw(u, state("gyroflow") or {}, w - width(s), h, t0, function() set_popover(nil) end)
+    else
+        where = u:popover(t0 + 8 * s, h - 8 * s, seen)
+    end
     shown_list = u.shown_list
     if not where and popover then set_popover(nil) end
     return u
@@ -2040,6 +2118,11 @@ end
 local function wheel(dir)
     return function(info)
         if info.event == "up" then return end
+        -- The lens dialog scrolls its list
+        if popover == lensdlg.ID then
+            if dir == 1 or dir == -1 then lensdlg.wheel(dir) end
+            return render()
+        end
         -- The list open closes as the panel scrolls; over the video (the mouse is the panel's while it's open), that's all
         if popover then
             set_popover(nil)
@@ -2120,6 +2203,7 @@ end
 local LIST_KEYS = { { "UP", "popover-up" }, { "DOWN", "popover-down" }, { "ENTER", "popover-enter" }, { "KP_ENTER", "popover-kp-enter" } }
 
 local function list_move(dir)
+    if popover == lensdlg.ID then lensdlg.move(dir); return update() end
     local l = shown_list
     if not l then return end
     local rows = {}
@@ -2135,6 +2219,10 @@ local function list_move(dir)
 end
 
 local function list_enter()
+    if popover == lensdlg.ID then
+        if lensdlg.enter() then set_popover(nil) end
+        return update()
+    end
     local l = shown_list
     local at = popover_focus
     if l and at == nil then at = l.chosen end

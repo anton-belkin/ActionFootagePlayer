@@ -241,6 +241,7 @@ put mpv/scripts/gyroflow/gestures.lua "$GYROFLOW/gestures.lua" 644
 put mpv/scripts/gyroflow/quality.lua "$GYROFLOW/quality.lua" 644
 put mpv/scripts/gyroflow/exportsettings.lua "$GYROFLOW/exportsettings.lua" 644
 put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
+put mpv/scripts/gyroflow/measure.lua "$GYROFLOW/measure.lua" 644
 put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/dnstep.lua "$GYROFLOW/dnstep.lua" 644
 put mpv/scripts/gyroflow/gyroflow.vpy "$GYROFLOW/gyroflow.vpy" 644
@@ -286,6 +287,7 @@ put mpv/scripts/side-panel/navkeys.lua "$PANEL/navkeys.lua" 644
 put mpv/scripts/side-panel/timeline.lua "$PANEL/timeline.lua" 644
 put mpv/scripts/side-panel/exportkind.lua "$PANEL/exportkind.lua" 644
 put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
+put mpv/scripts/side-panel/lensdialog.lua "$PANEL/lensdialog.lua" 644
 put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
 put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
 put mpv/scripts/side-panel/scrub.lua "$PANEL/scrub.lua" 644

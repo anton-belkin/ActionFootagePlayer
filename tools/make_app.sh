@@ -102,7 +102,7 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 install -m 644 luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 install -m 644 mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 install -m 644 mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
@@ -112,7 +112,7 @@ install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/tele
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
-install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
 install -m 644 mpv/scripts/side-panel/scrub.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"

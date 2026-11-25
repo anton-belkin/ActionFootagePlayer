@@ -218,7 +218,7 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
     mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-gpu-table.exe gyroflow-export.exe afp-cut.exe afp-meta.exe afp-catalog.exe gyroflow-optical.exe; do
@@ -228,7 +228,7 @@ cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$
 cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 cp mpv/scripts/side-panel/navkeys.lua "$panel/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
-cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
 # The seek bar's pictures: scrub.lua, without its helper here yet. afp-scrub (tools/scrub/afp-scrub.c) needs libav's
 # DLLs, which this mpv (built statically) doesn't have beside it, and its IPC over mpv's named pipe; until then the bar
 # has no pictures on Windows

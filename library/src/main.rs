@@ -91,6 +91,9 @@ struct Job {
     request: Value,
     /// Share: where the selection goes, and each item's state (share.rs)
     share: Option<share::Share>,
+    /// Find lens / Estimate lens: what was found for each clip (gyroflow-optical's status "results")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    results: Option<Value>,
 }
 
 // The batch running: the player, the files it talks through, and macOS's caffeinate keeping the Mac awake meanwhile
@@ -126,6 +129,9 @@ struct Inner {
     moving: Option<Moving>,
     // Moved (its catalog with it): its next watch looks at its folder again before the views read the catalog
     moved_to: Option<PathBuf>,
+    // Clips Stabilize optically measured (their .afp-motion beside them): their probe's answer worked out again (it
+    // says how they're stabilized now), by the worker that has the probes
+    measured: Vec<String>,
 }
 
 // How far a move of the project's files is: bytes copied of all (a move on one disk is a rename: nothing to count),
@@ -638,7 +644,7 @@ fn start_job(inner: &mut Inner) {
     let _ = std::fs::remove_file(dir.join("stop"));
     let started = std::fs::create_dir_all(&dir).map_err(|e| e.to_string())
         .and_then(|_| std::fs::write(&request, req.to_string()).map_err(|e| e.to_string()))
-        .and_then(|_| if job.kind == "optical" { start_optical(&request, &log) } else { start_player(&request, &log, job.id) });
+        .and_then(|_| if job.kind == "optical" || job.kind.starts_with("lens-") { start_optical(&request, &log) } else { start_player(&request, &log, job.id) });
     journal::step("job-start", json!({ "job": job.id, "kind": job.kind, "ok": started.is_ok(), "waited_ms": None::<f64> }));
     match started {
         Ok(child) => {
@@ -684,6 +690,7 @@ fn read_status(job: &mut Job, dir: &Path) -> bool {
             Some((p.first()?.as_str()?.to_string(), p.get(1).and_then(Value::as_str).unwrap_or("").to_string()))
         }).collect();
     }
+    if let Some(r) = st.get("results") { job.results = Some(r.clone()); }
     true
 }
 
@@ -712,11 +719,13 @@ fn tick(inner: &mut Inner) {
                     it.state = if it.name == now { "rendering" } else { "waiting" }.into();
                 }
             }
-            // Stabilize optically: each clip's Gyroflow project, told to the catalog as it lands (the views read it: the
-            // clip's motion data and badge change then; gyroflow-optical tells no one)
-            if job.made_paths.len() > had {
+            // Stabilize optically: each clip's motion file, told to the catalog as it lands, and the clip's probe asked
+            // again (the views read them: the clip's motion data and badge change then; gyroflow-optical tells no one)
+            let made_now = job.made_paths.len().saturating_sub(had);
+            if made_now > 0 {
                 let made = job.made_paths[had..].to_vec();
-                std::thread::spawn(move || seen::note_now(&optical_projects(&made)));
+                inner.measured.extend(made.iter().cloned());
+                std::thread::spawn(move || seen::note_now(&optical_files(&made)));
             }
             if let Some(status) = exited {
                 finished = true;
@@ -724,7 +733,7 @@ fn tick(inner: &mut Inner) {
                     job.state = if run.stop_asked.is_some() { JobState::Stopped } else { JobState::Failed };
                     if job.state == JobState::Failed {
                         let log = run.dir.join("log.txt");
-                        job.message = Some(if job.kind == "optical" {
+                        job.message = Some(if job.kind == "optical" || job.kind.starts_with("lens-") {
                             std::fs::read_to_string(&log).ok().and_then(|t| t.lines().rev().find(|l| !l.trim().is_empty()).map(str::to_string))
                                 .unwrap_or_else(|| format!("gyroflow-optical stopped ({status})"))
                         } else {
@@ -735,7 +744,7 @@ fn tick(inner: &mut Inner) {
             } else if !has_status && run.started.elapsed() > START_TIMEOUT {
                 let _ = run.child.kill();
                 job.state = JobState::Failed;
-                job.message = Some(if job.kind == "optical" { "gyroflow-optical didn't start".into() } else { "ActionFootagePlayer didn't start the batch".into() });
+                job.message = Some(if job.kind == "optical" || job.kind.starts_with("lens-") { "gyroflow-optical didn't start".into() } else { "ActionFootagePlayer didn't start the batch".into() });
             } else if run.stop_asked.is_some_and(|t| t.elapsed() > STOP_TIMEOUT) {
                 let _ = run.child.kill();
             }
@@ -775,12 +784,9 @@ fn tick(inner: &mut Inner) {
 
 /// The Gyroflow projects gyroflow-optical put beside these clips (<stem>.gyroflow, or <name.ext>.gyroflow when that's
 /// the one it replaced)
-fn optical_projects(clips: &[String]) -> Vec<PathBuf> {
-    clips.iter().flat_map(|c| {
-        let c = Path::new(c);
-        let name = c.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        [c.with_extension("gyroflow"), c.with_file_name(format!("{name}.gyroflow"))]
-    }).filter(|g| g.is_file()).collect()
+/// The motion files Stabilize optically wrote beside these clips (vs-gyroflow's afp_motion.rs: <stem>.afp-motion)
+fn optical_files(clips: &[String]) -> Vec<PathBuf> {
+    clips.iter().map(|c| Path::new(c).with_extension("afp-motion")).filter(|g| g.is_file()).collect()
 }
 
 fn stop_all(inner: &mut Inner) {
@@ -1151,7 +1157,10 @@ async fn probes_since(probes: State<'_, index::SharedProbes>, since: u64) -> Res
     // In the background: the window never waits on it (a share can take seconds)
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || -> Value {
-    probes.lock().unwrap().since(since)
+    let mut p = probes.lock().unwrap();
+    // A lens changed in the player (its lens database, not the project's files: no catalog change says so)
+    p.lens_list_check();
+    p.since(since)
 }).await.map_err(|e| e.to_string())
 }
 
@@ -1822,6 +1831,135 @@ async fn save_project_lens(probes: State<'_, index::SharedProbes>, path: String)
     }).await.map_err(|e| e.to_string())?
 }
 
+/// A lens of the clip's camera (gyroflow-probe --lens's "candidates" id) kept for the clip's whole mode in the player's
+/// own lens database (gyroflow-probe --assign-lens: vs-gyroflow's lens_db.rs); None: the one assigned taken away
+/// (--forget-lens). Every clip of that camera is read again. {"file", "mode", "lens"} or {"removed", "mode"}, and
+/// "again" (how many clips are read again)
+#[tauri::command]
+async fn assign_lens(probes: State<'_, index::SharedProbes>, path: String, id: Option<String>) -> Result<Value, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let probe = index::probe_tool(player().ok().as_deref()).ok_or("ActionFootagePlayer's gyroflow-probe isn't there")?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&probe);
+        match &id {
+            Some(id) => { cmd.arg("--assign-lens").arg(&path).arg(id); }
+            None => { cmd.arg("--forget-lens").arg(&path); }
+        }
+        cmd.stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't keep a lens for a mode: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        let camera = probes.lock().unwrap().get(&path).and_then(|a| a["camera"].as_str().map(String::from)).unwrap_or_default();
+        let again = if camera.is_empty() { 0 } else { probes.lock().unwrap().lens_saved_for(&camera, &before, None) };
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// One of what Find lens / Estimate lens found for a clip ("0".., "estimate") kept for its whole mode in the player's
+/// own lens database (gyroflow-optical --keep-lens: vs-gyroflow's lens_find::keep). The camera's clips are read again.
+/// {"file", "mode", "lens", "again"}
+#[tauri::command]
+async fn keep_found_lens(probes: State<'_, index::SharedProbes>, path: String, n: String) -> Result<Value, String> {
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let tool = optical_tool()?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--keep-lens").arg(&path).arg(&n).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't keep a lens found: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        let camera = probes.lock().unwrap().get(&path).and_then(|a| a["camera"].as_str().map(String::from)).unwrap_or_default();
+        let again = if camera.is_empty() { 0 } else { probes.lock().unwrap().lens_saved_for(&camera, &before, None) };
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// The lenses to choose from for a clip's mode, with what Find and Estimate said of each on it (gyroflow-optical --lenses:
+/// vs-gyroflow's lens_find::choices), for the lens dialog
+#[tauri::command]
+async fn lens_choices(path: String) -> Result<Value, String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let tool = optical_tool()?;
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--lenses").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't list a clip's lenses: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// A lens tried on one clip alone before its whole mode takes it (the lens dialog's Try on this clip): `how` "keep" (one
+/// Find or Estimate found, `what` its n) or "assign" (one of the mode's, `what` its id), its profile from
+/// gyroflow-optical --lens-for, kept in the clip's own file (`source.lens`, set_source: noted to the catalog); "forget"
+/// takes it away. The clip's probe read again
+#[tauri::command]
+async fn try_lens(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clip: String, path: String, how: String, what: Option<String>) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let lens = if how == "forget" { Value::Null } else {
+            let tool = optical_tool()?;
+            let mut cmd = Command::new(&tool);
+            cmd.arg("--lens-for").arg(&path).arg(&how).arg(what.as_deref().unwrap_or_default()).stdin(Stdio::null()).stderr(Stdio::null());
+            #[cfg(windows)]
+            { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+            let out = cmd.output().map_err(|e| e.to_string())?;
+            let v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+                .ok_or("This ActionFootagePlayer can't try a lens on one clip: update it")?;
+            if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+            v
+        };
+        let name = lens["name"].clone();
+        let change: serde_json::Map<String, Value> = [("lens".to_string(), lens)].into_iter().collect();
+        let problems = tags::set_source(&root, &[(clip.clone(), change)]);
+        if let Some(p) = problems.first() { return Err(p.clone()); }
+        probes.lock().unwrap().forget(&[path.clone()]);
+        Ok(json!({ "lens": name }))
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// The lens tried on a clip made its whole mode's (gyroflow-optical --promote-lens: the player's own lens database), and
+/// taken away from the clip's own file (the mode's is the same now). The camera's clips are read again
+#[tauri::command]
+async fn promote_lens(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clip: String, path: String) -> Result<Value, String> {
+    let root = shared.lock().unwrap().project.clone().ok_or("Open a project first")?;
+    let probes = probes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || -> Result<Value, String> {
+        let tool = optical_tool()?;
+        let before = index::lens_list_stamp();
+        let mut cmd = Command::new(&tool);
+        cmd.arg("--promote-lens").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
+        #[cfg(windows)]
+        { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let mut v: Value = String::from_utf8_lossy(&out.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())
+            .ok_or("This ActionFootagePlayer can't give a clip's lens to its mode: update it")?;
+        if let Some(e) = v["error"].as_str() { return Err(e.to_string()); }
+        let change: serde_json::Map<String, Value> = [("lens".to_string(), Value::Null)].into_iter().collect();
+        let problems = tags::set_source(&root, &[(clip, change)]);
+        if let Some(p) = problems.first() { return Err(p.clone()); }
+        let camera = probes.lock().unwrap().get(&path).and_then(|a| a["camera"].as_str().map(String::from)).unwrap_or_default();
+        probes.lock().unwrap().forget(&[path.clone()]);
+        let again = if camera.is_empty() { 0 } else { probes.lock().unwrap().lens_saved_for(&camera, &before, None) };
+        v["again"] = json!(again);
+        Ok(v)
+    }).await.map_err(|e| e.to_string())?
+}
+
 /// The lens type of these clips (their paths in the tree), kept in each one's own file; None: as the camera recorded
 #[tauri::command]
 async fn set_lens_type(shared: State<'_, Shared>, probes: State<'_, index::SharedProbes>, clips: Vec<String>, lens_type: Option<String>) -> Result<Vec<String>, String> {
@@ -1849,6 +1987,10 @@ async fn set_source(shared: State<'_, Shared>, probes: State<'_, index::SharedPr
     let probes = probes.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
         let problems = tags::set_source(&root, &list);
+        // A lens type given or taken away changes the clip's lens: what the index knows of it is read again
+        let typed: Vec<String> = list.iter().filter(|(_, s)| s.contains_key("lens_type")).filter_map(|(t, _)| tags::clip_own(&root, t).ok())
+            .map(|(_, c)| c.display().to_string()).collect();
+        if !typed.is_empty() { probes.lock().unwrap().forget(&typed); }
         // The clips as they are now (changed.rs)
         changed::of_clips(&root, &list.iter().map(|(t, _)| t.clone()).collect::<Vec<_>>(), problems).with_probes(&probes)
     }).await.map_err(|e| e.to_string())
@@ -2451,7 +2593,7 @@ fn choose_project(app: tauri::AppHandle, shared: State<Shared>) -> Result<Option
     }
 }
 
-const KINDS: [&str; 8] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical"];
+const KINDS: [&str; 10] = ["clips", "clips-again", "clips-finish", "moments", "photos", "export", "render", "optical", "lens-find", "lens-estimate"];
 
 #[tauri::command]
 async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>, only: Option<Vec<String>>, label: Option<String>, journal: Option<String>) -> Result<(), String> {
@@ -2472,6 +2614,8 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
         "moments" => "Moments of all marks".to_string(),
         "photos" => format!("Photos of all marks ({})", match photo.as_str() { "live" => "Live Photos", "motion" => "Motion Photos", _ => "stills" }),
         "optical" => "Stabilize optically".to_string(),
+        "lens-find" => "Find lens".to_string(),
+        "lens-estimate" => "Estimate lens".to_string(),
         "render" => format!("Render ({})", options.get("profiles").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_else(|| "HDR".into())),
         _ => format!("Export all moments ({})", if sdr { "SDR" } else { "HDR" }),
     };
@@ -2502,12 +2646,17 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     if kind == "moments" { request["alone"] = json!(options.get("alone").and_then(Value::as_bool).unwrap_or(false)); }
     // The clips, by their paths in the project's tree: each one's file is the copy its own files are beside (the main
     // one, tags::clip_own), where its Gyroflow project goes. Redo: those with a project made again
-    if kind == "optical" {
+    if kind == "optical" || kind.starts_with("lens-") {
         let trees: Vec<&str> = options.get("clips").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).collect();
         let clips: Vec<String> = trees.iter().filter_map(|t| tags::clip_own(&root, t).ok()).map(|(_, clip)| clip.display().to_string()).collect();
-        if clips.is_empty() { return Err("Select clips to stabilize".into()); }
+        if clips.is_empty() { return Err("Select clips".into()); }
+        // Estimate lens: one clip (an estimate is of one stretch of one clip)
+        if kind == "lens-estimate" && clips.len() != 1 { return Err("Estimate lens is for one clip at a time".into()); }
         request["clips"] = json!(clips);
         request["redo"] = json!(options.get("redo").and_then(Value::as_bool).unwrap_or(false));
+        if kind.starts_with("lens-") { request["action"] = json!(kind.trim_start_matches("lens-").to_string() + "-lens"); }
+        // Find stopped at the first lens that fits (the lens dialog's Quick, on by default)
+        if kind == "lens-find" { request["quick"] = json!(options.get("quick").and_then(Value::as_bool).unwrap_or(true)); }
     }
     if kind == "render" {
         let profiles: Vec<String> = options.get("profiles").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
@@ -2519,7 +2668,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
     let job = Job {
         id: inner.next_id, kind, title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
         project, state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None,
+        failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None, results: None,
     };
     let follow = (job.kind == "clips").then(|| (job.project.clone(), job.project_name.clone()));
     inner.jobs.push(job);
@@ -2529,7 +2678,7 @@ async fn add_job(shared: State<'_, Shared>, kind: String, options: Option<Value>
             let request = json!({ "kind": "clips-finish", "project": project });
             let id = inner.next_id;
             inner.jobs.push(Job { id, kind: "clips-finish".into(), title: "Clip previews: their pictures".into(), project_name, project, state: JobState::Waiting,
-                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None });
+                                  done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request, share: None, results: None });
         }
     }
     tick(&mut inner);
@@ -2611,7 +2760,7 @@ async fn share(shared: State<'_, Shared>, items: Vec<Value>, dest: String, folde
             inner.jobs.push(Job { id, kind: "share".into(), title, project_name: root.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
                                   project: root.display().to_string(), state: JobState::Looking, done: 0, total: n as u64, failed: 0, made: None, fraction: None,
                                   current: None, message: None, failures: Vec::new(), left_out: Vec::new(), made_paths: Vec::new(), request: Value::Null,
-                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ..Default::default() }) });
+                                  share: Some(share::Share { dest: dest.clone(), folder: folder.display().to_string(), items: Vec::new(), ..Default::default() }), results: None });
             id
         };
         // The export's settings (the sheet's: size, encoding, quality), else the defaults
@@ -2794,9 +2943,11 @@ fn main() {
     });
     let probes_for_setup = probes.clone();
     let worker = shared.clone();
+    let probes_for_tick = probes.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(Duration::from_millis(300));
-        tick(&mut worker.lock().unwrap());
+        let measured = { let mut inner = worker.lock().unwrap(); tick(&mut inner); std::mem::take(&mut inner.measured) };
+        if !measured.is_empty() { probes_for_tick.lock().unwrap().forget(&measured); }
         share_collect(&worker);
     });
 
@@ -2838,7 +2989,7 @@ fn main() {
                                                  choose_local, save_local, clear_cache, move_project, run_check, find_moved, apply_moved,
                                                  choose_other, take_in_plan, take_in_run, set_tags, set_rating, set_pick, set_comment, sync_tags, save_tag_stores, rename_tag, recent_tags, lens_types, set_lens_type, set_source, delete_renders, clear_renders, delete_items,
                                                  export_library, mend, missing_links, catalog_look, catalog_care, geo::photos_access, geo::suggest_locations, geo::set_locations,
-                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens,
+                                                 geo::parse_location, geo::places_of, geo::open_map, geo::mini_map, lens_info, save_project_lens, assign_lens, keep_found_lens, lens_choices, try_lens, promote_lens,
                                                  rename_album, albums::album_add, albums::album_move, albums::album_copy, albums::photo_add, share,
                                                  journal::journal_write, journal::journal_hello])
         .on_window_event(move |window, event| {
@@ -3325,7 +3476,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: project.clone(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None, results: None,
         });
         let t0 = Instant::now();
         while inner.jobs[0].made_paths.is_empty() && t0.elapsed() < Duration::from_secs(20) { tick(&mut inner); std::thread::sleep(Duration::from_millis(50)); }
@@ -3382,7 +3533,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "optical".into(), title: "Stabilize optically".into(), project: dir.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "optical", "clips": ["/x/A.MP4", "/x/B.MP4"] }), share: None, results: None,
         });
         let t0 = Instant::now();
         let mut saw_running = false;
@@ -3411,7 +3562,7 @@ EOF\n").unwrap();
         inner.jobs.push(Job {
             id: 1, kind: "clips-again".into(), title: "t".into(), project: trip.to_string_lossy().into(), project_name: "trip".into(),
             state: JobState::Waiting, done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None,
-            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }), share: None,
+            failures: vec![], left_out: vec![], made_paths: vec![], request: json!({ "kind": "clips-again", "project": trip.to_string_lossy() }), share: None, results: None,
         });
         let t0 = Instant::now();
         // Done once the player has said so and quit
@@ -3478,6 +3629,7 @@ mod share_e2e {
                 failures: vec![], left_out: vec![], made_paths: vec![],
                 request: json!({ "kind": "share", "project": root.display().to_string(), "items": asked }),
                 share: Some(share::Share { dest: "folder".into(), folder: folder.display().to_string(), items: planned, ..Default::default() }),
+                results: None,
             });
         }
         let t0 = Instant::now();
@@ -3622,9 +3774,12 @@ mod audit {
         let loc = geo::location_value(27.9, 34.3, None, "manual", Some(&json!({ "country": "Egypt" })), None, None);
         assert!(geo::set_location(&p, &["Day 1/B.MP4".into()], Some(&loc)).is_empty());
         row("Location", item(&p, "footage", "Day 1/B.MP4")["own"]["location"]["lat"].to_string());
-        // Stabilize optically: a Gyroflow project beside the clip, told as the task's status names the clip
+        // A Gyroflow project saved beside the clip, told to the catalog
         std::fs::write(f.join("Day 1/B.gyroflow"), b"{}").unwrap();
-        seen::note_now(&optical_projects(&[fp("Day 1/B.MP4")]));
+        seen::note_now(&[f.join("Day 1/B.gyroflow")]);
+        // Stabilize optically: its motion file, told as the task's status names the clip
+        std::fs::write(f.join("Day 1/B.afp-motion"), b"x").unwrap();
+        assert_eq!(optical_files(&[fp("Day 1/B.MP4")]), vec![f.join("Day 1/B.afp-motion")]);
         row("Stabilize optically (.gyroflow)", item(&p, "footage", "Day 1/B.MP4")["gyroflow"].to_string());
         // Finder moves a clip (the catalog's own look sees it), then Mend: the moment's link follows
         std::fs::create_dir_all(f.join("Day 2")).unwrap();
@@ -3786,7 +3941,7 @@ mod e2e {
             let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
             inner.jobs.push(Job { id: 1, kind: kind.into(), title: kind.into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                                   done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                                  made_paths: Vec::new(), request, share: None });
+                                  made_paths: Vec::new(), request, share: None, results: None });
             let t = Instant::now();
             let (mut made_at, mut shown_at): (Vec<f64>, Vec<f64>) = (Vec::new(), Vec::new());
             let mut done_at = None;
@@ -3878,7 +4033,7 @@ mod live_e2e {
         let mut inner = Inner { project: Some(p.clone()), ..Default::default() };
         inner.jobs.push(Job { id: 1, kind: "moments".into(), title: "moments".into(), project: p.display().to_string(), project_name: "P".into(), state: JobState::Waiting,
                               done: 0, total: 0, failed: 0, made: None, fraction: None, current: None, message: None, failures: Vec::new(), left_out: Vec::new(),
-                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) , share: None });
+                              made_paths: Vec::new(), request: json!({ "kind": "moments", "project": p.display().to_string(), "alone": false }) , share: None, results: None });
         let moments = |p: &Path| index::scan(p, "moments", false)["items"].as_array().cloned().unwrap_or_default();
         let mut made_at = None;
         until("the moment made and in the view", Duration::from_secs(300), &mut || {

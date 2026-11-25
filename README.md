@@ -133,7 +133,7 @@ this reads):
 | DJI Osmo 360 (single-lens MP4) | should work (D-Log M) | should work (EIS off) | should work | should work | none: the camera doesn't mark them | should work |
 | Other DJI cameras (Action 4, Action 5 Pro, Pocket 3, ...) | not yet | should work (EIS off) | should work | not yet | should work: Action 4, Action 5 Pro | should work |
 | DJI drones | by hand (`Ctrl+l`): HDR from D-Log M or D-Log ⁴ | not yet | should work | not yet | | should work, with a project |
-| GoPro | **verified**: HDR from GP-Log (HERO12 Black on firmware 1.20+). Should work: HERO13 Black, and GP-Log2 (MISSION 1) ⁴ | **verified**: HERO12 Black (HyperSmooth off). Should work: the others | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
+| GoPro | **verified**: HDR from GP-Log (HERO12 Black on firmware 1.20+). Should work: HERO13 Black, and GP-Log2 (MISSION 1) ⁴ | **verified**: HERO12 Black (HyperSmooth off). HyperSmooth on: HERO12 Black rendered from the command line (on top of it, half the crop), not yet played in the app; should work: HERO13 Black. HERO11 and older: HyperSmooth off only | should work | should work: GPS and speed; exposure on one without GPS | should work: HERO5 and later | should work |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | by hand (`Ctrl+l`): HDR from 10-bit I-Log (X6, Luna) ⁴. Not yet: 8-bit I-Log | should work (FlowState off) | should work | not yet | not yet | should work |
 | Other cameras Gyroflow supports | | not yet | should work | not yet | | should work, with a project |
 
@@ -297,7 +297,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | Key | | `script-binding` |
 |---|---|---|
 | `Ctrl+g` | Stabilization on → on with a wider view (no zoom: the stabilized picture covers about as much of the window as the frame, whatever the lens; the edges show at times, filled as `Ctrl+b` says) → off. On or wider sticks for the next clips without a project; a clip with a `.gyroflow` starts in it as Gyroflow has it (the menu's On (Gyroflow project)), unless On, Wider or Off is saved for it | `gyroflow/toggle` |
-| `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
+| `Ctrl+k` | The level of a clip without a project: weak → medium → strong (10, 20, 30 % cropped, half that on top of a GoPro's HyperSmooth; smoothness 50, 75, 100 %; see Stabilization). It sticks for the next clips; a clip with a `.gyroflow` has the project's own | `gyroflow/level` |
 | `Ctrl+b` | What fills the edges the stabilized frame doesn't cover: the project's background, what was seen in that direction with the colors around spread in where nothing was yet, or only the frame's own colors spread out (see Stabilization); it sticks for the next clips | `gyroflow/edges` |
 | `Ctrl+u` | The lens above water or behind a dome port (no refraction), and back to under water with a flat port, as the camera says or set by hand, whichever it was (Source → Lens). The source's input: Source → Save to the source keeps it. A clip with a Gyroflow project has the project's | `gyroflow/above-water` |
 | `Ctrl+a` | Color fringes under water taken out, or left as recorded (Stabilization → Lens in the menu). Only where the lens is under water: above water no color moves either way, and the lens stays as `Ctrl+u` has it. It sticks for the next clips | `gyroflow/fringes` |
@@ -426,21 +426,68 @@ Clips with gyro data of their own, recorded with the camera's stabilization off,
 project: DJI with EIS off, GoPro with HyperSmooth off (tried on a HERO12 Black), and (not yet tried on a real clip, see
 Other cameras) Insta360 with FlowState off in the camera, when Gyroflow's database has their lens. Only when the camera recorded
 that it was off: footage the camera stabilized already gets worse stabilized again, so a clip that doesn't say
-plays as it is. These clips get Gyroflow's default preset
+plays as it is. One exception: a GoPro HERO12 or later with HyperSmooth on (any mode: On, Boost, AutoBoost,
+horizon leveling) records with each frame how HyperSmooth turned the picture, so its motion data is the picture's own
+and the player stabilizes what HyperSmooth left, with half the level's crop (HyperSmooth cropped for itself already:
+`vs-gyroflow/src/in_camera.rs`). The HERO11 and older play as they are with HyperSmooth on: Gyroflow's
+[GoPro page](https://docs.gyroflow.xyz/app/getting-started/supported-cameras/gopro) lists HyperSmooth as supported
+from the HERO8, but here it's taken only from the HERO12 on, the one tried (the HERO5-7 Black don't record the turn
+at all). These clips get Gyroflow's default preset
 and then `default.gyroflow`: yours in `~/Library/Application Support/ActionFootagePlayer/gyroflow/` if you put one
 there, else the plugin's (`~/.config/mpv/scripts/gyroflow/`, or in ActionFootagePlayer). Why a clip isn't stabilized is in mpv's log
 (`--msg-level=gyroflow=v`; for D-Log M, `--msg-level=dlogm=v`).
 
-**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the HERO12 Black does).
-Otherwise it comes from Gyroflow's database, picked the way you would pick it in Gyroflow's list. It must be the same
-camera, the same lens mode the camera recorded (GoPro: Wide, Linear, SuperView...) and the same aspect ratio. Of those,
-the player takes the one made for exactly this resolution, frame rate and HyperSmooth setting, else the same HyperSmooth
-setting, then the nearest resolution and frame rate, then an official profile, then the one with the most stars from
-Gyroflow's users (a profile they mostly voted down only when there's nothing else). Gyroflow itself loads a profile
-only on that exact match, and then the first of several, however it was rated. Source → Lens shows which one it took
-("Nearest: …" when it isn't made for exactly this mode). Clips with motion data get stabilized with it too, and clips
-without motion data (the camera's stabilization on) get their lens corrected on its own. The stars are a snapshot
-taken at build time (`tools/update_lens_ratings.sh`); the player reads nothing online.
+**The lens profile** comes from the clip when the camera recorded its lens there (DJI with EIS off, newer GoPros: the
+HERO12 Black does). Otherwise the player takes a lens by itself only when it's **made for exactly the clip's mode**:
+the same camera, lens mode, in-camera stabilization (GoPro's HyperSmooth, DJI's EIS), resolution and frame rate, with
+its rolling-shutter readout. A lens that only nearly fits is not taken (Anton's rule: the readout matters most on old
+cameras). Where it looks, in order:
+
+1. a lens type chosen for the clip;
+2. the lens in the file;
+3. **the player's own lens database**: profiles estimated from footage (built in, shown as "built in": HERO4 Black,
+   HERO3 White, HERO7 Black and Osmo Action 6 modes, Anton's lens_profiles#41) and lenses you assigned to a mode;
+4. the curated list's type for the mode;
+5. Gyroflow's database, only a profile whose identifier is exactly the clip's, with a readout, not voted down.
+
+Otherwise Source → Lens says **No ready lens** and offers the camera's lenses under **Lens for the mode**, the ones
+made for exactly this mode first. The Library's Info has the same choice. A lens chosen there is **kept for every
+clip of that mode** in `lenses/` beside your own lens list (below), with an `"afp"` block naming the mode; **Forget the
+lens assigned to this mode** takes it away. `gyroflow-probe --lens <clip>` shows where the lens came from (`from`),
+the clip's mode (`mode_key`) and the lenses to choose from (`candidates`); `--assign-lens <clip> <id>` and
+`--forget-lens <clip>` do the same as the panel.
+
+**The lens dialog.** Source → Lens → **Choose lens…** in the Library, and Source → Lens for the mode → **Choose…** in
+the player's side panel, open the same dialog: the lenses of the clip's camera mode, each with what Find and Estimate
+said of it on the clip (fits / not checked / not reliable / doesn't fit / not tried, its readout, how far the lens
+moved), **Find lens** and **Estimate lens** run from there on the clip (the player runs them itself, no Library needed),
+**Try on this clip** (this clip alone takes it, measured again with it and played so; its mode's other clips keep
+theirs) and **Use for the mode** (every clip of the mode takes it; the selected ones measured again). A lens tried on a
+clip is kept in its own file (`source.lens` in `<clip>.afp.json`, with its readout) and wins over its mode's wherever
+its lens is decided: the probe, measuring, playing, the GPU table and exports. Source → Lens says "Tried on this clip
+only"; in the dialog **Use for the mode** makes it the mode's, **Forget the lens tried on this clip** goes back to the
+mode's. One click selects a lens; in the player Up/Down move, Enter uses it for the mode, Esc closes.
+`gyroflow-optical --lenses <clip>` prints what it lists; `--try-lens <clip> keep <n> | assign <id> | forget` and
+`--promote-lens <clip>` do the same from the command line.
+
+**Find lens / Estimate lens** (Gyroflow's own "lens from the video", gyroflow/gyroflow#1296):
+- **Quick** (on by default; the dialog's switch, remembered; `gyroflow.conf` `lens_quick` in the player; `--quick` on
+  the command line): Find stops at the first lens that fits, a "good" verdict with a readout, trying the nearest
+  first (the lens in use, then those made for this frame size, then others). GOPR1585: 5 s instead of 15.
+- **Find lens** tries the known lenses of each clip's camera on three parts of it, in air and under water. Where a lens
+  has no readout, it measures one on the clip. About 15 s a clip.
+- **Estimate lens** makes a lens and its readout from one clip, then checks it on the other parts of the clip. Under a
+  minute.
+- What fits is listed, in Source → Lens and in the task's entry under Tasks, with **Use for this mode and measure
+  again**: it becomes the lens of every clip of that mode, and the selected clips of that mode measured from the
+  picture (or with no motion data) are measured again with it. A lens that
+  fits only loosely is shown as not reliable and isn't kept. Find leaves out a GoPro's Max Lens Mod profiles for a clip
+  recorded without the mod, and Estimate doesn't start from a lens Find found not to fit.
+- **Not for a clip with its lens in the file** (a GoPro from the HERO11, a DJI where the player takes the file's): that
+  is the camera's own calibration of the clip, so no lens is chosen, found or estimated for it (Source → Lens says so,
+  and the commands refuse).
+- From the command line: `gyroflow-optical --find-lens <clip>...`, `--estimate-lens <clip>`, `--keep-lens <clip> <n>`. The stars are a snapshot taken at build time
+(`tools/update_lens_ratings.sh`); the player reads nothing online.
 
 **Lens types, for cameras the database has nothing for.** Gyroflow's database has no Osmo Action 4/5/6 profiles; the
 Action 6 carries its lens in the file only in Wide with EIS off. Another Action camera's profile fits it, so a curated
@@ -452,10 +499,11 @@ camera recorded (the Action 6 writes its FOV mode in every clip, EIS on or off),
 number for it (DJI's fov_type), so a lens tried on such clips can be given that mode once it fits; a named type
 without a profile (Wide with EIS on) as "Unknown (Wide)".
 
-The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode and picks nothing,
-but its file's settings box (`udta/SETT`) has a number that looks like the mode: 0, 2 or 4, probably Wide, Medium and
-Narrow. Its clips show "Unknown (mode 0)" and so on until that's checked. Its one type, Wide, has the best-voted HERO4
-Black profile in Gyroflow's database (2.7K, by Mike Petrichenko), for clips given that type in the Library.
+The GoPro HERO4 Black is in the list too. It records no GPMF, so Gyroflow can't tell its lens mode, but its file's
+settings box (`udta/SETT`) has the mode: 0 is Wide and 2 is Medium (lenses estimated from Anton's footage confirm
+both); 4 (Narrow?) isn't named yet. Its types have no profile of their own: their lenses come from the player's own
+database, for exactly the clip's size and frame rate (Wide 1080p 59.94, 2.7K 59.94, 4K 29.97; Medium 2.7K at 23.98,
+29.97 and 59.94), else No ready lens.
 
 The drones are in it as well, with a focal length alone, since a drone straightens its picture itself and the
 gimbal holds it: the Mini 4 Pro and the Mavic Air 2 (FC3170) at 24 mm equivalent and the Mavic Pro (FC220) at 26 mm,
@@ -537,7 +585,7 @@ lens alone; the log has it), with Gyroflow's zoom off. The smoothing is Gyroflow
 to the crop: where the camera turns further than the crop has room for, the picture follows it sooner, so the
 edges show only when it turns that far, filled as `Ctrl+b` says. The wider view of `Ctrl+g` smooths as the level does.
 Switching levels smooths the clip again in a few milliseconds, while it plays (`vs-gyroflow/src/levels.rs`,
-`smoothing.rs`).
+`smoothing.rs`). On top of a GoPro's HyperSmooth (above) the crops are half as large: 5, 10 and 15 %.
 
 Because nothing in it depends on the whole clip, each moment only on the few seconds around it, a clip without a
 project plays from its first seconds of motion data: from a NAS in about a second, where reading all of it first took
@@ -966,19 +1014,36 @@ Project). Then, as buttons:
 - **Make photos**: photos of all marks, as stills, Live Photos (macOS) or Motion Photos;
 - **Export**: every moment not exported yet into `_Exports/`, each with its own settings, in HDR as recorded or in
   SDR, as `Shift+E` exports one.
-- **Stabilize optically** (Albums, Originals): for the selected clips whose motion the player can't take from the
-  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth, RockSteady), Gyroflow
-  measures it from the picture, and its project goes beside each clip (`<clip>.gyroflow`), where the player plays
-  with it. One clip at a time, about as long as the clip plays (4K30), half again as long at 4K60. Left out, and
-  listed with why: clips with motion data the player uses, with a Gyroflow project already, 360° clips, and clips
-  whose lens isn't known (no lens profile for that camera and mode). **Lens** chooses the lens type for the selected
-  clips where their camera has types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player uses it too); a
-  lens chosen, or **Redo**, makes the clips' Gyroflow projects again: their settings kept, the lens and the motion
-  measured anew. It needs [Gyroflow](https://gyroflow.xyz) 1.7.0 or newer, which has the optical analysis
-  ([its releases](https://github.com/gyroflow/gyroflow/releases)), found where Gyroflow installs itself, or by
-  `AFP_GYROFLOW`. Not the Mac App Store's copy: it's sandboxed and can't read clips another app hands it, so it's
-  passed over (the release's copy can sit beside it, in `~/Applications` say). Lens types of your own: *Your own
-  lens list*.
+- **Source Settings** (Albums, Originals, the side panel): how each selected original is read, as a list of its
+  attributes, each with what it is now (Mixed for several): the turn, the log curve, the underwater colour, the lens
+  (a lens chosen for the whole mode, Find / Estimate lens), the lens type, the lens under water, the motion data.
+  Change any of them and **Save**: for all the selected clips at once, where it applies. Each is a filter too.
+- **Stabilize optically** (Source Settings' Motion data): for the selected clips whose motion the player can't take from the
+  camera (none recorded, or recorded with the camera's own stabilization on: HyperSmooth on a HERO11 or older,
+  RockSteady), the motion is
+  measured from the picture (Gyroflow's own analysis, run by the player: no Gyroflow app needed) and kept beside each
+  clip in `<clip>.afp-motion`, where the player plays with it. One clip at a time, about a third as long as the clip
+  plays. Left out, and listed with why: clips with motion data the player uses, with a Gyroflow project (the project
+  plays), with their motion measured already (**Measure again** does those), 360° clips, and clips whose lens isn't known (no lens
+  profile for that camera and mode). **Lens type** (Source Settings) chooses the lens type for the selected clips where their camera has
+  types (Osmo Action 6: Wide, Normal; a DJI drone: its main camera, taken by itself), kept with each clip (the player
+  uses it too); **Measure again** measures the motion again. Lens types of your own: *Your own lens list*.
+
+  **Motion measured from the picture, without a project:** `<clip>.afp-motion` beside the clip keeps what Gyroflow's
+  analysis measured, with the lens, the rolling shutter and the water it was measured with. With one and no Gyroflow
+  project, the clip plays stabilized like a clip with gyro: the player's levels, frame and projection, its own
+  settings saved with it. The horizon lock is off and can't be turned on: motion measured from the picture has no
+  gravity in it. A Gyroflow project beside the clip still wins, and so does the clip's own motion data where the
+  player uses it (gyro with the camera's stabilization off, or a HERO12+ with HyperSmooth on): the `.afp-motion` is
+  then left aside, and the Library says so. Exports, moments and photos of such a clip are stabilized with it too.
+  A clip measured without its lens's rolling shutter (readout 0 while the lens has one: a built-in lens's readout
+  went unused before) says **Measured without the rolling shutter: measure again** (Source Settings and the Motion
+  data filter); `tools/list_readout_left_out.py <folder>` lists them without writing anything. `gyroflow-optical --from-project <clip>...` writes one
+  from the clip's project (nothing measured again), `gyroflow-optical --show <clip>...` prints what's in it.
+  **Ctrl+m** in the player (or the panel's *Measure motion from the picture*) measures the clip playing, and Library's
+  *Stabilize optically* the selected ones: Gyroflow's own analysis, run by the player, no Gyroflow app needed, about
+  three times faster than the clip plays. Design:
+  [docs/optical-without-gyroflow.md](docs/optical-without-gyroflow.md).
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
@@ -1217,11 +1282,11 @@ camera's metadata is read from (what has been tried: [What works, camera by came
 | DJI Osmo Action 6 | yes | D-Log M | yes | the `hglg` box, as ExifTool reads it from an Action 4, not seen |
 | DJI Osmo 360 | EIS off (`eis_status`), single-lens MP4, not seen | D-Log M, from its schema, not seen | from its schema, not seen | none |
 | Other DJI (Action 4, Action 5 Pro, Pocket 3, Osmo 360 II, ...) | EIS off (`eis_status`), not seen | not yet: `ColorMode` is read only where it was checked against the model's schema | no | Action 4, Action 5 Pro: as the Action 6, not seen |
-| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; played in the app on HERO12 Black clips, checked on GoPro's own sample clips, and on a HERO12 clip from the command line (HyperSmooth on: rightly not stabilized) | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip; GP-Log played in the app on a HERO12 Black clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
+| GoPro | HyperSmooth off (`EISA`/`EISE`), lens from Gyroflow's database; played in the app on HERO12 Black clips, checked on GoPro's own sample clips. HyperSmooth on, from the HERO12 (`MINF`) when the clip records how it turned the picture (`IORI` next to `CORI`; a HERO7 Black's has neither; HERO8-11 record it but play as recorded): its motion data is the picture's (`CORI` × `IORI`), stabilized with half the level's crop; rendered with `gyroflow-export` on HERO12 Black clips (HS EIS, HS AutoBoost), above and under water, not yet played in the app | GP-Log2: the Protune color, `PTCL` in `udta`'s GPMF, is `GPLOG2` (gpmf-parser's list; read as `NATURAL` on a HERO12, a GP-Log2 clip not seen). GP-Log is `LOG`, used with the camera (`MINF`) and firmware (`FIRM`): HERO12 Black on 1.20 or later and HERO13 Black, where GoPro's own LUTs put 18 % grey where Zeb Gardner's does (HERO12 Black 2.32 read from a clip; GP-Log played in the app on a HERO12 Black clip) | GPS, speed, exposure; checked on GoPro's sample clips, and the exposure on a HERO12 clip | `HMMT` in `udta` (HERO5, HERO6), `HLMT` in `udta`'s GPMF (HERO7 and later): checked on a HERO7 Black's header, no clip seen |
 | Insta360 single-lens MP4 (Ace Pro, GO 3, ...) | FlowState off in the camera (`is_flowstate_online`), not seen | 10-bit I-Log by hand (`Ctrl+l`): where Insta360 records it isn't known. 8-bit I-Log: no transform yet | no | not yet (telemetry-parser reads them) |
 
 The stabilization errs on the safe side: a clip is stabilized only when the camera recorded that its own was
-off, so a wrong guess about a camera means its clips play as they are, not worse.
+off (or, a GoPro, how it turned the picture), so a wrong guess about a camera means its clips play as they are, not worse.
 
 **Clips that would help**, straight from the camera (not exported or trimmed by an app: that drops the metadata):
 
@@ -1418,6 +1483,7 @@ mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a
 mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
 mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
 mpv/scripts/gyroflow/projectwatch.lua  Ctrl+e's watch on the Gyroflow project: when a save there is taken up
+mpv/scripts/gyroflow/measure.lua       Ctrl+m: the clip's motion measured from its picture into its .afp-motion
 mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
                               rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
                               ~/.config/mpv/scripts/view360, and in ActionFootagePlayer

@@ -3,7 +3,9 @@
 --
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
---       with HyperSmooth off and Insta360 ones with FlowState off in the camera, when Gyroflow has their lens):
+--       with HyperSmooth off, or on from a HERO12 or later, which records how it turned the picture: stabilized on top
+--       of it with less crop, vs-gyroflow/src/in_camera.rs; and Insta360 ones with FlowState off in the camera, when
+--       Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
 --       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
@@ -93,6 +95,7 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
+--   lens_quick=yes  the lens dialog's Find lens stops at the first lens that fits (Quick); no: tries every one
 --   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) wherever mpv can (mpv 0.42 or the
 --                app's, vo=gpu-next): macOS, Windows and Linux (tried on all three); no: always through VapourSynth
 --   gpu_flush=auto  an mpv without the app's patch 0015 keeps every shader the GPU path has had until its window
@@ -221,7 +224,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "", lens_quick = true }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -371,9 +374,13 @@ local function find_source(path, done)
                 if not preset and file_exists(p) then preset = p end
             end
         end
-        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
+        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by.
+        -- optical: its motion measured from the picture (<stem>.afp-motion beside it, gyroflow-probe's "measured"), with
+        -- no horizon in it to lock. in_camera: how the camera stabilized it itself (GoPro HERO12+ HyperSmooth), stabilized
+        -- further on top of it
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
-               rotation = tonumber(info.rotation) or 0 })
+               rotation = tonumber(info.rotation) or 0, optical = info.motion == "optical" and (type(info.measured) == "table" and info.measured or {}) or nil,
+               in_camera = type(info.stabilized_in_camera) == "string" and info.stabilized_in_camera or nil })
     end)
 end
 
@@ -657,6 +664,7 @@ local function take(b)
     -- & Quality's Off leaves it out whatever this says (still.lua)
     if type(b.denoise) == "boolean" then still.set(b.denoise) else still.set(session.denoise) end
     if dn_sync then dn_sync() end
+    if (current_source and current_source.optical) then horizon = false end
     return b.view == "off"
 end
 
@@ -680,6 +688,9 @@ local function clip_settings(source)
     frame.rotation = (r == 90 or r == 180 or r == 270) and r or 0
     if has_project(source) then
         horizon, underwater = nil, "project"
+    elseif (source and source.optical) then
+        -- The refraction the motion was measured with: the measured motion's own, as a project's
+        horizon, underwater = false, "project"
     else
         underwater = (UNDERWATER_LABELS[i.underwater] and i.underwater ~= "project") and i.underwater or default_underwater
     end
@@ -924,6 +935,9 @@ function publish()
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
+        -- Motion measured from the picture (gyroflow-probe's "measured": how, at, lens, in_water, readout_ms, frames,
+        -- measured_frames), false for any other
+        optical = current_source and current_source.optical or false,
         -- The session's bundle and the app's defaults (the workspace plugin fills and makes bundles with them)
         session = session, defaults = DEFAULTS,
         -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
@@ -937,7 +951,11 @@ function publish()
     if DATA and DATA ~= "" then
         local preset
         for _, p in ipairs(PRESETS) do if file_exists(p) then preset = p; break end end
-        local text = utils.format_json({ v = 1, defaults = DEFAULTS, edges = o.edges, edges_blur = o.edges_blur,
+        -- (the underwater colour's defaults with them: the dlogm plugin's uwcolor.conf)
+        local defaults = {}
+        for k, v in pairs(DEFAULTS) do defaults[k] = v end
+        for k, v in pairs(mp.get_property_native("user-data/uwcolor/defaults") or {}) do defaults[k] = v end
+        local text = utils.format_json({ v = 1, defaults = defaults, edges = o.edges, edges_blur = o.edges_blur,
                                          temporal_denoise = o.temporal_denoise, preset = preset })
         if text and text ~= PRESETS.defaults_written then
             local path = utils.join_path(DATA, "render-defaults.json")
@@ -1824,6 +1842,7 @@ local function add_filter(source, done)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
                 .. ((has_project(source) or filter_lens(source) == "only") and "" or ", " .. level)
+                .. (source.in_camera and (", on top of the camera's " .. source.in_camera) or "")
                 .. (filter_lens(source) == "only" and ", the lens alone corrected" or filter_lens(source) == "recorded" and ", the lens as recorded" or "")
                 .. ((horizon ~= nil and filter_lens(source) ~= "only") and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
     done()
@@ -2095,8 +2114,11 @@ mp.register_event("file-loaded", function()
                     if type(t) == "table" and t.id then label_of[t.id] = t.label or t.id end
                 end
                 local typ = type(info.type) == "string" and info.type or type(info.recorded) == "string" and info.recorded or nil
+                -- Where it comes from, the clip's mode as the player's own lens database keeps it, and the lenses to
+                -- choose for that mode (lens_pick::candidates)
                 current_lens = { camera = info.camera or "", lens = info.lens or "", mode = tonumber(info.mode),
-                                 type_label = typ and (label_of[typ] or typ) or nil }
+                                 type_label = typ and (label_of[typ] or typ) or nil, from = info.from or "", mode_key = info.mode_key,
+                                 candidates = type(info.candidates) == "table" and info.candidates or {} }
                 publish()
             end
         end)
@@ -2106,6 +2128,7 @@ mp.register_event("file-loaded", function()
         if filtering() then label = "Gyroflow: no motion data, the lens corrected" end
     elseif current_source and filtering() then
         label = "Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+                .. ((current_source.in_camera and not stab_off) and (", on top of " .. current_source.in_camera) or "")
                 .. (view == "wide" and ", wider view" or "")
     end
     if label then first_frame_message(label) end
@@ -2506,6 +2529,10 @@ end)
 -- Level (locked) or Free; "project", from before, as the preset has it
 mp.register_script_message("horizon-lock", function(value)
     if project_owns("the horizon") then return end
+    if (current_source and current_source.optical) then
+        return mp.notify({ id = "gyroflow:horizon", kind = "info", seconds = 4, title = "No horizon to lock",
+                           detail = "This clip's motion was measured from the picture: it has no gravity in it" })
+    end
     if value == "project" then value = DEFAULTS.preset_horizon end
     if value == "toggle" then
         horizon = not horizon
@@ -2522,6 +2549,13 @@ end)
 
 local function set_underwater(value)
     if value == "project" or project_owns("the lens") then return end
+    if (current_source and current_source.optical) then
+        -- Kept for the clip (the next measurement's medium), but the motion plays in the medium it was measured in
+        mp.commandv("script-message-to", "workspace", "input-set", "underwater", value)
+        local wet = current_source.optical.in_water == true
+        return mp.notify({ id = "gyroflow:water", kind = "info", seconds = 5, title = "Kept for the next measurement",
+                           detail = "The motion was measured " .. (wet and "in water" or "in air") .. ": it plays so until it's measured again" })
+    end
     underwater = value
     if value ~= "no" then underwater_back = value end
     -- Input: the source's correction, into its own file at once
@@ -2778,8 +2812,6 @@ mp.register_script_message("remember", function()
         for k, v in pairs(b) do session[k] = v end
         publish()
     end
-    -- The underwater colour's part of the transform (the dlogm plugin's uwcolor.conf)
-    mp.commandv("script-message-to", "dlogm", "uw-remember")
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
@@ -3057,3 +3089,7 @@ if o.render_args ~= "" then
     mp.register_event("playback-restart", function() mp.add_timeout(0.05, dump) end)
     mp.register_event("end-file", function() dump() end)
 end
+
+-- Ctrl+m: the clip's motion measured from its picture into its .afp-motion (measure.lua), then played again with it.
+-- Not a local here: this chunk has as many as Lua allows
+require('measure').setup({ source = function() return current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify, options = o })

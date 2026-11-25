@@ -247,7 +247,11 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
 - **Input**, how to read the source right, set once: `curve` (`auto`, or a curve by hand), `rotation` (0, 90, 180,
   270 clockwise, the turn it was recorded with, on top of the file's display matrix: Gyroflow's `video_rotation`,
   before the stabilization) and `underwater` (`auto`: the camera's telemetry; `yes`: under water with a flat port;
-  `no`: above water or a dome port). Kept only in the source's `.afp.json` (`source`), always all three. A change, from
+  `no`: above water or a dome port), and the underwater colour of a plain SDR clip (`uw` on or off, `uw_highlights`,
+  `uw_strength` 0..1 in hundredths: the dlogm plugin's uwcolor.lua, the panel's Underwater colour tab and Source's
+  Color; where the source has none, `uwcolor.conf`'s). The underwater colour takes out what the camera put in, so it's
+  the source's like the log curve (Anton, 2026-11-24; before, #273 kept it in the transform:
+  tools/one_off/uw_to_source.py moves it once). Kept only in the source's `.afp.json` (`source`), always all of them. A change, from
   the source or any moment or clip preview of it (`input-set`, the workspace plugin's), is for viewing until the
   Source tab's **Save to the source** (`input-save`) writes it; **Revert to saved** (`input-revert`) goes back
   (Anton, 2026-11-06: the input is saved by its own button, and the Transform tab's Save never writes it). Moments and
@@ -257,10 +261,8 @@ two kinds (`mpv/scripts/workspace/transform.lua`, tests/transform_test.lua):
   (`as-is`: as the source is, `landscape`, `portrait`; the W:H shown is worked out for each source's shape, so one
   bundle fits a vertical clip and a level one alike), `projection`, `lens` (`corrected`, `as-recorded`: apart from
   the stabilization; `off` with `corrected` is the lens alone, Gyroflow with nothing smoothed, also what a clip with a
-  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected),
-  and the underwater colour of a plain SDR clip (`uw` on or off, `uw_highlights`, `uw_strength` 0..1 in hundredths:
-  the dlogm plugin's uwcolor.lua, the panel's Underwater colour tab; its defaults in `uwcolor.conf`; not in a render's
-  recipe yet, exports don't do it). An `aspect` from before the orientation (9:16:
+  lens profile and no motion data plays with; a bundle from before the key: `off` as recorded, else corrected).
+  An `aspect` from before the orientation (9:16:
   the ratio as it showed) is that ratio turned, portrait. Kept only as a whole bundle, never a key alone: the
   source's (`.afp.json`'s `view`), or a moment's or clip preview's own (its link's `stab`, with settings of its own:
   `snap` for a moment, `own` for a clip preview, the panel's one switch). Levels, the topmost one there is plays and

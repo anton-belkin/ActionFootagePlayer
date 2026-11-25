@@ -32,6 +32,10 @@ pub struct Changed {
     pub reload: Vec<String>,
     /// What the clips are, for the items given (as a scan's `probes`)
     pub probes: Value,
+    /// Clips whose own file or measured motion changed elsewhere (the player's lens dialog: a lens tried on the
+    /// clip, the clip measured again): their probe answers are worked out again (with_probes)
+    #[serde(skip)]
+    pub probe_again: Vec<String>,
     /// What couldn't be done, in words (each names its file)
     pub problems: Vec<String>,
     /// The command's own answer (a renamed file's path, how many went to the Trash)
@@ -75,7 +79,7 @@ impl Changed {
         for it in self.items.get("moments").into_iter().flatten() { if let Some(o) = it["original"].as_str() { want.push(o.to_string()); } }
         let off: BTreeSet<&str> = self.items.get("footage").into_iter().flatten().filter(|it| it["offline"].as_bool() == Some(true)).filter_map(|it| it["path"].as_str()).collect();
         let ask: Vec<String> = want.iter().filter(|p| !off.contains(p.as_str())).cloned().collect();
-        self.probes = { let mut p = probes.lock().unwrap(); p.want(&ask); p.known(&want) };
+        self.probes = { let mut p = probes.lock().unwrap(); p.forget(&self.probe_again); p.want(&ask); p.known(&want) };
         self
     }
 
@@ -240,8 +244,14 @@ pub fn of_files(root: &Path, files: &[PathBuf]) -> Option<Changed> {
             // (one that came: the page doesn't know its id, and reads Footage again)
             if there.is_none() { return None; }
             by.entry("footage").or_default().insert(tree);
-        } else if lower.ends_with(".afp.json") || lower.ends_with(".marks.json") || lower.ends_with(".gyroflow") || lower.ends_with(".lrf") || lower.ends_with(".thm") {
-            for clip in beside(p, &|l| is_video(l) && !l.ends_with(index::LINK_EXT)) { if let Some(t) = tree_of(&clip) { by.entry("footage").or_default().insert(t); } }
+        } else if lower.ends_with(".afp.json") || lower.ends_with(".afp-motion") || lower.ends_with(".marks.json") || lower.ends_with(".gyroflow") || lower.ends_with(".lrf") || lower.ends_with(".thm") {
+            // The clip's own file (source.lens: a lens tried on it), its measured motion, its Gyroflow project: what
+            // the probe tells of it may have changed
+            let again = lower.ends_with(".afp.json") || lower.ends_with(".afp-motion") || lower.ends_with(".gyroflow");
+            for clip in beside(p, &|l| is_video(l) && !l.ends_with(index::LINK_EXT)) {
+                if let Some(t) = tree_of(&clip) { by.entry("footage").or_default().insert(t); }
+                if again { let c2 = clip.display().to_string(); if !c.probe_again.contains(&c2) { c.probe_again.push(c2); } }
+            }
         }
     }
     if by.values().map(|s| s.len()).sum::<usize>() > 300 { return None; }
@@ -361,6 +371,23 @@ mod tests {
         assert_eq!(c.items["footage"][0]["tags"], json!(["player"]));
         assert_eq!(c.items["moments"][0]["renders"], json!({ "HDR": "stale" }));
         same_as_a_reading(p, &c, &[("footage", &clip2), ("moments", &new)], "from elsewhere");
+        // The clip's own file written elsewhere (a lens tried on it in the player): its probe answer asked again
+        assert_eq!(c.probe_again, vec![r.f.join(&clip2).display().to_string()]);
+        // …and its measured motion (measured again in the player): an answer worked out before goes stale, also for
+        // a Library that wasn't running then (the answer remembers what the catalog had beside the clip)
+        let clip_path = r.f.join(&clip2).display().to_string();
+        let probes: SharedProbes = Default::default();
+        probes.lock().unwrap().put(&clip_path, json!({ "mode": null }));
+        probes.lock().unwrap().want(std::slice::from_ref(&clip_path));
+        assert_eq!(probes.lock().unwrap().since(0)["pending"], json!(0), "known and unchanged: not asked");
+        let motion = r.f.join(&clip2).with_extension("afp-motion");
+        std::fs::write(&motion, b"motion").unwrap();
+        seen::note_now(std::slice::from_ref(&motion));
+        probes.lock().unwrap().want(std::slice::from_ref(&clip_path));
+        assert_eq!(probes.lock().unwrap().since(0)["pending"], json!(1), "its motion measured since: asked again");
+        let c = of_files(p, std::slice::from_ref(&motion)).unwrap();
+        assert_eq!(c.probe_again, vec![r.f.join(&clip2).display().to_string()]);
+        assert_eq!(c.items["footage"].len(), 1);
         // …and what can't be said item by item: the project's file, a folder, a clip gone
         assert!(of_files(p, &[p.join(locations::PROJECT_FILE)]).is_none());
         assert!(of_files(p, &[p.join("_Moments/Trip 01")]).is_none());
