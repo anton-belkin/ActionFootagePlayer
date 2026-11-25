@@ -55,6 +55,11 @@ pub mod nas {
     /// How many questions were asked since the last `take` (stats, reads, writes), delayed or not
     static ASKED: [AtomicU64; 3] = [AtomicU64::new(0), AtomicU64::new(0), AtomicU64::new(0)];
     static FROM_ENV: std::sync::Once = std::sync::Once::new();
+    thread_local! {
+        /// The same, asked on this thread alone: for a test that counts its own questions while others run beside it
+        /// (ASKED counts every thread's; library's perf::renders_seen_from_the_catalog_are_the_disks, #325)
+        static HERE: [std::cell::Cell<u64>; 3] = const { [std::cell::Cell::new(0), std::cell::Cell::new(0), std::cell::Cell::new(0)] };
+    }
 
     /// Milliseconds a stat, a read (a folder listed, a file opened and read) and a write (a file written, renamed or
     /// removed) each take; zeros: as the disk is
@@ -68,6 +73,7 @@ pub mod nas {
             for (m, v) in MICROS.iter().zip(t.split(',')) { m.store((v.trim().parse::<f64>().unwrap_or(0.0) * 1000.0) as u64, Ordering::Relaxed); }
         });
         ASKED[i].fetch_add(1, Ordering::Relaxed);
+        HERE.with(|h| h[i].set(h[i].get() + 1));
         let us = MICROS[i].load(Ordering::Relaxed);
         if us > 0 { std::thread::sleep(std::time::Duration::from_micros(us)); }
     }
@@ -76,6 +82,8 @@ pub mod nas {
     pub fn write() { wait(2) }
     /// The questions asked since the last time: [stats, reads, writes]
     pub fn take() -> [u64; 3] { [0, 1, 2].map(|i| ASKED[i].swap(0, Ordering::Relaxed)) }
+    /// The questions asked on this thread since its last `take_here`: [stats, reads, writes]
+    pub fn take_here() -> [u64; 3] { HERE.with(|h| [0, 1, 2].map(|i| h[i].replace(0))) }
 }
 
 /// A temporary file's name beside `p`: hidden (walks leave it out), never the same twice
