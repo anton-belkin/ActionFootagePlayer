@@ -32,7 +32,7 @@ READERS = {
     "mpv/scripts/footage-menu/main.lua": LUA,
     "mpv/scripts/side-panel/main.lua": LUA,
     "vs-gyroflow/src/lists.rs": r'include_str!\("\.\./\.\./mpv/scripts/workspace/registry\.json"\)',
-    "vs-gyroflow/src/bin/gyroflow-export.rs": r"vs_gyroflow::lists::",
+    "vs-gyroflow/src/bin/gyroflow-export/main.rs": r"vs_gyroflow::lists::",
     "library/src/lists.rs": r'include_str!\("\.\./\.\./mpv/scripts/workspace/registry\.json"\)',
     "library/src/main.rs": r"js_init_script\(lists::page_script\(\)\)",
     "library/src/renders.rs": RUST,
@@ -40,7 +40,7 @@ READERS = {
     "library/src/index.rs": RUST,
     "library/src/checks.rs": RUST,
     "library/ui/share.js": JS,
-    "library/ui/app.js": JS,
+    "library/ui/source.js": JS,
     "library/ui/albums.js": JS,
     "library/ui-tests/lists.js": r'"registry\.json"',
     "library/ui-tests/page.js": r'require\("\./lists"\)',
@@ -65,7 +65,7 @@ ALLOWED = {
                                                "checked against the registry by registry.rs's test",
     ("catalog/src/range.rs", "log curves"): "the same: a match giving each curve a name kept for good (Range::Log), "
                                             "checked by registry.rs's test",
-    ("mpv/scripts/gyroflow/main.lua", "the bundle's keys"): "not a list: the warp's request and the plugin's options, by key "
+    ("mpv/scripts/gyroflow/controls.lua", "the bundle's keys"): "not a list: the options Use as default writes, by key "
                                                             "(tests/render_keys_test.py checks them against the registry)",
 }
 sources = files("mpv/scripts", [".lua"]) + files("vs-gyroflow/src", [".rs"]) + files("catalog/src", [".rs"]) \

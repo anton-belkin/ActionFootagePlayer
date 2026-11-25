@@ -5,7 +5,7 @@
 // scroll, what was selected in it, its search and filters. Choosing, searching and filtering inside a place are not
 // steps of their own. Its buttons are the bar's ‹ ›; the mouse's side buttons (button 3 Back, 4 Forward: WebKit on the
 // Mac and WebView2 on Windows both hand them to the page), ⌘[ ⌘] on the Mac and Alt+← Alt+→ on Windows do the same.
-// (app.js: renderMain notes the place it draws; S.hist, S.histAt)
+// (drawing.js: renderMain notes the place it draws; S.hist, S.histAt)
 
 const HIST_MAX = 200;
 function place() { return S.view + "\u0000" + (S.view === "clip" ? S.clip : S.path.join("/")); }

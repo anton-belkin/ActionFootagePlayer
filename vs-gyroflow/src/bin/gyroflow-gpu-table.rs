@@ -42,7 +42,7 @@ use gyroflow_core::stabilization::Stabilization;
 use nalgebra::Vector2;
 use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 
-/// The player's GPU path (mpv/scripts/gyroflow/main.lua): `--player <json> <out.glsl> [--server <socket>]`, the JSON
+/// The player's GPU path (mpv/scripts/gyroflow/gpupath.lua): `--player <json> <out.glsl> [--server <socket>]`, the JSON
 /// main.lua hands the VapourSynth filter plus input_width/height, interpolation, chromatic (on/off), edges and
 /// edges_blur. Writes the shader and prints one JSON line: { shader, output: [w, h], mode, chromatic, ms } or
 /// { unsupported: why } or { error }. With a server (--serve) listening, it answers: the clip is loaded there already

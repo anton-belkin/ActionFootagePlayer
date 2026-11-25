@@ -169,6 +169,7 @@ done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/settings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
+    mpv/scripts/gyroflow/sources.lua mpv/scripts/gyroflow/framing.lua mpv/scripts/gyroflow/denoise.lua mpv/scripts/gyroflow/translation.lua mpv/scripts/gyroflow/bundle.lua mpv/scripts/gyroflow/shaders.lua mpv/scripts/gyroflow/gpupath.lua mpv/scripts/gyroflow/camera360.lua mpv/scripts/gyroflow/play.lua mpv/scripts/gyroflow/controls.lua mpv/scripts/gyroflow/gyroflowapp.lua \
     mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
 for f in gyroflow-probe.exe gyroflow-project.exe gyroflow-gpu-table.exe gyroflow-export.exe afp-cut.exe afp-meta.exe afp-catalog.exe gyroflow-optical.exe; do
@@ -187,6 +188,7 @@ cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
 cp mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
 cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua mpv/scripts/workspace/projectcache.lua mpv/scripts/workspace/longpath.lua mpv/scripts/workspace/tags.lua mpv/scripts/workspace/librarylist.lua mpv/scripts/workspace/journal.lua mpv/scripts/workspace/registry.lua mpv/scripts/workspace/registry.json "$workspace/"
+cp mpv/scripts/workspace/places.lua mpv/scripts/workspace/catalogtool.lua mpv/scripts/workspace/common.lua mpv/scripts/workspace/trash.lua mpv/scripts/workspace/momentlist.lua mpv/scripts/workspace/opening.lua mpv/scripts/workspace/momentsave.lua mpv/scripts/workspace/clippreviews.lua mpv/scripts/workspace/cutout.lua mpv/scripts/workspace/viewsave.lua mpv/scripts/workspace/marksjob.lua mpv/scripts/workspace/renders.lua mpv/scripts/workspace/tagging.lua mpv/scripts/workspace/inbox.lua mpv/scripts/workspace/batch.lua "$workspace/"
 cp mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/recording.lua mpv/scripts/view360/view360.glsl "$view360/"
 
 echo "== ffmpeg"

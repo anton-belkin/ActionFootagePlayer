@@ -29,6 +29,13 @@
 //                              HLG's nominal peak, 1000 nits (system gamma 1.2), the same light as the HLG; with HDR10's
 //                              static metadata (mastering display 1000 nits, MaxCLL 1000) for the TV's own mapping
 //     --realtime               no faster than the clip's own rate
+//     -behind <n>              the shaders show the frame n behind the newest one they're given (the temporal denoise's
+//                              gyroflow_dn_after, warp.glsl's dn_ passes: it takes the frames after the shown one too):
+//                              decoding starts 2n+10 frames before -ss (the frames before it, its noise measured), each
+//                              output frame is the one shown, with its time, and after the clip's last frame that frame
+//                              is given n more times, as gyroflow-export's GPU path does. -every then encodes every n-th
+//                              frame shown, but all are rendered (the denoise needs them in a row)
+//     -set <name>=<value>      a shader's parameter (//!PARAM) set before the first frame, e.g. gyroflow_dn_radius=3
 //
 // Build: cc -O2 afp-render.c -o afp-render $(pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm)
 
@@ -124,9 +131,141 @@ static char *read_file(const char *path, size_t *len)
     return buf;
 }
 
+// Frames in flight: rendered, waiting for the GPU before the encoder takes them; their decoded sources held until then
+#define DEPTH 3
+// -behind: the times of the frames rendered, enough of them back
+#define HIST 64
+
+// What each frame's render needs (main sets it up), and where the frames are
+struct render {
+    pl_renderer rr; struct pl_render_params params; AVBufferRef *ef; int W, H;
+    struct pl_color_space color, color_out; struct pl_color_repr repr_out; bool hlg, pq;
+    union pl_var_data *pts_vars[16]; int npts;
+    double start, duration, offset, fps; int every, behind;
+    AVCodecContext *ec; AVFormatContext *oc; AVStream *ovs; AVPacket *opkt;
+    // (emit: encoded; else a render only the shaders' own state needed: its frame dropped once the GPU is done with it)
+    struct { AVFrame *src, *out; pl_tex tex; bool emit; } queue[DEPTH]; int qn;
+    // The times of the frames rendered (nin of them), the last frame shown, and how many were encoded
+    double hist[HIST]; int64_t nin; double last_shown; int64_t frames; double tstart;
+};
+
+static void drain_one(struct render *r)
+{
+    while (pl_tex_poll(gpu, r->queue[0].tex, UINT64_MAX)) ;
+    if (r->queue[0].emit && avcodec_send_frame(r->ec, r->queue[0].out) < 0) DIE("encoding failed");
+    av_frame_free(&r->queue[0].out); av_frame_free(&r->queue[0].src);
+    memmove(&r->queue[0], &r->queue[1], sizeof(r->queue[0]) * (DEPTH - 1)); r->qn--;
+    while (avcodec_receive_packet(r->ec, r->opkt) == 0) {
+        if (!r->opkt->duration) r->opkt->duration = 1;
+        av_packet_rescale_ts(r->opkt, r->ec->time_base, r->ovs->time_base);
+        r->opkt->stream_index = r->ovs->index;
+        av_interleaved_write_frame(r->oc, r->opkt);
+    }
+}
+
+// One frame through the shaders, at its time `pts` (the file's, from its start). The frame that comes out is the one
+// the shaders show: this one, or with -behind the one that many before the newest (the first one while fewer are in,
+// as warp.glsl's dn_window has it). It's encoded, at its own time, when it's one of the render's (from -ss, for -t,
+// each n-th with -every) and not the same as the last one; else it was rendered only for the shaders' own state
+static void render(struct render *r, AVFrame *f, double pts)
+{
+    double fps = r->fps;
+    r->hist[r->nin % HIST] = pts;
+    double shown = r->hist[(r->nin - (r->nin < r->behind ? r->nin : r->behind)) % HIST];
+    r->nin++;
+    bool emit = shown >= r->start - 0.5 / fps && shown > r->last_shown + 0.5 / fps && (r->duration <= 0 || shown < r->start + r->duration)
+        && (!r->behind || r->every == 1 || llround((shown - r->start) * fps) % r->every == 0);
+    if (emit) r->last_shown = shown;
+
+    // The shaders find the frame by mpv's PTS: the file's time from its start
+    for (int i = 0; i < r->npts; i++) r->pts_vars[i]->f = (float) (pts - r->offset);
+    VASurfaceID sid = (VASurfaceID) (uintptr_t) f->data[3];
+    vaSyncSurface(va, sid);
+    pl_tex *src_tex = map_surface(0, sid, f->width, f->height, false);
+    AVFrame *of = av_frame_alloc();
+    if (av_hwframe_get_buffer(r->ef, of, 0) < 0) DIE("no encoder surface");
+    VASurfaceID oid = (VASurfaceID) (uintptr_t) of->data[3];
+    pl_tex *dst_tex = map_surface(1, oid, r->W, r->H, true);
+
+    struct pl_frame src = {
+        .num_planes = 2,
+        .planes = {
+            { .texture = src_tex[0], .components = 1, .component_mapping = { PL_CHANNEL_Y } },
+            { .texture = src_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
+        },
+        .repr = { .sys = r->hlg ? PL_COLOR_SYSTEM_BT_2020_NC : pl_system_from_av(f->colorspace), .levels = pl_levels_from_av(f->color_range),
+                  .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 } },
+        .color = r->color,
+    };
+    if (src.repr.sys == PL_COLOR_SYSTEM_UNKNOWN) src.repr.sys = PL_COLOR_SYSTEM_BT_709;
+    if (src.repr.levels == PL_COLOR_LEVELS_UNKNOWN) src.repr.levels = PL_COLOR_LEVELS_LIMITED;
+    pl_frame_set_chroma_location(&src, PL_CHROMA_LEFT);
+    struct pl_frame dst = {
+        .num_planes = 2,
+        .planes = {
+            { .texture = dst_tex[0], .components = 1, .component_mapping = { PL_CHANNEL_Y } },
+            { .texture = dst_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
+        },
+        .repr = r->repr_out,
+        .color = r->color_out,
+    };
+    pl_frame_set_chroma_location(&dst, PL_CHROMA_LEFT);
+    if (!pl_render_image(r->rr, &src, &dst, &r->params)) DIE("rendering failed");
+    pl_gpu_flush(gpu);
+
+    // The clip's own time: segments of renders from different points fit one playlist
+    AVCodecContext *ec = r->ec;
+    of->pts = av_rescale_q((int64_t) llround((shown - r->offset) * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
+    of->color_primaries = ec->color_primaries; of->color_trc = ec->color_trc; of->colorspace = ec->colorspace; of->color_range = AVCOL_RANGE_MPEG;
+    if (r->hlg && r->pq) {
+        // HDR10's static metadata, as SEI (hevc_vaapi writes it from the frame's side data): a mastering display of
+        // BT.2020 primaries and D65 at 0.005-1000 nits, MaxCLL 1000 (HLG's nominal peak), MaxFALL unknown (0)
+        AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(of);
+        if (md) {
+            const double prim[3][2] = { { 0.708, 0.292 }, { 0.170, 0.797 }, { 0.131, 0.046 } };
+            for (int c = 0; c < 3; c++) { md->display_primaries[c][0] = av_d2q(prim[c][0], 50000); md->display_primaries[c][1] = av_d2q(prim[c][1], 50000); }
+            md->white_point[0] = av_d2q(0.3127, 50000); md->white_point[1] = av_d2q(0.3290, 50000);
+            md->max_luminance = av_make_q(1000, 1); md->min_luminance = av_make_q(50, 10000);
+            md->has_primaries = 1; md->has_luminance = 1;
+        }
+        AVContentLightMetadata *cll = av_content_light_metadata_create_side_data(of);
+        if (cll) { cll->MaxCLL = 1000; cll->MaxFALL = 0; }
+    }
+    if (r->qn == DEPTH) drain_one(r);
+    r->queue[r->qn].src = av_frame_clone(f);
+    r->queue[r->qn].out = of;
+    r->queue[r->qn].tex = dst_tex[1];
+    r->queue[r->qn].emit = emit;
+    r->qn++;
+    if (emit && ++r->frames % 120 == 0)
+        fprintf(stderr, "afp-render: %lld frames, %.1f fps\n", (long long) r->frames, r->frames / (now() - r->tstart));
+}
+
+// A shader parameter set by name (-set): every hook that has it
+static void set_param(const struct pl_hook **hooks, int nhooks, const char *assign)
+{
+    const char *eq = strchr(assign, '=');
+    if (!eq) DIE("-set wants name=value: %s", assign);
+    int found = 0;
+    for (int i = 0; i < nhooks; i++)
+        for (int p = 0; p < hooks[i]->num_parameters; p++) {
+            const struct pl_hook_par *par = &hooks[i]->parameters[p];
+            if (strlen(par->name) != (size_t) (eq - assign) || strncmp(par->name, assign, eq - assign)) continue;
+            switch (par->type) {
+            case PL_VAR_FLOAT: par->data->f = (float) atof(eq + 1); break;
+            case PL_VAR_SINT: par->data->i = atoi(eq + 1); break;
+            case PL_VAR_UINT: par->data->u = (unsigned) strtoul(eq + 1, NULL, 10); break;
+            default: DIE("-set: %.*s isn't a number", (int) (eq - assign), assign);
+            }
+            found++;
+        }
+    if (!found) DIE("-set: no shader has the parameter %.*s", (int) (eq - assign), assign);
+}
+
 int main(int argc, char **argv)
 {
     int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; int every = 1; const char *bitrate = "12M"; bool hlg = false, realtime = false, sdr = false, pq = false;
+    int behind = 0; const char *sets[16]; int nsets = 0;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
@@ -142,9 +281,11 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--sdr")) sdr = true;
         else if (!strcmp(argv[i], "--pq")) pq = true;
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
+        else if (!strcmp(argv[i], "-behind") && i + 1 < argc) { behind = atoi(argv[++i]); if (behind < 0 || behind > 16) DIE("-behind: 0 to 16"); }
+        else if (!strcmp(argv[i], "-set") && i + 1 < argc) { if (nsets == 16) DIE("too many -set"); sets[nsets++] = argv[++i]; }
         else if (npos < 64) pos[npos++] = argv[i];
     }
-    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -every N -b RATE --hlg --realtime] <in> <out dir> [shader.glsl ...]");
+    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -every N -b RATE -behind N -set NAME=VALUE --hlg --sdr --pq --realtime] <in> <out dir> [shader.glsl ...]");
     W &= ~1; H &= ~1;
     const char *in = pos[0], *outdir = pos[1];
     mkdir(outdir, 0755);
@@ -170,7 +311,10 @@ int main(int argc, char **argv)
     AVRational fr = av_guess_frame_rate(ic, vst, NULL);
     double fps = fr.num > 0 ? av_q2d(fr) : 30.0;
     double t0 = vst->start_time != AV_NOPTS_VALUE ? vst->start_time * av_q2d(vst->time_base) : 0.0;
-    if (start > 0) av_seek_frame(ic, -1, (int64_t) ((start + t0) * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
+    // Decoded from here: -ss, or with -behind the frames before it the shaders take in first
+    double dstart = start - (behind ? (2 * behind + 10) / fps : 0);
+    if (dstart < 0) dstart = 0;
+    if (dstart > 0) av_seek_frame(ic, -1, (int64_t) ((dstart + t0) * AV_TIME_BASE), AVSEEK_FLAG_BACKWARD);
 
     // ---- libplacebo on Vulkan ----
     pl_log log = pl_log_create(PL_API_VER, pl_log_params(.log_cb = pl_log_color, .log_level = PL_LOG_WARN));
@@ -190,6 +334,7 @@ int main(int argc, char **argv)
         hooks[nhooks++] = h;
         free(text);
     }
+    for (int i = 0; i < nsets; i++) set_param(hooks, nhooks, sets[i]);
 
     // ---- Encoder: hevc_vaapi, low power (VDEnc), Main10, into its own P010 surfaces ----
     const AVCodec *enc = avcodec_find_encoder_by_name("hevc_vaapi");
@@ -276,29 +421,19 @@ int main(int argc, char **argv)
         .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 },
     };
     if (repr_out.sys == PL_COLOR_SYSTEM_UNKNOWN) repr_out.sys = PL_COLOR_SYSTEM_BT_709;
-    struct pl_render_params params = pl_render_fast_params;
-    params.hooks = hooks; params.num_hooks = nhooks;
-    params.upscaler = &pl_filter_bilinear; params.downscaler = &pl_filter_bilinear;
-    AVPacket *pkt = av_packet_alloc(), *opkt = av_packet_alloc();
-    // Frames in flight: rendered, waiting for the GPU before the encoder takes them; their decoded sources held until then
-#define DEPTH 3
-    struct { AVFrame *src, *out; pl_tex tex; } queue[DEPTH];
-    int qn = 0;
-#define DRAIN_ONE() do { \
-        while (pl_tex_poll(gpu, queue[0].tex, UINT64_MAX)) ; \
-        if (avcodec_send_frame(ec, queue[0].out) < 0) DIE("encoding failed"); \
-        av_frame_free(&queue[0].out); av_frame_free(&queue[0].src); \
-        memmove(&queue[0], &queue[1], sizeof(queue[0]) * (DEPTH - 1)); qn--; \
-        while (avcodec_receive_packet(ec, opkt) == 0) { \
-            if (!opkt->duration) opkt->duration = 1; \
-            av_packet_rescale_ts(opkt, ec->time_base, ovs->time_base); \
-            opkt->stream_index = ovs->index; \
-            av_interleaved_write_frame(oc, opkt); \
-        } \
-    } while (0)
+    struct render R = { .rr = rr, .ef = ef, .W = W, .H = H, .color = color, .color_out = color_out, .repr_out = repr_out, .hlg = hlg, .pq = pq,
+                        .npts = npts, .start = start, .duration = duration, .offset = offset, .fps = fps, .every = every, .behind = behind,
+                        .ec = ec, .oc = oc, .ovs = ovs, .opkt = av_packet_alloc(), .last_shown = -1e9, .tstart = now() };
+    memcpy(R.pts_vars, pts_vars, sizeof pts_vars);
+    R.params = pl_render_fast_params;
+    R.params.hooks = hooks; R.params.num_hooks = nhooks;
+    R.params.upscaler = &pl_filter_bilinear; R.params.downscaler = &pl_filter_bilinear;
+    AVPacket *pkt = av_packet_alloc(), *opkt = R.opkt;
     AVFrame *f = av_frame_alloc();
-    int64_t frames = 0; double tstart = now(), first_pts = -1;
-    bool eof = false;
+    double first_pts = -1;
+    // cut: stopped at -t (else the file's end); last: the last frame decoded, given again after the file's end (-behind)
+    bool eof = false, cut = false;
+    AVFrame *last = NULL; double last_pts = 0;
     while (!eof) {
         int r = av_read_frame(ic, pkt);
         if (r < 0) { eof = true; avcodec_send_packet(dc, NULL); }
@@ -317,80 +452,27 @@ int main(int argc, char **argv)
         else { avcodec_send_packet(dc, pkt); av_packet_unref(pkt); }
         while (avcodec_receive_frame(dc, f) == 0) {
             double pts = f->best_effort_timestamp * av_q2d(vst->time_base) - t0;
-            if (pts < start - 0.5 / fps) { av_frame_unref(f); continue; }
-            if (duration > 0 && pts >= start + duration) { av_frame_unref(f); eof = true; break; }
-            // Every n-th frame from the render's start (a segment's first frame, so segments keep their keyframe)
-            if (every > 1 && llround((pts - start) * fps) % every != 0) { av_frame_unref(f); continue; }
+            if (pts < dstart - 0.5 / fps) { av_frame_unref(f); continue; }
+            // (with -behind, on until the last frame to show is shown)
+            if (duration > 0 && pts >= start + duration + behind / fps) { av_frame_unref(f); eof = cut = true; break; }
+            // Every n-th frame from the render's start (a segment's first frame, so segments keep their keyframe); with
+            // -behind all are rendered and every n-th shown is encoded (render())
+            if (!behind && every > 1 && llround((pts - start) * fps) % every != 0) { av_frame_unref(f); continue; }
             if (first_pts < 0) first_pts = pts;
-            // The shaders find the frame by mpv's PTS: the file's time from its start
-            for (int i = 0; i < npts; i++) pts_vars[i]->f = (float) (pts - offset);
-            VASurfaceID sid = (VASurfaceID) (uintptr_t) f->data[3];
-            vaSyncSurface(va, sid);
-            pl_tex *src_tex = map_surface(0, sid, f->width, f->height, false);
-            AVFrame *of = av_frame_alloc();
-            if (av_hwframe_get_buffer(ef, of, 0) < 0) DIE("no encoder surface");
-            VASurfaceID oid = (VASurfaceID) (uintptr_t) of->data[3];
-            pl_tex *dst_tex = map_surface(1, oid, W, H, true);
-
-            struct pl_frame src = {
-                .num_planes = 2,
-                .planes = {
-                    { .texture = src_tex[0], .components = 1, .component_mapping = { PL_CHANNEL_Y } },
-                    { .texture = src_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
-                },
-                .repr = { .sys = hlg ? PL_COLOR_SYSTEM_BT_2020_NC : pl_system_from_av(f->colorspace), .levels = pl_levels_from_av(f->color_range),
-                          .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 } },
-                .color = color,
-            };
-            if (src.repr.sys == PL_COLOR_SYSTEM_UNKNOWN) src.repr.sys = PL_COLOR_SYSTEM_BT_709;
-            if (src.repr.levels == PL_COLOR_LEVELS_UNKNOWN) src.repr.levels = PL_COLOR_LEVELS_LIMITED;
-            pl_frame_set_chroma_location(&src, PL_CHROMA_LEFT);
-            struct pl_frame dst = {
-                .num_planes = 2,
-                .planes = {
-                    { .texture = dst_tex[0], .components = 1, .component_mapping = { PL_CHANNEL_Y } },
-                    { .texture = dst_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
-                },
-                .repr = repr_out,
-                .color = color_out,
-            };
-            pl_frame_set_chroma_location(&dst, PL_CHROMA_LEFT);
-            if (!pl_render_image(rr, &src, &dst, &params)) DIE("rendering failed");
-            pl_gpu_flush(gpu);
-
-            // The clip's own time: segments of renders from different points fit one playlist
-            of->pts = av_rescale_q((int64_t) llround((pts - offset) * 1e6), (AVRational) { 1, 1000000 }, ec->time_base);
-            of->color_primaries = ec->color_primaries; of->color_trc = ec->color_trc; of->colorspace = ec->colorspace; of->color_range = AVCOL_RANGE_MPEG;
-            if (hlg && pq) {
-                // HDR10's static metadata, as SEI (hevc_vaapi writes it from the frame's side data): a mastering display of
-                // BT.2020 primaries and D65 at 0.005-1000 nits, MaxCLL 1000 (HLG's nominal peak), MaxFALL unknown (0)
-                AVMasteringDisplayMetadata *md = av_mastering_display_metadata_create_side_data(of);
-                if (md) {
-                    const double prim[3][2] = { { 0.708, 0.292 }, { 0.170, 0.797 }, { 0.131, 0.046 } };
-                    for (int c = 0; c < 3; c++) { md->display_primaries[c][0] = av_d2q(prim[c][0], 50000); md->display_primaries[c][1] = av_d2q(prim[c][1], 50000); }
-                    md->white_point[0] = av_d2q(0.3127, 50000); md->white_point[1] = av_d2q(0.3290, 50000);
-                    md->max_luminance = av_make_q(1000, 1); md->min_luminance = av_make_q(50, 10000);
-                    md->has_primaries = 1; md->has_luminance = 1;
-                }
-                AVContentLightMetadata *cll = av_content_light_metadata_create_side_data(of);
-                if (cll) { cll->MaxCLL = 1000; cll->MaxFALL = 0; }
-            }
-            if (qn == DEPTH) DRAIN_ONE();
-            queue[qn].src = av_frame_clone(f);
-            queue[qn].out = of;
-            queue[qn].tex = dst_tex[1];
-            qn++;
+            if (behind) { av_frame_free(&last); last = av_frame_clone(f); last_pts = pts; }
+            render(&R, f, pts);
             av_frame_unref(f);
-            frames++;
             if (realtime) {
-                double ahead = (pts - first_pts) - (now() - tstart);
+                double ahead = (pts - first_pts) - (now() - R.tstart);
                 if (ahead > 0) usleep((useconds_t) (ahead * 1e6));
             }
-            if (frames % 120 == 0)
-                fprintf(stderr, "afp-render: %lld frames, %.1f fps\n", (long long) frames, frames / (now() - tstart));
         }
     }
-    while (qn > 0) DRAIN_ONE();
+    // After the file's last frame, for the shaders' last frames shown: that frame again, a frame's time apart (the
+    // player shows the last frame so too)
+    for (int k = 1; behind && last && !cut && k <= behind; k++) render(&R, last, last_pts + k / fps);
+    av_frame_free(&last);
+    while (R.qn > 0) drain_one(&R);
     avcodec_send_frame(ec, NULL);
     while (avcodec_receive_packet(ec, opkt) == 0) {
         av_packet_rescale_ts(opkt, ec->time_base, ovs->time_base);
@@ -398,6 +480,9 @@ int main(int argc, char **argv)
         av_interleaved_write_frame(oc, opkt);
     }
     av_write_trailer(oc);
-    fprintf(stderr, "afp-render: done, %lld frames in %.1f s (%.1f fps)\n", (long long) frames, now() - tstart, frames / (now() - tstart));
+    double took = now() - R.tstart;
+    fprintf(stderr, "afp-render: done, %lld frames in %.1f s (%.1f fps)", (long long) R.frames, took, R.frames / took);
+    if (R.nin != R.frames) fprintf(stderr, ", %lld rendered (%.1f fps)", (long long) R.nin, R.nin / took);
+    fprintf(stderr, "\n");
     return 0;
 }

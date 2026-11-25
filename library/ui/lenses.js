@@ -48,7 +48,7 @@ function lensRows(d) {
 
 const LENS_VERDICT = { clip: ["", "tried on this clip"], good: ["ok", "fits"], single: ["ok", "fits, one part told"], unchecked: ["", "not checked"], loose: ["bad", "not reliable"], poor: ["bad", "doesn’t fit"], untried: ["", "not tried"] };
 
-// The clips of the mode it would measure again (app.js's keptLensClips: the selected ones measured from the picture or
+// The clips of the mode it would measure again (source.js's keptLensClips: the selected ones measured from the picture or
 // with no motion data)
 function lensMeasureCount() { const l = S.lens; return l ? keptLensClips(l.path, l.mode).length : 0; }
 
@@ -185,7 +185,7 @@ async function lensForget() {
   renderSide();
 }
 
-// The queue was read again (app.js's poll): what Find or Estimate found so far, as it comes
+// The queue was read again (loading.js's poll): what Find or Estimate found so far, as it comes
 function lensTick() {
   const l = S.lens;
   if (S.sheet !== "lens" || !l) return;

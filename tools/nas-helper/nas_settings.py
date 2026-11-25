@@ -31,7 +31,7 @@ SETTINGS = [
      "else's player and Library in about a second, without anyone walking the share. It writes nothing but the "
      "catalog. A project newer than this helper is refused, not touched: update the helper.", ("on", "off")),
     ("AFP_STREAM", "on", "parts", "The stream (afp-stream): every clip, moment and clip preview as an HLS stream, as the "
-     "player plays it (stabilized on the GPU, D-Log M to HDR, the project's settings), rendered by the NAS's GPU as it "
+     "player plays it (stabilized on the GPU, a log clip in HDR, the project's settings), rendered by the NAS's GPU as it "
      "is watched. Its page: http://<nas>:AFP_PORT/. Needs /dev/dri: graphics with VA-API that encode HEVC (Intel, AMD). One stream at a time is what an N100 surely keeps up with; a second at once may stutter.", ("on", "off")),
     ("AFP_JELLYFIN", "off", "parts", "Links for Jellyfin: a folder (/jellyfin) a Jellyfin Home Videos library reads, a "
      ".strm (the stream's URL), .nfo and cover per item, sorted into trips; the library refreshed after a change. Needs "
@@ -60,6 +60,9 @@ SETTINGS = [
      "N100); bspline, bicubic and lanczos are sharper and slower.", ("bilinear", "bspline", "bicubic", "lanczos")),
     ("AFP_CHROMATIC", "0", "stream", "1: the water's color fringes taken out where the player does it (slower: ~48 fps on "
      "an N100, not real time at 4K60).", ("0", "1")),
+    ("AFP_DENOISE", "off", "stream", "player: the temporal denoise where the player has it on for the clip (Ctrl+p, the "
+     "clip's transform; how much: /config/player's gyroflow.conf temporal_denoise, full or light). Far slower than real "
+     "time on an N100: for clips pre-rendered whole (the page's 'pre-render whole clips'). off: none.", ("off", "player")),
     ("AFP_TV_LOOK", "hlg", "stream", "What TVs that take only MPEG-TS HLS get (Samsung Tizen before 5, LG webOS before "
      "3.5; also any stream asked with ?fmt=ts): hlg, pq (HDR10) or sdr, optionally followed by x<peak> (highlights "
      "expanded up to that many nits), g<gain> (the whole picture brighter) and r<fps> (at most that many frames a "

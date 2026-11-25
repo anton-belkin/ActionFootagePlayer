@@ -41,7 +41,7 @@ work on this repository at once, and this file is what they all share.
   ```
 
 - **Check what open PRs touch the files you'll change** with `gh pr list` and `gh pr view N --json files`.
-  - If another open PR is in the same big file (`workspace/main.lua`, `gyroflow/main.lua`, `library/src/main.rs`,
+  - If another open PR is in the same big file (`library/src/main.rs`,
     `library/ui/app.js`, `vs-gyroflow/src/lib.rs`, `library/src/index.rs`), say so to Anton before starting.
   - Better still, build on that PR or wait for it.
 - **Keep stacks to two or three PRs deep**, merged bottom first.
@@ -94,7 +94,7 @@ to it rather than around it).
   - `mpv/scripts/workspace/transform.lua` and `library/src/renders.rs`, shared cases in `tests/render_settings.json`;
     the keys and their valid values are the registry's; what it says of the plugin's options, gyroflow-export's flags
     and the warp's request: `tests/render_keys_test.py`;
-  - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
+  - the gyroflow.conf defaults: `gyroflow/bundle.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
     `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
     `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
   - the render recipe: `renders.rs` `VERSION` goes with what a recipe holds, and the hashes stay
@@ -188,7 +188,12 @@ to it rather than around it).
 - **A fix made on a trial or integration branch goes back into its PR, or into its own PR.** It must never live only
   on a local trial branch.
 - **An integration PR's tree must equal the build Anton tried** (`git diff <trial> HEAD` empty).
-- **Build a trial app with `tools/dev_app.sh`,** not `install.sh --apps` (the steps: `docs/dev/release.md`). Then:
+- **Builds come from CI, not from this Mac or the NAS** (Anton, 2026-11-26: memory is the bottleneck on both,
+  the internet is fast). Never `docker build` locally, on the Mac or the NAS: the NAS Helper image is CI's `nas-helper`
+  artifact (main's run, or `gh workflow run release.yml --ref <branch>` to have GitHub build a branch). A trial app is
+  CI's `release-macos` artifact of the commit: downloaded (say the file and size), its two apps taken out, the download
+  deleted (`docs/dev/release.md`). `tools/dev_app.sh`, never `install.sh --apps`, only when CI hasn't built that tree.
+- **After installing a trial app:**
   - check `Contents/Helpers/mpv --version`;
   - unregister every other copy from Launch Services;
   - check that an MP4 opens the copy in `~/Applications`.
@@ -198,10 +203,10 @@ to it rather than around it).
 
 The ones that bite most often; the rest, by area, are in `docs/dev/gotchas.md`.
 
-- **The Lua 200-locals limit.** `workspace/main.lua` sits at Lua's 200 top-level locals, and `gyroflow/main.lua` near
-  it (~170 since the VapourSynth path left, 2026-11). Put
-  new code in a module of its own (as `transform.lua`, `sidecar.lua` and `ahead.lua` are), not in another
-  `(function() end)()` block. Add the module to the packagers; `packaging_test.py` checks it.
+- **The Lua 200-locals limit.** A chunk holds at most 200 locals. `workspace/main.lua` and `gyroflow/main.lua` are
+  only their plugins' wiring: the parts are modules that share `W` (and the gyroflow plugin's `S`,
+  `docs/dev/gotchas.md`). Put new code in the part it belongs to, or a module of its own, not in a
+  `(function() end)()` block. Add a new module to the packagers; `packaging_test.py` checks it.
 - **libplacebo user shaders:**
   - `//!` inside comments is read as a directive;
   - `keepaspect=no` drops margins;

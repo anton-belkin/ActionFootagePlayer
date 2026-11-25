@@ -206,7 +206,7 @@ def plan():
         if lib:
             stream = os.path.join(DATA, "stream")
             env = {k: S.get(k) for k in ("AFP_PORT", "AFP_HEIGHT", "AFP_BITRATE", "AFP_SEGMENT", "AFP_CACHE_GB", "AFP_OPENING",
-                                         "AFP_INTERP", "AFP_CHROMATIC", "AFP_TV_LOOK", "AFP_LOG_REQUESTS")}
+                                         "AFP_INTERP", "AFP_CHROMATIC", "AFP_DENOISE", "AFP_TV_LOOK", "AFP_LOG_REQUESTS")}
             env.update(AFP_LIBRARY=":".join(lib), AFP_SHARES=";".join(f"{s}={d}" for s, d in sh), AFP_BIN=BIN, AFP_PLAYER=PLAYER,
                        AFP_PLAYER_CONFIG=os.path.join(CONFIG, "player"), AFP_CACHE=os.path.join(stream, "cache"),
                        AFP_ARGS=os.path.join(stream, "args"), AFP_GENERATED=os.path.join(stream, "shaders"), AFP_HELPER_STATUS=STATUS)

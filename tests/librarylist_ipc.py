@@ -33,7 +33,7 @@ def clip(path, seconds=3):
 
 
 def write_list(path, items, start, label):
-    # As the Library writes it (library/src/main.rs, list_m3u)
+    # As the Library writes it (library/src/playing.rs, list_m3u)
     lines = ["#EXTM3U", "#PLAYLIST:" + label, f"#AFP-START:{start}"]
     for title, p in items:
         lines += [f"#EXTINF:-1,{title}", p]

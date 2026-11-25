@@ -2,8 +2,8 @@
 // Years, Months or Days. A day's header has its date and the places of its items; days in a row at one place read as
 // a trip, with its own line above them. What has no date is in one group at the end.
 //
-// Dates and places are what the page has already (an item's `when` and `geo`, app.js's deriveItems / deriveGeo): no
-// clip is read for this view. Days is drawn by what's on screen: each block (a month's line, a trip's, a day with its
+// Dates and places are what the page has already (an item's `when` and `geo`, items.js's deriveItems, places.js's
+// deriveGeo): no clip is read for this view. Days is drawn by what's on screen: each block (a month's line, a trip's, a day with its
 // rows of tiles) has a height known from the tiles' fixed size, so only the blocks near the window are in the page.
 
 const TL = { tileW: 168, tileH: 146, gap: 8, pad: 14, dayH: 38, tripH: 34, monthH: 48, over: 700,
@@ -149,7 +149,7 @@ function drawTimeline(main) {
     '<button type="button" role="tab" aria-selected="' + (TL.level === x[0]) + '" class="' + (TL.level === x[0] ? "on" : "") + '" data-a="tlevel" data-v="' + x[0] + '">' + x[1] + '</button>').join("") + '</div>' +
     '<span class="sub" style="display:inline">' + avCount(m.n, "item", "items") + (list.length !== all.length ? " of " + all.length.toLocaleString("en-US") + " match" : "") + (m.trips.length ? " · " + avCount(m.trips.length, "trip", "trips") : "") + '</span>' +
     (TL.level === "days" && m.n ? avSelBar(m.n, c) : "") + '</div>';
-  h = '<div class="mbar">' + h + '</div>'; // pinned while the timeline scrolls (app.js pinBar)
+  h = '<div class="mbar">' + h + '</div>'; // pinned while the timeline scrolls (drawing.js pinBar)
   if (probesPending) h += '<div class="indexing">Reading what the clips are: ' + probesPending + ' to go. A clip gets its day once it’s read.</div>';
   const st = main.scrollTop;
   if (!ready) { main.innerHTML = h + '<div class="empty"><span class="spin" aria-hidden="true"></span> Scanning the project’s files…</div>'; return; }

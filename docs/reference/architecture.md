@@ -28,8 +28,8 @@ with `--script=` from `Contents/Resources/plugins/` (`macos/player.sh`; on Windo
 
 | Plugin | What it does | Notable modules |
 |---|---|---|
-| `workspace` | The project a clip belongs to, its moments, tags, clip previews, batch mode, the inbox from the Library | `workspace.lua` (project lookup, twin of `workspace.rs`), `projectfile.lua`, `projectcache.lua`, `sidecar.lua` (`<clip>.afp.json`), `transform.lua` (source and transform settings), `moments.lua`, `link.lua` (the MP4 link reader), `tags.lua`, `cut.lua` (Ctrl+x), `librarylist.lua` (a list from the Library as the playlist), `journal.lua` (responsiveness journal), `longpath.lua` (Windows MAX_PATH) |
-| `gyroflow` | Stabilization on the GPU path, export, photos, Save frame, crop mode, quality fallbacks | `main.lua`, `ahead.lua` (table kept ahead of playback), `export.lua` (runs `gyroflow-export`), `exportsettings.lua`, `still.lua` (Ctrl+p denoise switch), `dnstep.lua` (frame steps under the denoise), `quality.lua`, `crop.lua`, `gestures.lua`, `measure.lua` (Ctrl+m), `projectwatch.lua` (Ctrl+e), `platform.lua`, `gpu_hold.glsl`, `chromatic.glsl`, `underwater.gyroflow` |
+| `workspace` | The project a clip belongs to, its moments, tags, clip previews, batch mode, the inbox from the Library | `main.lua` registers everything; its parts share `W`: `places.lua` (file calls, locations), `catalogtool.lua` (afp-catalog), `common.lua`, `trash.lua`, `momentlist.lua` (the clip's moments, chapters), `opening.lua` (what a file opens as), `momentsave.lua` (k, moment commands, export name, photo link), `clippreviews.lua` (and the project's counts), `cutout.lua` (Ctrl+x), `viewsave.lua` (Source/Transform Save, Autoplay), `marksjob.lua` (moments or photos of all marks), `renders.lua` (exports of all moments, renders), `tagging.lua`, `inbox.lua` (the Library's changes heard), `batch.lua` (`AFP_BATCH`). Plain Lua beside them: `workspace.lua` (project lookup, twin of `workspace.rs`), `projectfile.lua`, `projectcache.lua`, `sidecar.lua` (`<clip>.afp.json`), `transform.lua` (source and transform settings), `moments.lua`, `link.lua` (the MP4 link reader), `tags.lua`, `cut.lua` (Ctrl+x), `librarylist.lua` (a list from the Library as the playlist), `journal.lua` (responsiveness journal), `longpath.lua` (Windows MAX_PATH) |
+| `gyroflow` | Stabilization on the GPU path, export, photos, Save frame, crop mode, quality fallbacks | `main.lua` registers everything; its parts share `W` and `S` (the state they change): `sources.lua` (what a clip is stabilized with), `framing.lua` (the output's frame), `bundle.lua` (the transform, what's published), `controls.lua` (the keys and messages that change it), `play.lua` (a clip opening), `gpupath.lua` (the table, ahead of playback, applied), `shaders.lua` (the warp's files in mpv's list), `denoise.lua` (the denoise in step, frame steps), `translation.lua` (Ctrl+j), `camera360.lua` (a 360 camera's file), `gyroflowapp.lua` (Ctrl+e); `ahead.lua` (table kept ahead of playback), `export.lua` (runs `gyroflow-export`), `exportsettings.lua`, `still.lua` (Ctrl+p denoise switch), `dnstep.lua` (frame steps under the denoise), `quality.lua`, `crop.lua`, `gestures.lua`, `measure.lua` (Ctrl+m), `projectwatch.lua` (Ctrl+e), `platform.lua`, `gpu_hold.glsl`, `chromatic.glsl`, `underwater.gyroflow` |
 | `dlogm` | Log curves and looks: log → HDR, SDR looks, Dolby Vision, underwater colour | `main.lua`, `dji_color.lua`, `gopro_color.lua`, `video_color.lua` (the `colr` box), `uwcolor.lua` + `uw_estimate.lua`, `dv/` (shipped RPUs and their look) |
 | `view360` | 360° clips as a view to look around in, and the recorded view | `view360.glsl`, `view.lua` (its geometry in Lua), `recording.lua` |
 | `side-panel` | The settings panel beside the video, the navigation bar, cards and dialogs | `ui.lua`, `bar.lua` + `timeline.lua`, `notify.lua` + `notify_client.lua` (what other plugins load), `scrub.lua` (seek-bar pictures via `afp-scrub`), `tagchips.lua`, `lensdialog.lua`, `exportkind.lua`, `navkeys.lua` |
@@ -99,10 +99,16 @@ each other at once ([contracts.md](contracts.md#the-live-channel-library-and-pla
 
 ### Library
 
-`library/src/` is the app's Rust side; `main.rs` holds the Tauri commands, the job queue and the player's batch runs.
+`library/src/` is the app's Rust side. `main.rs` is the wiring: the state the commands share (`Inner`, `Job`), `main()`
+and `generate_handler!`'s list of every command. The commands live in a module per area, each `use`d whole by
+`main.rs` (`pub(crate)` for what another module calls):
 
 | Module | What |
 |---|---|
+| `project.rs`, `recent.rs`, `settings.rs`, `moving.rs`, `watching.rs` | The project: its file (`read_doc`, `update_doc`), opening it, this computer's list of projects, its locations and caches, moving it, its folder watched |
+| `batch.rs` | The player run without a window: the job queue (`add_job`, `start_job`, `tick`), Share's runs |
+| `browsing.rs`, `items.rs`, `playing.rs` | The views read (`scan`, `cached_view`); what's done to items (take in, rename, delete, new folder); opened in the player |
+| `care.rs`, `tagging.rs`, `lens.rs` | Check, Find moved, Mend; tags, picks, ratings; the lens and Source settings |
 | `index.rs` | The views (footage, moments, stills, exports) read from the files; the probe queue (`gyroflow-probe --library`, `GEOTAG`) |
 | `seen.rs` | The catalog in the Library: what changed, noted, and told to player windows |
 | `renders.rs` | The render cache: recipe, hash, `BUNDLE_KEYS`, `EXPORT_CHOICES` |
@@ -110,7 +116,9 @@ each other at once ([contracts.md](contracts.md#the-live-channel-library-and-pla
 | `tags.rs` | Tags and culling (twin of `tags.lua`) |
 | `albums.rs`, `changed.rs`, `checks.rs`, `geo.rs`, `takein.rs`, `thumbs.rs`, `journal.rs`, `perf.rs` | Albums, pinpoint updates, Check/Find moved files, locations from Apple Photos and GPS, Take in, thumbnails, the journal, the perf rig |
 
-`library/ui/` is the page: `app.js` (the window), `tiles.js`, `albums.js` + `albumviews.js` + `timeline.js` +
+`library/ui/` is the page: the window's own scripts, which were one `app.js` (`state.js`: what they share, `S` and the
+data read; `items.js`, `drawing.js`, `source.js`, `checks.js`, `project.js`, `navigate.js`, `menu.js`, `places.js`,
+`keys.js`, `loading.js`; `app.js`: the page's events and its start), `tiles.js`, `albums.js` + `albumviews.js` + `timeline.js` +
 `map.js`, `culling.js`, `share.js`, `lenses.js`, `writes.js` + `changes.js` (screen first, disk after), `history.js`,
 `journal.js`, `atstart.js`. `library/ui-tests/` runs the page in jsdom against a mock (`npm test`); `library/tests/`
 holds the headless-Chrome screenshot scripts.
@@ -118,15 +126,17 @@ holds the headless-Chrome screenshot scripts.
 In the page:
 
 - **Script order** (`ui/index.html`): `journal`, `writes`, `changes`, `albums`, `tiles`, `albumviews`, `timeline`,
-  `map`, `culling`, `atstart`, `share`, `lenses`, `history`, `app` last. A script may use a later one's names only
-  inside functions.
+  `map`, `culling`, `atstart`, `share`, `lenses`, `history`, then the window's own: `state`, `items`, `drawing`, `source`,
+  `checks`, `project`, `navigate`, `menu`, `places`, `keys`, `loading`, `app` last. They are classic scripts: their
+  top-level names are shared, and a script may use a later one's names only inside functions (a function declared
+  in a later file isn't there yet while an earlier one loads).
 - **Albums** are folders: one album name stands for `_Clips/<name>`, `_Moments/<name>` and `_Stills/<name>`
   (`albums.js` `albumShown`, `albumRealDirs`); what's added from the Library goes to `_Clips/<name>`. A new kind of
   item is a source in `ALBUM_SOURCES` and a line in `ALBUM_KINDS`. "My albums" is a place in the page only.
 - **Views inside Albums that aren't folders** (Timeline, Map, My albums, the media types) are entries of `ALBUM_VIEWS`
   (`[id, label, draw, items, meta]`; `draw: null` lets `renderMain` draw). Such a view is `S.view = "footage"` with
   `S.path[0]` its label behind `AV_MARK` (a zero-width space), so a user's album named "Timeline" stays an album.
-- **Dates and places** are each item's `when` and `geo` (`app.js` `deriveItems`, `deriveGeo`): an original's
+- **Dates and places** are each item's `when` and `geo` (`items.js` `deriveItems`, `places.js` `deriveGeo`): an original's
   recording time; a moment's or photo link's is its clip's start + `in` / `t`; a rendered photo's its mtime. A place
   is the original's `location`, else the camera's GPS named through `places.json`; moments and photos take their
   clip's. A trip (`timeline.js` `tlModel`) is two days or more in a row at one wider place, one empty day allowed.
@@ -243,7 +253,7 @@ All through mpv's `subprocess` command, asynchronously.
 
 ### The Library and the player
 
-- **Opening items:** `open_items` and `open_list` in `library/src/main.rs`. macOS: `open -a <ActionFootagePlayer.app>
+- **Opening items:** `open_items` and `open_list` in `library/src/playing.rs`. macOS: `open -a <ActionFootagePlayer.app>
   <files>` (Apple Events reach the running mpv; a video opened while one plays replaces it). Windows: the launcher sends
   the files down the player's pipe `\\.\pipe\ActionFootagePlayer`, and the Library polls `get_property path` on that
   pipe until it plays. A list is an `.afplist.m3u8` file that `workspace/librarylist.lua` reads into the playlist.
@@ -275,7 +285,7 @@ the player's own plugins how each file plays (`--script-opts-append=gyroflow-ren
    (planes mode), finding the frame by mpv's PTS. It renders at the size of the video's rectangle on screen, so it is
    the scaler. Inside it, as asked: the fringes under water, the edge fill (sphere or smooth), the temporal denoise
    (`dn_` passes, Ctrl+p), the translation compensation (Ctrl+j). Interpolation: Lanczos up to 31 fps, bicubic above
-   (`gyroflow/main.lua` `interpolation`). `gyroflow-gpu-table` assembles `warp.glsl`'s sections by mode: the player
+   (`gyroflow/framing.lua` `interpolation`). `gyroflow-gpu-table` assembles `warp.glsl`'s sections by mode: the player
    gets grid (RGB at `MAIN`, a table point every `--grid-step` px, 16 by default) when it needs RGB (fringes, the
    edge fill), else planes (`reply.mode`); `exact` is for checks. 33 rotation knots a frame (`--knots`) are at the
    noise floor. The table is a 16384-wide `rgba32f` texture (`gpu_table::MAX_TEX`): per frame 16 parameter texels and
@@ -297,7 +307,7 @@ other than `gpu-next`, plays as recorded with a card saying why. Details: [../de
 
 - **The tracks:** a 360 camera's two lens tracks are joined side by side, on the GPU by the app's mpv (`--video-join`,
   patch 0014), elsewhere by `lavfi-complex` `hstack` with copy decoding; each track is decoded on a thread of its own
-  (`vd-queue-enable=yes`, `gyroflow/main.lua`).
+  (`vd-queue-enable=yes`, `gyroflow/camera360.lua`).
 - **The sphere:** `gyroflow-gpu-table --sphere360`, 5760 wide by default (`sphere360::DEFAULT_WIDTH`;
   `gyroflow.conf` `sphere_width`), with the angles stamped under it for `view360.glsl`. `sphere360.rs` makes the same sphere for
   exports.
@@ -326,6 +336,11 @@ other than `gpu-next`, plays as recorded with a card saying why. Details: [../de
    video plays. The `  -> <file>` line on stderr names the result; `export.lua` notes it in the catalog.
 
 Photos (`--photo`, `still.rs`, `photo.rs`, `afp-photo` for HEIC) and moments (`--preview still`) are the same tool.
+Its source is `vs-gyroflow/src/bin/gyroflow-export/`: `main.rs` (the uses, `main()`, stop and background),
+`options.rs` (`--help`'s text, the flags, `--settings`' `apply_settings`), `video.rs` (an export: the pipes path, and
+the branch to the GPU path), `gpu.rs`, `post.rs` (the player's shaders over the engine's frames), `photo.rs` (photos,
+Live and Motion Photos), `sphere.rs` (360), `preview.rs`, `color.rs`, `encode.rs`, `source.rs`, `dates.rs`,
+`translation.rs`, `tests.rs`.
 Details: [../design/export-gpu-path.md](../design/export-gpu-path.md), [../design/export-settings.md](../design/export-settings.md).
 
 ## Log curves and looks
@@ -398,7 +413,7 @@ it HLG in Rec.2020, so every look takes it from there. `dlogm/uwcolor.lua` measu
 
 ## Gyroflow
 
-The gyroflow plugin (`gyroflow/main.lua`) asks `gyroflow-gpu-table` for the clip's warp: Gyroflow's own render of the
+The gyroflow plugin (`gyroflow/gpupath.lua`) asks `gyroflow-gpu-table` for the clip's warp: Gyroflow's own render of the
 project (smoothing, zoom, lens, horizon) as an mpv shader. Without a `.gyroflow` beside the video, `gyroflow-probe`
 decides whether the clip has its own motion data recorded with the camera's stabilization off (each camera's rule:
 `vs-gyroflow/src/probe.rs`), or a GoPro HERO12+ HyperSmooth record (`in_camera.rs`), or motion measured from the
@@ -478,7 +493,7 @@ catalog/
   examples/rig.rs, Dockerfile  the NAS-side rig, the catalog's own image
 library/
   src/                         the Library's Rust side (main.rs, index.rs, renders.rs, …)
-  ui/                          the page (app.js, tiles.js, albums.js, share.js, …); ui/vendor/ third-party JS
+  ui/                          the page (state.js … app.js, tiles.js, albums.js, share.js, …); ui/vendor/ third-party JS
   ui-tests/                    the page in jsdom against a mock (npm test)
   tests/                       headless-Chrome screenshot scripts and their mocks
   tauri.conf.json, capabilities/, icons/, build.rs

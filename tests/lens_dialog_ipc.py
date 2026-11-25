@@ -21,9 +21,10 @@ for p in R.PLUGINS:
     if os.path.isdir(src) and os.path.isdir(os.path.join(plugins, p)):
         for f in glob.glob(os.path.join(src, "*.lua")) + glob.glob(os.path.join(src, "*.json")): shutil.copy(f, os.path.join(plugins, p))
 for b in R.BINARIES: shutil.copy(os.path.join(REPO, "vs-gyroflow/target/release", b), plugins + "/gyroflow")
-g = plugins + "/gyroflow/main.lua"; m = open(g).read()
-m = m.replace('"/usr/bin/open"', '"/usr/bin/true"').replace('if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end', 'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then return false end').replace('(vo == "" or vo:find("gpu-next", 1, true))', '(vo == "" or vo == "null" or vo:find("gpu-next", 1, true))')
-open(g, "w").write(m)
+for g in glob.glob(plugins + "/gyroflow/*.lua"):
+  m = open(g).read()
+  m = m.replace('"/usr/bin/open"', '"/usr/bin/true"').replace('if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end', 'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then return false end').replace('(vo == "" or vo:find("gpu-next", 1, true))', '(vo == "" or vo == "null" or vo:find("gpu-next", 1, true))')
+  open(g, "w").write(m)
 os.makedirs(rig + "/clips")
 for f in glob.glob(CLIPDIR + "/GOPR1585.*"): shutil.copy(f, rig + "/clips/")
 os.environ["AFP_CURATED_LENSES"] = rig + "/lenses-own/curated_lenses.json"

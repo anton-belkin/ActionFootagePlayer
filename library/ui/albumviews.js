@@ -2,7 +2,7 @@
 // share. Loaded after albums.js and before app.js, whose state and helpers it uses when called; app.js calls in at
 // the lines marked "albumviews.js" (items(), buildFacets(), renderMain(), goUp()).
 //
-// A view is [id, label, draw(main), items(), meta]. With no draw (null) it is drawn by app.js's renderMain: the media
+// A view is [id, label, draw(main), items(), meta]. With no draw (null) it is drawn by drawing.js's renderMain: the media
 // types (Videos, Moments, Photos…, meta { media: true }) as an album of their items, My albums (meta { folders: true })
 // as the user's albums' folders. Both pushed below. While one is open the page's view is still Albums (S.view "footage")
 // and S.path[0] is the view's label behind AV_MARK, a character no folder's name starts with: so the breadcrumbs,
@@ -12,7 +12,7 @@
 
 const AV_MARK = "​";
 const AV = { cache: null, more: 400 };
-// What was chosen last time on this computer; here, not app.js's remembered(): these files load before it
+// What was chosen last time on this computer; here, not state.js's remembered(): these files load before it
 function avRemembered(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : v; } catch (_) { return d; } }
 
 function albumViewOpen() {
