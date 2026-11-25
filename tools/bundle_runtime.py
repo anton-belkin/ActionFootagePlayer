@@ -8,12 +8,9 @@
 #   Contents/Resources/plugins/  the plugins' own binaries that link <prefix>'s libraries (afp-scrub: the libav ones
 #                                mpv links), relinked to Frameworks/ in place
 #   Contents/Frameworks/         every library they link from <prefix>, and libMoltenVK.dylib, with
-#                                Python.framework: VapourSynth's scripts (gyroflow.vpy) run in it, with the
-#                                vapoursynth module in its site-packages. Pruned to what the plugins and the setup use
+#                                Python.framework, <prefix>'s newest Python, for the setup (macos/setup.sh: the LUT
+#                                shaders). Pruned to what the setup uses
 #   Contents/Resources/vulkan/   MoltenVK's ICD manifest, for the Vulkan loader (VK_DRIVER_FILES, player.sh)
-#   Contents/Resources/bin/      with VapourSynth 74 and later, the `vapoursynth` command VSScript runs to find its
-#                                Python (player.sh puts it in PATH). A script: in Helpers/, codesign would
-#                                take it for code
 #   Contents/Resources/ThirdParty/ for each Homebrew formula all this comes from, its license files and formula, and
 #                                SOURCES.txt: each one's version and source (the GPL's and LGPL's terms). With MPV_BIN,
 #                                mpv's and libplacebo's (linked into it) license files, and their commits in SOURCES.txt
@@ -45,9 +42,6 @@ DROP_MODULES = re.compile(r"^(_tkinter|_ssl|_hashlib|_sqlite3|readline|_curses|_
                           r"_test\w*|_ctypes_test|xxlimited\w*|xxsubtype)\.")
 DROP_STDLIB = ["test", "idlelib", "tkinter", "turtledemo", "ensurepip", "lib2to3", "pydoc_data", "venv",
                "sqlite3", "curses", "dbm"]
-# Of the vapoursynth package (VapourSynth 74 and later): what's for building plugins, and the plugins folder,
-# a link into <prefix>
-DROP_VAPOURSYNTH = ["include", "pkgconfig", "plugins", "vspipe"]
 
 
 def run(*args):
@@ -95,20 +89,18 @@ def ours(path):
     return path.startswith(prefix + "/") or "/Cellar/" in path or path.startswith("/opt/homebrew/")
 
 
-def find_vapoursynth():
-    """The vapoursynth module, and the Python it's for: Homebrew's, or VapourSynth's venv of it (74 and later)"""
-    candidates = [os.path.join(prefix, "opt/vapoursynth/libexec/bin/python3")]
-    candidates += sorted(glob.glob(os.path.join(prefix, "opt/python@3.*/bin/python3.*[0-9]")), reverse=True)
-    for py in candidates:
-        if not os.path.exists(py):
-            continue
-        r = subprocess.run([py, "-c", "import sys, vapoursynth; print(vapoursynth.__file__); "
-                                      "print(sys.base_prefix); print('%d.%d' % sys.version_info[:2])"],
+def find_python():
+    """<prefix>'s newest Python 3: its framework's version folder, and its version"""
+    def minor(py):
+        m = re.search(r"python@3\.(\d+)/", py)
+        return int(m.group(1)) if m else -1
+    for py in sorted(glob.glob(os.path.join(prefix, "opt/python@3.*/bin/python3.*[0-9]")), key=minor, reverse=True):
+        r = subprocess.run([py, "-I", "-c", "import sys; print(sys.base_prefix); print('%d.%d' % sys.version_info[:2])"],
                            capture_output=True, text=True)
         if r.returncode == 0:
-            module, base, version = r.stdout.split("\n")[:3]
-            return os.path.realpath(module), os.path.realpath(base), version
-    raise SystemExit("No Python in " + prefix + " imports vapoursynth")
+            base, version = r.stdout.split("\n")[:2]
+            return os.path.realpath(base), version
+    raise SystemExit("No Python 3 in " + prefix + " (brew install python)")
 
 
 # Homebrew's builds the app mustn't carry: what `brew upgrade` would fix stays in the app
@@ -141,7 +133,7 @@ for name, least in MIN_KEGS.items():
         raise SystemExit(f"Homebrew's {name} is {m and m.group(1)}: the app needs {least} or later "
                          f"(brew update && brew upgrade {name})")
 
-vs_module, src_ver, py_version = find_vapoursynth()
+src_ver, py_version = find_python()
 py_fw = os.path.join(frameworks, "Python.framework")
 py_ver = os.path.join(py_fw, "Versions", py_version)
 stdlib = os.path.join(py_ver, "lib", f"python{py_version}")
@@ -163,15 +155,6 @@ for f in os.listdir(os.path.join(stdlib, "lib-dynload")):
     if DROP_MODULES.match(f):
         os.remove(os.path.join(stdlib, "lib-dynload", f))
 os.makedirs(site_packages)
-# vapoursynth.so alone (up to 73), or the vapoursynth package, with VapourSynth's libraries in it
-if os.path.basename(vs_module) == "__init__.py":
-    vs_src = os.path.dirname(vs_module)
-    vs_dst = os.path.join(site_packages, "vapoursynth")
-    shutil.copytree(vs_src, vs_dst, symlinks=True, ignore=shutil.ignore_patterns(*DROP_VAPOURSYNTH))
-else:
-    vs_src = vs_module
-    vs_dst = os.path.join(site_packages, os.path.basename(vs_module))
-    shutil.copy2(vs_module, vs_dst)
 os.symlink(py_version, os.path.join(py_fw, "Versions", "Current"))
 for name in ("Python", "Resources"):
     os.symlink(f"Versions/Current/{name}", os.path.join(py_fw, name))
@@ -201,19 +184,7 @@ for root, _, files in os.walk(py_ver):
         p = os.path.join(root, f)
         if not is_macho(p):
             continue
-        if p == vs_dst or p.startswith(vs_dst + "/"):
-            origin[p] = os.path.realpath(vs_src + p[len(vs_dst):])
-        else:
-            origin[p] = os.path.realpath(os.path.join(src_ver, os.path.relpath(p, py_ver)))
-if os.path.isdir(vs_dst) and os.path.exists(os.path.join(vs_dst, "_cli.py")):
-    vs_command = os.path.join(contents, "Resources", "bin", "vapoursynth")
-    os.makedirs(os.path.dirname(vs_command), exist_ok=True)
-    with open(vs_command, "w") as f:
-        f.write('#!/bin/sh\n# VSScript runs `vapoursynth config` to find its Python when it has none in '
-                '~/.config/vapoursynth/vapoursynth.toml yet: this app\'s\n'
-                f'exec "$(dirname "$0")/../../Frameworks/Python.framework/Versions/{py_version}/bin/python3" -c '
-                '"import sys; from vapoursynth._cli import main; sys.exit(main())" "$@"\n')
-    os.chmod(vs_command, 0o755)
+        origin[p] = os.path.realpath(os.path.join(src_ver, os.path.relpath(p, py_ver)))
 
 # The libraries, transitively: those not copied yet into Frameworks/, under the name they're linked by
 copy_of = {src: dst for dst, src in origin.items()}

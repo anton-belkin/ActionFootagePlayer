@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The paused frame without its noise, from the frames on both sides of it: `core.gyroflow.Still(clip, time=...)`.
+// A frame without its noise, from the frames on both sides of it: gyroflow-export's photo (`denoise`). (It was also the
+// player's paused clean frame through VapourSynth, up to 2026-11; the player's denoise is now warp.glsl's dn_ passes.)
 //
 // At 60 fps the eye averages the noise over time by itself; a still frame keeps all of it, and a pause has time to
 // spare. So the frame the video is paused on (`time`, mpv's pts) is rebuilt from it and its `radius` neighbours
@@ -23,17 +24,13 @@
 //   5. some of the luma's grain kept (`luma_keep`), so it doesn't look smeared; the color's noise goes
 //
 // The color uses the luma's vectors and weights, and its own patches. The stabilized frame's marker row
-// (dispersion.rs) is left as it is. Every other frame passes through untouched: in mpv the filter sits after
-// Stabilize only while the gyroflow plugin's still.lua seeks to the paused frame again, and comes out on the next
-// seek.
+// (dispersion.rs) is left as it is.
 
-use std::ffi::{ c_int, c_void, CString };
-use std::ptr::null;
 use std::sync::{ Arc, mpsc };
 use std::time::Instant;
 
 use parking_lot::Mutex;
-use vapoursynth4_sys::*;
+
 
 /// The neighbours on each side at most (the shaders' MAXN is twice this)
 pub const MAX_RADIUS: usize = 7;
@@ -668,25 +665,6 @@ fn gpu() -> Result<Arc<Gpu>, String> {
     g.as_ref().unwrap().clone()
 }
 
-/// Sets the GPU up in the background, so the first paused frame doesn't wait for it
-pub fn warm_up() {
-    if GPU.lock().is_some() { return; }
-    std::thread::spawn(|| { let _ = gpu(); });
-}
-
-/// The same, `after` seconds from now and at low priority: Stabilize asks for it as a clip starts (with the clean still
-/// frame on), when the first seconds belong to getting playback going. Once per process
-pub fn warm_up_later(after: f64) {
-    static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    if ASKED.swap(true, std::sync::atomic::Ordering::Relaxed) { return; }
-    std::thread::spawn(move || {
-        #[cfg(target_os = "macos")]
-        unsafe { libc::pthread_set_qos_class_self_np(libc::qos_class_t::QOS_CLASS_UTILITY, 0); }
-        std::thread::sleep(std::time::Duration::from_secs_f64(after.max(0.0)));
-        if GPU.lock().is_none() { let _ = gpu(); }
-    });
-}
-
 impl Gpu {
     fn new() -> Result<Gpu, String> {
         let t = Instant::now();
@@ -1010,190 +988,4 @@ fn denoise_on(g: &Gpu, frames: &[Frame], bytes: usize, max_value: u32, sub: (u32
     let millis = start.elapsed().as_secs_f64() * 1000.0;
     log::debug!("Still: motion and noise {motion_ms:.0} ms, all {millis:.0} ms");
     Ok(Output { planes, sigma: [sigma[8][0], sigma[8][1], sigma[8][2]], millis })
-}
-
-// ---------------------------------------------------------------------------------------------------
-// The filter
-
-struct StillFilter {
-    node: *mut VSNode,
-    time: f64,
-    radius: c_int,
-    fallback_duration: f64,
-    settings: Settings,
-    /// When mpv's seek loaded it, for the log
-    created: Instant,
-}
-
-const STAGE_FRAME: usize = 1;
-const STAGE_WINDOW: usize = 2;
-
-unsafe fn is_skipped(api: &VSAPI, props: *const VSMap) -> bool {
-    let mut err = VSMapPropertyError::Success;
-    let v = unsafe { (api.mapGetInt)(props, crate::SKIPPED_PROP.as_ptr(), 0, &mut err) };
-    err == VSMapPropertyError::Success && v != 0
-}
-
-impl StillFilter {
-    unsafe fn time_of(&self, n: c_int, api: &VSAPI, frame: *const VSFrame) -> (f64, f64) {
-        let props = unsafe { (api.getFramePropertiesRO)(frame) };
-        let duration = unsafe { crate::frame_duration(api, props, self.fallback_duration) };
-        (unsafe { crate::frame_pts(api, props, n, duration) }, duration)
-    }
-
-    /// The frame `n` (the paused one) from the window around it; Err leaves it as it is
-    unsafe fn build(&self, n: c_int, api: &VSAPI, ctx: *mut VSFrameContext, core: *mut VSCore) -> Result<*const VSFrame, String> {
-        let get = |k: c_int| unsafe { (api.getFrameFilter)(k, self.node, ctx) };
-        let reference = get(n);
-        let (t0, _) = unsafe { self.time_of(n, api, reference) };
-        let format = unsafe { &*(api.getVideoFrameFormat)(reference) };
-        let size = |fr: *const VSFrame| unsafe { ((api.getFrameWidth)(fr, 0), (api.getFrameHeight)(fr, 0)) };
-        // Nearest first, before then after; the clip's ends repeat its first and last frame, which counts once
-        let mut window = vec![reference];
-        let mut times = vec![t0];
-        for d in 1..=self.radius {
-            for k in [n - d, n + d] {
-                let fr = get(k);
-                let (t, _) = unsafe { self.time_of(k, api, fr) };
-                let props = unsafe { (api.getFramePropertiesRO)(fr) };
-                let same = unsafe { (*(api.getVideoFrameFormat)(fr)).bytes_per_sample == format.bytes_per_sample } && size(fr) == size(reference);
-                if same && !unsafe { is_skipped(api, props) } && times.iter().all(|&s| (s - t).abs() > 1.0e-4) {
-                    window.push(fr);
-                    times.push(t);
-                } else {
-                    unsafe { (api.freeFrame)(fr) };
-                }
-            }
-        }
-        let planes_of = |fr: *const VSFrame| -> Frame {
-            Frame { planes: (0..format.num_planes).map(|p| unsafe {
-                let (w, h) = ((api.getFrameWidth)(fr, p) as usize, (api.getFrameHeight)(fr, p) as usize);
-                let stride = (api.getStride)(fr, p) as usize;
-                Plane { data: std::slice::from_raw_parts((api.getReadPtr)(fr, p), stride * h), stride, width: w, height: h }
-            }).collect() }
-        };
-        let frames: Vec<Frame> = window.iter().map(|&fr| planes_of(fr)).collect();
-        let bytes = format.bytes_per_sample as usize;
-        let max_value = ((1u64 << format.bits_per_sample) - 1) as u32;
-        let sub = (format.sub_sampling_w as u32, format.sub_sampling_h as u32);
-        // A panic mustn't cross into VapourSynth (mpv would go down with it)
-        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| denoise(&frames, bytes, max_value, sub, &self.settings)))
-            .unwrap_or_else(|_| Err("panicked".into()));
-        let result = result.map(|out| unsafe {
-            let (w, h) = size(reference);
-            let dst = (api.newVideoFrame)(format, w, h, reference, core);
-            for (p, data) in out.planes.iter().enumerate() {
-                let p = p as c_int;
-                let (pw, ph) = ((api.getFrameWidth)(dst, p) as usize, (api.getFrameHeight)(dst, p) as usize);
-                let stride = (api.getStride)(dst, p) as usize;
-                let src_stride = (api.getStride)(reference, p) as usize;
-                let base = (api.getWritePtr)(dst, p);
-                let src = (api.getReadPtr)(reference, p);
-                for y in 0..ph {
-                    let row = base.add(y * stride);
-                    // The last row of luma carries the stabilization's marker (dispersion.rs): as it was
-                    if p == 0 && y == ph - 1 {
-                        std::ptr::copy_nonoverlapping(src.add(y * src_stride), row, pw * bytes);
-                        continue;
-                    }
-                    let line = &data[y * pw..(y + 1) * pw];
-                    if bytes == 1 {
-                        for (x, &v) in line.iter().enumerate() { *row.add(x) = v as u8; }
-                    } else {
-                        std::ptr::copy_nonoverlapping(line.as_ptr() as *const u8, row, pw * 2);
-                    }
-                }
-            }
-            log::info!("Still frame at {t0:.3} s: {} frames, noise {:.1}/{:.1}/{:.1} codes (10-bit), {:.0} ms ({} ms after the seek)",
-                       frames.len(), out.sigma[0], out.sigma[1], out.sigma[2], out.millis, self.created.elapsed().as_millis());
-            dst as *const VSFrame
-        });
-        for &fr in &window[1..] { unsafe { (api.freeFrame)(fr) }; }
-        match result {
-            Ok(dst) => {
-                unsafe { (api.freeFrame)(reference) };
-                Ok(dst)
-            }
-            Err(e) => {
-                log::warn!("Still frame at {t0:.3} s left as it is: {e}");
-                Ok(reference)
-            }
-        }
-    }
-}
-
-unsafe extern "system-unwind" fn still_get_frame(n: c_int, reason: VSActivationReason, instance: *mut c_void, frame_data: *mut *mut c_void, ctx: *mut VSFrameContext, core: *mut VSCore, vsapi: *const VSAPI) -> *const VSFrame {
-    let f = unsafe { &*(instance as *const StillFilter) };
-    let api = unsafe { &*vsapi };
-    match reason {
-        VSActivationReason::Initial => unsafe {
-            (api.requestFrameFilter)(n, f.node, ctx);
-            *frame_data = STAGE_FRAME as *mut c_void;
-            null()
-        },
-        VSActivationReason::AllFramesReady if unsafe { *frame_data } as usize == STAGE_FRAME => unsafe {
-            let frame = (api.getFrameFilter)(n, f.node, ctx);
-            let (t, duration) = f.time_of(n, api, frame);
-            if (t - f.time).abs() >= duration * 0.5 || is_skipped(api, (api.getFramePropertiesRO)(frame)) {
-                return frame;
-            }
-            // The paused frame: its neighbours too, then it's called again
-            log::debug!("Still: frame {n} is the one, {} ms after the seek", f.created.elapsed().as_millis());
-            (api.freeFrame)(frame);
-            for k in n - f.radius..=n + f.radius { (api.requestFrameFilter)(k, f.node, ctx); }
-            *frame_data = STAGE_WINDOW as *mut c_void;
-            null()
-        },
-        VSActivationReason::AllFramesReady => unsafe {
-            match f.build(n, api, ctx, core) {
-                Ok(frame) => frame,
-                Err(e) => {
-                    let msg = CString::new(format!("Still: {e}")).unwrap_or_default();
-                    (api.setFilterError)(msg.as_ptr(), ctx);
-                    null()
-                }
-            }
-        },
-        _ => null()
-    }
-}
-
-unsafe extern "system-unwind" fn still_free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
-    let f = unsafe { Box::from_raw(instance as *mut StillFilter) };
-    unsafe { ((*vsapi).freeNode)(f.node) };
-}
-
-/// `core.gyroflow.Still(clip, time, radius=3, luma_strength, chroma_strength, luma_keep, chroma_keep, specks)`
-pub unsafe extern "system-unwind" fn still_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
-    crate::init_logging();
-    let api = unsafe { &*vsapi };
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    let fmt = &vi.format;
-    if fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || !(fmt.num_planes == 1 || fmt.num_planes == 3) {
-        return unsafe { crate::set_error(api, out, node, "Still", "only 8-16 bit integer YUV or gray".into()) };
-    }
-    let f64_arg = |key: &std::ffi::CStr| unsafe { crate::map_get_f64(api, input, key) };
-    let Some(time) = f64_arg(c"time") else {
-        return unsafe { crate::set_error(api, out, node, "Still", "time is required".into()) };
-    };
-    let radius = unsafe { crate::map_get_i64(api, input, c"radius") }.unwrap_or(3).clamp(1, MAX_RADIUS as i64) as c_int;
-    let d = Settings::default();
-    let settings = Settings {
-        luma_strength: f64_arg(c"luma_strength").map(|v| v as f32).unwrap_or(d.luma_strength),
-        chroma_strength: f64_arg(c"chroma_strength").map(|v| v as f32).unwrap_or(d.chroma_strength),
-        luma_keep: f64_arg(c"luma_keep").map(|v| v as f32).unwrap_or(d.luma_keep),
-        chroma_keep: f64_arg(c"chroma_keep").map(|v| v as f32).unwrap_or(d.chroma_keep),
-        specks: f64_arg(c"specks").map(|v| v as f32).unwrap_or(d.specks),
-    };
-    warm_up();
-    log::info!("Still: the frame at {time:.3} s, {radius} frames each side");
-    let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
-    let filter = Box::new(StillFilter { node, time, radius, fallback_duration, settings, created: Instant::now() });
-    let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::General }];
-    unsafe {
-        (api.createVideoFilter)(out, c"Still".as_ptr(), &vi, still_get_frame, Some(still_free), VSFilterMode::Parallel,
-                                deps.as_ptr(), deps.len() as c_int, Box::into_raw(filter) as *mut c_void, core);
-    }
 }

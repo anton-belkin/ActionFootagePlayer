@@ -36,7 +36,7 @@ Files:
   also keeps a clip without motion data faster than real time: 75-80 fps against 43 through libplacebo's own conversion
   of the whole 4K source), then afp-render runs
 - `jellyfin.py`: a project's moments and clips as a Jellyfin library (below, "In Jellyfin")
-- `Dockerfile`: the image, on top of tools/gpu-spike's (mpv 0.42 + libplacebo 7.387 on Fedora 43 with RPM Fusion's ffmpeg)
+- `Dockerfile`: the image, on top of the GPU spike's (tools/gpu-spike, in git history: mpv 0.42 + libplacebo 7.387 on Fedora 43 with RPM Fusion's ffmpeg)
 
 On the NAS (2026-11-07), in `~claude/afp-test/stream`: `gyroflow-gpu-table` built for Linux there (15 min on the N100),
 `dlogm_hlg.glsl` (tools/cube_to_glsl.py), the player's plugins in `player/` (below), and the container:

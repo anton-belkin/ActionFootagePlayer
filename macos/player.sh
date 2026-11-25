@@ -10,8 +10,9 @@
 # you may also have, its ~/.config/mpv and the plugins install.sh puts there, isn't read: the first time, only the
 # plugins' settings are copied over from it. What the plugins can't keep in the app, DJI's LUT and your default
 # preset, is in ~/Library/Application Support/ActionFootagePlayer/ too (DLOGM_DATA, GYROFLOW_DATA). mpv is the app's
-# own when it has one (tools/bundle_runtime.py: in Contents/Helpers/, with Python, VapourSynth and MoltenVK beside
-# it), else Homebrew's.
+# own when it has one (tools/bundle_runtime.py: in Contents/Helpers/, with MoltenVK and the setup's Python beside
+# it), else Homebrew's. The stabilization is Gyroflow's warp as an mpv shader: it needs mpv 0.42 (or the app's own)
+# and vo=gpu-next.
 #
 # The first time it starts, it offers the setup (Contents/Resources/setup.sh, through setup-offer.lua): the default
 # app for MP4 videos, the Finder Quick Actions and DJI's LUT. Once asked, or once set up (setup.sh, install.sh
@@ -84,21 +85,9 @@ if [ -z "${AFP_BATCH:-}" ] && [ ! -t 1 ]; then
 fi
 contents="$app/Contents"
 if [ -x "$contents/Helpers/mpv" ]; then
-    # VapourSynth's Python (and the `vapoursynth` command that tells VSScript where it is), the Vulkan driver
-    # (mpv's HDR output), and the ffmpeg gyroflow-export runs
-    export PATH="$res/bin:$contents/Helpers:$PATH"
+    # The setup's Python, the Vulkan driver (mpv's HDR output, the warp), and the ffmpeg gyroflow-export runs
+    export PATH="$contents/Helpers:$PATH"
     for home in "$contents"/Frameworks/Python.framework/Versions/[0-9]*; do export PYTHONHOME="$home"; done
-    # VapourSynth 74 and later: VSScript is in the vapoursynth package, where mpv doesn't look for it
-    for vs in "$PYTHONHOME"/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
-        [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
-    done
-    # VSScript finds that Python in ~/.config/vapoursynth/vapoursynth.toml, by its python3 and that file's time. An app
-    # put in place of another (an update, tools/dev_app.sh) has a newer one, and VSScript's own `vapoursynth config`
-    # fails from inside mpv: the stabilization is then off. So it's written here first when it isn't this app's
-    py="$PYTHONHOME/bin/python3"
-    entry="\"$py\",\"$PYTHONHOME/Python\",\"$(stat -L -f %m "$py" 2>/dev/null)\""
-    grep -qF "$entry" "${XDG_CONFIG_HOME:-$HOME/.config}/vapoursynth/vapoursynth.toml" 2>/dev/null \
-        || "$res/bin/vapoursynth" config >/dev/null 2>&1 || true
     export VK_DRIVER_FILES="$res/vulkan/icd.d/MoltenVK_icd.json"
     export VK_ICD_FILENAMES="$VK_DRIVER_FILES" GYROFLOW_TOOLS="$contents/Helpers"
     [ -n "$log" ] && exec "$contents/Helpers/mpv" "$@" >"$log" 2>&1
@@ -106,11 +95,6 @@ if [ -x "$contents/Helpers/mpv" ]; then
 fi
 for mpv in /opt/homebrew/bin/mpv /usr/local/bin/mpv /opt/local/bin/mpv; do
     [ -x "$mpv" ] || continue
-    # The same with Homebrew's VapourSynth (74 and later): without it mpv can't make the gyroflow filter, and plays
-    # the sound alone
-    for vs in "${mpv%/bin/mpv}"/opt/vapoursynth/libexec/lib/python*/site-packages/vapoursynth/libvsscript.dylib; do
-        [ -e "$vs" ] && export VSSCRIPT_PATH="$vs"
-    done
     [ -n "$log" ] && exec "$mpv" "$@" >"$log" 2>&1
     exec "$mpv" "$@"
 done

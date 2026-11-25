@@ -37,15 +37,12 @@ def env_for(app, out):
     env = dict(os.environ)
     env.update(DLOGM_DATA=mine + "/dlogm", GYROFLOW_DATA=mine + "/gyroflow", AGENT_DATA=mine + "/agent",
                AFP_JOURNAL_DIR=out + "/journal", MPVBUNDLE="true")
-    env["PATH"] = res + "/bin:" + c + "/Helpers:" + env["PATH"]
+    env["PATH"] = c + "/Helpers:" + env["PATH"]
     homes = sorted(d for d in os.listdir(c + "/Frameworks/Python.framework/Versions") if d[0].isdigit()) \
         if os.path.isdir(c + "/Frameworks/Python.framework/Versions") else []
     if homes:
         home = c + "/Frameworks/Python.framework/Versions/" + homes[-1]
         env["PYTHONHOME"] = home
-        for root, _, files in os.walk(home + "/lib"):
-            if "libvsscript.dylib" in files and root.endswith("vapoursynth"):
-                env["VSSCRIPT_PATH"] = root + "/libvsscript.dylib"
     icd = res + "/vulkan/icd.d/MoltenVK_icd.json"
     env.update(VK_DRIVER_FILES=icd, VK_ICD_FILENAMES=icd, GYROFLOW_TOOLS=c + "/Helpers")
     # MoltenVK's own account of where pipeline time goes, logged when the device is destroyed

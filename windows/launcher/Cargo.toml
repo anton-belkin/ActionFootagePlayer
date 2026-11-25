@@ -3,7 +3,7 @@ name = "action-footage-player"
 version = "0.1.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "ActionFootagePlayer for Windows: starts the mpv it carries with the plugins, VapourSynth and its Python"
+description = "ActionFootagePlayer for Windows: starts the mpv it carries with the plugins"
 
 # Nothing but the standard library and a few Win32 calls
 [dependencies]

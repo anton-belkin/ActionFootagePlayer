@@ -564,7 +564,7 @@ fn translation(file: &str, opts: &Options) -> Result<Outcome, String> {
     let key = opts.project.as_ref().map_or(file.to_string(), |p| p.to_string_lossy().to_string());
     let fps = info.fps.0 as f64 / info.fps.1.max(1) as f64;
     let (sw, sh) = (960usize, ((960.0 * info.height as f64 / info.width.max(1) as f64).round() as usize) & !1);
-    let engine = Engine::load(format!("translation|{file}"), &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level,
+    let engine = Engine::load(&source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level,
                               0.0, (sw, sh), 1, (1, 1), None, SampleKind::U16, 1023.0, true, Interpolation::Bilinear, 2, None, None, opts.frame, source.lens)?;
     let (rw, rh) = engine.render_size;
     let view = if opts.fov == Fov::Wide { vs_gyroflow::edges::VIEW_WIDE } else { vs_gyroflow::edges::VIEW_NORMAL };
@@ -1752,10 +1752,9 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
     // the frames go to the LUT as they are decoded
     let (w, h) = (info.width & !1, info.height & !1);
     let workers = 3;
-    let key = format!("export|{}", path.display());
     let engine = match &source {
         // All of the motion data before it starts (look-ahead 0): an export has the time
-        Some(source) => Some(Arc::new(Engine::load(key, &source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
+        Some(source) => Some(Arc::new(Engine::load(&source.project, source.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0, (w, h), 3, (1, 1), None,
                                                    SampleKind::U16, 1023.0, true, opts.interpolation, workers,
                                                    // --alone: --from to --to's own motion, a photo's motion too
                                                    opts.alone.then(|| (opts.from.unwrap_or(from), opts.to.unwrap_or(to))), opts.alone_project, opts.frame, source.lens)?)),
@@ -3103,7 +3102,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             return Ok((sdr, Some(hdr), format!("HLG as the player rendered it: SDR {how}, HDR HLG"), 0));
         }
         let engine = match &source {
-            Some(s) => Some(Engine::load(format!("photo|{}", path.display()), &s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
+            Some(s) => Some(Engine::load(&s.project, s.preset.as_deref(), opts.fov, opts.horizon_lock, opts.underwater, opts.level, 0.0,
                                          (w, h), 3, (1, 1), None, SampleKind::U16, 1023.0, true, opts.interpolation, 2,
                                          // --alone: the part (--from, --to) stabilized by its own motion, as a moment plays
                                          opts.alone.then(|| (opts.from.unwrap_or(0.0), opts.to.unwrap_or(info.duration))), opts.alone_project, opts.frame, s.lens)?),

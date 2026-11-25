@@ -10,11 +10,13 @@ your own memory.
 
 - **Player:** mpv with the Lua plugins in `mpv/scripts/` (workspace, gyroflow, dlogm, side-panel, view360, live-photo,
   footage-menu, …).
-  - There are two render paths. The **VapourSynth path** is `gyroflow.vpy` with the vs-gyroflow filter. The **GPU
-    path** (`gpu=auto`) is the `gyroflow-gpu-table` server plus `shaders/gyroflow/warp.glsl` in libplacebo.
+  - There is one render path, the **GPU path**: the `gyroflow-gpu-table` server plus `shaders/gyroflow/warp.glsl` in
+    libplacebo (mpv 0.42 or our own, vo=gpu-next). The VapourSynth path was taken out (2026-11). What the warp can't do
+    (`gpu_table.rs` `unsupported`) and an mpv that can't run it play as recorded, with a card saying why.
   - Our mpv is built by `tools/build_mpv.sh`, with the patches in `tools/mpv-patches/` and
     `tools/libplacebo-patches/`.
-- **vs-gyroflow/** (Rust): the VapourSynth plugin, plus the binaries in `src/bin/` (`gyroflow-export`,
+- **vs-gyroflow/** (Rust): the engine (`lib.rs`'s `Engine`, which the export's pipes path renders with), plus the
+  binaries in `src/bin/` (`gyroflow-export`,
   `gyroflow-gpu-table`, `gyroflow-probe`, `afp-*` …). `gyroflow-export` makes exports, photos, Live Photos and moments.
 - **catalog/** (`afp-catalog`): the project, its journal and snapshots, and the safeguards.
 - **library/**: the Library app (Tauri, `src/` plus `ui/`). It links `afp-catalog` only.
@@ -44,16 +46,15 @@ Most regressions so far were a feature that worked in the live player but not on
 #271, #291). For any change to what the picture or a setting does, go through every path below. In the PR, mark each
 one *done*, *n/a because…*, or *not done → issue #N*:
 
-1. Player, VapourSynth path (`gyroflow.vpy`, `lib.rs`).
-2. Player, GPU path (`gpu_table.rs`, `warp.glsl`, `user_shader.rs`).
-3. Export (`gyroflow-export`), on both its GPU path and its pipes path. Check what `export.lua` passes, from both the
-   live state (`as_it_plays`) and the saved bundle.
-4. Photo, Live Photo and Motion Photo (`still.rs`, `photo`).
-5. Moment, and the Save frame view.
-6. Library: the render recipe and its hash (`library/src/renders.rs`, `BUNDLE_KEYS`/`valid`/`defaults_of`), Source
+1. Player (`gpu_table.rs`, `warp.glsl`, `user_shader.rs`).
+2. Export (`gyroflow-export`), on both its GPU path and its pipes path (`lib.rs`'s engine). Check what `export.lua`
+   passes, from both the live state (`as_it_plays`) and the saved bundle.
+3. Photo, Live Photo and Motion Photo (`still.rs`, `photo`).
+4. Moment, and the Save frame view.
+5. Library: the render recipe and its hash (`library/src/renders.rs`, `BUNDLE_KEYS`/`valid`/`defaults_of`), Source
    settings, and batch renders (`AFP_BATCH`).
-7. NAS stream (`tools/stream/afp_stream.py`) when it changes what the player sends.
-8. Windows and Linux packaging: `install.sh`, `tools/make_app.sh`, `tools/make_windows_app.sh`. The test
+6. NAS stream (`tools/stream/afp_stream.py`) when it changes what the player sends.
+7. Windows and Linux packaging: `install.sh`, `tools/make_app.sh`, `tools/make_windows_app.sh`. The test
    `tests/packaging_test.py` checks the Lua modules.
 
 ### The same logic is in more than one language
@@ -136,7 +137,8 @@ Change these copies together, in the same PR:
 
 ## Traps
 
-- **The Lua 200-locals limit.** `workspace/main.lua` and `gyroflow/main.lua` sit at Lua's 200 top-level locals. Put
+- **The Lua 200-locals limit.** `workspace/main.lua` sits at Lua's 200 top-level locals, and `gyroflow/main.lua` near
+  it (~170 since the VapourSynth path left, 2026-11). Put
   new code in a module of its own (as `transform.lua`, `sidecar.lua` and `ahead.lua` are), not in another
   `(function() end)()` block. Add the module to the packagers; `packaging_test.py` checks it.
 - **libplacebo user shaders:**

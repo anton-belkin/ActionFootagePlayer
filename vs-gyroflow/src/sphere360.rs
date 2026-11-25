@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The plugin's 360 mode (docs/360-cameras.md, "The plugin's part"; step 4 of docs/360-implementation-plan.md):
-// `core.gyroflow.Sphere360(clip, video=...)`, where `clip` is a 360 camera's lens tracks joined side by side (mpv's
-// lavfi-complex hstack, in track order). Out comes the sphere, equirectangular, in the camera's own axes at the middle
+// The 360 mode's sphere on the CPU's side (docs/360-cameras.md, "The plugin's part"; step 4 of
+// docs/360-implementation-plan.md), for gyroflow-export's 360 exports (export360.rs): a 360 camera's lens tracks joined
+// side by side, in track order. (The player makes it with gpu_table::sphere_shader from the same Prepared360; this was
+// also its VapourSynth filter up to 2026-11.) Out comes the sphere, equirectangular, in the camera's own axes at the middle
 // of the frame: every lens mapped onto it by gyroflow-core's kernel (the fork's equirect output projection and RigLens:
 // its pose, its offset at the stitching distance, its validity), with no smoothing, so only the rolling shutter is
 // taken out, and the lenses blended by their feathers (rig.rs). Under it, ROWS rows more: the stamp (stamp.rs), the
@@ -17,13 +18,11 @@
 // onto it, as in the flat mode) and reading its part of the joined frame (the input buffer's rect); a few workers each
 // have their GPU context and a set of them, so one uploads while another renders.
 
-use std::ffi::{ c_int, c_void, CString };
-use std::ptr::null;
 use std::sync::{ Arc, mpsc };
 
 use nalgebra::Vector3;
 use parking_lot::Mutex;
-use vapoursynth4_sys::*;
+
 
 use gyroflow_core::{ StabilizationManager, filesystem, lens_profile::LensProfile };
 use gyroflow_core::gpu::{ BufferDescription, BufferSource, Buffers };
@@ -382,7 +381,7 @@ pub struct Sphere360 {
 
 /// A 360 clip set up for its sphere, before anything renders it: its rig, each lens's gyroflow-core parameters
 /// (the equirect output, its RigLens, no smoothing: only the rolling shutter taken out), the sphere's size, the
-/// stitching distance and the stamp per frame. Sphere360 (VapourSynth) and the GPU path's sphere shader
+/// stitching distance and the stamp per frame. Sphere360 (the export's) and the GPU path's sphere shader
 /// (gpu_table::sphere_shader) both start from it
 pub struct Prepared360 {
     pub rig: Rig,
@@ -689,141 +688,6 @@ fn frame(shared: &Shared, gpu: &mut [Vec<LensPlane>], scratch: &mut [Vec<Vec<u8>
     };
     if !written { return Err("the frame is too small for the stamp".into()); }
     Ok(())
-}
-
-// ---------------------------------------------------------------------------------------------------
-// The filter: `core.gyroflow.Sphere360(clip, video, width=5760, distance=0, interpolation="bilinear", workers=3,
-// start_time=0, time_offset=0)`
-
-static ENGINES: Mutex<Vec<(String, Arc<Sphere360>)>> = Mutex::new(Vec::new());
-
-struct Filter {
-    node: *mut VSNode,
-    engine: Arc<Sphere360>,
-    out_size: (c_int, c_int),
-    num_planes: usize,
-    is_yuv: bool,
-    start_time: f64,
-    time_offset: f64,
-    fallback_duration: f64,
-}
-
-unsafe extern "system-unwind" fn get_frame(n: c_int, reason: VSActivationReason, instance: *mut c_void, frame_data: *mut *mut c_void, ctx: *mut VSFrameContext, core: *mut VSCore, vsapi: *const VSAPI) -> *const VSFrame {
-    let f = unsafe { &*(instance as *const Filter) };
-    let api = unsafe { &*vsapi };
-    match reason {
-        VSActivationReason::Initial => unsafe {
-            (api.requestFrameFilter)(n, f.node, ctx);
-            if crate::pts_unknown() {
-                (api.requestFrameFilter)(n + 1, f.node, ctx);
-                *frame_data = 1 as *mut c_void;
-            }
-            null()
-        },
-        VSActivationReason::AllFramesReady => unsafe {
-            let src = (api.getFrameFilter)(n, f.node, ctx);
-            let props = (api.getFramePropertiesRO)(src);
-            let duration = crate::frame_duration(api, props, f.fallback_duration);
-            if !(*frame_data).is_null() {
-                let next = (api.getFrameFilter)(n + 1, f.node, ctx);
-                crate::calibrate_pts(api, props, (api.getFramePropertiesRO)(next), duration);
-                (api.freeFrame)(next);
-            }
-            let time = crate::frame_pts(api, props, n, duration);
-            let timestamp_us = ((time - f.start_time + f.time_offset) * 1_000_000.0).round() as i64 + f.engine.frame_offset_us;
-            let mut err = VSMapPropertyError::Success;
-            let range = (api.mapGetInt)(props, c"_ColorRange".as_ptr(), 0, &mut err);
-            let limited_range = if err == VSMapPropertyError::Success { range == 1 } else { f.is_yuv };
-
-            let format = (api.getVideoFrameFormat)(src);
-            let dst = (api.newVideoFrame)(format, f.out_size.0, f.out_size.1, src, core);
-            let planes = (0..f.num_planes as c_int).map(|p| PlaneJob {
-                src: (api.getReadPtr)(src, p), src_stride: (api.getStride)(src, p) as usize,
-                src_w: (api.getFrameWidth)(src, p) as usize, src_h: (api.getFrameHeight)(src, p) as usize,
-                dst: (api.getWritePtr)(dst, p), dst_stride: (api.getStride)(dst, p) as usize,
-                dst_w: (api.getFrameWidth)(dst, p) as usize, dst_h: (api.getFrameHeight)(dst, p) as usize,
-            }).collect();
-            let result = f.engine.process(timestamp_us, planes, limited_range);
-            (api.freeFrame)(src);
-            match result {
-                Ok(()) => dst,
-                Err(e) => {
-                    log::error!("360 frame {n} at {timestamp_us} us: {e}");
-                    (api.freeFrame)(dst);
-                    let msg = CString::new(format!("Gyroflow 360: {e}")).unwrap_or_default();
-                    (api.setFilterError)(msg.as_ptr(), ctx);
-                    null()
-                }
-            }
-        },
-        _ => null(),
-    }
-}
-
-unsafe extern "system-unwind" fn free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
-    let f = unsafe { Box::from_raw(instance as *mut Filter) };
-    unsafe { ((*vsapi).freeNode)(f.node) };
-}
-
-pub unsafe extern "system-unwind" fn create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
-    crate::init_logging();
-    let api = unsafe { &*vsapi };
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let fail = |msg: String| unsafe { crate::set_error(api, out, node, "Sphere360", msg) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    let fmt = vi.format.clone();
-    let is_yuv = fmt.color_family == VSColorFamily::YUV;
-    if !(is_yuv || fmt.color_family == VSColorFamily::Gray) || fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || vi.width == 0 {
-        return fail("only constant-size YUV or Gray clips with 8-16 bit integer samples".into());
-    }
-    let Some(video) = (unsafe { crate::map_get_str(api, input, c"video") }) else { return fail("video is required".into()) };
-    // Bilinear by default: the kernel's time is its taps where a lens has picture (bicubic's 16 took an X5's frame at
-    // 7680 to ~120 ms a GPU worker, past what 25 fps leaves; bilinear's 4, ~70), and the view shader enlarges the
-    // sphere at most FOVs anyway
-    let interpolation = match unsafe { crate::map_get_str(api, input, c"interpolation") }.unwrap_or_else(|| "bilinear".into()).to_ascii_lowercase().as_str() {
-        "bilinear" => Interpolation::Bilinear,
-        "bicubic" => Interpolation::Bicubic,
-        "lanczos" | "lanczos4" => Interpolation::Lanczos4,
-        other => return fail(format!("unknown interpolation {other} (bilinear, bicubic, lanczos)")),
-    };
-    let width = unsafe { crate::map_get_i64(api, input, c"width") }.filter(|w| *w > 0).map(|w| w as usize).unwrap_or(DEFAULT_WIDTH).clamp(512, 16384);
-    let distance = unsafe { crate::map_get_f64(api, input, c"distance") }.filter(|d| d.is_finite() && *d >= 0.0).unwrap_or(0.0);
-    let workers = unsafe { crate::map_get_i64(api, input, c"workers") }.unwrap_or(3).clamp(1, 6) as usize;
-    let kind = if fmt.bytes_per_sample == 1 { SampleKind::U8 } else { SampleKind::U16 };
-    let input_size = (vi.width as usize, vi.height as usize);
-    let version = std::fs::metadata(&video).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
-    let key = format!("{video}|{version}|{input_size:?}|{:?}{}|{}|{}|{width}|{distance}|{interpolation:?}|{workers}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h, fmt.num_planes);
-    let engine = {
-        let mut engines = ENGINES.lock();
-        match engines.iter().find(|e| e.0 == key) {
-            Some(e) => e.1.clone(),
-            None => {
-                // One 360 clip at a time: an 8K one's GPU buffers are big
-                engines.clear();
-                match Sphere360::load(&video, input_size, fmt.num_planes as usize, (kind, fmt.bits_per_sample as u32, is_yuv, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize)), interpolation, width, distance, workers) {
-                    Ok(e) => { let e = Arc::new(e); engines.push((key, e.clone())); e }
-                    Err(e) => { drop(engines); return fail(e); }
-                }
-            }
-        }
-    };
-    let (w, h) = engine.output_size();
-    let mut out_vi = vi.clone();
-    out_vi.width = w as c_int;
-    out_vi.height = h as c_int;
-    let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
-    let filter = Box::new(Filter {
-        node, engine, out_size: (out_vi.width, out_vi.height), num_planes: fmt.num_planes as usize, is_yuv,
-        start_time: unsafe { crate::map_get_f64(api, input, c"start_time") }.unwrap_or(0.0),
-        time_offset: unsafe { crate::map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0),
-        fallback_duration,
-    });
-    let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
-    unsafe {
-        (api.createVideoFilter)(out, c"Sphere360".as_ptr(), &out_vi, get_frame, Some(free), VSFilterMode::Parallel,
-                                deps.as_ptr(), deps.len() as c_int, Box::into_raw(filter) as *mut c_void, core);
-    }
 }
 
 #[cfg(test)]
