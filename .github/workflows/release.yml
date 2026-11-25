@@ -37,7 +37,7 @@ jobs:
           clean: ${{ runner.environment == 'github-hosted' }}
       - name: Tidy (Anton's Mac)
         if: runner.environment == 'self-hosted'
-        run: git clean -ffd
+        run: git clean -ffd && rm -rf dist
 
       - name: Rust
         if: runner.environment == 'github-hosted'
@@ -96,7 +96,9 @@ jobs:
       - name: Preview test
         run: GYROFLOW_EXPORT=vs-gyroflow/target/release/gyroflow-export luajit tests/link_test.lua
 
+      # For the plugins job (main and releases); a pull request's app stays in dist/ on the Mac
       - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: release-macos
           path: dist/
@@ -105,6 +107,17 @@ jobs:
   # The Library and the catalog, which the macos job builds but doesn't test: afp-catalog's tests (with its
   # safeguards and the many-computers random run, in release: slow otherwise), the Library's Rust tests, and its page
   # in jsdom against a mock of the app (library/ui-tests). Beside the build, so it adds no time to it
+
+      # On Anton's Mac the build folders stay between runs and grow with every change of dependencies: one over 20 GB is
+      # cleaned (the next run builds it again from scratch)
+      - name: Build folders kept small (Anton's Mac)
+        if: always() && runner.environment == 'self-hosted'
+        run: |
+          for crate in vs-gyroflow library catalog; do
+            kb=$(du -sk "$crate/target" 2>/dev/null | cut -f1)
+            if [ "${kb:-0}" -gt 20971520 ]; then echo "$crate/target: $((kb / 1048576)) GB, cleaned"; (cd "$crate" && cargo clean); fi
+          done
+
   tests:
     # Your own branches and main build on Anton's Mac (the self-hosted runner "anton-mac", label afp: its build folders
     # kept between runs, its Homebrew as it is); releases (tags), forks and runs by hand on GitHub's macOS, whose
@@ -154,6 +167,9 @@ jobs:
   # ActionFootagePlayer-<version>-windows-<arch>-setup.exe, for x86_64 and arm64 (on GitHub's arm64 runner, built
   # for it as everything there is). Linux on the oldest Ubuntu runner, so the binaries run with older glibc too
   plugin:
+    # Not on pull requests: their required checks are macos and tests (on Anton's Mac). Every push to main and every
+    # release runs it, so a break on Windows or Linux still shows up the same day
+    if: github.event_name != 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -265,6 +281,9 @@ jobs:
   # x86-64 NAS, saved as ActionFootageNASHelper-<version>-linux-x86_64.tar.gz (`docker load -i` it) with its example
   # compose.yaml. Its own artifact: the plugins job doesn't need it
   nas-helper:
+    # Not on pull requests: their required checks are macos and tests (on Anton's Mac). Every push to main and every
+    # release runs it, so a break on Windows or Linux still shows up the same day
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -313,6 +332,9 @@ jobs:
           compression-level: 0
 
   plugins:
+    # Not on pull requests: their required checks are macos and tests (on Anton's Mac). Every push to main and every
+    # release runs it, so a break on Windows or Linux still shows up the same day
+    if: github.event_name != 'pull_request'
     needs: [macos, plugin]
     runs-on: ubuntu-latest
     steps:
