@@ -834,6 +834,36 @@ mod tests {
         assert!(find(&look(&root, true), &moment, hdr).file.is_none());
     }
 
+    /// What a recipe holds goes with VERSION, and a recipe keeps its hash: a render is found by it (its file is named
+    /// by it), so a hash that changes by itself leaves every render made before stale. Changing what goes into a recipe
+    /// is raising VERSION, and this test's lines with it; a change of hash alone (canonical, the hash, settings, the
+    /// registry's settings) is a mistake. The player's recipe of before the cache by hash is index.rs's (RENDER_VERSION)
+    #[test]
+    fn the_recipe_goes_with_its_version_and_keeps_its_hash() {
+        fn paths(v: &Value, at: &str, out: &mut Vec<String>) {
+            for (k, x) in v.as_object().into_iter().flatten() {
+                let p = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                if x.is_object() { paths(x, &p, out) } else { out.push(p) }
+            }
+        }
+        let shape = |v: &Value| { let mut out = Vec::new(); paths(v, "", &mut out); out.sort(); out.join(" ") };
+        let (root, moment, photo, clip) = project("recipe-version");
+        let ctx = look(&root, true);
+        let (hdr, ph) = (profile("HDR").unwrap(), profile("Photo").unwrap());
+        let (m, p, c) = (recipe(&ctx, &moment, hdr), recipe(&ctx, &photo, ph), recipe(&ctx, &clip, hdr));
+        let kept = format!("moment: {} / photo: {} / clip: {}", shape(&m), shape(&p), shape(&c));
+        assert_eq!((VERSION, kept.as_str()), (4, concat!("moment: clip.hash clip.size in kind out profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.orient",
+                               "ation settings.projection settings.view v / photo: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_",
+                               "strong settings.lens settings.level settings.orientation settings.projection settings.view t v / clip: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.level settings.orientation settings.projection settings.view v")), "what a recipe holds changed, or VERSION did: they change together");
+        assert_eq!([hash(&m), hash(&p), hash(&c)], ["c3d1323d60720559a14f227f", "2f58eb104de1ceca73053fe0", "5dd5a11539e16cd587d8f210"], "the same recipes hash otherwise: every render made before is stale");
+        let full = json!({ "v": 4, "kind": "moment", "clip": { "hash": "5f2c", "size": 1234567890 }, "in": 12.5, "out": 20.033333333,
+                           "settings": { "view": "wide", "level": "medium", "horizon_lock": "yes", "fov": 1.25 },
+                           "opts": { "edges": "fill", "temporal_denoise": "light" }, "gyroflow": "ab12", "profile": { "name": "HDR", "look": "hdr" },
+                           "export": { "size": "1080" }, "empty": {}, "none": null });
+        assert_eq!(hash(&full), "4d6e970673332a22ea71d399");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
     #[test]
     fn the_same_recipe_hashes_the_same_and_every_setting_changes_it() {
         let (root, moment, photo, clip) = project("hash");

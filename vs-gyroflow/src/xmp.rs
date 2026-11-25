@@ -2,58 +2,19 @@
 //
 // A photo's own metadata, the player's part of it (docs/library-management.md §8, "Photos carry what they need"): its
 // link to its clip (`afp:link`, the player's namespace, as photo.rs writes it in a JPEG and afp-photo in a HEIC) and
-// its tags (`dc:subject`, which Photos and Lightroom read as keywords), in the file's XMP packet. Read from any photo;
-// written into a JPEG here (its XMP segment replaced, the image data as it is: a Motion Photo's video after it keeps
-// its length, which its XMP says from the end), into a HEIC by afp-photo on a Mac (ImageIO copies the image as it is).
+// its tags (`dc:subject`, which Photos and Lightroom read as keywords), in the file's XMP packet. Read from any photo
+// (afp-catalog's xmp.rs, the one copy); written into a JPEG here (its XMP segment replaced, the image data as it is: a
+// Motion Photo's video after it keeps its length, which its XMP says from the end), into a HEIC by afp-photo on a Mac
+// (ImageIO copies the image as it is).
 
 use crate::photo::AFP_NS;
 
 const XMP_NS: &[u8] = b"http://ns.adobe.com/xap/1.0/\0";
 const DC_NS: &str = "http://purl.org/dc/elements/1.1/";
 
-/// The XMP packet in a file's bytes: `<x:xmpmeta …>…</x:xmpmeta>`, its byte range
-pub fn packet(bytes: &[u8]) -> Option<(usize, usize)> {
-    let find = |hay: &[u8], needle: &[u8], from: usize| hay.get(from..)?.windows(needle.len()).position(|w| w == needle).map(|p| p + from);
-    let a = find(bytes, b"<x:xmpmeta", 0)?;
-    let end = b"</x:xmpmeta>";
-    let b = find(bytes, end, a)? + end.len();
-    Some((a, b))
-}
-
-fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&apos;", "'").replace("&#34;", "\"").replace("&amp;", "&")
-}
-fn escape(s: &str) -> String { s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;") }
-
-/// The link (`afp:link`): an element, as photo.rs writes it, or an attribute, as ImageIO may
-pub fn link(xml: &str) -> Option<String> {
-    if let Some(a) = xml.find("<afp:link>") {
-        let from = a + "<afp:link>".len();
-        let to = from + xml[from..].find("</afp:link>")?;
-        return Some(unescape(&xml[from..to]));
-    }
-    let a = xml.find("afp:link=\"")? + "afp:link=\"".len();
-    let to = a + xml[a..].find('"')?;
-    Some(unescape(&xml[a..to]))
-}
-
-/// The tags (`dc:subject`'s list)
-pub fn tags(xml: &str) -> Vec<String> {
-    let Some(a) = xml.find("<dc:subject") else { return Vec::new() };
-    let Some(len) = xml[a..].find("</dc:subject>") else { return Vec::new() };
-    let part = &xml[a..a + len];
-    let mut out = Vec::new();
-    let mut rest = part;
-    while let Some(i) = rest.find("<rdf:li") {
-        let Some(gt) = rest[i..].find('>') else { break };
-        let from = i + gt + 1;
-        let Some(to) = rest[from..].find("</rdf:li>") else { break };
-        let t = unescape(rest[from..from + to].trim());
-        if !t.is_empty() { out.push(t); }
-        rest = &rest[from + to..];
-    }
-    out
-}
+// Read as the catalog and the Library read it: afp-catalog's xmp.rs, the one copy
+pub use afp_catalog::xmp::{ link, packet, tags };
+use afp_catalog::xmp::escape;
 
 /// What's between `open` (an element's start, `<afp:link`) and its end taken out, wherever it is
 fn without_element(xml: &str, name: &str) -> String {

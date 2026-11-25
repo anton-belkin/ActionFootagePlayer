@@ -37,23 +37,17 @@ pub(crate) fn holds_nothing(doc: &Value) -> bool {
     ["marks", "view", "source", "view360", "location", "tags", "rating", "pick", "comment"].iter().all(|k| doc.get(*k).is_none())
 }
 
-/// A clip's own file over the project's locations (workspace.rs's own_file, docs/library-management.md §8): the
-/// copies in the library's locations in their order, then copies-only and this computer's own; the main file is beside
-/// the first copy that has one, else beside the first copy that isn't copies only or local
+/// A clip's own file over the project's locations (afp-catalog's workspace::own_at, as the player's workspace.lua
+/// decides it, docs/library-management.md §8): the copies in the library's locations in their order, then
+/// copies-only and this computer's own; the main file is beside the first copy that has one (or the .marks.json of
+/// before), else beside the first copy that isn't copies only or local. -> (the own file, the copy it's beside)
 pub fn clip_own(root: &Path, tree: &str) -> Result<(PathBuf, PathBuf), String> {
     clip_own_in(&locations::locations(root, &locations::mounts()), tree)
 }
 
 /// The same with the project's locations worked out already (many clips at once: the locations once, not per clip)
 pub fn clip_own_in(locs: &[locations::Location], tree: &str) -> Result<(PathBuf, PathBuf), String> {
-    // (nas::stat: a share's slowness stood in for when measuring, nothing otherwise)
-    let is_file = |f: &Path| { afp_catalog::store::nas::stat(); f.is_file() };
-    let mut copies: Vec<(PathBuf, bool)> = locs.iter().filter_map(|l| locations::in_location(tree, l).filter(|f| is_file(f)).map(|f| (f, l.copies || l.local))).collect();
-    copies.sort_by_key(|(_, late)| *late);
-    let found: Vec<&PathBuf> = copies.iter().map(|(f, _)| f).filter(|f| is_file(&f.with_extension("afp.json"))).collect();
-    let clip = found.first().map(|f| (*f).clone()).or_else(|| copies.iter().find(|(_, c)| !c).map(|(f, _)| f.clone()))
-        .or_else(|| copies.first().map(|(f, _)| f.clone())).ok_or(format!("{tree} isn't in the project's locations"))?;
-    Ok((clip.with_extension("afp.json"), clip))
+    afp_catalog::workspace::own_at(tree, locs).map(|o| (o.file, o.clip)).ok_or(format!("{tree} isn't in the project's locations"))
 }
 
 // ---------- the model ----------

@@ -256,52 +256,17 @@ pub fn keys_and_cover(path: &Path) -> (HashMap<String, String>, Option<Vec<u8>>)
     (keys, cover)
 }
 
-fn unescape(s: &str) -> String {
-    s.replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#34;", "\"").replace("&apos;", "'").replace("&amp;", "&")
-}
-
-/// A photo's XMP packet, within the file's first 64 KiB (where vs-gyroflow's photo.rs and ImageIO put it)
-fn photo_xmp(path: &Path) -> Option<String> {
-    use std::io::Read;
-    let mut head = Vec::with_capacity(65536);
-    std::fs::File::open(path).ok()?.take(65536).read_to_end(&mut head).ok()?;
-    let s = String::from_utf8_lossy(&head);
-    let a = s.find("<x:xmpmeta")?;
-    let b = a + s[a..].find("</x:xmpmeta>")?;
-    Some(s[a..b].to_string())
-}
-
-/// A photo's link to its clip: `afp:link` in its XMP (the player's namespace, https://actionfootageplayer.ch/ns/1.0/),
-/// an element as photo.rs writes it, or an attribute as ImageIO may
+/// A photo's link to its clip: `afp:link` in its XMP (afp-catalog's xmp.rs, the player's namespace,
+/// https://actionfootageplayer.ch/ns/1.0/)
 fn photo_link(path: &Path) -> Option<Value> {
-    let s = photo_xmp(path)?;
-    let text = if let Some(a) = s.find("<afp:link>") {
-        let from = a + "<afp:link>".len();
-        s[from..from + s[from..].find("</afp:link>")?].to_string()
-    } else {
-        let from = s.find("afp:link=\"")? + "afp:link=\"".len();
-        s[from..from + s[from..].find('"')?].to_string()
-    };
-    serde_json::from_str(&unescape(&text)).ok()
+    let xml = afp_catalog::xmp::of_file(path).ok()??;
+    serde_json::from_str(&afp_catalog::xmp::link(&xml)?).ok()
 }
 
 /// A photo's tags: `dc:subject` in its XMP (vs-gyroflow's afp-meta writes them), which Photos and Lightroom read as
 /// keywords
 pub fn photo_tags(path: &Path) -> Vec<String> {
-    let Some(s) = photo_xmp(path) else { return Vec::new() };
-    let Some(a) = s.find("<dc:subject") else { return Vec::new() };
-    let Some(len) = s[a..].find("</dc:subject>") else { return Vec::new() };
-    let mut out = Vec::new();
-    let mut rest = &s[a..a + len];
-    while let Some(i) = rest.find("<rdf:li") {
-        let Some(gt) = rest[i..].find('>') else { break };
-        let from = i + gt + 1;
-        let Some(to) = rest[from..].find("</rdf:li>") else { break };
-        let t = unescape(rest[from..from + to].trim());
-        if !t.is_empty() { out.push(t); }
-        rest = &rest[from + to..];
-    }
-    out
+    afp_catalog::xmp::of_file(path).ok().flatten().map(|x| afp_catalog::xmp::tags(&x)).unwrap_or_default()
 }
 
 pub fn link(path: &Path) -> Option<Value> {
@@ -1654,5 +1619,63 @@ mod probe_version {
     fn the_probes_geotag_is_the_same() {
         let tool = source("bin/gyroflow-probe.rs");
         assert!(tool.contains(&format!("out[\"geotag\"] = {GEOTAG}.into();")), "gyroflow-probe.rs's \"geotag\" isn't {GEOTAG}");
+    }
+}
+
+/// The recipe of a moment's render as the player makes it (mpv/scripts/workspace/main.lua's render_recipe and its
+/// RENDER_VERSION) is render_recipe_of's: the same version, the same fields. A render the player made is current
+/// while its link's recipe is the moment's now, as either works it out
+#[cfg(test)]
+mod render_recipe_twin {
+    use super::*;
+
+    /// The keys of a Lua table constructor (`{ a = 1, b = { c = 2 }, ["in"] = 3 }`), nested ones as "b.c"
+    fn lua_keys(t: &str) -> Vec<String> {
+        let (mut out, mut stack, mut word, mut last): (Vec<String>, Vec<String>, String, Option<String>) = (Vec::new(), Vec::new(), String::new(), None);
+        let mut chars = t.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '{' => { stack.push(last.take().unwrap_or_default()); word.clear(); }
+                '}' => { stack.pop(); if stack.is_empty() { break; } }
+                '=' if chars.peek() != Some(&'=') && !word.is_empty() => {
+                    let path: Vec<&str> = stack.iter().skip(1).map(String::as_str).chain([word.as_str()]).collect();
+                    out.push(path.join("."));
+                    last = Some(word.clone());
+                    word.clear();
+                }
+                '[' | '"' | ']' | ' ' | '\n' => {}
+                c if c.is_alphanumeric() || c == '_' => word.push(c),
+                _ => { word.clear(); if c == ',' { last = None; } }
+            }
+            if c == ',' { word.clear(); }
+        }
+        // A table's own key is its fields' parent ("clip" of "clip.hash")
+        let parents: Vec<String> = out.iter().filter_map(|k| k.rsplit_once('.').map(|(p, _)| p.to_string())).collect();
+        out.retain(|k| !parents.contains(k));
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn the_players_render_recipe_is_this_one() {
+        let lua = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../mpv/scripts/workspace/main.lua")).unwrap();
+        assert!(lua.contains(&format!("\nlocal RENDER_VERSION = {RENDER_VERSION}\n")), "workspace/main.lua's RENDER_VERSION isn't {RENDER_VERSION}");
+        let a = lua.find("\nlocal function render_recipe(").expect("workspace/main.lua's render_recipe");
+        let body = &lua[a..];
+        let t = &body[body.find("trimmed({").unwrap() + "trimmed(".len()..];
+        let lua_fields = lua_keys(t);
+        let link = json!({ "hash": "h", "size": 1, "in": 1.5, "out": 4.0, "stab": { "view": "wide" }, "alone": true });
+        let mut rust_fields = Vec::new();
+        fn paths(v: &Value, at: &str, out: &mut Vec<String>) {
+            for (k, x) in v.as_object().into_iter().flatten() {
+                let p = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                // a value of the link's or the clip's own file (stab, input) is one field, whatever it holds
+                if x.is_object() && k == "clip" { paths(x, &p, out) } else { out.push(p) }
+            }
+        }
+        paths(&render_recipe_of(&link, json!({ "curve": "dlogm" }), json!("fp"), "HDR"), "", &mut rust_fields);
+        rust_fields.sort();
+        assert_eq!(lua_fields, rust_fields, "the player's render_recipe and render_recipe_of hold other fields");
+        assert_eq!(lua_keys("{ v = 1, clip = { hash = l.hash, size = l.size }, [\"in\"] = l[\"in\"], x = a == b }"), ["clip.hash", "clip.size", "in", "v", "x"]);
     }
 }

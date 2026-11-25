@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // A project's locations (docs/library-management.md): where its footage is, each placed at a point of the project's
-// tree, in an order, the first that has a clip winning. The twin of vs-gyroflow's workspace.rs and the workspace
-// plugin's workspace.lua for the Library, which doesn't link the Gyroflow engine: keep the three in step (their shared
-// cases are tests/workspace_cases.txt; this one's own tests are below).
+// tree, in an order, the first that has a clip winning. The one Rust copy (the Library, afp-catalog, and gyroflow-export
+// through workspace.rs here, which finds a clip's project and own file over them); the player's twin is the workspace
+// plugin's workspace.lua: keep the two in step (their shared cases are tests/workspace_cases.txt, run by workspace.rs's
+// test and tests/workspace_test.lua).
 //
 // What one computer adds (copies of footage on its own disk) is kept on it, by the project's id, in
 // <data>/ActionFootage/projects/<id>.json ({ "locations": [...] }): looked at before the project's own.
@@ -44,7 +45,8 @@ pub fn mounts() -> Vec<(String, PathBuf)> {
     } else if let Ok(t) = std::fs::read_to_string("/proc/mounts") {
         for line in t.lines() {
             let f: Vec<&str> = line.split(' ').collect();
-            if f.len() > 2 && f[0].starts_with("//") { out.push((f[0].replace("\\040", " "), PathBuf::from(f[1].replace("\\040", " ")))); }
+            let unescape = |s: &str| s.replace("\\040", " ").replace("\\011", "\t");
+            if f.len() > 2 && f[0].starts_with("//") { out.push((unescape(f[0]), PathBuf::from(unescape(f[1])))); }
         }
     }
     out
@@ -255,7 +257,7 @@ pub fn locations(project: &Path, mounts: &[(String, PathBuf)]) -> Vec<Location> 
     list
 }
 
-#[allow(dead_code)]
+/// A file's path under a folder ("Day 1/A.MP4", with "/" on every system), None when it isn't under it
 pub fn relative(file: &Path, dir: &Path) -> Option<String> {
     let rel = file.strip_prefix(dir).ok()?;
     let parts: Vec<String> = rel.components().map(|c| c.as_os_str().to_string_lossy().to_string()).collect();
@@ -307,92 +309,6 @@ pub fn write_pointers(project: &Path, list: &[Location], gone: &[Location], moun
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// tests/workspace_cases.txt (the cases the player's workspace.lua and vs-gyroflow's workspace.rs run, as its comment
-    /// says), for what this twin does: a project's locations, with this computer's records (known) and the shares
-    /// mounted (mount). Given the project a case expects for a clip, its path in the project's tree (relative: the
-    /// deepest location that has it) and the file at a tree path (original: the first location that has it). Finding
-    /// the project from a clip, its own file and Gyroflow project are the player's and the export's, not checked here
-    #[test]
-    fn workspace_cases() {
-        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/workspace_cases.txt")).unwrap();
-        let top = std::env::temp_dir().join(format!("catalog-workspace-cases-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&top);
-        let (mut failures, mut checks, mut n) = (Vec::new(), 0, 0);
-        let (mut base, mut name, mut in_tree) = (PathBuf::new(), String::new(), false);
-        let mut mounts: Vec<(String, PathBuf)> = Vec::new();
-        let (mut clip, mut project): (Option<PathBuf>, Option<PathBuf>) = (None, None);
-        for line in text.lines() {
-            if line.starts_with('#') || line.trim().is_empty() { continue; }
-            if let Some(rest) = line.strip_prefix("case ") {
-                n += 1;
-                let dir = top.join(n.to_string());
-                std::fs::create_dir_all(&dir).unwrap();
-                base = dir.canonicalize().unwrap();
-                name = rest.to_string();
-                in_tree = false;
-                mounts.clear();
-                PROJECTS_DIR_FOR_TESTS.with(|d| *d.borrow_mut() = Some(base.join("no records")));
-                clip = None;
-            } else if line.starts_with("home ") || line.starts_with("volume ") {
-            } else if let Some(rest) = line.strip_prefix("known ") {
-                let d = base.join(rest);
-                PROJECTS_DIR_FOR_TESTS.with(|x| *x.borrow_mut() = Some(d));
-            } else if let Some(rest) = line.strip_prefix("mount ") {
-                let (src, dir) = rest.split_once(' ').unwrap();
-                mounts.push((src.to_string(), base.join(dir)));
-            } else if line == "tree" {
-                in_tree = true;
-            } else if let Some(rest) = line.strip_prefix("clip ") {
-                in_tree = false;
-                clip = Some(base.join(rest));
-                project = None;
-            } else if in_tree {
-                let rel = line.trim();
-                if let Some((file, text)) = rel.split_once(" = ") {
-                    let p = base.join(file);
-                    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-                    std::fs::write(p, text.replace("@/", &format!("{}/", base.display()))).unwrap();
-                } else if let Some(dir) = rel.strip_suffix('/') {
-                    std::fs::create_dir_all(base.join(dir)).unwrap();
-                } else {
-                    let p = base.join(rel);
-                    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
-                    std::fs::write(p, b"").unwrap();
-                }
-            } else if let Some(clip) = &clip {
-                let (key, value) = line.trim().split_once(' ').unwrap();
-                match key {
-                    "project" => project = (value != "-").then(|| base.join(value)),
-                    "relative" => {
-                        let Some(p) = &project else { continue };
-                        checks += 1;
-                        let got = locations(p, &mounts).iter().filter_map(|l| {
-                            let d = l.dir.as_ref()?;
-                            let rel = relative(clip, d)?;
-                            Some((d.components().count(), if l.at.is_empty() { rel } else { format!("{}/{rel}", l.at) }))
-                        }).max_by_key(|(depth, _)| *depth).map(|(_, t)| t);
-                        if got.as_deref() != Some(value) { failures.push(format!("{name}: {} relative: got {got:?}, want {value}", clip.display())); }
-                    }
-                    "original" => {
-                        let Some(p) = &project else { continue };
-                        checks += 1;
-                        // the tree path is up to the file's extension, the file after it (as workspace.rs reads it)
-                        let tree = value.split_inclusive(".MP4").next().unwrap_or("").trim();
-                        let want = value.split_inclusive(".MP4").nth(1).unwrap_or("").trim();
-                        let want = (want != "-").then(|| base.join(want));
-                        let got = locations(p, &mounts).iter().filter_map(|l| in_location(tree, l)).find(|f| f.is_file());
-                        if got != want { failures.push(format!("{name}: {tree} original: got {got:?}, want {want:?}")); }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        PROJECTS_DIR_FOR_TESTS.with(|d| *d.borrow_mut() = None);
-        let _ = std::fs::remove_dir_all(&top);
-        assert!(checks >= 15, "only {checks} checks read");
-        assert!(failures.is_empty(), "{} of {checks} failed:\n{}", failures.len(), failures.join("\n"));
-    }
 
     #[test]
     fn network_paths() {

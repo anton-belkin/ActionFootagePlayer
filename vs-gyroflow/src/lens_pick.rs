@@ -505,7 +505,7 @@ pub fn clip_lens(path: &str) -> Option<ClipLens> {
 }
 
 fn clip_lens_value(path: &str) -> Option<serde_json::Value> {
-    let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
+    let text = std::fs::read_to_string(crate::workspace::own_file_of(std::path::Path::new(path))).ok()?;
     let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
     doc.pointer("/source/lens").filter(|v| v.is_object()).cloned()
 }
@@ -531,7 +531,7 @@ pub fn candidate_profile(path: &str, clip: &Clip, id: &str) -> Result<(LensProfi
 /// The lens given to the clip alone written into its own file (`source.lens`), the file's other keys kept; None takes
 /// it away. The file written
 pub fn set_clip_lens(path: &str, lens: Option<(&LensProfile, &str, &str, &str)>) -> Result<std::path::PathBuf, String> {
-    let file = crate::workspace::sidecar_file(std::path::Path::new(path));
+    let file = crate::workspace::own_file_of(std::path::Path::new(path));
     let had = std::fs::read_to_string(&file).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok());
     if had.is_none() && lens.is_none() { return Ok(file); }
     let mut doc = had.unwrap_or_else(|| serde_json::json!({ "format": "actionfootageplayer-clip", "version": 1 }));
@@ -555,7 +555,7 @@ pub fn set_clip_lens(path: &str, lens: Option<(&LensProfile, &str, &str, &str)>)
 }
 
 pub fn chosen_type(path: &str) -> Option<String> {
-    let text = std::fs::read_to_string(crate::workspace::sidecar_file(std::path::Path::new(path))).ok()?;
+    let text = std::fs::read_to_string(crate::workspace::own_file_of(std::path::Path::new(path))).ok()?;
     let doc: serde_json::Value = serde_json::from_str(&text).ok()?;
     doc.pointer("/source/lens_type")?.as_str().filter(|s| !s.is_empty()).map(String::from)
 }

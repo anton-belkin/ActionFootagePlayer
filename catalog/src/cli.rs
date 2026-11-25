@@ -76,21 +76,10 @@ fn paths(roots: &[crate::Root], keys: &[(String, String)]) -> Vec<String> {
     keys.iter().filter_map(|(r, rel)| roots.iter().find(|x| x.id == *r).map(|x| x.dir.join(rel).display().to_string())).collect()
 }
 
-/// The project a file is in: a Project.afproject above it, else the project its location's .afplocation names
+/// The project a file is in, found as the player and gyroflow-export find a clip's (workspace.rs's project_root): a
+/// Project.afproject above it, else the project its location's .afplocation names (of the pointer's id)
 pub fn project_for(file: &Path) -> Option<PathBuf> {
-    let mounts = crate::locations::mounts();
-    let mut dir = file.parent();
-    while let Some(d) = dir {
-        if d.join(crate::locations::PROJECT_FILE).is_file() { return Some(d.to_path_buf()); }
-        for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
-            let n = e.file_name().to_string_lossy().into_owned();
-            if !n.ends_with(crate::locations::LOCATION_EXT) { continue; }
-            let Some(v) = crate::locations::read_json(&e.path()) else { continue };
-            if let Some(p) = crate::locations::pointer_project(&v, d, &mounts) { return Some(p); }
-        }
-        dir = d.parent();
-    }
-    None
+    crate::workspace::project_root(file)
 }
 
 /// At low priority (a look in the background mustn't slow what's playing): nice, and on a Mac its disk and network

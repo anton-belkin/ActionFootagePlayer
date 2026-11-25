@@ -1489,7 +1489,7 @@ mpv/scripts/side-panel/       the plugins' settings in a panel beside the video 
 mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
                               ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
 mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
-                              Lua; vs-gyroflow/src/workspace.rs is its twin), and link.lua, which reads the link in a
+                              Lua; catalog/src/workspace.rs is its twin), and link.lua, which reads the link in a
                               moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it), and moments.lua, the moments'
                               part with no mpv in it  →  ~/.config/mpv/scripts/workspace, and
                               in ActionFootagePlayer

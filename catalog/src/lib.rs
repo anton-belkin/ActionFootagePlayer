@@ -24,6 +24,8 @@ pub mod sim;
 pub mod snapshot;
 pub mod state;
 pub mod store;
+pub mod workspace;
+pub mod xmp;
 
 pub use catalog::{ computer_id, machine_id, Catalog, Error, Inspect, Loaded, Report, Root, Sweep, Want };
 pub use state::{ File, State };

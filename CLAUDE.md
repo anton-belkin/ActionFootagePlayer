@@ -69,13 +69,17 @@ JSON reader of its own), vs-gyroflow and the Library with `include_str!` into `a
 names of one list (a copy creeping back), with an allow-list saying why. Plugins zipped alone carry a copy of
 registry.lua/json (`tests/packaging_test.py`).
 
+Rust that the Library and vs-gyroflow both need lives once, in `afp-catalog` (which both link; the Library links
+nothing else): the workspace and pointer lookup, a clip's own file and a file's fingerprint (`workspace.rs`, over
+`locations.rs`), a photo's XMP link and tags (`xmp.rs`), Finder's tags (`finder.rs`). Never copy it into either; it
+must build in `catalog/Dockerfile` (its folder alone, `--locked`: no new crates without a reason).
+
 What's left is logic in more than one language. Change these copies together, in the same PR. The test after each
 fails when they drift apart; a guard that reads the sources has an allow-list for what it can't resolve, with why (add
 to it rather than around it).
 
-- **Workspace and pointer lookup:** `workspace.lua`, `vs-gyroflow/src/workspace.rs` and `catalog/src/locations.rs`.
-  The shared cases are in `tests/workspace_cases.txt`, run by all three (the catalog: locations, `relative`,
-  `original`).
+- **Workspace and pointer lookup:** `workspace.lua` and the catalog's `workspace.rs`/`locations.rs` (vs-gyroflow's
+  `workspace.rs` re-exports them). The shared cases are in `tests/workspace_cases.txt`, run by both.
 - **Render settings:**
   - `mpv/scripts/workspace/transform.lua` and `library/src/renders.rs`, shared cases in `tests/render_settings.json`;
     the keys and their valid values are the registry's; what it says of the plugin's options, gyroflow-export's flags
@@ -83,7 +87,9 @@ to it rather than around it).
   - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
     `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
     `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
-  - the render recipe: workspace `RENDER_VERSION` and `renders.rs` `VERSION`.
+  - the render recipe: `renders.rs` `VERSION` goes with what a recipe holds, and the hashes stay
+    (`the_recipe_goes_with_its_version_and_keeps_its_hash`); the moment renders of before the cache by hash, workspace
+    `main.lua`'s `RENDER_VERSION`/`render_recipe` and `index.rs` `render_recipe_of` (`render_recipe_twin`).
 - **Curves** are the registry's. Still apart: `export.lua`'s mapping before `--curve` (a curve the player plays must
   reach the export as one of the registry's), the packagers' `make_hdr_lut.py` curves (each curve's `lut` in `luts/` or
   made), the cameras' `DJI_CURVES`/`GOPRO_CURVES` and `probe.rs`, `catalog/src/range.rs` `log_curve`, gyroflow-export's
@@ -101,9 +107,10 @@ to it rather than around it).
 - **user-data:** every `user-data/<key>` read is written somewhere (`tests/user_data_test.py`).
 - **The probe's answer:** what `gyroflow-probe --library` answers and `library/src/index.rs` `GEOTAG` (and the probe's
   own `"geotag"`) change together: `index.rs`'s `probe_version` tests.
-- **Tags:** `tags.lua`, `library/src/tags.rs` and `catalog/src/finder.rs`.
-- **The clip's own file (`<clip>.afp.json`)** is found in `sidecar.lua`, `workspace.rs`, `tags.rs` (`clip_own_in`) and
-  `reframe.rs`.
+- **Tags:** `tags.lua` and `library/src/tags.rs` (over the catalog's `finder.rs` and `xmp.rs`).
+- **The clip's own file (`<clip>.afp.json`)** is found by `workspace.lua`'s `own_file` (`sidecar.lua` writes it) and
+  the catalog's `workspace.rs` (`own_at`, `own_file`), which the Library (`tags.rs` `clip_own`) and vs-gyroflow
+  (`workspace::own_file_of`: reframe, lens, water, geotag) use: `tests/workspace_cases.txt`.
 - **The 360 view:** `view360.glsl`, `view360.wgsl` and `view.lua`.
 
 ## Stored data: the rules Anton set
@@ -122,7 +129,7 @@ to it rather than around it).
   - When the path fails, fall back to this computer's record by id.
   - Never search shares by name.
   - Write hosts into every pointer.
-  - (#299; keep workspace.lua, workspace.rs and the catalog's `pointer_project` in step.)
+  - (#299; keep workspace.lua and the catalog's `pointer_project` in step.)
 - **Migrations are one-off scripts** in `tools/one_off/`, run once on Anton's library when he says so. There is no
   migration feature or dual-format reader in the product.
 - **The NAS runs only what Anton starts.** No background pre-renders or scans on the NAS. Measure its disk I/O before
