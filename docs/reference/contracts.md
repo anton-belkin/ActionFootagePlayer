@@ -20,7 +20,7 @@ General rules that hold for every contract here:
 ## The Library's batch (`AFP_BATCH`)
 
 The Library makes clip previews, moments, photos, exports and renders by running the player with no window. One job
-runs at a time (`library/src/main.rs` `start_job`, `tick`). The player side is the end of
+runs at a time (`library/src/batch.rs` `start_job`, `tick`). The player side is the end of
 `mpv/scripts/workspace/main.lua` (the `do … AFP_BATCH … end` block and `render_moments`).
 
 ### How it starts
@@ -48,7 +48,7 @@ Kinds `optical`, `lens-find` and `lens-estimate` run `gyroflow-optical --batch <
 
 ### The request
 
-`add_job` (`library/src/main.rs`) builds it; `start_job` adds `status`, `stop` and `focus`.
+`add_job` (`library/src/batch.rs`) builds it; `start_job` adds `status`, `stop` and `focus`.
 
 | Key | Type | Kinds | Meaning |
 |---|---|---|---|
@@ -387,7 +387,7 @@ What talks on it:
 
 ## The Library page and its commands
 
-The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_handler` lists them). Rules they keep
+The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_handler` lists them; they live in a module per area). Rules they keep
 ([../design/library-responsiveness.md](../design/library-responsiveness.md)):
 
 - **A command that changes items answers what they are now:** `changed::Changed { items, gone, gone_files, reload,
@@ -487,7 +487,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | gyroflow | `underwater` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/main.lua` |
 | gyroflow | `view` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | highlights | `go` | `mpv/scripts/highlights/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
-| highlights | `mark` | `mpv/scripts/highlights/main.lua` | `library/src/main.rs` |
+| highlights | `mark` | `mpv/scripts/highlights/main.lua` | `library/src/tests/live_e2e.rs` |
 | highlights | `notify-answer` | `mpv/scripts/side-panel/notify_client.lua` | — |
 | live_photo | `live-photo-dump` | `mpv/scripts/live-photo/main.lua` | — |
 | live_photo | `live-photo-layout` | `mpv/scripts/live-photo/main.lua` | — |
@@ -672,7 +672,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `view360` | `mpv/scripts/view360/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/side-panel/scrub.lua` |
 | `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 10 more |
 | `workspace/clip` | — | `mpv/scripts/gyroflow/export.lua` |
-| `workspace/moments` | — | `library/src/main.rs` |
+| `workspace/moments` | — | `library/src/tests/live_e2e.rs` |
 
 A key read with nothing listed as its writer is covered by a key above or below it (a table written whole, or its fields one by one); `tests/user_data_test.py` checks that every read has a writer.
 <!-- END GENERATED: user-data -->
@@ -689,7 +689,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_360_TIMES` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_360_WIDTH` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_ARGS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_BATCH` | `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua`, `mpv/scripts/gyroflow/export.lua` and 3 more | `tests/agent_test.lua` |
+| `AFP_BATCH` | `library/src/batch.rs`, `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua` and 4 more | `tests/agent_test.lua` |
 | `AFP_BIN` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_BITRATE` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_CACHE` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
@@ -713,7 +713,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_GRACE` | — | `catalog/examples/rig.rs` |
 | `AFP_HEIGHT` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_HELPER_STATUS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_HOME` | `catalog/src/project.rs`, `library/src/main.rs`, `library/src/seen.rs`, `mpv/scripts/live-photo/main.lua` and 2 more | `tests/gpu_ahead_e2e.py`, `tests/live_photo_ipc.py` |
+| `AFP_HOME` | `catalog/src/project.rs`, `library/src/seen.rs`, `mpv/scripts/live-photo/main.lua`, `mpv/scripts/workspace/main.lua` and 1 more | `library/src/tests/e2e.rs`, `library/src/tests/live_e2e.rs`, `library/src/tests/tests.rs`, `tests/gpu_ahead_e2e.py` and 1 more |
 | `AFP_INTERP` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_JELLYFIN` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_JELLYFIN_EVERY` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
@@ -725,7 +725,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_JELLYFIN_USER` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_JOURNAL` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | — |
 | `AFP_JOURNAL_DIR` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/gyroflow_reload_ipc.py`, `tests/journal_mpv_test.sh`, `tests/journal_test.lua`, `tools/journal_report.py` and 1 more |
-| `AFP_JOURNAL_PARENT` | `library/src/main.rs`, `mpv/scripts/workspace/journal.lua` | — |
+| `AFP_JOURNAL_PARENT` | `library/src/batch.rs`, `mpv/scripts/workspace/journal.lua` | — |
 | `AFP_LIBRARY` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_LISTS` | `library/src/lists.rs`, `library/src/main.rs` | `library/ui-tests/lists.js`, `library/ui/albums.js`, `library/ui/app.js`, `library/ui/share.js` and 1 more |
 | `AFP_LIVE_PHOTOS` | — | `tests/live_photo_test.lua` |

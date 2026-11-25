@@ -481,7 +481,7 @@ Writes.define("photoadd", {
   problems: (r) => (r && r.failed ? r.failed.map((f) => f[0] + ": " + f[1]) : []),
 });
 
-// A new album (or folder): shown at once with the name the app will give it (src/main.rs's new_folder: "untitled
+// A new album (or folder): shown at once with the name the app will give it (src/items.rs's new_folder: "untitled
 // folder", " 2"… when taken), ready to be renamed; the app is asked for that name
 Writes.define("newfolder", {
   views: ["footage", "moments", "stills", "exports"],

@@ -47,7 +47,7 @@ pub struct Changed {
     pub links_gone: Vec<String>,
 }
 
-/// Whether the project's clip previews are laid out flat (main.rs's project_info, without counting its files)
+/// Whether the project's clip previews are laid out flat (project.rs's project_info, without counting its files)
 pub fn flat_previews(root: &Path) -> bool {
     let s = locations::read_json(&root.join(locations::PROJECT_FILE)).and_then(|d| d.get("settings").cloned()).unwrap_or(json!({}));
     let flag = s.get("clips_flat").and_then(Value::as_bool).unwrap_or(false);
@@ -67,7 +67,7 @@ impl Changed {
         let gone: Vec<String> = ids.iter().filter(|i| !have.contains(i.as_str())).cloned().collect();
         if !gone.is_empty() { let g = self.gone.entry(view.to_string()).or_default(); g.extend(gone); g.sort(); g.dedup(); }
         // A moment whose clip was found away from where its link says: the scan itself writes the link again
-        // (main.rs's scan); here it's only left out of what's sent
+        // (browsing.rs's scan); here it's only left out of what's sent
         let found: Vec<Value> = found.into_iter().map(|mut it| { if let Some(o) = it.as_object_mut() { o.remove("relink"); } it }).collect();
         if !found.is_empty() { self.items.entry(view.to_string()).or_default().extend(found); }
     }
@@ -113,7 +113,7 @@ pub fn of_clips(root: &Path, trees: &[String], problems: Vec<String>) -> Changed
 /// A path in the project's folder, as the views name it
 fn rel_in(root: &Path, path: &Path) -> Option<String> { locations::relative(path, root) }
 
-/// A file of the project's renamed (main.rs's rename_in): `from` gone from its view, `to` there. A folder: its views
+/// A file of the project's renamed (items.rs's rename_in): `from` gone from its view, `to` there. A folder: its views
 /// read again (what's in it moved with it)
 pub fn of_rename(root: &Path, view: &str, kind: &str, from: &Path, to: &str) -> Changed {
     let mut c = Changed { answer: json!(to), ..Default::default() };
@@ -151,7 +151,7 @@ pub fn of_album(root: &Path, made: &[(String, Option<PathBuf>, PathBuf)], proble
     c
 }
 
-/// What's to be known of `items` ({ kind, path }) before they're deleted (main.rs's delete_in): the clips whose
+/// What's to be known of `items` ({ kind, path }) before they're deleted (items.rs's delete_in): the clips whose
 /// previews they are
 pub fn before_delete(items: &[Value]) -> Vec<String> {
     items.iter().filter(|it| it["kind"] == "preview").filter_map(|it| index::link(Path::new(it["path"].as_str()?))).filter_map(|l| l["clip"].as_str().map(str::to_string)).collect()

@@ -185,7 +185,7 @@ impl Ctx {
 /// What a render takes from this computer's player: what it wrote last (gyroflow/main.lua `publish`, every time it
 /// starts, a batch too: <its data>/gyroflow/render-defaults.json, AFL_PLAYER_DEFAULTS to point elsewhere), else worked
 /// out from its gyroflow.conf (AFL_PLAYER_OPTS) as the player would. A batch tells what it would have used, and a
-/// share compares (main.rs `share_collect`)
+/// share compares (batch.rs `share_collect`)
 fn player_defaults() -> Value {
     // (tests never read this computer's player, but those run with one: AFL_PLAYER)
     if cfg!(test) && std::env::var_os("AFL_PLAYER").is_none() { return json!({}); }

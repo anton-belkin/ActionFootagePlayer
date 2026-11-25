@@ -67,7 +67,7 @@ static RUN: AtomicU64 = AtomicU64::new(0);
 /// (the thread's id it's for: a thread stopped, still finishing, doesn't take the new one's)
 static READ_WITHOUT: AtomicU64 = AtomicU64::new(0);
 
-/// A view about to be read: noted if it's not from the catalog of this run (main.rs's scan, after wait_ready)
+/// A view about to be read: noted if it's not from the catalog of this run (browsing.rs's scan, after wait_ready)
 pub fn reading_view(root: &Path) {
     // Under SEEN's lock: the thread puts its catalog there under the same lock, then asks (ready_counts)
     let g = SEEN.read().unwrap_or_else(|e| e.into_inner());
@@ -772,7 +772,7 @@ mod tests {
         assert!(root.join(".afp/catalog/snap").is_dir(), "the catalog made");
         assert!(c.load(Ordering::Relaxed) >= 1, "read without it: read again");
         drop(r);
-        // There: the view waits for it, as main.rs's scan does, and isn't read again
+        // There: the view waits for it, as browsing.rs's scan does, and isn't read again
         let (c, l) = counter();
         let r = start(&root, c.clone(), l, false);
         wait_ready(&root, Duration::from_secs(30));

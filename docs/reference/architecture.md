@@ -99,10 +99,16 @@ each other at once ([contracts.md](contracts.md#the-live-channel-library-and-pla
 
 ### Library
 
-`library/src/` is the app's Rust side; `main.rs` holds the Tauri commands, the job queue and the player's batch runs.
+`library/src/` is the app's Rust side. `main.rs` is the wiring: the state the commands share (`Inner`, `Job`), `main()`
+and `generate_handler!`'s list of every command. The commands live in a module per area, each `use`d whole by
+`main.rs` (`pub(crate)` for what another module calls):
 
 | Module | What |
 |---|---|
+| `project.rs`, `recent.rs`, `settings.rs`, `moving.rs`, `watching.rs` | The project: its file (`read_doc`, `update_doc`), opening it, this computer's list of projects, its locations and caches, moving it, its folder watched |
+| `batch.rs` | The player run without a window: the job queue (`add_job`, `start_job`, `tick`), Share's runs |
+| `browsing.rs`, `items.rs`, `playing.rs` | The views read (`scan`, `cached_view`); what's done to items (take in, rename, delete, new folder); opened in the player |
+| `care.rs`, `tagging.rs`, `lens.rs` | Check, Find moved, Mend; tags, picks, ratings; the lens and Source settings |
 | `index.rs` | The views (footage, moments, stills, exports) read from the files; the probe queue (`gyroflow-probe --library`, `GEOTAG`) |
 | `seen.rs` | The catalog in the Library: what changed, noted, and told to player windows |
 | `renders.rs` | The render cache: recipe, hash, `BUNDLE_KEYS`, `EXPORT_CHOICES` |
@@ -243,7 +249,7 @@ All through mpv's `subprocess` command, asynchronously.
 
 ### The Library and the player
 
-- **Opening items:** `open_items` and `open_list` in `library/src/main.rs`. macOS: `open -a <ActionFootagePlayer.app>
+- **Opening items:** `open_items` and `open_list` in `library/src/playing.rs`. macOS: `open -a <ActionFootagePlayer.app>
   <files>` (Apple Events reach the running mpv; a video opened while one plays replaces it). Windows: the launcher sends
   the files down the player's pipe `\\.\pipe\ActionFootagePlayer`, and the Library polls `get_property path` on that
   pipe until it plays. A list is an `.afplist.m3u8` file that `workspace/librarylist.lua` reads into the playlist.

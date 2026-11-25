@@ -595,7 +595,7 @@ pub fn scan_only(root: &Path, view: &str, flat_previews: bool, only: Option<&[St
                 it["renders"] = renders_of(&renders, crate::renders::Kind::Moment, rel, &path, &l);
                 let (original, moved_to) = original_of(&l);
                 it["original"] = original.map(|o| json!(o.display().to_string())).unwrap_or(Value::Null);
-                // Found away from the path its link names: the new path, written into the link (main.rs's scan)
+                // Found away from the path its link names: the new path, written into the link (browsing.rs's scan)
                 if let Some(t) = moved_to { it["relink"] = json!(t); }
                 it["link"] = l;
             }

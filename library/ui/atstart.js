@@ -1,5 +1,5 @@
 "use strict";
-// "Open at start" (src/main.rs: set_start_project, open_at_start, close_project): one project of the list of those
+// "Open at start" (src/project.rs: set_start_project, open_at_start, close_project): one project of the list of those
 // opened here is the one the app opens when it's started with no file, skipping the start screen. The choice is this
 // computer's, kept in the app's own data (with the list), never in the project. A tick on the project's menu (for the
 // one open) and on each row of the start screen's list sets it; ticking another moves it; the tick again takes it off.
