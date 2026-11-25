@@ -142,8 +142,18 @@ pub fn read_json(path: &Path) -> Option<Value> {
     std::fs::read_to_string(path).ok().and_then(|t| serde_json::from_str(&t).ok())
 }
 
+#[cfg(test)]
+thread_local! {
+    /// This computer's records of its projects (the folder of <id>.json files) for a test on this thread
+    pub static PROJECTS_DIR_FOR_TESTS: std::cell::RefCell<Option<PathBuf>> = const { std::cell::RefCell::new(None) };
+}
+
 /// This computer's own file for a project (its id): <data>/ActionFootage/projects/<id>.json
 pub fn local_file(id: &str) -> Option<PathBuf> {
+    #[cfg(test)]
+    if let Some(d) = PROJECTS_DIR_FOR_TESTS.with(|d| d.borrow().clone()) {
+        return (!id.is_empty() && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')).then(|| d.join(format!("{id}.json")));
+    }
     let base = if cfg!(target_os = "macos") {
         PathBuf::from(std::env::var_os("HOME")?).join("Library/Application Support")
     } else if cfg!(windows) {
@@ -297,6 +307,92 @@ pub fn write_pointers(project: &Path, list: &[Location], gone: &[Location], moun
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// tests/workspace_cases.txt (the cases the player's workspace.lua and vs-gyroflow's workspace.rs run, as its comment
+    /// says), for what this twin does: a project's locations, with this computer's records (known) and the shares
+    /// mounted (mount). Given the project a case expects for a clip, its path in the project's tree (relative: the
+    /// deepest location that has it) and the file at a tree path (original: the first location that has it). Finding
+    /// the project from a clip, its own file and Gyroflow project are the player's and the export's, not checked here
+    #[test]
+    fn workspace_cases() {
+        let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/workspace_cases.txt")).unwrap();
+        let top = std::env::temp_dir().join(format!("catalog-workspace-cases-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&top);
+        let (mut failures, mut checks, mut n) = (Vec::new(), 0, 0);
+        let (mut base, mut name, mut in_tree) = (PathBuf::new(), String::new(), false);
+        let mut mounts: Vec<(String, PathBuf)> = Vec::new();
+        let (mut clip, mut project): (Option<PathBuf>, Option<PathBuf>) = (None, None);
+        for line in text.lines() {
+            if line.starts_with('#') || line.trim().is_empty() { continue; }
+            if let Some(rest) = line.strip_prefix("case ") {
+                n += 1;
+                let dir = top.join(n.to_string());
+                std::fs::create_dir_all(&dir).unwrap();
+                base = dir.canonicalize().unwrap();
+                name = rest.to_string();
+                in_tree = false;
+                mounts.clear();
+                PROJECTS_DIR_FOR_TESTS.with(|d| *d.borrow_mut() = Some(base.join("no records")));
+                clip = None;
+            } else if line.starts_with("home ") || line.starts_with("volume ") {
+            } else if let Some(rest) = line.strip_prefix("known ") {
+                let d = base.join(rest);
+                PROJECTS_DIR_FOR_TESTS.with(|x| *x.borrow_mut() = Some(d));
+            } else if let Some(rest) = line.strip_prefix("mount ") {
+                let (src, dir) = rest.split_once(' ').unwrap();
+                mounts.push((src.to_string(), base.join(dir)));
+            } else if line == "tree" {
+                in_tree = true;
+            } else if let Some(rest) = line.strip_prefix("clip ") {
+                in_tree = false;
+                clip = Some(base.join(rest));
+                project = None;
+            } else if in_tree {
+                let rel = line.trim();
+                if let Some((file, text)) = rel.split_once(" = ") {
+                    let p = base.join(file);
+                    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                    std::fs::write(p, text.replace("@/", &format!("{}/", base.display()))).unwrap();
+                } else if let Some(dir) = rel.strip_suffix('/') {
+                    std::fs::create_dir_all(base.join(dir)).unwrap();
+                } else {
+                    let p = base.join(rel);
+                    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+                    std::fs::write(p, b"").unwrap();
+                }
+            } else if let Some(clip) = &clip {
+                let (key, value) = line.trim().split_once(' ').unwrap();
+                match key {
+                    "project" => project = (value != "-").then(|| base.join(value)),
+                    "relative" => {
+                        let Some(p) = &project else { continue };
+                        checks += 1;
+                        let got = locations(p, &mounts).iter().filter_map(|l| {
+                            let d = l.dir.as_ref()?;
+                            let rel = relative(clip, d)?;
+                            Some((d.components().count(), if l.at.is_empty() { rel } else { format!("{}/{rel}", l.at) }))
+                        }).max_by_key(|(depth, _)| *depth).map(|(_, t)| t);
+                        if got.as_deref() != Some(value) { failures.push(format!("{name}: {} relative: got {got:?}, want {value}", clip.display())); }
+                    }
+                    "original" => {
+                        let Some(p) = &project else { continue };
+                        checks += 1;
+                        // the tree path is up to the file's extension, the file after it (as workspace.rs reads it)
+                        let tree = value.split_inclusive(".MP4").next().unwrap_or("").trim();
+                        let want = value.split_inclusive(".MP4").nth(1).unwrap_or("").trim();
+                        let want = (want != "-").then(|| base.join(want));
+                        let got = locations(p, &mounts).iter().filter_map(|l| in_location(tree, l)).find(|f| f.is_file());
+                        if got != want { failures.push(format!("{name}: {tree} original: got {got:?}, want {want:?}")); }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        PROJECTS_DIR_FOR_TESTS.with(|d| *d.borrow_mut() = None);
+        let _ = std::fs::remove_dir_all(&top);
+        assert!(checks >= 15, "only {checks} checks read");
+        assert!(failures.is_empty(), "{} of {checks} failed:\n{}", failures.len(), failures.join("\n"));
+    }
 
     #[test]
     fn network_paths() {

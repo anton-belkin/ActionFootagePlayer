@@ -48,7 +48,7 @@ function userAlbum(d) { return !!d && d !== OTHER && !d.startsWith(OTHER + "/") 
 // Views inside Albums that aren't folders: [id, label, draw, items, meta] (albumviews.js): Timeline, Map, the media types
 const ALBUM_VIEWS = [];
 // The log curves a thumbnail is turned to normal colour from (the player's luts/<curve>_hlg.cube)
-const ALBUM_CURVES = ["dlogm", "dlog", "dlog2", "gplog", "gplog2", "ilog"];
+const ALBUM_CURVES = ["dlogm", "dlog", "gplog", "gplog2", "ilog"];
 
 // Every clip link of the project (the scan's `links`), as its clip with the link's own place: one item a link, so a
 // clip in two albums is two items. A link whose clip isn't among the footage isn't shown (the strip on top counts it)
