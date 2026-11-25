@@ -87,7 +87,7 @@ function html(ui, state) {
   let page = fs.readFileSync(path.join(ui, "index.html"), "utf8");
   page = page.replace("<head>", '<head><base href="file://' + encodeURI(ui) + '/">');
   // (in a function of its own: the page's scripts have names of their own)
-  page = page.replace(/<script src=/, () => "<script>(() => {" + mock + "})();</script>\n<script src=");
+  page = page.replace(/<script src=/, () => "<script>" + require("./lists").script() + "(() => {" + mock + "})();</script>\n<script src=");
   return page.replace("</body>", "<script>" + does + "</script></body>");
 }
 

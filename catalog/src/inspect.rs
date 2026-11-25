@@ -18,7 +18,8 @@ use std::path::Path;
 
 pub const LINK_KEY: &str = "ch.actionfootageplayer.link";
 pub const LINK_EXT: &str = ".afplink.mp4";
-/// A project's own folders (at its top, or at a location's top where they aren't footage)
+/// A project's own folders (at its top, or at a location's top where they aren't footage): registry.json's own_folders and
+/// recycle_bins (a const, the catalog being built from its folder alone: registry.rs's test checks it)
 pub const OWN_FOLDERS: [&str; 13] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
                                      "_actionfootageplayer", "generated", "#recycle"];
 

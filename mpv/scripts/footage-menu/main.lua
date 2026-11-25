@@ -65,7 +65,9 @@ local APP_NAME = o.version ~= "" and "ActionFootagePlayer " .. o.version or "Act
 local platform = mp.get_property("platform") or ""
 -- DJI's telemetry names its schema, not the camera
 local CAMERAS = { ["dvtm_ac206.proto"] = "DJI Osmo Action 6", ["dvtm_oq101.proto"] = "DJI Osmo 360" }
-local CURVES = { { "dlogm", "D-Log M" }, { "dlog", "D-Log" }, { "gplog", "GP-Log" }, { "gplog2", "GP-Log2" }, { "ilog", "I-Log (10-bit)" } }
+-- The log curves, { id, name } in Ctrl+l's order: registry.json's (the workspace plugin's, beside this one)
+local CURVES = {}
+for _, c in ipairs(require('registry').curves) do if c.log then table.insert(CURVES, { c.id, c.name }) end end
 local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }

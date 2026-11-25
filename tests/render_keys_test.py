@@ -1,74 +1,57 @@
-"""The settings a render is made with are the same keys and values in the player and the Library, so a key added to one
-can't silently skip the Library's recipe and its hash (tests/render_settings.json checks what each gives, case by case;
-this checks that both have the same keys to give it from):
-  * the bundle's keys: mpv/scripts/workspace/transform.lua KEYS and library/src/renders.rs BUNDLE_KEYS, in order
-  * the underwater colour's: transform.lua UW_KEYS and renders.rs UW_KEYS
-  * the input's (curve, rotation, underwater: the source's): each one renders.rs carries from an old view
-  * each key's valid values: transform.lua VALID and renders.rs valid()
-  * the values renders.rs defaults_of takes from gyroflow.conf are valid ones
-A key only the player has goes into PLAYER_ONLY with why. From the repository's folder: python3 tests/render_keys_test.py"""
+"""The settings a render is made with are registry.json's `settings` (mpv/scripts/workspace/registry.json): transform.lua
+and the Library's renders.rs take their keys, order, valid values, neutral values and what a project owns from it, and
+renders.rs's defaults_of reads gyroflow.conf by its conf names (tests/registry_test.py checks each reads it;
+tests/render_settings.json and tests/gyroflow_conf_cases.json check what each gives, case by case). What the registry
+says that's still kept apart, checked here:
+  * each key's gyroflow.conf option and default are the gyroflow plugin's own (gyroflow/main.lua's `o`)
+  * each key gyroflow-export takes (exported, cli) is in its argument parser and handed to it by export.lua
+  * each key's field in the warp's request (gpu) is in gyroflow/main.lua's player_args
+  * a key not exported says why (player_only)
+From the repository's folder: python3 tests/render_keys_test.py"""
+import json
 import re
 
 from twins import Checks, block, read
 
 c = Checks("render keys")
-lua = read("mpv/scripts/workspace/transform.lua")
-rs = read("library/src/renders.rs")
+reg = json.loads(read("mpv/scripts/workspace/registry.json"))
+plugin = read("mpv/scripts/gyroflow/main.lua")
+export_lua = read("mpv/scripts/gyroflow/export.lua")
+export_rs = read("vs-gyroflow/src/bin/gyroflow-export.rs")
 
-# Keys the player has that the Library's recipe doesn't need: why
-PLAYER_ONLY = {}
+GROUPS = {"bundle", "uw", "input", "opts"}
+KINDS = {"enum", "bool", "number", "ratio", "curve"}
+keys = [s["key"] for s in reg["settings"]]
+c.expect("each key once", len(keys) == len(set(keys)), str(keys))
 
+# The plugin's options and their defaults: `local o = { k = v, ... }`
+o = {}
+for k, v in re.findall(r'(\w+) = ("[^"]*"|true|false|-?[\d.]+)', re.search(r"\nlocal o = \{([^\n]*)", plugin).group(1)):
+    o[k] = json.loads(v) if v not in ("true", "false") else v == "true"
+args = block(plugin, r"\nlocal function player_args\(source\)", "gyroflow/main.lua player_args")
+parsed = set(re.findall(r'"(--[a-z0-9-]+)"(?: \| "[^"]*")* =>', export_rs))
 
-def lua_list(name):
-    m = re.search(rf"\nM\.{name} = \{{([^}}]*)\}}", lua)
-    c.expect(f"transform.lua has {name}", m)
-    return re.findall(r'"(\w+)"', m.group(1)) if m else []
-
-
-def rs_list(name):
-    m = re.search(rf"const {name}: \[&str; \d+\] = \[([^\]]*)\]", rs)
-    c.expect(f"renders.rs has {name}", m)
-    return re.findall(r'"(\w+)"', m.group(1)) if m else []
-
-
-keys, bundle = lua_list("KEYS"), rs_list("BUNDLE_KEYS")
-c.expect("the bundle's keys: transform.lua KEYS and renders.rs BUNDLE_KEYS, in order",
-         [k for k in keys if k not in PLAYER_ONLY] == bundle, f"transform: {keys}; renders: {bundle}")
-uw, uw_rs = lua_list("UW_KEYS"), rs_list("UW_KEYS")
-c.expect("the underwater colour's keys: transform.lua UW_KEYS and renders.rs UW_KEYS",
-         [k for k in uw if k not in PLAYER_ONLY] == uw_rs, f"transform: {uw}; renders: {uw_rs}")
-for k in lua_list("INPUT_KEYS"):
-    c.expect(f"renders.rs carries the input's {k} from an old view (transform.migrate_source)", f'v["{k}"]' in rs)
-for k in PLAYER_ONLY:
-    c.expect(f"PLAYER_ONLY lists only the player's keys: {k}", k in keys + uw)
-
-# Valid values, key by key (aspect and uw_strength are worked out, not listed: both sides take any ratio, 0-1)
-valid_lua = {}
-for k, body in re.findall(r"\n    (\w+) = \{([^}]*)\},", block(lua, r"\nlocal VALID = ", "transform.lua VALID")):
-    vals = set(re.findall(r'\["([^"]+)"\]|(\w+) = true', body))
-    vals = {a or b for a, b in vals}
-    if "[true] = true" in body:
-        vals = {"<bool>"}
-    valid_lua[k] = vals
-valid_rs = {}
-fn = block(rs, r"fn valid\(k: &str, v: &Value\) -> bool ", "renders.rs valid()")
-for keys_, vals in re.findall(r'((?:"\w+"\s*\|?\s*)+) => matches!\(s, ([^)]*)\)', fn):
-    for k in re.findall(r'"(\w+)"', keys_):
-        valid_rs[k] = set(re.findall(r'"([^"]+)"', vals))
-for keys_ in re.findall(r'((?:"\w+"\s*\|?\s*)+) => v\.is_boolean\(\)', fn):
-    for k in re.findall(r'"(\w+)"', keys_):
-        valid_rs[k] = {"<bool>"}
-for k in sorted(set(bundle + uw_rs) - {"aspect", "uw_strength"}):
-    c.expect(f"{k}: the same valid values in transform.lua and renders.rs", valid_lua.get(k) == valid_rs.get(k) and valid_rs.get(k),
-             f"transform: {sorted(valid_lua.get(k, []))}; renders: {sorted(valid_rs.get(k, []))}")
-for k in ("aspect", "uw_strength"):
-    c.expect(f"{k}: worked out on both sides", k in fn and (k in valid_lua or f'k == "{k}"' in lua))
-
-# defaults_of: what it takes from gyroflow.conf, a valid value
-defaults = block(rs, r"fn defaults_of\(conf: &str\) -> Value ", "renders.rs defaults_of")
-for key, of, default in re.findall(r'one\("(\w+)", &\[([^\]]*)\], "([^"]*)"\)', defaults):
-    vals = set(re.findall(r'"([^"]+)"', of))
-    if key in valid_rs:
-        c.expect(f"defaults_of's {key}: valid values", vals <= valid_rs[key], f"{sorted(vals - valid_rs[key])}")
-    c.expect(f"defaults_of's {key}: its default is one of them", default in vals)
+for s in reg["settings"]:
+    k = s["key"]
+    c.expect(f"{k}: a group", s.get("group") in GROUPS, str(s.get("group")))
+    c.expect(f"{k}: a kind", s.get("kind") in KINDS, str(s.get("kind")))
+    if s["kind"] in ("enum", "ratio"):
+        c.expect(f"{k}: its values", s.get("values"))
+    if s["kind"] == "enum" and "neutral" in s:
+        c.expect(f"{k}: its neutral value is one of them", s["neutral"] in s["values"], str(s["neutral"]))
+    if s.get("conf"):
+        c.expect(f"{k}: gyroflow.conf's {s['conf']} is the plugin's option", s["conf"] in o, s["conf"])
+        c.expect(f"{k}: its default is the plugin's ({s['conf']} = {o.get(s['conf'])!r})", o.get(s["conf"]) == s.get("conf_default"),
+                 repr(s.get("conf_default")))
+        for v in s.get("not_in_conf", []):
+            c.expect(f"{k}: not_in_conf {v} is one of its values", v in s.get("values", []))
+    if s.get("exported"):
+        c.expect(f"{k}: exported, by its flags", s.get("cli"))
+        for flag in s.get("cli", []):
+            c.expect(f"{k}: gyroflow-export reads {flag}", flag in parsed)
+            c.expect(f"{k}: export.lua hands it {flag}", f'"{flag}"' in export_lua)
+    else:
+        c.expect(f"{k}: not exported, says why (player_only)", s.get("player_only"))
+    if s.get("gpu"):
+        c.expect(f"{k}: the warp's request has {s['gpu']} (player_args)", re.search(rf"\b{s['gpu']} = ", args))
 c.done()

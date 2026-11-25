@@ -1,15 +1,12 @@
--- The log curves, kept in several places, agree (#291: the player's curve "uw" reached gyroflow-export, which
--- didn't know it, "unknown curve uw"):
---   * every curve the dlogm plugin can play (mpv/scripts/dlogm/main.lua CURVES, and the ones it adds, CURVE.uw) is
---     handed to gyroflow-export as a curve it takes (vs-gyroflow/src/bin/gyroflow-export.rs CURVES), or mapped to one
---     on the way (export.lua as_it_plays, a saved view's): checked by running export.lua over a fake mpv, so a mapping
---     added there counts as well as the curve added to the export
---   * the export's "unknown curve" message names its curves
---   * every curve of the export has its LUT: luts/<id>_hlg.cube in the repository, or made by tools/make_hdr_lut.py in
---     each packager (install.sh, make_app.sh, make_release.sh, make_windows_app.sh), "uw" excepted (made per clip)
---   * the curves the cameras' metadata name (DJI_CURVES, GOPRO_CURVES) are the plugin's
---   * the Library's lists of curves: Source settings' (library/ui/app.js SRC_CURVES), what a clip's own file may say
---     (library/src/tags.rs), the thumbnails' (library/ui/albums.js ALBUM_CURVES: a LUT each)
+-- The log curves are registry.json's (mpv/scripts/workspace/registry.json), read by the dlogm plugin, the side panel,
+-- the right-click menu, gyroflow-export and the Library (tests/registry_test.py checks each reads it). What's still
+-- apart, checked here (#291: the player's curve "uw" reached gyroflow-export, which didn't know it, "unknown curve uw"):
+--   * every curve the dlogm plugin can play is handed to gyroflow-export as one of the registry's, or mapped to one on
+--     the way (export.lua as_it_plays, a saved view's): checked by running export.lua over a fake mpv
+--   * every curve's LUT (the registry's lut): luts/<lut> in the repository, or made by tools/make_hdr_lut.py in each
+--     packager (install.sh, make_app.sh, make_release.sh, make_windows_app.sh); "uw" has none (made per clip)
+--   * the curves the cameras' metadata name (DJI_CURVES, GOPRO_CURVES) are the registry's
+--   * gyroflow-export's help names the log curves
 -- From the repository's folder: luajit tests/curves_twin_test.lua
 
 local failures, checks = 0, 0
@@ -44,17 +41,17 @@ local function block(text, start_pattern, what)
     error("unclosed " .. what)
 end
 
--- The player's curves
+package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
+local registry = require 'registry'
 local dlogm = read("mpv/scripts/dlogm/main.lua")
-local player = {}
-for id in block(dlogm, "\nlocal CURVES = {", "dlogm CURVES"):gmatch('id = "([%w_]+)"') do player[id] = true end
-local logs = {}
-for k in pairs(player) do logs[k] = true end
--- The ones added beside them (the underwater colour), not in Ctrl+l's round
-for name in dlogm:gmatch("\nCURVE%.([%w_]+) = ") do player[name] = true end
-for name in dlogm:gmatch('\nCURVE%["([%w_]+)"%] = ') do player[name] = true end
-expect("the player has curves", next(player) ~= nil)
-expect("the player's uw is among them (the curve #291 was about)", player.uw == true, sorted(player))
+-- The player's curves, and the log ones (Ctrl+l's round, a source's curve)
+local player, logs = {}, {}
+for _, c in ipairs(registry.curves) do
+    player[c.id] = true
+    if c.log then logs[c.id] = true end
+end
+expect("the registry has curves", next(player) ~= nil)
+expect("the player's uw is among them (the curve #291 was about)", player.uw == true and not logs.uw, sorted(player))
 
 -- What the cameras' metadata says, as a curve: one of the plugin's
 for _, name in ipairs({ "DJI_CURVES", "GOPRO_CURVES" }) do
@@ -63,19 +60,12 @@ for _, name in ipairs({ "DJI_CURVES", "GOPRO_CURVES" }) do
     end
 end
 
--- gyroflow-export's
+-- gyroflow-export takes the registry's curves (vs-gyroflow/src/lists.rs); its help names the log ones
 local exporter = read("vs-gyroflow/src/bin/gyroflow-export.rs")
-local export = {}
-for id in block(exporter, "const CURVES: &%[%(&str, &str%)%] = &", "gyroflow-export CURVES"):gmatch('%("([%w_]+)", "') do export[id] = true end
-expect("gyroflow-export has curves", next(export) ~= nil)
--- Its message names them
-local listed = exporter:match('unknown curve {c} %(([^)]*)%)')
-expect("gyroflow-export's unknown-curve message is there", listed ~= nil)
-if listed then
-    local named = {}
-    for id in listed:gmatch("[%w_]+") do if id ~= "none" then named[id] = true end end
-    expect("gyroflow-export's message names its curves", sorted(named) == sorted(export), "message: " .. sorted(named) .. "; CURVES: " .. sorted(export))
-end
+local export = player
+local help = exporter:match("%-%-curve <curve>  the log curve: ([^\n]*)")
+expect("gyroflow-export's help for --curve is there", help ~= nil)
+for id in pairs(logs) do expect("gyroflow-export's help names " .. id, help and help:find(id .. ",", 1, true) ~= nil, help) end
 
 -- Each export curve's LUT: in the repository, or made in every packager
 local made = {}
@@ -87,14 +77,17 @@ for _, p in ipairs(packagers) do
     for id in (list or ""):gmatch("[%w_]+") do made[p][id] = true end
 end
 local hdr_lut = read("tools/make_hdr_lut.py")
-for id in pairs(export) do
-    if id ~= "uw" then
-        local f = io.open("luts/" .. id .. "_hlg.cube", "r")
+for _, c in ipairs(registry.curves) do
+    expect(c.id .. ": a LUT, or none only for uw (made per clip)", (c.lut ~= nil) == (c.id ~= "uw"))
+    local id = c.id
+    if c.lut then
+        expect(c.id .. "'s LUT is luts/<id>_hlg.cube, as make_hdr_lut.py names it", c.lut == id .. "_hlg.cube", c.lut)
+        local f = io.open("luts/" .. c.lut, "r")
         if f then
             f:close()
         else
             expect("make_hdr_lut.py makes " .. id, hdr_lut:find("\ndef " .. id .. "%(") ~= nil)
-            for _, p in ipairs(packagers) do expect(p .. " makes " .. id .. "_hlg.cube", made[p][id], "no luts/" .. id .. "_hlg.cube in the repository") end
+            for _, p in ipairs(packagers) do expect(p .. " makes " .. c.lut, made[p][id], "no luts/" .. c.lut .. " in the repository") end
         end
     end
 end
@@ -129,7 +122,6 @@ package.loaded['mp.utils'] = {
     parse_json = function(s) return requests[s] end,
     getpid = function() return 1 end,
 }
-package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path
 assert(loadfile("mpv/scripts/gyroflow/export.lua"))()
 expect("export.lua binds Shift+E (export)", type(bindings.export) == "function")
 expect("export.lua takes export-batch", type(messages["export-batch"]) == "function")
@@ -155,22 +147,6 @@ for id in pairs(player) do
         got = #ran > before and curve_arg() or nil
         expect("a saved view in " .. id .. ": a curve gyroflow-export takes", got and (export[got] or got == "none"), "--curve " .. tostring(got))
     end
-end
-
--- The Library's lists of the log curves (a clip's own choice, not uw: the source's switch of its own)
-local app = read("library/ui/app.js")
-local src = {}
-for id in block(app, "const SRC_CURVES = ", "SRC_CURVES"):gmatch('%["([%w_]+)", "') do if id ~= "auto" then src[id] = true end end
-expect("Source settings offer the player's log curves (app.js SRC_CURVES)", sorted(src) == sorted(logs), "app.js: " .. sorted(src) .. "; player: " .. sorted(logs))
-local tags = read("library/src/tags.rs")
-local own = tags:match('"curve" => v%.as_str%(%)%.is_some_and%(|s| %[([^%]]*)%]')
-expect("tags.rs knows which curves a clip's own file may name", own ~= nil)
-local own_set = {}
-for id in (own or ""):gmatch('"([%w_]+)"') do if id ~= "auto" then own_set[id] = true end end
-expect("a clip's own file may name the player's log curves (tags.rs)", sorted(own_set) == sorted(logs), "tags.rs: " .. sorted(own_set) .. "; player: " .. sorted(logs))
-local albums = read("library/ui/albums.js")
-for id in (albums:match("const ALBUM_CURVES = (%b[])") or ""):gmatch('"([%w_]+)"') do
-    expect("a thumbnail's curve (albums.js ALBUM_CURVES) has its LUT: " .. id, export[id] and id ~= "uw")
 end
 
 print(("%d checks, %d failed"):format(checks, failures))

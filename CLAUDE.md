@@ -59,28 +59,41 @@ one *done*, *n/a because…*, or *not done → issue #N*:
 
 ### The same logic is in more than one language
 
-Change these copies together, in the same PR. The test after each fails when they drift apart; a guard that reads the
-sources has an allow-list for what it can't resolve, with why (add to it rather than around it).
+Plain lists live in one file, `mpv/scripts/workspace/registry.json`: the curves, an export's settings, the transform's
+keys (values, defaults, gyroflow.conf names, recipe/exported, gyroflow-export flags, gpu-table fields) and the project's
+own folders. Change a list there, never in a reader. The player reads it with `require 'registry'` (registry.lua, a
+JSON reader of its own), vs-gyroflow and the Library with `include_str!` into `afp_catalog::registry`'s types
+(`lists.rs` in each), the Library's page as `window.AFP_LISTS` (put there by `main.rs` before its scripts;
+`library/ui-tests/lists.js` for the rigs). The catalog, built from its folder alone, keeps consts that its
+`registry.rs` tests check. `tests/registry_test.py` checks each reader reads it and flags a line that quotes several
+names of one list (a copy creeping back), with an allow-list saying why. Plugins zipped alone carry a copy of
+registry.lua/json (`tests/packaging_test.py`).
+
+What's left is logic in more than one language. Change these copies together, in the same PR. The test after each
+fails when they drift apart; a guard that reads the sources has an allow-list for what it can't resolve, with why (add
+to it rather than around it).
 
 - **Workspace and pointer lookup:** `workspace.lua`, `vs-gyroflow/src/workspace.rs` and `catalog/src/locations.rs`.
   The shared cases are in `tests/workspace_cases.txt`, run by all three (the catalog: locations, `relative`,
   `original`).
 - **Render settings:**
   - `mpv/scripts/workspace/transform.lua` and `library/src/renders.rs`, shared cases in `tests/render_settings.json`;
-    the keys and their valid values: `tests/render_keys_test.py`;
+    the keys and their valid values are the registry's; what it says of the plugin's options, gyroflow-export's flags
+    and the warp's request: `tests/render_keys_test.py`;
   - the gyroflow.conf defaults: `gyroflow/main.lua` `defaults_bundle` and `renders.rs` `defaults_of`, shared cases in
     `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
     `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
   - the render recipe: workspace `RENDER_VERSION` and `renders.rs` `VERSION`.
-- **Curves:** `dlogm/main.lua` `CURVES` and `gyroflow-export.rs` `CURVES`. A curve the player offers must either be
-  accepted by the export or be mapped before `--curve`. Also the packagers' `make_hdr_lut.py` curves (each export
-  curve needs its `luts/<id>_hlg.cube`), the Library's `app.js` `SRC_CURVES`, `tags.rs`'s curve list and `albums.js`
-  `ALBUM_CURVES`. `tests/curves_twin_test.lua`.
-- **Export choices:** `gyroflow/exportsettings.lua`, `library/ui/share.js` and `renders.rs` `EXPORT_CHOICES`, plus what
-  `gyroflow-export` takes (`--resolution`, `--encode`) and `still.rs` `MAX_RADIUS`. `tests/export_choices_test.py`.
-- **The project's own folders** (`_Moments`, `_Stills`, `_Renders`, `Generated`, `.afp`, …) are left out of the
-  footage by `library/src/index.rs` `OWN_FOLDERS`, `catalog/src/inspect.rs` `OWN_FOLDERS`, `library/src/checks.rs`
-  `OWN`, `workspace/moments.lua` `OWN_FOLDERS` and `tools/stream/afp_stream.py`. A new folder goes into each.
+- **Curves** are the registry's. Still apart: `export.lua`'s mapping before `--curve` (a curve the player plays must
+  reach the export as one of the registry's), the packagers' `make_hdr_lut.py` curves (each curve's `lut` in `luts/` or
+  made), the cameras' `DJI_CURVES`/`GOPRO_CURVES` and `probe.rs`, `catalog/src/range.rs` `log_curve`, gyroflow-export's
+  help. `tests/curves_twin_test.lua`, the catalog's `registry.rs` tests.
+- **Export choices** are the registry's. Still apart: what `gyroflow-export` takes (`--resolution`, `--encode`), the
+  plugin's `export_*`/`photo_*` option defaults (`tests/export_choices_test.py`) and `still.rs` `MAX_RADIUS`
+  (vs-gyroflow's `lists.rs` test).
+- **The project's own folders** (`_Moments`, `_Stills`, `_Renders`, `Generated`, `.afp`, …) are the registry's
+  `own_folders` (index.rs, checks.rs, moments.lua read it; `catalog/src/inspect.rs` `OWN_FOLDERS` is a checked const;
+  `tools/stream/afp_stream.py` leaves out every `_` folder). A folder made has to be left out by each:
   `tests/project_folders_test.py`.
 - **Script messages and key bindings:** every `script-message-to <plugin> <msg>` (Lua, the Library's IPC, the rigs)
   has its `register_script_message` in that plugin; a binding named like a message takes it over unless the message is

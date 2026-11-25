@@ -162,8 +162,6 @@ fn is_video(name: &str) -> bool {
     let l = name.to_lowercase();
     (l.ends_with(".mp4") || l.ends_with(".mov")) && !l.ends_with(crate::index::LINK_EXT)
 }
-const OWN: [&str; 12] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
-                         "_actionfootageplayer", "generated"];
 
 /// Every clip of the project, at its tree path (all copies), and every own file found on the way: from the project's
 /// catalog when it has them (seen.rs: no question to the share for each file), else from the disks
@@ -172,7 +170,8 @@ pub fn footage(locs: &[Location]) -> (Vec<Clip>, Vec<(String, PathBuf)>) {
     let mut owns = Vec::new();
     for l in locs {
         let Some(dir) = &l.dir else { continue };
-        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN.contains(&lower);
+        // The project's own folders (registry.json's; index.rs's walk skips # names)
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && crate::lists::get().own_folder(lower, false);
         for (r, is_dir, size, _) in crate::index::walk(dir, &skip) {
             if is_dir { continue; }
             let name = r.rsplit('/').next().unwrap_or(&r).to_string();

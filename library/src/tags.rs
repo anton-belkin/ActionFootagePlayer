@@ -504,7 +504,8 @@ pub fn set_lens_type(root: &Path, trees: &[String], lens_type: Option<&str>) -> 
 pub fn source_value_ok(key: &str, v: &Value) -> bool {
     if v.is_null() { return true; }
     match key {
-        "curve" => v.as_str().is_some_and(|s| ["auto", "dlogm", "dlog", "gplog", "gplog2", "ilog"].contains(&s)),
+        // auto, or a log curve (registry.json's)
+        "curve" => v.as_str().is_some_and(|s| s == "auto" || crate::lists::get().curve(s).is_some_and(|c| c.log)),
         "rotation" => v.as_i64().is_some_and(|r| [0, 90, 180, 270].contains(&r)),
         "underwater" => v.as_str().is_some_and(|s| ["auto", "yes", "no"].contains(&s)),
         "lens_type" => v.as_str().is_some_and(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')),

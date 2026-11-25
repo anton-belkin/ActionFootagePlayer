@@ -20,6 +20,7 @@ mod geo;
 mod index;
 // The responsiveness journal (docs/responsiveness-journal.md)
 mod journal;
+mod lists;
 mod locations;
 mod renders;
 mod seen;
@@ -2961,6 +2962,9 @@ fn main() {
     let for_window = shared.clone();
     let for_run = shared.clone();
     let app = tauri::Builder::default()
+        // The lists shared with the player (registry.json: curves, export choices): window.AFP_LISTS, before the page's
+        // scripts run
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("afp-lists").js_init_script(lists::page_script()).build())
         // A second one started (a project double-clicked in Explorer while this runs): its project opens here
         .plugin(tauri_plugin_single_instance::init(move |app, argv, _cwd| {
             if let Some(p) = argv.iter().skip(1).find(|a| !a.starts_with('-')) {

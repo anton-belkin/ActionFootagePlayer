@@ -1,0 +1,79 @@
+{
+  "about": "The lists the player (Lua), gyroflow-export (Rust) and the Library (Rust and its page's JS) share, kept here once and read by each: registry.lua in the player, include_str! in vs-gyroflow and the Library (afp_catalog::registry's types), window.AFP_LISTS in the Library's page (main.rs puts it there before the page's scripts run). Order matters wherever a list is an array. CLAUDE.md, 'The same logic is in more than one language'; tests/registry_test.py checks each side reads it.",
+
+  "curves_about": "The log curves, in Ctrl+l's order (log: in the round, offered as a source's curve by the Library), and the underwater colour, which the player shows as one (not in the round, never a source's saved curve). id: what everything names it by (a clip's own file, --curve). name: the player's and the Library's. export_name: gyroflow-export's, where it's another. lut: gyroflow-export's LUT to HLG (luts/), none where it's made per clip. hdr / sdr: the player's shaders to HLG and the maker's to Rec.709; maker, maker_lut: whose that one is.",
+  "curves": [
+    { "id": "dlogm", "name": "D-Log M", "log": true, "lut": "dlogm_hlg.cube", "hdr": "shaders/dlogm_hlg.glsl", "sdr": "shaders/dlogm_lut3d.glsl",
+      "maker": "DJI", "maker_lut": "DJI's D-Log M to Rec.709 LUT 11.17, for the Osmo Action 6, downloaded from DJI's site at setup" },
+    { "id": "dlog", "name": "D-Log", "log": true, "lut": "dlog_hlg.cube", "hdr": "shaders/dlog_hlg.glsl" },
+    { "id": "gplog", "name": "GP-Log", "log": true, "lut": "gplog_hlg.cube", "hdr": "shaders/gplog_hlg.glsl" },
+    { "id": "gplog2", "name": "GP-Log2", "log": true, "lut": "gplog2_hlg.cube", "hdr": "shaders/gplog2_hlg.glsl" },
+    { "id": "ilog", "name": "I-Log (10-bit)", "export_name": "I-Log", "log": true, "lut": "ilog_hlg.cube", "hdr": "shaders/ilog_hlg.glsl" },
+    { "id": "uw", "name": "Underwater colour", "log": false, "hdr": "shaders/underwater_hlg.glsl" }
+  ],
+
+  "export_about": "An export's settings (docs/export-settings.md), the player's (exportsettings.lua) and the Library's Share (share.js, renders.rs's recipe). Each setting's choices in order, the first its default: the defaults are what was exported before these settings existed, so a recipe keeps only the others and its hash stays. kinds: the settings each kind of file has. flag: gyroflow-export's option for it (quality is a preset of several). photo_radius_max: the radius a photo is cleaned up from at its best (vs-gyroflow still.rs MAX_RADIUS).",
+  "export": {
+    "settings": [
+      { "key": "size", "flag": "--resolution", "choices": [
+        { "value": "original", "label": "Original", "note": "the clip's own size" },
+        { "value": "2160", "label": "4K", "note": "2160 on the short side" },
+        { "value": "1080", "label": "1080p", "note": "1080 on the short side" },
+        { "value": "720", "label": "720p", "note": "720 on the short side" } ] },
+      { "key": "encode", "flag": "--encode", "choices": [
+        { "value": "fast", "label": "Fast", "note": "the encoder's real-time mode, the source's bit rate" },
+        { "value": "quality", "label": "Quality", "note": "the encoder's quality mode, 1.5× the bit rate" } ] },
+      { "key": "quality", "choices": [
+        { "value": "displayed", "label": "As displayed", "note": "As this computer plays it: Performance & Quality's temporal denoise and edges" },
+        { "value": "quickest", "label": "Quickest", "note": "Each at its lightest: no temporal denoise, the frame's edge spread out, fringes left, bilinear" },
+        { "value": "highest", "label": "Highest", "note": "Each at its best: the full temporal denoise, the trail at the edges, Lanczos; photos cleaned up from 7 frames each side" } ] }
+    ],
+    "kinds": { "video": ["size", "encode", "quality"], "photo": ["size", "quality"] },
+    "photo_radius_max": 7
+  },
+
+  "settings_about": "What a clip is read as and shown with (transform.lua, renders.rs), key by key, in order within each group. group: bundle (the transform, kept whole), uw (the underwater colour: the source's, in a render's settings only when on), input (the source's own correction), opts (the computer's, gyroflow.conf's, in a render's recipe as opts). kind: enum (one of values), bool, number (min-max), ratio (one of values, or any W:H landscape-wise). neutral: what a bundle from before the key existed plays as. project: a Gyroflow project owns it. conf / conf_default: gyroflow.conf's option and the plugin's default for it; not_in_conf: values the option can't take (the default instead). recipe: in the Library's render recipe. exported: gyroflow-export takes it, as cli says (player_only otherwise, with why). gpu: its field in the warp's request to gyroflow-gpu-table (gyroflow/main.lua player_args), where it has one.",
+  "settings": [
+    { "key": "view", "group": "bundle", "kind": "enum", "values": ["normal", "wide", "off"], "conf": "view", "conf_default": "normal", "not_in_conf": ["off"],
+      "recipe": true, "exported": true, "cli": ["--wide", "--no-stabilize", "--lens-only"], "gpu": "wide" },
+    { "key": "level", "group": "bundle", "kind": "enum", "values": ["weak", "medium", "strong"], "project": true, "conf": "level", "conf_default": "medium",
+      "recipe": true, "exported": true, "cli": ["--level"], "gpu": "level" },
+    { "key": "horizon_lock", "group": "bundle", "kind": "enum", "values": ["yes", "no"], "project": true, "conf": "horizon_lock", "conf_default": "project",
+      "recipe": true, "exported": true, "cli": ["--horizon-lock"], "gpu": "horizon_lock" },
+    { "key": "chromatic", "group": "bundle", "kind": "bool", "conf": "chromatic", "conf_default": true,
+      "recipe": true, "exported": true, "cli": ["--chromatic"], "gpu": "chromatic" },
+    { "key": "aspect", "group": "bundle", "kind": "ratio", "values": ["original"], "neutral": "original", "project": true, "conf": "aspect", "conf_default": "original",
+      "recipe": true, "exported": true, "cli": ["--aspect"], "gpu": "aspect" },
+    { "key": "orientation", "group": "bundle", "kind": "enum", "values": ["as-is", "landscape", "portrait"], "neutral": "as-is", "project": true, "conf": "orientation", "conf_default": "as-is",
+      "recipe": true, "exported": true, "cli": ["--aspect"], "gpu": "aspect" },
+    { "key": "projection", "group": "bundle", "kind": "enum", "values": ["linear", "stereographic", "equidistant", "equisolid", "orthographic", "project"], "neutral": "linear",
+      "conf": "projection", "conf_default": "linear", "not_in_conf": ["project"],
+      "recipe": true, "exported": true, "cli": ["--projection"], "gpu": "projection" },
+    { "key": "lens", "group": "bundle", "kind": "enum", "values": ["corrected", "as-recorded"], "conf": "lens", "conf_default": "corrected",
+      "recipe": true, "exported": true, "cli": ["--lens-recorded", "--lens-only"], "gpu": "lens" },
+    { "key": "denoise", "group": "bundle", "kind": "bool", "conf": "still", "conf_default": true,
+      "recipe": true, "exported": true, "cli": ["--denoise"] },
+    { "key": "denoise_strong", "group": "bundle", "kind": "bool", "neutral": false, "conf": "denoise_strong", "conf_default": false,
+      "recipe": true, "exported": true, "cli": ["--denoise-strong"] },
+
+    { "key": "uw", "group": "uw", "kind": "bool", "recipe": true, "exported": true, "cli": ["--uw-color"] },
+    { "key": "uw_highlights", "group": "uw", "kind": "bool", "recipe": true, "exported": true, "cli": ["--uw-highlights"] },
+    { "key": "uw_strength", "group": "uw", "kind": "number", "min": 0, "max": 1, "recipe": true, "exported": true, "cli": ["--uw-strength"] },
+
+    { "key": "curve", "group": "input", "kind": "curve", "recipe": true, "exported": true, "cli": ["--curve"] },
+    { "key": "rotation", "group": "input", "kind": "number", "recipe": true, "exported": true, "cli": ["--rotation"], "gpu": "rotation" },
+    { "key": "underwater", "group": "input", "kind": "enum", "values": ["yes", "no", "auto", "project"], "conf": "underwater", "conf_default": "auto",
+      "recipe": true, "exported": true, "cli": ["--underwater"], "gpu": "underwater" },
+
+    { "key": "edges", "group": "opts", "kind": "enum", "values": ["off", "sphere", "smooth"], "conf": "edges", "conf_default": "sphere",
+      "recipe": true, "exported": true, "cli": ["--edges"], "gpu": "edges" },
+    { "key": "edges_blur", "group": "opts", "kind": "number", "conf": "edges_blur", "conf_default": 2,
+      "recipe": true, "exported": true, "cli": ["--edges-blur"], "gpu": "edges_blur" },
+    { "key": "temporal_denoise", "group": "opts", "kind": "enum", "values": ["full", "light", "off"], "conf": "temporal_denoise", "conf_default": "full",
+      "recipe": true, "exported": true, "cli": ["--denoise"] }
+  ],
+
+  "own_folders_about": "The folders the player and the Library make in a project (and earlier versions made), lower case: left out of its footage wherever it's listed (#128). recycle_bins: the NAS's, never footage either (the walks skip # names anyway).",
+  "own_folders": ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized", "_actionfootageplayer", "generated"],
+  "recycle_bins": ["#recycle"]
+}

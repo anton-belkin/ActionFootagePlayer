@@ -15,7 +15,7 @@ cd "$(dirname "$0")/.."
 
 version=${1:?usage: tools/make_plugin_zip.sh <version> [<rust target>]}
 target=${2:-}
-if ! git diff --quiet HEAD -- vs-gyroflow mpv/scripts/gyroflow mpv/scripts/view360; then
+if ! git diff --quiet HEAD -- vs-gyroflow mpv/scripts/gyroflow mpv/scripts/view360 mpv/scripts/workspace/registry.lua mpv/scripts/workspace/registry.json; then
     echo "vs-gyroflow or the plugin has uncommitted changes; the zip would not match the tree" >&2
     exit 1
 fi
@@ -42,6 +42,10 @@ name="mpv-gyroflow-$version-$os-$arch"
 rm -rf "dist/$name" "dist/$name.zip"
 mkdir -p "dist/$name"
 git archive HEAD mpv/scripts/gyroflow mpv/scripts/view360 | tar -x --strip-components 2 -C "dist/$name"
+# The shared lists (the workspace plugin's: the curves, the export's settings) beside the plugin's files, which require
+# finds there (tests/packaging_test.py)
+git show HEAD:mpv/scripts/workspace/registry.lua > "dist/$name/gyroflow/registry.lua"
+git show HEAD:mpv/scripts/workspace/registry.json > "dist/$name/gyroflow/registry.json"
 mv "dist/$name/gyroflow/underwater.gyroflow" "dist/$name/gyroflow/default.gyroflow"
 # Without the debug info and symbols the release profile keeps (the MSVC build has them in .pdb files, which
 # aren't copied)

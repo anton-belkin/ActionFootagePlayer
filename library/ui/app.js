@@ -1124,7 +1124,8 @@ function momentsBody(c) {
 // database's: every clip of that mode takes it. What's read from the clip itself (its camera, colour, lens, motion
 // data) is the index's (gyroflow-probe --library, its lens_info too): nothing is read from the clip to show this.
 // Stabilize optically and Find / Estimate lens are tasks, started at once from their attribute's row.
-const SRC_CURVES = [["auto", "From the clip"], ["dlogm", "D-Log M"], ["dlog", "D-Log"], ["gplog", "GP-Log"], ["gplog2", "GP-Log2"], ["ilog", "I-Log (10-bit)"]];
+// (the log curves: registry.json's, window.AFP_LISTS)
+const SRC_CURVES = [["auto", "From the clip"]].concat(window.AFP_LISTS.curves.filter((c) => c.log).map((c) => [c.id, c.name]));
 const SRC_TURNS = [["0", "As is"], ["90", "90° ↻"], ["180", "180°"], ["270", "90° ↺"]];
 const SRC_WATER = [["auto", "Auto: as the camera says"], ["yes", "Yes (a flat port)"], ["no", "No"]];
 const SRC_UW = [["off", "Off"], ["on", "On"], ["bright", "On, brighter highlights"]];

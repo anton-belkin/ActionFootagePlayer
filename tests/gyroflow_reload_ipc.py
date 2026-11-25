@@ -34,6 +34,9 @@ def make_rig(app, clip, table, lua):
     g = rig + "/app.app/Contents/Resources/plugins/gyroflow"
     for f in glob.glob(os.path.join(lua, "*.lua")):
         shutil.copy(f, g)
+    # The lists the plugin reads (the workspace plugin's registry, beside it in a checkout), where they are
+    for f in glob.glob(os.path.join(lua, "..", "workspace", "registry.*")):
+        shutil.copy(f, rig + "/app.app/Contents/Resources/plugins/workspace")
     if table:
         shutil.copy(table, g + "/gyroflow-gpu-table")
     main = open(g + "/main.lua").read()

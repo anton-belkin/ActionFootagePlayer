@@ -114,7 +114,7 @@ function html(ui, state, extraTags) {
     setTimeout(go, 50);`;
   let page = fs.readFileSync(path.join(ui, "index.html"), "utf8");
   page = page.replace("<head>", '<head><base href="file://' + encodeURI(ui) + '/">');
-  page = page.replace(/<script src=/, () => "<script>(() => {" + mock + "})();</script>\n<script src=");
+  page = page.replace(/<script src=/, () => "<script>" + require("./lists").script() + "(() => {" + mock + "})();</script>\n<script src=");
   return page.replace("</body>", "<script>" + does + "</script></body>");
 }
 

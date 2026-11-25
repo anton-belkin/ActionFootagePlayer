@@ -8,23 +8,20 @@
 --            as every export took them so far), quickest (each of them at its lightest) or highest (each at its best)
 -- A photo: size and quality, the same names; it has no encoder to choose.
 -- The defaults are what was exported before these settings existed: nothing changes for who doesn't touch them.
--- Plain Lua, no mpv: tests/exportsettings_test.lua
+-- Plain Lua, no mpv (registry.lua on package.path): tests/exportsettings_test.lua
 
 local M = {}
 
--- Each setting's choices, in order: { value, label, note }. The Library's dialog has the same (library/ui/share.js)
-M.CHOICES = {
-    size = { { "original", "Original", "the clip's own size" }, { "2160", "4K", "2160 on the short side" },
-             { "1080", "1080p", "1080 on the short side" }, { "720", "720p", "720 on the short side" } },
-    encode = { { "fast", "Fast", "the encoder's real-time mode, the source's bit rate" },
-               { "quality", "Quality", "the encoder's quality mode, 1.5× the bit rate" } },
-    quality = { { "displayed", "As displayed", "As this computer plays it: Performance & Quality's temporal denoise and edges" },
-                { "quickest", "Quickest", "Each at its lightest: no temporal denoise, the frame's edge spread out, fringes left, bilinear" },
-                { "highest", "Highest", "Each at its best: the full temporal denoise, the trail at the edges, Lanczos; photos cleaned up from 7 frames each side" } },
-}
-M.DEFAULT = { size = "original", encode = "fast", quality = "displayed" }
--- The settings each kind of file has
-M.KEYS = { video = { "size", "encode", "quality" }, photo = { "size", "quality" } }
+-- Each setting's choices, in order: { value, label, note }, the first its default; the settings each kind of file has.
+-- registry.json's (the workspace plugin's, beside this one), which the Library's Share dialog and its recipe read too
+local reg = require 'registry'
+M.CHOICES, M.DEFAULT = {}, {}
+for _, s in ipairs(reg.export.settings) do
+    M.CHOICES[s.key] = {}
+    for _, c in ipairs(s.choices) do table.insert(M.CHOICES[s.key], { c.value, c.label, c.note }) end
+    M.DEFAULT[s.key] = s.choices[1].value
+end
+M.KEYS = reg.export.kinds
 
 local function valid(key, v)
     for _, c in ipairs(M.CHOICES[key] or {}) do if c[1] == v then return true end end
@@ -71,7 +68,7 @@ local function remove(args, key, values)
 end
 
 -- The radius a photo is cleaned up from at its best (gyroflow-export's still::MAX_RADIUS)
-M.PHOTO_RADIUS_MAX = 7
+M.PHOTO_RADIUS_MAX = reg.export.photo_radius_max
 
 -- The settings into gyroflow-export's arguments, for a video or a photo: the size and the encoder as its own options,
 -- the quality preset as the options it stands for (each of the picture-quality settings playback has that a file can

@@ -11,16 +11,12 @@ const SHARE_DESTS = [
 ];
 // The export's settings (docs/export-settings.md), the same names and choices as the player's Output tab and Save
 // frame (mpv/scripts/gyroflow/exportsettings.lua): a video's size, encoding and quality, a photo's size and quality.
-// Each choice's first is the default, what was rendered before there were settings. Remembered on this computer
-const EXPORT_CHOICES = {
-  size: [["original", "Original", "the clip's own size"], ["2160", "4K", "2160 on the short side"], ["1080", "1080p", "1080 on the short side"], ["720", "720p", "720 on the short side"]],
-  encode: [["fast", "Fast", "the encoder's real-time mode, the source's bit rate"], ["quality", "Quality", "the encoder's quality mode, 1.5× the bit rate"]],
-  quality: [["displayed", "As displayed", "As this computer plays it: Performance & Quality's temporal denoise and edges"],
-    ["quickest", "Quickest", "Each at its lightest: no temporal denoise, the frame's edge spread out, fringes left, bilinear"],
-    ["highest", "Highest", "Each at its best: the full temporal denoise, the trail at the edges, Lanczos; photos cleaned up from 7 frames each side"]],
-};
+// Each choice's first is the default, what was rendered before there were settings. Remembered on this computer.
+// Both registry.json's (window.AFP_LISTS, put there by the app before the page's scripts): { key: [[value, label, note]] }
+// and the settings each kind has
+const EXPORT_CHOICES = Object.fromEntries(window.AFP_LISTS.export.settings.map((s) => [s.key, s.choices.map((c) => [c.value, c.label, c.note])]));
 const EXPORT_LABELS = { size: "Size", encode: "Encoding", quality: "Quality" };
-const EXPORT_KEYS = { video: ["size", "encode", "quality"], photo: ["size", "quality"] };
+const EXPORT_KEYS = window.AFP_LISTS.export.kinds;
 function shareSettings() {
   const out = {};
   for (const kind of ["video", "photo"]) {

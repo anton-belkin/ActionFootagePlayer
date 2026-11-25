@@ -38,7 +38,7 @@ def make_rig(app, clip):
     for p in PLUGINS:
         src = os.path.join(REPO, "mpv/scripts", p)
         if os.path.isdir(src) and os.path.isdir(os.path.join(plugins, p)):
-            for f in glob.glob(os.path.join(src, "*.lua")):
+            for f in glob.glob(os.path.join(src, "*.lua")) + glob.glob(os.path.join(src, "*.json")):  # (registry.json too)
                 shutil.copy(f, os.path.join(plugins, p))
     g = plugins + "/gyroflow"
     for b in BINARIES:

@@ -225,10 +225,9 @@ QuickTime location): the camera's GPS at that time, else the clip's location in 
                    its video in the image's SDR look, which the apps showing it all play alike)
   --quality <0-100>  the image's quality (default 92)";
 
-// The log curves, as the dlogm plugin names them; luts/<id>_hlg.cube is each one's LUT to HLG
-const CURVES: &[(&str, &str)] = &[("dlogm", "D-Log M"), ("dlog", "D-Log"), ("gplog", "GP-Log"), ("gplog2", "GP-Log2"), ("ilog", "I-Log"),
-                                  // Not a log curve: the underwater colour, which the player shows as one (its LUT: Uw's)
-                                  ("uw", "Underwater colour")];
+// The log curves, as the dlogm plugin names them, and the underwater colour, which the player shows as one (its LUT:
+// Uw's, made per clip): registry.json's (vs_gyroflow::lists), each with its LUT to HLG in luts/
+use vs_gyroflow::lists::{ curve_lut as curve_lut_file, curve_name };
 
 struct Options {
     // None: from the metadata; Some(None): none
@@ -364,8 +363,9 @@ fn main() {
         match a.as_str() {
             "--curve" => opts.curve = Some(match value("--curve").as_str() {
                 "none" => None,
-                c => Some(CURVES.iter().find(|(id, _)| *id == c).map(|(id, _)| *id)
-                    .unwrap_or_else(|| fail(&format!("unknown curve {c} (dlogm, dlog, gplog, gplog2, ilog, uw, none)")))),
+                c => Some(vs_gyroflow::lists::curve(c).map(|x| x.id.as_str())
+                    .unwrap_or_else(|| fail(&format!("unknown curve {c} ({}, none)",
+                                                     vs_gyroflow::lists::get().curves.iter().map(|x| x.id.as_str()).collect::<Vec<_>>().join(", "))))),
             }),
             "--uw-color" => opts.uw = yes_no("--uw-color", &value("--uw-color")),
             "--uw-strength" => opts.uw_settings.strength = value("--uw-strength").parse::<f64>().ok().filter(|v| (0.0..=1.0).contains(v))
@@ -1387,7 +1387,7 @@ fn flipbook(file: &str, opts: &Options) -> Result<Outcome, String> {
     // underwater colour by its numbers at the flipbook's frames (their median: one LUT for them all)
     let curve = clip_curve(opts, &path);
     let uw = match curve { Some("uw") => Some(Uw::new(&source, opts, UwSpan::Median(times.clone()), &out_dir, &name)?), _ => None };
-    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&curve_lut_file(c)) };
     let mut _temp_lut = None;
     let cube = match curve {
         Some("dlogm") if !opts.nbcu && lut("dji-dlogm-rec709.cube").is_ok() => Some(lut("dji-dlogm-rec709.cube")?),
@@ -1602,7 +1602,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         }
         _ => None,
     };
-    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&curve_lut_file(c)) };
     // On the pipes' GPU LUT, each frame's own numbers, exactly as the shader (gpu_lut.rs): what comes after it, a LUT
     // from its HLG to SDR (NBCU's) or none
     let mut uw_after: Option<Option<PathBuf>> = None;
@@ -1639,7 +1639,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
         let look_name = if look == Look::Maker { "DJI's LUT" } else { "NBCU" };
         // The video: a log curve's HLG, or an HLG clip, made PQ by one LUT; a PQ clip as it is
         let (log_hlg, name) = match (curve, info.transfer.as_deref()) {
-            (Some(c), _) => (Some(curve_lut(c)?), CURVES.iter().find(|(id, _)| *id == c).map_or(c, |(_, name)| *name)),
+            (Some(c), _) => (Some(curve_lut(c)?), curve_name(c)),
             (None, Some("arib-std-b67")) => (None, "HLG"),
             (None, Some("smpte2084")) => (None, "PQ"),
             _ => return Err("--youtube: an HDR video, for a log or HDR (HLG, PQ) clip".into()),
@@ -1669,7 +1669,7 @@ fn export(file: &str, opts: &Options, part: Option<&Part>) -> Result<Outcome, St
             (String::new(), tags, format!("{name} -> PQ for YouTube (SDR by {look_name})"))
         }
     } else if let Some(curve) = curve {
-        let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
+        let name = curve_name(curve);
         let (cube, matrix, primaries, transfer, label) = if nbcu {
             let composed = out_dir.join(format!(".{stem}.nbcu.cube"));
             gpu_lut::compose_nbcu(&curve_lut(curve)?, &lut(NBCU_HLG)?, &composed)?;
@@ -3292,7 +3292,7 @@ fn photo(file: &str, opts: &Options, t: f64) -> Result<Outcome, String> {
             (Some(hdr), format!("underwater colour (red {:+.4}, blue {:+.4}, leak {:.4}, lift {:+.4} EV, strength {:.2}{})",
                                 p.dr, p.db, p.k, p.ev, p.s, if p.hp != 1.0 { ", highlights" } else { "" }))
         } else if let Some(curve) = curve {
-            (Some(Cube::load(&lut(&format!("{curve}_hlg.cube"))?)?.apply(&rgb)), curve.to_string())
+            (Some(Cube::load(&lut(&curve_lut_file(curve))?)?.apply(&rgb)), curve.to_string())
         } else if info.transfer.as_deref() == Some("arib-std-b67") {
             (Some(rgb.clone()), "HLG".to_string())
         } else {
@@ -3758,11 +3758,11 @@ fn export_360(file: &str, opts: &Options, mode: &Mode360) -> Result<Outcome, Str
                                    &out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default())?),
         _ => None,
     };
-    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&format!("{c}_hlg.cube")) };
+    let curve_lut = |c: &str| match (&uw, c) { (Some(u), "uw") => Ok(u.cube.0.clone()), _ => lut(&curve_lut_file(c)) };
     let (look_vf, tags, look_label) = match curve {
         None => ("scale=out_range=tv:out_color_matrix=bt709".to_string(), ["bt709", "bt709", "bt709"], "colors as recorded".to_string()),
         Some(curve) => {
-            let name = CURVES.iter().find(|(id, _)| *id == curve).map_or(curve, |(_, name)| *name);
+            let name = curve_name(curve);
             let (cube, tags, label) = if opts.nbcu {
                 let composed = out_dir.join(format!(".{}.nbcu.cube", out_path.file_stem().map(|x| x.to_string_lossy().to_string()).unwrap_or_default()));
                 gpu_lut::compose_nbcu(&curve_lut(curve)?, &lut(NBCU_HLG)?, &composed)?;

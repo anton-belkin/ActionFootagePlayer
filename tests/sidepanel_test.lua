@@ -3,7 +3,7 @@
 -- list (docs/360-reframe.md, "One Export button in the Output tab").
 -- From the repository's folder: luajit tests/sidepanel_test.lua
 
-package.path = "mpv/scripts/side-panel/?.lua;" .. package.path
+package.path = "mpv/scripts/side-panel/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 
 -- The stand-in: properties, observers, bindings, script messages; what's run is logged
 local props = {

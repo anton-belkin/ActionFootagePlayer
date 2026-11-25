@@ -25,8 +25,8 @@ use std::process::{ Command, Stdio };
 use std::sync::{ Arc, Mutex };
 
 pub const LINK_EXT: &str = ".afplink.mp4";
-pub const OWN_FOLDERS: [&str; 13] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
-                                     "_actionfootageplayer", "generated", "#recycle"];
+/// A project's own folder, its name lower case: registry.json's own_folders, and the NAS's recycle bins
+pub fn own_folder(lower: &str) -> bool { crate::lists::get().own_folder(lower, true) }
 /// Where what's made goes since 0.11 (docs/library-management.md §8): Generated/<date> <time> <what>/
 pub const GENERATED: &str = "Generated";
 
@@ -40,7 +40,7 @@ pub fn footage_dirs(root: &Path) -> Vec<PathBuf> {
 pub fn own_area(root: &Path, path: &Path, footage: &[PathBuf]) -> bool {
     let Ok(rel) = path.strip_prefix(root) else { return false };
     let top = rel.components().next().map(|c| c.as_os_str().to_string_lossy().to_lowercase()).unwrap_or_default();
-    if top.starts_with('_') || OWN_FOLDERS.contains(&top.as_str()) { return true; }
+    if top.starts_with('_') || own_folder(&top) { return true; }
     !footage.iter().any(|d| path.starts_with(d))
 }
 
@@ -434,7 +434,7 @@ fn footage(root: &Path, flat_previews: bool, only: Option<&[String]>) -> Value {
         let id = format!("l:{}", l.path);
         // A project's own folders at the top of a location (this project's, or the one that was there before it moved)
         // aren't footage
-        let skip = |rel: &str, lower: &str| !rel.contains('/') && OWN_FOLDERS.contains(&lower);
+        let skip = |rel: &str, lower: &str| !rel.contains('/') && own_folder(lower);
         let (dir, found) = if let Some(only) = only {
             let dir = if off { offline_dir(l) } else { match &l.dir { Some(d) => d.clone(), None => continue } };
             let found = only.iter().filter_map(|tree| {
