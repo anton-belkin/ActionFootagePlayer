@@ -1,18 +1,18 @@
 #!/bin/bash
 # tools/make_windows_app.sh <version> [<rust target>]: into dist/
 #   ActionFootagePlayer-<version>-windows-<arch>-setup.exe   the Windows app's installer: ActionFootagePlayer with
-#                                                            everything it needs in its folder (no mpv, Python or
-#                                                            VapourSynth to install), for the user alone (no admin)
+#                                                            everything it needs in its folder (no mpv or Python to
+#                                                            install), for the user alone (no admin)
 #
-# The app (windows/launcher/src/main.rs has its layout): the launcher, mpv, Python with VapourSynth, the VC++ runtime
-# VapourSynth needs, a Vulkan loader, ffmpeg for exports, the plugins (and their right-click menu) and the setup.
+# The app (windows/launcher/src/main.rs has its layout): the launcher, mpv, Python for the setup, a Vulkan loader,
+# ffmpeg for exports, the plugins (and their right-click menu) and the setup.
 # What it carries from elsewhere is downloaded once into build/windows-deps/, at the versions pinned here, and
 # checked; build/windows-app/ is the app's folder as installed. The installer is windows/installer.iss, made with
 # Inno Setup 6 or 7 (ISCC.exe, in PATH or where its installer puts it; without it, the folder is made and the
 # installer isn't).
 #
 # <arch> is x86_64, or arm64 with the Rust target aarch64-pc-windows-msvc. Everything in mpv's process is then built
-# for arm64; VapourSynth has no such build, and is built here from its source, with Visual Studio.
+# for arm64.
 #
 # Runs on Windows in Git Bash (.github/workflows/release.yml runs it after tools/make_plugin_zip.sh, whose binaries
 # it uses). Built from HEAD's sources, like the plugin zip.
@@ -29,7 +29,7 @@ case "$arch" in
 esac
 
 # What the app carries. The sources' own checksums; updating one means downloading it and updating both
-# Python: python.org's build, as NuGet has it (a plain folder, which VapourSynth's vsscript.dll finds it in)
+# Python: python.org's build, as NuGet has it (a plain folder), for the setup (windows/setup.py)
 PYTHON_DLL="python313.dll"
 # The Vulkan loader (Khronos's, as Silk.NET builds it, for both), which mpv.exe needs to start at all: the GPU's
 # driver installs one, and the system's comes first (the launcher puts this one last in PATH); without one Windows
@@ -39,19 +39,11 @@ VULKAN_LOADER_SHA256="33811c05ab0bcba632ad38abba459b0d72d6e58859342e0782d011863d
 VULKAN_LICENSE_URL="https://raw.githubusercontent.com/KhronosGroup/Vulkan-Loader/v1.3.283/LICENSE.txt"
 VULKAN_LICENSE_SHA256="43c0a37e6a0fa7ff3c843b3ec5a4fac84b712558ddac103fbd4c1649662a9ece"
 if [ $arch = x86_64 ]; then
-    # mpv: shinchiro's build (with VapourSynth support), as SourceForge mirrors it; x86-64 without AVX2 (v3), for
-    # any CPU
+    # mpv: shinchiro's build, as SourceForge mirrors it; x86-64 without AVX2 (v3), for any CPU
     MPV_URL="https://downloads.sourceforge.net/project/mpv-player-windows/64bit/mpv-x86_64-20261018-git-01e2533f31.7z"
     MPV_SHA256="d7157567a2fd88e46f739d2e8b8e6c02d2ad812db04547b45c59a2800821991f"
     PYTHON_URL="https://api.nuget.org/v3-flatcontainer/python/3.13.17/python.3.13.17.nupkg"
     PYTHON_SHA256="dce409744b088f94c6e37ba41f8100c384c27e029e843237364c602d30d475e5"
-    # VapourSynth R81, the wheel (for any Python from 3.12)
-    VAPOURSYNTH_URL="https://files.pythonhosted.org/packages/6c/c1/d1448dd3a34ac2d3f439496167b3ffe14d6c0b7f9647d468c2292a06e4c2/vapoursynth-81-cp312-abi3-win_amd64.whl"
-    VAPOURSYNTH_SHA256="8de011b9d372ca1593ccbe6ea164c5d093ef44905a69597fa3d8099d38ce381c"
-    # The VC++ runtime VapourSynth is built for (14.50 or later), its DLLs as a wheel: in the app's folder, so
-    # there's nothing for the system to install
-    MSVC_RUNTIME_URL="https://files.pythonhosted.org/packages/c2/6e/7ba5696e9d8c1bcb01352f06e441497c308e84f75aba598400646ab31ca7/msvc_runtime-14.51.36231-cp313-cp313-win_amd64.whl"
-    MSVC_RUNTIME_SHA256="f3c3ac4f733a774f6ae209567e533bfde6f72dc1c10977733bfe09ce01e5b624"
     VULKAN_RID=win-x64
     # ffmpeg for gyroflow-export: BtbN's build of the same release (x265, NVENC, Quick Sync, AMF, and libplacebo with
     # Vulkan for the GPU path, docs/export-gpu-path.md: Gyan's essentials build has neither), from a month's last
@@ -67,14 +59,6 @@ else
     MPV_SHA256="736934c6f960f937851577d21f4d57695ff930a0b9aebe5521112f1c74d4c0d0"
     PYTHON_URL="https://api.nuget.org/v3-flatcontainer/pythonarm64/3.13.17/pythonarm64.3.13.17.nupkg"
     PYTHON_SHA256="aaa8c60c0adffde214ebd13e19bd79289aedb6452b4883eb08a59592c008456b"
-    # VapourSynth R81, its source: the wheel is built from it, once. On Windows it builds only with Python 3.14 or
-    # later, as its own wheels are; they're for any Python from 3.12 (the stable ABI), and so is this one
-    VAPOURSYNTH_URL="https://files.pythonhosted.org/packages/69/6a/f9441173c91a3355a32b870522726ed2252cd3c7b04b45e499f30b1a2c98/vapoursynth-81.tar.gz"
-    VAPOURSYNTH_SHA256="3bf6c90ad737e8ffc5605b05a1ff29cd884f8632fbe0eb49a2705942073a96be"
-    VAPOURSYNTH_PYTHON_URL="https://api.nuget.org/v3-flatcontainer/pythonarm64/3.14.10/pythonarm64.3.14.10.nupkg"
-    VAPOURSYNTH_PYTHON_SHA256="79cac95bc8219587eaf4b073a92162388f567a2509cd2bc497102feaf7dc8a38"
-    MSVC_RUNTIME_URL="https://files.pythonhosted.org/packages/e3/ab/c21892fbc87d39ebd9763759d1ee499f9938ab4ce4e49e089ea020e6aaab/msvc_runtime-14.51.36231-cp313-cp313-win_arm64.whl"
-    MSVC_RUNTIME_SHA256="52f9fd6e089eac9d72607d3ac4ffebcd5f0d6f940fca83db8a9c12ca11b1c26c"
     VULKAN_RID=win-arm64
     # ffmpeg for gyroflow-export: BtbN's build of the same release (x265; no NVENC, Quick Sync or AMF, which ARM PCs
     # don't have), from a month's last build, which BtbN keeps
@@ -136,11 +120,6 @@ cp "$tmp/mpv/mpv.exe" "$app/mpv/"
 # Its window and the taskbar show the app's icon, not mpv's
 $set_icon "$app/mpv/mpv.exe" windows/AppIcon.ico
 
-echo "== The VC++ runtime"
-archive=$(fetch "$MSVC_RUNTIME_URL" "$MSVC_RUNTIME_SHA256")
-unzip_to "$archive" "$tmp/msvc"
-cp "$tmp"/msvc/msvc_runtime-*.data/data/Scripts/*.dll "$app/mpv/"
-
 echo "== The Vulkan loader"
 archive=$(fetch "$VULKAN_LOADER_URL" "$VULKAN_LOADER_SHA256")
 unzip_to "$archive" "$tmp/vulkan"
@@ -148,7 +127,7 @@ mkdir -p "$app/vulkan"
 cp "$tmp/vulkan/runtimes/$VULKAN_RID/native/vulkan-1.dll" "$app/vulkan/"
 vulkan_license=$(fetch "$VULKAN_LICENSE_URL" "$VULKAN_LICENSE_SHA256")
 
-echo "== Python and VapourSynth"
+echo "== Python"
 archive=$(fetch "$PYTHON_URL" "$PYTHON_SHA256")
 unzip_to "$archive" "$tmp/python"
 python="$app/python"
@@ -158,35 +137,6 @@ cp -r "$tmp/python/tools/DLLs" "$tmp/python/tools/Lib" "$python/"
 # What the app doesn't run: tests, the GUI toolkit, pip
 rm -rf "$python/Lib/"{test,idlelib,tkinter,turtledemo,ensurepip,turtle.py} "$python/Lib/site-packages/"*
 find "$python" -name __pycache__ -type d -prune -exec rm -rf {} +
-site="$python/Lib/site-packages"
-archive=$(fetch "$VAPOURSYNTH_URL" "$VAPOURSYNTH_SHA256")
-if [ $arch = arm64 ]; then
-    # Its wheel, built from the source with the Python 3.14 pinned for it and kept with what's downloaded. meson
-    # finds Visual Studio (--vsenv) and builds for the Python's arm64. With Visual Studio's compiler, not clang-cl
-    # (as VapourSynth's x86-64 wheels are): zimg's NEON code takes clang-cl for it, and doesn't compile. Without
-    # VapourSynth's own NEON kernels, which test for the CPU's features with clang's options (its filters that
-    # have them aren't used here). And without its AviSynth layer, which is for x86 only (AviSynth's headers have
-    # no other CPU, and its plugins are x86 DLLs): meson.build builds it on x86 only
-    name=$(basename "$archive" .tar.gz)
-    if ! ls "$deps/$name"-*-win_arm64.whl >/dev/null 2>&1; then
-        echo "== Building $name for arm64"
-        unzip_to "$(fetch "$VAPOURSYNTH_PYTHON_URL" "$VAPOURSYNTH_PYTHON_SHA256")" "$tmp/build-python"
-        mkdir -p "$tmp/vapoursynth-src"
-        tar -xzf "$archive" -C "$tmp/vapoursynth-src"
-        src="$tmp/vapoursynth-src/$name"
-        x86_only="if cxx.get_argument_syntax() == 'msvc' and host_cpu_family.startswith('x86')"
-        perl -pi -e 's|^(    avscompat = shared_module\(.avscompat.,)$|endif\n\n'"$x86_only"'\n$1|' "$src/meson.build"
-        grep -B1 -x "    avscompat = shared_module('avscompat'," "$src/meson.build" | grep -qxF "$x86_only" \
-            || { echo "$name: its meson.build has changed; the arm64 change no longer applies" >&2; exit 1; }
-        "$tmp/build-python/tools/python.exe" -I -m pip wheel --no-deps --disable-pip-version-check -w "$deps" \
-            -Csetup-args=--vsenv -Csetup-args=-Denable_arm_asm=false "$src"
-    fi
-    archive=$(ls "$deps/$name"-*-win_arm64.whl | head -1)
-fi
-unzip_to "$archive" "$tmp/vapoursynth"
-cp -r "$tmp/vapoursynth/vapoursynth" "$tmp/vapoursynth/"vapoursynth-*.dist-info "$site/"
-rm -rf "$site/vapoursynth/"{include,pkgconfig} "$site/vapoursynth/"*.pdb
-
 echo "== The plugins"
 plugins="$app/plugins"
 dlogm="$plugins/dlogm"
@@ -219,9 +169,9 @@ done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
     mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
-    mpv/scripts/gyroflow/gyroflow.vpy mpv/scripts/gyroflow/sphere360.vpy mpv/scripts/gyroflow/chromatic.glsl mpv/scripts/gyroflow/crop_preview.glsl mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
+    mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"
-for f in vs_gyroflow.dll gyroflow-probe.exe gyroflow-project.exe gyroflow-gpu-table.exe gyroflow-export.exe afp-cut.exe afp-meta.exe afp-catalog.exe gyroflow-optical.exe; do
+for f in gyroflow-probe.exe gyroflow-project.exe gyroflow-gpu-table.exe gyroflow-export.exe afp-cut.exe afp-meta.exe afp-catalog.exe gyroflow-optical.exe; do
     cp "$gyroflow_bin/$f" "$gyroflow/"
 done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
@@ -273,8 +223,6 @@ mkdir -p "$licenses"
 cp LICENSE "$licenses/ActionFootagePlayer.txt"
 cp windows/THIRD-PARTY.txt "$licenses/"
 cp "$python/LICENSE.txt" "$licenses/Python.txt"
-cp "$site"/vapoursynth-*.dist-info/licenses/COPYING.LESSER "$licenses/VapourSynth.txt"
-cp "$tmp"/msvc/msvc_runtime-*.dist-info/licenses/LICENSE "$licenses/VC++ runtime.txt"
 cp "$vulkan_license" "$licenses/Vulkan loader.txt"
 find "$tmp/ffmpeg" -maxdepth 2 \( -name LICENSE -o -name LICENSE.txt \) -exec cp {} "$licenses/ffmpeg.txt" \;
 echo "$version" > "$app/VERSION"

@@ -13,7 +13,7 @@
 //   stamp was written at less one, the bits per fine code less one, the version.
 // - Two references, codes 7 and 8: black (code 0) and white (the depth's top code). The shader reads every code
 //   through them, (v - black) / (white - black): gpu-next doesn't normalize every format alike (10-bit limited range
-//   reads ×0.99904, p010 full range ×1.00096: off by one at the top, tools/stamp360/), and the references make the
+//   reads ×0.99904, p010 full range ×1.00096: off by one at the top, tools/stamp360/ in git history), and the references make the
 //   reading exact whatever it does short of a curve.
 // - The fields, codes 9-33, in fine codes of `bits` bits each (the depth's, at most MAX_BITS). A fine code with fewer
 //   bits than the depth sits at the middle of its step, as a coarse one does. Fixed point, most significant code first:
@@ -25,14 +25,11 @@
 //
 // Two codes are 20 bits at 10-bit depth: a quaternion component to ~2·10⁻⁶, a ten-thousandth of a degree.
 //
-// shaders/stamp_probe.glsl reads it on screen; tools/stamp360/ tests that gpu-next hands it to a shader unchanged.
+// shaders/stamp_probe.glsl reads it on screen; tools/stamp360/ (in git history) tested that gpu-next hands it to a shader
+// unchanged.
 
-use std::ffi::{ c_int, c_void, CString };
-use std::io::Write as _;
-use std::ptr::null;
 
-use parking_lot::Mutex;
-use vapoursynth4_sys::*;
+
 
 pub const VERSION: u32 = 1;
 /// Pixel rows the stamp takes at the bottom of the luma plane
@@ -253,125 +250,33 @@ pub fn read<T: Sample>(plane: &[T], stride: usize, width: usize, height: usize, 
     Fixed::from_codes(&codes, depth)
 }
 
-/// Writes the stamp into a VapourSynth frame's first plane
-pub unsafe fn write_frame(api: &VSAPI, frame: *mut VSFrame, stamp: &Stamp) -> bool {
-    unsafe {
-        let fmt = &*(api.getVideoFrameFormat)(frame);
-        if fmt.sample_type != VSSampleType::Integer { return false; }
-        let (w, h) = ((api.getFrameWidth)(frame, 0) as usize, (api.getFrameHeight)(frame, 0) as usize);
-        let stride = (api.getStride)(frame, 0) as usize;
-        let ptr = (api.getWritePtr)(frame, 0);
-        let depth = fmt.bits_per_sample as u32;
-        match fmt.bytes_per_sample {
-            1 => write(std::slice::from_raw_parts_mut(ptr, stride * h), stride, w, h, depth, stamp),
-            2 => write(std::slice::from_raw_parts_mut(ptr as *mut u16, stride / 2 * h), stride / 2, w, h, depth, stamp),
-            _ => false,
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------------------------------
-// The test filter: `core.gyroflow.Stamp360Test(clip, log="", time_base=...)`, which only stamps, with values known
-// from the frame's number. tools/stamp360/ plays it and compares what the probe shader read with the log
-
-/// The test values of frame `n`: the extremes on the first frames, then values from a hash
-pub fn test_stamp(n: i64, time_us: i64) -> Stamp {
-    let mut x = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
-    let mut next = || {
-        x ^= x >> 33; x = x.wrapping_mul(0xFF51_AFD7_ED55_8CCD); x ^= x >> 33;
-        (x >> 11) as f64 / (1u64 << 53) as f64
-    };
-    let pi = std::f64::consts::PI;
-    let (q, yaws, conf): ([f64; 4], [f64; 4], [f64; 4]) = match n {
-        0 => ([1.0, 0.0, 0.0, 0.0], [0.0; 4], [0.0; 4]),
-        1 => ([-1.0, 1.0, -1.0, 1.0], [pi, -pi, pi * 0.5, -pi * 0.5], [1.0; 4]),
-        2 => ([0.5, -0.5, 0.5, -0.5], [-1e-9, 1e-9, 3.0, -3.0], [0.5, 0.25, 0.75, 1.0]),
-        _ => {
-            let mut q = [0.0; 4].map(|_| next() * 2.0 - 1.0);
-            let norm = q.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-9);
-            q.iter_mut().for_each(|c| *c /= norm);
-            ([q[0], q[1], q[2], q[3]], [0.0; 4].map(|_| (next() * 2.0 - 1.0) * pi), [0.0; 4].map(|_| next()))
-        }
-    };
-    let mut headings = [HeadingStamp::default(); HEADINGS];
-    for i in 0..HEADINGS { headings[i] = HeadingStamp { yaw: yaws[i], confidence: conf[i] }; }
-    Stamp { time_us, q_world_from_cam: q, headings }
-}
-
-struct TestFilter {
-    node: *mut VSNode,
-    fps: (i64, i64),
-    time_base: i64,
-    log: Option<Mutex<std::fs::File>>,
-}
-unsafe impl Send for TestFilter {}
-unsafe impl Sync for TestFilter {}
-
-unsafe extern "system-unwind" fn test_get_frame(n: c_int, reason: VSActivationReason, instance: *mut c_void, _frame_data: *mut *mut c_void, ctx: *mut VSFrameContext, core: *mut VSCore, vsapi: *const VSAPI) -> *const VSFrame {
-    let f = unsafe { &*(instance as *const TestFilter) };
-    let api = unsafe { &*vsapi };
-    match reason {
-        VSActivationReason::Initial => unsafe { (api.requestFrameFilter)(n, f.node, ctx); null() },
-        VSActivationReason::AllFramesReady => unsafe {
-            let src = (api.getFrameFilter)(n, f.node, ctx);
-            let frame = (api.copyFrame)(src, core);
-            (api.freeFrame)(src);
-            let (num, den) = f.fps;
-            let time_us = f.time_base.wrapping_add(if num > 0 { (n as i64 * 1_000_000 * den + num / 2) / num } else { n as i64 * 33_333 });
-            let stamp = test_stamp(n as i64, time_us);
-            let fmt = &*(api.getVideoFrameFormat)(frame);
-            let depth = fmt.bits_per_sample as u32;
-            if !write_frame(api, frame, &stamp) {
-                let msg = CString::new("Stamp360Test: the frame is too small, or not 8-16 bit integer").unwrap_or_default();
-                (api.setFilterError)(msg.as_ptr(), ctx);
-                (api.freeFrame)(frame);
-                return null();
-            }
-            if let Some(log) = &f.log {
-                let x = Fixed::from_stamp(&stamp, bits_for(depth));
-                let line = serde_json::json!({ "n": n, "depth": depth, "bits": x.bits, "time": x.time, "q": x.q,
-                                               "yaw": x.yaw, "confidence": x.confidence, "time_us": time_us });
-                let _ = writeln!(log.lock(), "{line}");
-            }
-            frame
-        },
-        _ => null(),
-    }
-}
-
-unsafe extern "system-unwind" fn test_free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
-    let f = unsafe { Box::from_raw(instance as *mut TestFilter) };
-    unsafe { ((*vsapi).freeNode)(f.node) };
-}
-
-pub unsafe extern "system-unwind" fn test_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
-    crate::init_logging();
-    let api = unsafe { &*vsapi };
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    let fmt = &vi.format;
-    if fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || (vi.width as usize) < WIDTH || (vi.height as usize) < ROWS {
-        return unsafe { crate::set_error(api, out, node, "Stamp360Test", "only 8-16 bit integer clips at least 64x2".into()) };
-    }
-    let log = unsafe { crate::map_get_str(api, input, c"log") }.filter(|p| !p.is_empty());
-    let log = match log.map(|p| std::fs::OpenOptions::new().create(true).append(true).open(p)) {
-        Some(Ok(file)) => Some(Mutex::new(file)),
-        Some(Err(e)) => return unsafe { crate::set_error(api, out, node, "Stamp360Test", format!("the log: {e}")) },
-        None => None,
-    };
-    let time_base = unsafe { crate::map_get_i64(api, input, c"time_base") }.unwrap_or(0);
-    let filter = Box::new(TestFilter { node, fps: (vi.fps_num, vi.fps_den), time_base, log });
-    let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
-    unsafe {
-        (api.createVideoFilter)(out, c"Stamp360Test".as_ptr(), &vi, test_get_frame, Some(test_free), VSFilterMode::Parallel,
-                                deps.as_ptr(), deps.len() as c_int, Box::into_raw(filter) as *mut c_void, core);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The test values of frame `n`: the extremes on the first frames, then values from a hash
+    fn test_stamp(n: i64, time_us: i64) -> Stamp {
+        let mut x = (n as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0xD1B5_4A32_D192_ED03;
+        let mut next = || {
+            x ^= x >> 33; x = x.wrapping_mul(0xFF51_AFD7_ED55_8CCD); x ^= x >> 33;
+            (x >> 11) as f64 / (1u64 << 53) as f64
+        };
+        let pi = std::f64::consts::PI;
+        let (q, yaws, conf): ([f64; 4], [f64; 4], [f64; 4]) = match n {
+            0 => ([1.0, 0.0, 0.0, 0.0], [0.0; 4], [0.0; 4]),
+            1 => ([-1.0, 1.0, -1.0, 1.0], [pi, -pi, pi * 0.5, -pi * 0.5], [1.0; 4]),
+            2 => ([0.5, -0.5, 0.5, -0.5], [-1e-9, 1e-9, 3.0, -3.0], [0.5, 0.25, 0.75, 1.0]),
+            _ => {
+                let mut q = [0.0; 4].map(|_| next() * 2.0 - 1.0);
+                let norm = q.iter().map(|c| c * c).sum::<f64>().sqrt().max(1e-9);
+                q.iter_mut().for_each(|c| *c /= norm);
+                ([q[0], q[1], q[2], q[3]], [0.0; 4].map(|_| (next() * 2.0 - 1.0) * pi), [0.0; 4].map(|_| next()))
+            }
+        };
+        let mut headings = [HeadingStamp::default(); HEADINGS];
+        for i in 0..HEADINGS { headings[i] = HeadingStamp { yaw: yaws[i], confidence: conf[i] }; }
+        Stamp { time_us, q_world_from_cam: q, headings }
+    }
 
     fn plane<T: Sample>(h: usize, stride: usize, fill: u32) -> Vec<T> { vec![T::from_code(fill); stride * h] }
 
@@ -441,7 +346,7 @@ mod tests {
 
     #[test]
     fn the_references_undo_what_gpu_next_does() {
-        // What tools/stamp360/ measured on screen at 10-bit (v = a * code / white + b), and worse; read as the probe
+        // What tools/stamp360/ (in git history) measured on screen at 10-bit (v = a * code / white + b), and worse; read as the probe
         // shader does, in f32, through the references
         for depth in [8, 10, 12, 16] {
             let white = mask(depth) as f32;

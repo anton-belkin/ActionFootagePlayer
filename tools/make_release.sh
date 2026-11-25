@@ -51,13 +51,11 @@ rm -rf "dist/$name" "dist/$name.tar.gz"
 mkdir -p "dist/$name/bin"
 git archive HEAD | tar -x -C "dist/$name"
 echo "$version" > "dist/$name/VERSION"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
+for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
     install -m 755 "vs-gyroflow/target/release/$f" "dist/$name/bin/$f"
     strip -x "dist/$name/bin/$f"
 done
 install -m 755 library/target/release/ActionFootageLibrary "dist/$name/bin/ActionFootageLibrary"
-# The build machine's path otherwise stays in the library as its install name
-install_name_tool -id @rpath/libvs_gyroflow.dylib "dist/$name/bin/libvs_gyroflow.dylib"
 for f in "dist/$name/bin/"*; do
     codesign --force -s - "$f"
 done

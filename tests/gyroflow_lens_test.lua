@@ -1,8 +1,7 @@
 -- The output's lens over a clip's own Gyroflow project (#196), in the gyroflow plugin (mpv/scripts/gyroflow/main.lua)
 -- over a fake mpv: the bundle saved for the clip (its .afp.json's view, as the workspace plugin publishes it) or the
--- Lens drop-down's pick reaches the filter's arguments (its user-data JSON, which the GPU path's gyroflow-gpu-table
--- --player request is made from): a projection in place of the project's (linear too), the project's own (none given),
--- the lens as recorded. From the repository's folder: luajit tests/gyroflow_lens_test.lua
+-- Lens drop-down's pick reaches the warp's arguments (gyroflow-gpu-table --player's request): a projection in place of
+-- the project's (linear too), the project's own (none given), the lens as recorded. From the repository's folder: luajit tests/gyroflow_lens_test.lua
 
 package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 
@@ -43,13 +42,16 @@ write(clip, "")
 write(dir .. "/GX010001.gyroflow", serialize({ video_info = { width = 3840, height = 2160, fps = 50 },
                                                  stabilization = { output_projection = "Equidistant", horizon_lock_amount = 0 },
                                                  output = { output_width = 3840, output_height = 2160 } }))
-write(dir .. "/libvs_gyroflow.dylib", "")
-write(dir .. "/gyroflow.vpy", "")
+write(dir .. "/gyroflow-gpu-table", "")
 
 -- The fake mpv: properties, observers, events, hooks, script messages; anything else does nothing
-local props = { platform = "darwin", path = clip, filename = "GX010001.MP4", vo = "gpu-next", ["mpv-version"] = "mpv 0.41.0",
+local props = { platform = "darwin", path = clip, filename = "GX010001.MP4", vo = "gpu-next", ["mpv-version"] = "mpv 0.42.0",
+                -- The app's own mpv (patch 0015: it lets go of shaders itself)
+                ["option-info/video-join/name"] = "video-join",
                 ["osd-dimensions"] = { w = 1920, h = 1080 }, ["display-width"] = 1920, ["display-height"] = 1080, pause = true }
-local observers, events, hooks, messages = {}, {}, {}, {}
+local observers, events, hooks, messages, requests = {}, {}, {}, {}, {}
+-- What gyroflow-gpu-table says it can't do (nil: it can), and the cards shown
+local unsupported, cards = nil, {}
 local function changed(name)
     for _, o in ipairs(observers) do
         if o.name == name or name:sub(1, #o.name + 1) == o.name .. "/" then o.fn(o.name, props[o.name]) end
@@ -63,8 +65,7 @@ local mp = {
     get_property = function(name, def) local v = props[name]; if v == nil or type(v) == "table" then return def end; return tostring(v) end,
     get_property_number = function(name, def) return tonumber(props[name]) or def end,
     get_property_bool = function(name, def) local v = props[name]; if v == nil then return def end; return v == true end,
-    -- The clip's own filter chain is the chain while it plays
-    set_property_native = function(name, v) props[name] = v; if name == "file-local-options/vf" then props.vf = v end; changed(name); return true end,
+    set_property_native = function(name, v) props[name] = v; changed(name); return true end,
     observe_property = function(name, _, fn) observers[#observers + 1] = { name = name, fn = fn } end,
     register_event = function(name, fn) events[name] = events[name] or {}; table.insert(events[name], fn) end,
     add_hook = function(name, prio, fn) hooks[#hooks + 1] = { name = name, prio = prio, fn = fn } end,
@@ -75,16 +76,29 @@ local mp = {
     add_periodic_timer = function() return { kill = function() end, resume = function() end, is_enabled = function() return false end, stop = function() end } end,
     get_time = function() return 0 end,
     command_native = function() return nil end,
-    command_native_async = function() return {} end,
+    -- gyroflow-gpu-table --player: the request kept, a shader answered at once
+    command_native_async = function(c, fn)
+        local args = c.args or {}
+        if args[2] == "--player" then
+            requests[#requests + 1] = args[3]
+            if unsupported then
+                fn(true, { status = 0, stdout = "{[\"unsupported\"]=" .. string.format("%q", unsupported) .. "}" })
+            else
+                fn(true, { status = 0, stdout = "{[\"shader\"]=" .. string.format("%q", args[4]) .. ",[\"mode\"]=\"grid\",[\"output\"]={3840,2160}}" })
+            end
+        end
+        return {}
+    end,
     create_osd_overlay = function() return { update = function() end, remove = function() end } end,
 }
 mp.set_property = function(name, v) props[name] = v; changed(name); return true end
 mp.set_property_number = mp.set_property_native
 mp.set_property_bool = mp.set_property_native
+mp.notify = function(t) cards[#cards + 1] = t end
 setmetatable(mp, { __index = function() return function() end end })
 package.preload.mp = function() return mp end
 package.preload["mp.options"] = function()
-    return { read_options = function(o, name) if name == "gyroflow" then o.gpu = "no"; o.workers = 1 end end }
+    return { read_options = function() end }
 end
 package.preload["mp.utils"] = function()
     return {
@@ -110,16 +124,14 @@ dofile("mpv/scripts/gyroflow/main.lua")
 -- The clip loaded (the on_load hook), with what the workspace plugin publishes for it: view, the bundle saved, or none
 local function load(view)
     props["user-data/workspace"] = { path = clip, clip = clip, view = view }
-    props["file-local-options/vf"], props.vf = nil, nil
+    requests = {}
     for _, h in ipairs(hooks) do
         if h.name == "on_load" then h.fn({ defer = function() end, cont = function() end }) end
     end
 end
--- The filter's arguments as set now
+-- The warp's arguments as last asked for
 local function filter()
-    for _, f in ipairs(props.vf or {}) do
-        if f.name == "vapoursynth" then return parse(f.params["user-data"]) end
-    end
+    return parse(requests[#requests])
 end
 
 -- No bundle saved: the project's own lens, corrected; no projection given
@@ -155,7 +167,7 @@ ud = filter()
 expect("off: the lens alone", ud and ud.lens, "only")
 expect("…in the projection picked (3)", ud and ud.projection, 3)
 
--- The Lens drop-down's picks while it plays (none saved): the filter set up again with them
+-- The Lens drop-down's picks while it plays (none saved): the warp written again with them
 load(nil)
 messages.lens("orthographic")
 ud = filter()
@@ -185,6 +197,43 @@ messages.lens("stereographic")
 ud = filter()
 -- (no motion data without the probe: nothing to stabilize with here; the projection is what's published)
 expect("no project: a projection sticks to the session", (props["user-data/gyroflow/session"] or {}).projection, "stereographic")
+
+-- What the warp can't do (a Sony lens profile): as recorded, nothing of the warp's in the list, a card saying why, and
+-- the panel told (user-data/gyroflow/unstabilized)
+write(dir .. "/GX010001.gyroflow", serialize({ video_info = { width = 3840, height = 2160, fps = 50 }, output = { output_width = 3840, output_height = 2160 } }))
+-- The last card of the stabilization's own (not the loading card)
+local function unstab_card()
+    for i = #cards, 1, -1 do if cards[i].id == "gyroflow:unstabilized" then return cards[i] end end
+    return {}
+end
+local function warps()
+    local n = 0
+    for _, sh in ipairs(props["file-local-options/glsl-shaders"] or {}) do if sh:find("mpv%-gyroflow%-") or sh:find("gpu_hold") then n = n + 1 end end
+    return n
+end
+unsupported, cards = "lens model sony", {}
+props.path = clip
+load(nil)
+local card = unstab_card()
+expect("unsupported: a card", card.id, "gyroflow:unstabilized")
+expect("…naming Sony's lens profiles", tostring(card.detail):find("Sony lens profiles", 1, true) ~= nil, true)
+expect("…published for the panel", tostring(props["user-data/gyroflow/unstabilized"]):find("Sony", 1, true) ~= nil, true)
+expect("…not stabilizing", props["user-data/gyroflow/available"], false)
+expect("…no warp in the list", warps(), 0)
+-- Loaded again: not asked again, the same card
+requests = {}
+load(nil)
+expect("loaded again: gyroflow-gpu-table not asked", #requests, 0)
+expect("…the card again", tostring(unstab_card().detail):find("Sony", 1, true) ~= nil, true)
+unsupported = nil
+
+-- An mpv without the frame's PTS (a distribution's 0.41): as recorded, the card says which mpv it needs
+props["mpv-version"], props.path, cards, requests = "mpv 0.41.0", clip .. "x", {}, {}
+load(nil)
+expect("mpv 0.41: a card", unstab_card().id, "gyroflow:unstabilized")
+expect("…naming 0.42", tostring(unstab_card().detail):find("0.42", 1, true) ~= nil, true)
+expect("…gyroflow-gpu-table not asked", #requests, 0)
+props["mpv-version"] = "mpv 0.42.0"
 
 os.execute("rm -rf '" .. dir .. "'")
 print(("%d checks, %d failed"):format(checks, failures))

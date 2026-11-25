@@ -1,13 +1,13 @@
 #!/bin/bash
 # tools/dev_app.sh [--no-install]: ActionFootagePlayer.app built from this folder the way the release builds it
-# (tools/make_release.sh with BUNDLE_RUNTIME: with its own mpv, tools/build_mpv.sh's, and ffmpeg, Python and
-# VapourSynth, Homebrew's), and put in ~/Applications in place of the one there, which is kept as build/ActionFootagePlayer-previous.app. For trying a
+# (tools/make_release.sh with BUNDLE_RUNTIME: with its own mpv, tools/build_mpv.sh's, and ffmpeg and Python,
+# Homebrew's), and put in ~/Applications in place of the one there, which is kept as build/ActionFootagePlayer-previous.app. For trying a
 # branch or a fix without waiting for GitHub: a few minutes, most of it the first cargo build. Uncommitted changes
 # are built too. mpv's own config (~/.config/mpv) isn't touched: the app doesn't read it.
 #
 # The version is the tag's when HEAD is one (0.6.2), else <the last tag>-dev.<commits since>+<commit>, with .dirty
 # for uncommitted changes. Its mpv is tools/build_mpv.sh's (build/mpv-afp/out/mpv), as the release's, when it's been
-# built, else this Mac's Homebrew one; MPV_BIN names another. ffmpeg, VapourSynth and what mpv links are this Mac's
+# built, else this Mac's Homebrew one; MPV_BIN names another. ffmpeg, Python and what mpv links are this Mac's
 # Homebrew ones: `brew upgrade ffmpeg` first to have what the release would (its build gets the latest).
 #
 #   --no-install   only build/ActionFootagePlayer.app
@@ -87,11 +87,10 @@ echo "== Gyroflow plugin"
 bin="$BUILD/dev-bin"
 rm -rf "$bin"
 mkdir -p "$bin"
-for f in libvs_gyroflow.dylib gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
+for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-rpu afp-cut afp-meta afp-catalog gyroflow-optical; do
     install -m 755 "vs-gyroflow/target/release/$f" "$bin/$f"
     "$STRIP" -x "$bin/$f"
 done
-"$INSTALL_NAME_TOOL" -id @rpath/libvs_gyroflow.dylib "$bin/libvs_gyroflow.dylib"
 for f in "$bin/"*; do
     /usr/bin/codesign --force -s - "$f"
 done

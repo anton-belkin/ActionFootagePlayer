@@ -1,18 +1,17 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Gyroflow stabilization as a VapourSynth filter: `core.gyroflow.Stabilize(clip, project=...)`.
+// Gyroflow stabilization for ActionFootagePlayer: the engine (Engine, Views: a clip loaded with gyroflow-core as the
+// player plays it), which gyroflow-gpu-table turns into the player's warp shader (gpu_table.rs) and gyroflow-export
+// renders with on its pipes path; and the binaries' shared parts (probe, lens, motion, sphere, stills, ...).
 //
-// Built for mpv's `vf=vapoursynth`, so a video with a .gyroflow project next to it, or motion data of its own (with
-// a default preset) plays stabilized in realtime. Each plane of the YUV frame is stabilized on its own, at the clip's
-// bit depth, the way
-// Gyroflow's exporter does it (src/rendering/mod.rs) - no RGB conversion, so 10-bit D-Log M stays 10-bit.
+// The engine stabilizes each plane of the YUV frame on its own, at the clip's bit depth, the way Gyroflow's exporter
+// does it (src/rendering/mod.rs) - no RGB conversion, so 10-bit D-Log M stays 10-bit. (Up to 2026-11 it was also a
+// VapourSynth filter for mpv, `vf=vapoursynth`; the player's only path is now the GPU warp.)
 
-use std::ffi::{ c_int, c_void, CStr, CString };
-use std::ptr::{ null, null_mut };
-use std::sync::{ Arc, Once, mpsc, atomic::{ AtomicBool, AtomicIsize, Ordering } };
+use std::sync::{ Arc, Once, mpsc, atomic::{ AtomicBool, Ordering } };
 
 use parking_lot::Mutex;
-use vapoursynth4_sys::*;
+
 
 use gyroflow_core::{ StabilizationManager, filesystem };
 
@@ -411,7 +410,6 @@ fn wide_view(base: &ComputeParams, fov: f64) -> ComputeParams {
 
 /// Also used by gyroflow-export, so a video renders the same as it plays
 pub struct Engine {
-    key: String,
     tx: mpsc::Sender<Job>,
     /// The size it was loaded for (render_size_for); a filter may ask for another
     pub render_size: (usize, usize),
@@ -704,7 +702,7 @@ impl Engine {
     /// it renders at the frame of `input_size` then (Frame::size), unless the script asks for another size
     /// `lens`: stabilized with the lens corrected, the lens alone corrected (nothing smoothed, no horizon lock: Gyroflow's
     /// own static zoom to what the corrected frame covers), or stabilized with the lens as recorded (LensMode)
-    pub fn load(key: String, project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
+    pub fn load(project: &str, preset: Option<&str>, fov: Fov, horizon_lock: Option<f64>, underwater: Underwater, level: Level, lookahead: f64, input_size: (usize, usize), num_planes: usize, subsampling: (usize, usize), output_override: Option<(usize, usize)>, kind: SampleKind, max_value: f32, is_yuv: bool, interpolation: Interpolation, workers: usize, trim: Option<(f64, f64)>, alone: Option<bool>, frame: Frame, lens: LensMode) -> Result<Engine, String> {
         let t = std::time::Instant::now();
         let Prepared { stab, views, view, view_index, level_geometry, motion, render_size, project_size, output_size, frame, frame_offset_us, uncovered_frames, wide_fov } =
             prepare(project, preset, fov, horizon_lock, underwater, level, lookahead, input_size, output_override, trim, alone, frame, lens, None)?;
@@ -746,7 +744,7 @@ impl Engine {
                 .spawn(move || m.run(stab, g, level, move || edges.level().unwrap_or(level))).map_err(|e| e.to_string())?;
         }
         let level = motion.is_some().then_some(level);
-        Ok(Engine { key, tx, render_size, project_size, frame_size: output_size, frame, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
+        Ok(Engine { tx, render_size, project_size, frame_size: output_size, frame, frame_offset_us, edges, uncovered_frames, wide_fov, views, motion, level, throughput: Mutex::new((0, std::time::Instant::now())) })
     }
 
     /// The size frames of `input_size` render at: `output_override` when the script asks for one, else the project's
@@ -1019,23 +1017,6 @@ fn project_output_size(json: &serde_json::Value) -> Option<(usize, usize)> {
     (w >= 16 && h >= 16).then_some((w & !1, h & !1))
 }
 
-static ENGINES: Mutex<Vec<Arc<Engine>>> = Mutex::new(Vec::new());
-const MAX_ENGINES: usize = 2;
-
-fn get_engine(key: &str, load: impl FnOnce() -> Result<Engine, String>) -> Result<Arc<Engine>, String> {
-    let mut engines = ENGINES.lock();
-    if let Some(i) = engines.iter().position(|e| e.key == key) {
-        let e = engines.remove(i);
-        engines.push(e.clone());
-        return Ok(e);
-    }
-    let e = Arc::new(load()?);
-    engines.push(e.clone());
-    // Dropping an engine drops its sender, which ends its worker and frees its GPU resources
-    while engines.len() > MAX_ENGINES { engines.remove(0); }
-    Ok(e)
-}
-
 struct PlaneStab {
     stab: Stabilization,
     index: usize,
@@ -1254,456 +1235,6 @@ fn process_plane<T: PixelType>(plane: &mut PlaneStab, timestamp_us: i64, max_val
     stab.process_pixels::<T>(timestamp_us, None, &mut buffers, Some(&transform))
         .map(|info| (info.backend, dispersion::Marker::from_transform(&transform, (pj.dst_w, pj.dst_h))))
         .map_err(|e| format!("process_pixels: {e:?}"))
-}
-
-// ---------------------------------------------------------------------------------------------------
-// Frame timestamps
-//
-// mpv's source clip restarts at frame 0 after every seek, so the frame number alone doesn't say where
-// in the video a frame is. mpv doesn't set _AbsoluteTime, but it attaches its own `struct mp_image`
-// as the binary _MP_IMAGE property, and that has the pts. Rather than hardcode the struct layout of one
-// mpv version, the pts field is found from two neighbouring frames: the first double that advances by
-// exactly the frame duration. The offset is shared by all instances (it's the same mpv build), so this
-// happens once per process, on its first frame.
-
-const PTS_UNKNOWN: isize = -1;
-const PTS_UNAVAILABLE: isize = -2;
-static MP_PTS_OFFSET: AtomicIsize = AtomicIsize::new(PTS_UNKNOWN);
-
-fn read_f64(blob: &[u8], off: usize) -> f64 {
-    f64::from_ne_bytes(blob[off..off + 8].try_into().unwrap())
-}
-
-fn find_pts_offset(a: &[u8], b: &[u8], expected_step: f64) -> Option<usize> {
-    if a.len() != b.len() || a.len() < 16 { return None; }
-    (0..=a.len() - 8).step_by(8).find(|&off| {
-        let (x, y) = (read_f64(a, off), read_f64(b, off));
-        x.is_finite() && y.is_finite() && x >= 0.0 && x < 1.0e6 && ((y - x) - expected_step).abs() < 1.0e-4
-    })
-}
-
-unsafe fn mp_image(api: &VSAPI, props: *const VSMap) -> Option<&'static [u8]> {
-    let mut err = VSMapPropertyError::Success;
-    let ptr = unsafe { (api.mapGetData)(props, c"_MP_IMAGE".as_ptr(), 0, &mut err) };
-    if err != VSMapPropertyError::Success || ptr.is_null() { return None; }
-    let size = unsafe { (api.mapGetDataSize)(props, c"_MP_IMAGE".as_ptr(), 0, &mut err) };
-    Some(unsafe { std::slice::from_raw_parts(ptr as *const u8, size.max(0) as usize) })
-}
-
-// ---------------------------------------------------------------------------------------------------
-// The filter
-
-struct Filter {
-    node: *mut VSNode,
-    engine: Arc<Engine>,
-    out_size: (c_int, c_int),
-    num_planes: usize,
-    is_yuv: bool,
-    start_time: f64,
-    time_offset: f64,
-    fallback_duration: f64,
-    /// Each frame's lens geometry in its luma, for mpv's chromatic.glsl
-    marker: bool,
-    /// Frames before this time (s) come out blank, unprocessed: mpv seeks to a paused frame again from the keyframe
-    /// before it (still.lua), and only the frames just before it are needed
-    skip_before: f64,
-    blank: Mutex<BlankFrame>,
-}
-
-/// The blank frame skipped frames share (Filter::skipped), made with the first
-struct BlankFrame(*mut VSFrame);
-unsafe impl Send for BlankFrame {}
-
-/// Whether the pts in _MP_IMAGE is still to be found (`calibrate_pts`, from the first frame and the next)
-pub(crate) fn pts_unknown() -> bool { MP_PTS_OFFSET.load(Ordering::Relaxed) == PTS_UNKNOWN }
-
-/// Finds the pts in _MP_IMAGE from frame n and n + 1, once per process: it's the same mpv build for every filter
-pub(crate) unsafe fn calibrate_pts(api: &VSAPI, props: *const VSMap, next_props: *const VSMap, duration: f64) {
-    let found = match (unsafe { mp_image(api, props) }, unsafe { mp_image(api, next_props) }) {
-        (Some(a), Some(b)) => find_pts_offset(a, b, duration),
-        _ => None,
-    };
-    match found {
-        Some(off) => log::info!("Found the pts in mpv's _MP_IMAGE at offset {off}"),
-        None => log::warn!("No pts in the frame properties; timing by frame number, which is only right without seeking"),
-    }
-    let _ = MP_PTS_OFFSET.compare_exchange(PTS_UNKNOWN, found.map(|x| x as isize).unwrap_or(PTS_UNAVAILABLE), Ordering::Relaxed, Ordering::Relaxed);
-}
-
-/// A frame's duration in seconds, from its properties
-pub(crate) unsafe fn frame_duration(api: &VSAPI, props: *const VSMap, fallback: f64) -> f64 {
-    let mut e1 = VSMapPropertyError::Success;
-    let mut e2 = VSMapPropertyError::Success;
-    let num = unsafe { (api.mapGetInt)(props, c"_DurationNum".as_ptr(), 0, &mut e1) };
-    let den = unsafe { (api.mapGetInt)(props, c"_DurationDen".as_ptr(), 0, &mut e2) };
-    if e1 == VSMapPropertyError::Success && e2 == VSMapPropertyError::Success && num > 0 && den > 0 {
-        num as f64 / den as f64
-    } else {
-        fallback
-    }
-}
-
-/// Presentation time of frame `n` in seconds: _AbsoluteTime, mpv's pts, or by its number
-pub(crate) unsafe fn frame_pts(api: &VSAPI, props: *const VSMap, n: c_int, duration: f64) -> f64 {
-    let mut err = VSMapPropertyError::Success;
-    let t = unsafe { (api.mapGetFloat)(props, c"_AbsoluteTime".as_ptr(), 0, &mut err) };
-    if err == VSMapPropertyError::Success && t.is_finite() { return t; }
-
-    let off = MP_PTS_OFFSET.load(Ordering::Relaxed);
-    if off >= 0 {
-        if let Some(blob) = unsafe { mp_image(api, props) }.filter(|b| off as usize + 8 <= b.len()) {
-            let pts = read_f64(blob, off as usize);
-            if pts.is_finite() && pts > -1.0e3 { return pts; }
-        }
-    }
-    n as f64 * duration
-}
-
-/// Set on the frames Stabilize leaves out (skip_before): Still doesn't take them for neighbours
-pub(crate) const SKIPPED_PROP: &CStr = c"_GyroflowSkipped";
-
-impl Filter {
-    unsafe fn frame_duration(&self, api: &VSAPI, props: *const VSMap) -> f64 {
-        unsafe { frame_duration(api, props, self.fallback_duration) }
-    }
-
-    /// Finds the pts in _MP_IMAGE from frame n and n + 1
-    unsafe fn calibrate(&self, api: &VSAPI, props: *const VSMap, next_props: *const VSMap) {
-        unsafe { calibrate_pts(api, props, next_props, self.frame_duration(api, props)) }
-    }
-
-    /// Presentation time of frame `n`, in seconds
-    unsafe fn frame_time(&self, n: c_int, api: &VSAPI, props: *const VSMap) -> f64 {
-        unsafe { frame_pts(api, props, n, self.frame_duration(api, props)) }
-    }
-
-    /// A frame left out (before skip_before): the blank one's planes, without a copy, with `src`'s properties
-    unsafe fn skipped(&self, api: &VSAPI, src: *const VSFrame, core: *mut VSCore) -> *const VSFrame {
-        let format = unsafe { (api.getVideoFrameFormat)(src) };
-        let mut blank = self.blank.lock();
-        if blank.0.is_null() {
-            let b = unsafe { (api.newVideoFrame)(format, self.out_size.0, self.out_size.1, src, core) };
-            let fmt = unsafe { &*format };
-            for p in 0..fmt.num_planes {
-                let (h, stride) = unsafe { ((api.getFrameHeight)(b, p) as usize, (api.getStride)(b, p) as usize) };
-                let ptr = unsafe { (api.getWritePtr)(b, p) };
-                // Black: limited-range black luma, neutral chroma (never shown: mpv drops them as it seeks)
-                let v = if p == 0 && self.is_yuv { 16u32 << (fmt.bits_per_sample - 8) } else if p == 0 { 0 } else { 128u32 << (fmt.bits_per_sample - 8) };
-                if fmt.bytes_per_sample == 1 {
-                    unsafe { std::ptr::write_bytes(ptr, v as u8, h * stride) };
-                } else {
-                    let row = unsafe { std::slice::from_raw_parts_mut(ptr as *mut u16, h * stride / 2) };
-                    row.fill(v as u16);
-                }
-            }
-            blank.0 = b;
-        }
-        let sources = [blank.0 as *const VSFrame; 3];
-        let planes = [0, 1, 2];
-        let dst = unsafe { (api.newVideoFrame2)(format, self.out_size.0, self.out_size.1, sources.as_ptr(), planes.as_ptr(), src, core) };
-        unsafe { (api.mapSetInt)((api.getFramePropertiesRW)(dst), SKIPPED_PROP.as_ptr(), 1, VSMapAppendMode::Replace) };
-        dst
-    }
-}
-
-unsafe extern "system-unwind" fn filter_get_frame(n: c_int, reason: VSActivationReason, instance: *mut c_void, frame_data: *mut *mut c_void, ctx: *mut VSFrameContext, core: *mut VSCore, vsapi: *const VSAPI) -> *const VSFrame {
-    let f = unsafe { &*(instance as *const Filter) };
-    let api = unsafe { &*vsapi };
-    match reason {
-        VSActivationReason::Initial => unsafe {
-            (api.requestFrameFilter)(n, f.node, ctx);
-            if MP_PTS_OFFSET.load(Ordering::Relaxed) == PTS_UNKNOWN {
-                // Remember that this request also has the next frame, for `calibrate`
-                (api.requestFrameFilter)(n + 1, f.node, ctx);
-                *frame_data = 1 as *mut c_void;
-            }
-            null()
-        },
-        VSActivationReason::AllFramesReady => unsafe {
-            let src = (api.getFrameFilter)(n, f.node, ctx);
-            let props = (api.getFramePropertiesRO)(src);
-
-            if !(*frame_data).is_null() {
-                let next = (api.getFrameFilter)(n + 1, f.node, ctx);
-                f.calibrate(api, props, (api.getFramePropertiesRO)(next));
-                (api.freeFrame)(next);
-            }
-
-            let time = f.frame_time(n, api, props);
-            if time < f.skip_before {
-                let dst = f.skipped(api, src, core);
-                (api.freeFrame)(src);
-                return dst;
-            }
-            let timestamp_us = ((time - f.start_time + f.time_offset) * 1_000_000.0).round() as i64 + f.engine.frame_offset_us;
-
-            let mut err = VSMapPropertyError::Success;
-            let range = (api.mapGetInt)(props, c"_ColorRange".as_ptr(), 0, &mut err);
-            // VapourSynth: 0 = full, 1 = limited. Video without the property is almost always limited
-            let limited_range = if err == VSMapPropertyError::Success { range == 1 } else { f.is_yuv };
-
-            let format = (api.getVideoFrameFormat)(src);
-            let dst = (api.newVideoFrame)(format, f.out_size.0, f.out_size.1, src, core);
-
-            let planes = (0..f.num_planes as c_int).map(|p| PlaneJob {
-                src: (api.getReadPtr)(src, p), src_stride: (api.getStride)(src, p) as usize,
-                src_w: (api.getFrameWidth)(src, p) as usize, src_h: (api.getFrameHeight)(src, p) as usize,
-                dst: (api.getWritePtr)(dst, p), dst_stride: (api.getStride)(dst, p) as usize,
-                dst_w: (api.getFrameWidth)(dst, p) as usize, dst_h: (api.getFrameHeight)(dst, p) as usize,
-            }).collect();
-
-            let result = f.engine.process(timestamp_us, planes, limited_range, f.marker);
-            (api.freeFrame)(src);
-
-            match result {
-                Ok(()) => dst,
-                Err(e) => {
-                    log::error!("Frame {n} at {timestamp_us} us: {e}");
-                    (api.freeFrame)(dst);
-                    let msg = CString::new(format!("Gyroflow: {e}")).unwrap_or_default();
-                    (api.setFilterError)(msg.as_ptr(), ctx);
-                    null()
-                }
-            }
-        },
-        _ => null()
-    }
-}
-
-unsafe extern "system-unwind" fn filter_free(instance: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
-    let f = unsafe { Box::from_raw(instance as *mut Filter) };
-    unsafe {
-        ((*vsapi).freeNode)(f.node);
-        let blank = f.blank.lock().0;
-        if !blank.is_null() { ((*vsapi).freeFrame)(blank); }
-    }
-}
-
-pub(crate) unsafe fn map_get_str(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<String> {
-    let mut err = VSMapPropertyError::Success;
-    let ptr = unsafe { (api.mapGetData)(map, key.as_ptr(), 0, &mut err) };
-    if err != VSMapPropertyError::Success || ptr.is_null() { return None; }
-    Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
-}
-pub(crate) unsafe fn map_get_f64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<f64> {
-    let mut err = VSMapPropertyError::Success;
-    let v = unsafe { (api.mapGetFloat)(map, key.as_ptr(), 0, &mut err) };
-    (err == VSMapPropertyError::Success).then_some(v)
-}
-pub(crate) unsafe fn map_get_i64(api: &VSAPI, map: *const VSMap, key: &CStr) -> Option<i64> {
-    let mut err = VSMapPropertyError::Success;
-    let v = unsafe { (api.mapGetInt)(map, key.as_ptr(), 0, &mut err) };
-    (err == VSMapPropertyError::Success).then_some(v)
-}
-
-/// The engine the arguments of Stabilize ask for, loaded or from the cache, so LeavesEdges and Stabilize share it, and
-/// the size the clip renders at
-unsafe fn engine_for(api: &VSAPI, input: *const VSMap, vi: &VSVideoInfo) -> Result<(Arc<Engine>, (usize, usize)), String> {
-    let fmt = &vi.format;
-    let is_yuv = fmt.color_family == VSColorFamily::YUV;
-    if !(is_yuv || fmt.color_family == VSColorFamily::Gray) || fmt.sample_type != VSSampleType::Integer || fmt.bytes_per_sample > 2 || vi.width == 0 {
-        return Err("only constant-size YUV or Gray clips with 8-16 bit integer samples are supported".into());
-    }
-    let kind = if fmt.bytes_per_sample == 1 { SampleKind::U8 } else { SampleKind::U16 };
-    let max_value = ((1u32 << fmt.bits_per_sample) - 1) as f32;
-
-    let Some(project) = (unsafe { map_get_str(api, input, c"project") }) else {
-        return Err("project is required".into());
-    };
-    let interpolation_name = unsafe { map_get_str(api, input, c"interpolation") }.unwrap_or_else(|| "bicubic".into());
-    let interpolation = match interpolation_name.to_ascii_lowercase().as_str() {
-        "bilinear" => Interpolation::Bilinear,
-        "bicubic"  => Interpolation::Bicubic,
-        "lanczos" | "lanczos4" => Interpolation::Lanczos4,
-        other => return Err(format!("unknown interpolation {other} (bilinear, bicubic, lanczos)")),
-    };
-    let workers = unsafe { map_get_i64(api, input, c"workers") }.unwrap_or(3).clamp(1, 6) as usize;
-    let output_override = match (unsafe { map_get_i64(api, input, c"width") }, unsafe { map_get_i64(api, input, c"height") }) {
-        (Some(w), Some(h)) if w > 0 && h > 0 => Some((align(w, fmt.sub_sampling_w), align(h, fmt.sub_sampling_h))),
-        (None, None) => None,
-        _ => return Err("width and height go together".into()),
-    };
-
-    let preset = unsafe { map_get_str(api, input, c"preset") }.filter(|p| !p.is_empty());
-    let fov = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 {
-        Fov::Wide
-    } else {
-        unsafe { map_get_f64(api, input, c"fov") }.filter(|v| *v > 0.0).map(|v| Fov::Set(v.clamp(0.1, 4.0))).unwrap_or(Fov::Project)
-    };
-    let horizon_lock = unsafe { map_get_f64(api, input, c"horizon_lock") }.map(|v| v.clamp(0.0, 100.0));
-    let underwater = match unsafe { map_get_str(api, input, c"underwater") } {
-        None => Underwater::Auto,
-        Some(v) => Underwater::parse(&v).ok_or_else(|| format!("unknown underwater {v} (yes, no, auto, project)"))?,
-    };
-    let level = unsafe { level_arg(api, input) }?;
-    let lookahead = unsafe { map_get_f64(api, input, c"lookahead") }.unwrap_or(4.0).clamp(0.0, 60.0);
-    // A project's "only within the trim range", as it's viewed (a moment's switch)
-    let alone = unsafe { map_get_i64(api, input, c"alone") }.map(|v| v != 0);
-    // A part stabilized on its own (a moment's), seconds of the video
-    let trim = match unsafe { (map_get_f64(api, input, c"trim_start"), map_get_f64(api, input, c"trim_end")) } {
-        (Some(a), Some(b)) if b > a => Some((a, b)),
-        _ => None,
-    };
-    // The output frame turned and cut to an aspect, and its projection (Frame), in place of the project's
-    let frame = Frame::new(unsafe { map_get_i64(api, input, c"rotation") }.unwrap_or(0), unsafe { map_get_str(api, input, c"aspect") }.as_deref(),
-                           unsafe { map_get_i64(api, input, c"projection") })?;
-    let lens = match unsafe { map_get_str(api, input, c"lens") } {
-        None => LensMode::Stabilized,
-        Some(v) => LensMode::parse(&v).ok_or_else(|| format!("unknown lens {v} (stabilized, only, recorded)"))?,
-    };
-    // A project saved again within the file system's time resolution: the size tells the versions apart
-    let version = |path: &str| std::fs::metadata(path).map(|m| format!("{:?}/{}", m.modified().ok(), m.len())).unwrap_or_default();
-    let mtime = format!("{}|{preset:?}|{}", version(&project), preset.as_deref().map(version).unwrap_or_default());
-    // One engine for both views (Views): the view it starts in isn't part of what it is
-    let fov_key = match fov { Fov::Set(v) => format!("{v}"), Fov::Project | Fov::Wide => String::new() };
-    // The level isn't either: the control file switches it. Nor the sizes, in or out (render_size_for): the paused frame
-    // at full size (still.lua) and another display's size cost no other engine, only the GPU workers set up again for
-    // them. A second engine for a 4K clip ran a 2 GB integrated GPU out of memory
-    let key = format!("{project}|{mtime}|{:?}{}|{interpolation_name}|{workers}|{fov_key}|{horizon_lock:?}|{underwater:?}|{lookahead}|{trim:?}|{alone:?}|{frame:?}|{lens:?}|{}", fmt.color_family, fmt.bits_per_sample, fmt.sub_sampling_w * 10 + fmt.sub_sampling_h);
-    let input_size = (vi.width as usize, vi.height as usize);
-    let engine = get_engine(&key, || Engine::load(key.clone(), &project, preset.as_deref(), fov, horizon_lock, underwater, level, lookahead, input_size, fmt.num_planes as usize, (fmt.sub_sampling_w as usize, fmt.sub_sampling_h as usize), output_override, kind, max_value, is_yuv, interpolation, workers, trim, alone, frame, lens))?;
-    let size = engine.render_size_for(input_size, output_override);
-    Ok((engine, size))
-}
-
-/// The `level` argument (levels.rs), medium without it
-unsafe fn level_arg(api: &VSAPI, input: *const VSMap) -> Result<Level, String> {
-    match unsafe { map_get_str(api, input, c"level") } {
-        None => Ok(Level::Medium),
-        Some(v) => Level::parse(&v).ok_or_else(|| format!("unknown level {v} (weak, medium, strong)")),
-    }
-}
-
-/// Chroma planes need the size to be a multiple of the subsampling
-fn align(v: i64, ss: c_int) -> usize {
-    (v as usize) & !((1usize << ss) - 1)
-}
-
-pub(crate) unsafe fn set_error(api: &VSAPI, out: *mut VSMap, node: *mut VSNode, what: &str, msg: String) {
-    log::error!("{msg}");
-    let msg = CString::new(format!("{what}: {msg}")).unwrap_or_default();
-    unsafe {
-        (api.mapSetError)(out, msg.as_ptr());
-        if !node.is_null() { (api.freeNode)(node); }
-    }
-}
-
-unsafe extern "system-unwind" fn stabilize_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, core: *mut VSCore, vsapi: *const VSAPI) {
-    init_logging();
-    let api = unsafe { &*vsapi };
-    let fail = |node: *mut VSNode, msg: String| unsafe { set_error(api, out, node, "Stabilize", msg) };
-
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    let fmt = vi.format.clone();
-    let (engine, render_size) = match unsafe { engine_for(api, input, &vi) } {
-        Ok(e) => e,
-        Err(e) => return fail(node, e),
-    };
-    let is_yuv = fmt.color_family == VSColorFamily::YUV;
-    let start_time  = unsafe { map_get_f64(api, input, c"start_time") }.unwrap_or(0.0);
-    let time_offset = unsafe { map_get_f64(api, input, c"time_offset") }.unwrap_or(0.0);
-    let marker = unsafe { map_get_i64(api, input, c"chromatic") }.unwrap_or(0) != 0;
-    let skip_before = unsafe { map_get_f64(api, input, c"skip_before") }.unwrap_or(f64::NEG_INFINITY);
-    if let Some(after) = unsafe { map_get_f64(api, input, c"still_warm_up") } { still::warm_up_later(after); }
-
-    let edge_mode = unsafe { map_get_str(api, input, c"edges") }.unwrap_or_default();
-    let Some(edge_mode) = edges::EdgeMode::parse(&edge_mode) else {
-        return fail(node, format!("unknown edges {edge_mode} (off, sphere, smooth)"));
-    };
-    let mut edge_settings = edges::EdgeSettings::default();
-    if let Some(v) = unsafe { map_get_f64(api, input, c"edges_blur") } { edge_settings.blur = (v as f32 / 100.0).clamp(0.0, 0.2); }
-    let edge_control = unsafe { map_get_str(api, input, c"edges_control") }.filter(|p| !p.is_empty()).map(std::path::PathBuf::from);
-    // The view the filter is made in; the control file has the one switched to since, which wins (mpv makes the
-    // filter again on every seek with the arguments it was first given)
-    let view = if unsafe { map_get_i64(api, input, c"wide") }.unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
-    let level = match unsafe { level_arg(api, input) } { Ok(l) => l, Err(e) => return fail(node, e) };
-    engine.edges.configure(edge_mode, edge_settings, view, level, edge_control);
-    engine.edges.set_realtime(true);
-    engine.edges.seeked(skip_before.is_finite());
-
-    let mut out_vi = vi.clone();
-    out_vi.width  = align(render_size.0 as i64, fmt.sub_sampling_w) as c_int;
-    out_vi.height = align(render_size.1 as i64, fmt.sub_sampling_h) as c_int;
-    log::debug!("Stabilize: {}x{} -> {}x{}", vi.width, vi.height, out_vi.width, out_vi.height);
-
-    let fallback_duration = if vi.fps_num > 0 && vi.fps_den > 0 { vi.fps_den as f64 / vi.fps_num as f64 } else { 1.0 / 30.0 };
-    let filter = Box::new(Filter {
-        node, engine, out_size: (out_vi.width, out_vi.height), num_planes: fmt.num_planes as usize, is_yuv,
-        start_time, time_offset, fallback_duration, marker, skip_before, blank: Mutex::new(BlankFrame(null_mut())),
-    });
-    let deps = [VSFilterDependency { source: node, request_pattern: VSRequestPattern::StrictSpatial }];
-    unsafe {
-        (api.createVideoFilter)(out, c"Stabilize".as_ptr(), &out_vi, filter_get_frame, Some(filter_free), VSFilterMode::Parallel,
-                                deps.as_ptr(), deps.len() as c_int, Box::into_raw(filter) as *mut c_void, core);
-    }
-}
-
-/// `core.gyroflow.LeavesEdges(clip, ...Stabilize's arguments)`: the frames of the clip whose stabilized frame leaves part
-/// of the output uncovered (Engine's `uncovered_frames`). Loads the engine Stabilize then gets from the cache: the mpv
-/// script asks first, to play a fast clip every other frame where the edge fill has work to do
-unsafe extern "system-unwind" fn leaves_edges_create(input: *const VSMap, out: *mut VSMap, _user_data: *mut c_void, _core: *mut VSCore, vsapi: *const VSAPI) {
-    init_logging();
-    let api = unsafe { &*vsapi };
-    let mut err = VSMapPropertyError::Success;
-    let node = unsafe { (api.mapGetNode)(input, c"clip".as_ptr(), 0, &mut err) };
-    let vi = unsafe { (*(api.getVideoInfo)(node)).clone() };
-    match unsafe { engine_for(api, input, &vi) } {
-        Ok((engine, _)) => unsafe {
-            // In the view asked for: an engine from the cache may have started in the other
-            let view = if map_get_i64(api, input, c"wide").unwrap_or(0) != 0 { edges::VIEW_WIDE } else { edges::VIEW_NORMAL };
-            let index = engine.views.index(view, level_arg(api, input).unwrap_or(Level::Medium));
-            (api.mapSetInt)(out, c"uncovered".as_ptr(), engine.views.uncovered[index].0 as i64, VSMapAppendMode::Replace);
-            (api.freeNode)(node);
-        },
-        Err(e) => unsafe { set_error(api, out, node, "LeavesEdges", e) },
-    }
-}
-
-/// Windows: the plugin stays loaded until mpv quits. VapourSynth unloads it with the core that loaded it, which mpv
-/// frees each time it sets the filter up again (the next clip of the playlist), while what it started runs on: the
-/// engines' GPU workers, their motion and sphere threads, the cached engines themselves. mpv then crashed in the
-/// unloaded DLL. On macOS dlclose leaves a Rust dylib loaded anyway
-#[cfg(windows)]
-fn pin_module() {
-    const GET_MODULE_HANDLE_EX_FLAG_PIN: u32 = 0x1;
-    const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x4;
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn GetModuleHandleExW(flags: u32, module_name: *const u16, module: *mut *mut c_void) -> i32;
-    }
-    let mut module = null_mut();
-    unsafe {
-        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, pin_module as *const u16, &mut module);
-    }
-}
-
-#[unsafe(no_mangle)]
-pub unsafe extern "system-unwind" fn VapourSynthPluginInit2(plugin: *mut VSPlugin, vspapi: *const VSPLUGINAPI) {
-    #[cfg(windows)]
-    pin_module();
-    let api = unsafe { &*vspapi };
-    unsafe {
-        (api.configPlugin)(c"xyz.gyroflow.vapoursynth".as_ptr(), c"gyroflow".as_ptr(), c"Gyroflow video stabilization".as_ptr(),
-                           vs_make_version(0, 1), vs_make_version(4, 0), 0, plugin);
-        (api.registerFunction)(c"Stabilize".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;lens:data:opt;edges:data:opt;edges_blur:float:opt;edges_control:data:opt;chromatic:int:opt;skip_before:float:opt;still_warm_up:float:opt;".as_ptr(),
-                               c"clip:vnode;".as_ptr(), stabilize_create, null_mut(), plugin);
-        (api.registerFunction)(c"LeavesEdges".as_ptr(),
-                               c"clip:vnode;project:data;preset:data:opt;start_time:float:opt;time_offset:float:opt;width:int:opt;height:int:opt;interpolation:data:opt;workers:int:opt;fov:float:opt;wide:int:opt;horizon_lock:float:opt;underwater:data:opt;level:data:opt;lookahead:float:opt;trim_start:float:opt;trim_end:float:opt;alone:int:opt;rotation:int:opt;aspect:data:opt;projection:int:opt;lens:data:opt;".as_ptr(),
-                               c"uncovered:int;".as_ptr(), leaves_edges_create, null_mut(), plugin);
-        (api.registerFunction)(c"Still".as_ptr(),
-                               c"clip:vnode;time:float;radius:int:opt;luma_strength:float:opt;chroma_strength:float:opt;luma_keep:float:opt;chroma_keep:float:opt;specks:float:opt;".as_ptr(),
-                               c"clip:vnode;".as_ptr(), still::still_create, null_mut(), plugin);
-        // The 360 mode: a 360 camera's lens tracks joined side by side into the sphere and its stamp (sphere360.rs)
-        (api.registerFunction)(c"Sphere360".as_ptr(),
-                               c"clip:vnode;video:data;width:int:opt;distance:float:opt;interpolation:data:opt;workers:int:opt;start_time:float:opt;time_offset:float:opt;".as_ptr(),
-                               c"clip:vnode;".as_ptr(), sphere360::create, null_mut(), plugin);
-        // Test only: stamps known values for the 360 stamp's test (tools/stamp360/)
-        (api.registerFunction)(c"Stamp360Test".as_ptr(), c"clip:vnode;log:data:opt;time_base:int:opt;".as_ptr(),
-                               c"clip:vnode;".as_ptr(), stamp::test_create, null_mut(), plugin);
-    }
 }
 
 #[cfg(test)]

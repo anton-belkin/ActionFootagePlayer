@@ -3,10 +3,7 @@ name = "vs-gyroflow"
 version = "0.2.0"
 edition = "2024"
 license = "GPL-3.0-or-later"
-description = "Gyroflow stabilization as a VapourSynth filter, for realtime playback in mpv"
-
-[lib]
-crate-type = ["cdylib", "rlib"]
+description = "Gyroflow stabilization for ActionFootagePlayer: the GPU warp's tables, the export, probes and tools"
 
 [dependencies]
 # Gyroflow 1.7.0 (it has the Static zoom modes, gyroflow/gyroflow#1264, and the iGPU memory hint, #1280), from the fork
@@ -24,7 +21,6 @@ gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "2
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.2", features = ["unstable-api"] }
 url = "2"
-vapoursynth4-sys = "0.4.1"
 log = "0.4"
 simplelog = "0.12"
 parking_lot = "0.13"

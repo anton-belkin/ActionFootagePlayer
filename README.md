@@ -147,8 +147,8 @@ carries the same plugins, and on Linux they're in an mpv of your own:
 
 1. D-Log M is plain Lua and GPU shaders, for any mpv on any system. Whether HDR reaches the screen there depends on
    mpv and the system. The Rec.709 LUT is baked in from a checkout of this repo (`install.sh` does it on Linux).
-2. The stabilization and the export need an mpv built with VapourSynth, and binaries for macOS on Apple Silicon,
-   Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
+2. The stabilization needs mpv 0.42 or later (the app's own is) with `vo=gpu-next`, and binaries for macOS on Apple
+   Silicon, Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
 4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
    checked against the makers' own LUTs; on footage, so far only GP-Log, on a HERO12 Black. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
@@ -161,15 +161,15 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 | For | File |
 |---|---|
 | a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.dmg`: the app, with all the plugins and their menu, mpv and ffmpeg in it (or the same app as `-macos-arm64.zip`) |
-| a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv, VapourSynth and ffmpeg in it |
+| a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
 | a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | D-Log M and telemetry in your own mpv, on any system | `mpv-dlogm-<version>.zip`, `mpv-dji-telemetry-<version>.zip` |
-| stabilization and export in your own mpv | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
+| stabilization and export in your own mpv (0.42 or later) | `mpv-gyroflow-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
 | a NAS (x86-64 with Intel or AMD graphics, Docker): collaboration in one library, streams, links for Jellyfin | `ActionFootageNASHelper-<version>-linux-x86_64.tar.gz` (the Docker image) with `ActionFootageNASHelper-<version>-compose.yaml`: [the NAS Helper](tools/nas-helper/README.md) |
 
-**The app** carries its own mpv (with VapourSynth and its Python, for the stabilization) and ffmpeg (for
-exporting), [Homebrew](https://brew.sh)'s builds of them: nothing else to install. It needs macOS 15 or later, the
+**The app** carries its own mpv (built for it, with the stabilization's shader support) and ffmpeg (for exporting),
+with [Homebrew](https://brew.sh)'s libraries: nothing else to install. It needs macOS 15 or later, the
 oldest macOS those builds are made for.
 
 Open the disk image, drag ActionFootagePlayer onto Applications and open it from there (from the zip: unzip it and
@@ -265,8 +265,8 @@ switches and buttons, scrolled with the wheel:
 - Source and Output have **In the folder** at the bottom: the previous and next clip, **Autoplay next**, **Loop the
   clip**.
 - **Playlist**: the videos in the clip's folder, the one playing marked (▶); a click plays one. `F8` opens it.
-- **Performance & Quality**: the frame rate and size it's stabilized at, the paused frame at full size, the temporal
-  denoise (Full, Light, Off), what fills the edges and how often the trail is written, skipping the color aberration correction on
+- **Performance & Quality**: the size it's stabilized at, the temporal
+  denoise (Full, Light, Off), what fills the edges, skipping the color aberration correction on
   this screen, whether it asks when the GPU can't keep up. They make playback lighter on this computer; what's
   saved, exports and photos stay as they are, but for the temporal denoise: exports have it as it plays here (Full,
   Light, or none with Off).
@@ -305,8 +305,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Ctrl+h` | Straight to HDR, as `Ctrl+s` would choose it | `dlogm/hdr` |
 | `L` | Log handling off for this clip: the file as it is, flat as the camera recorded it (an HDR clip: in HDR) | `dlogm/off` |
 | `Ctrl+l` | The source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. For clips whose metadata doesn't say. The source's input: Source → Save to the source keeps it, for all its moments and clips | `dlogm/curve` |
-| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): a moment after the video pauses, the frame is rebuilt from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (about a second for 4K; the stabilization must be on). Playing on goes on from it as usual. It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's. Exports have it too (not fully tested yet: measured headless, not tried in the app or on Windows/Linux) (`Shift+E`, moments, the Library's batches, a Live Photo's video): each frame cleaned from the frames on both sides of it by the Mac GPU path's own shader (Full or Light as Performance & Quality has it, and Stronger), which gyroflow-export runs offline | `gyroflow/still` |
-| `Ctrl+f` | The paused frame at full size, now (it pauses first): the source's own resolution and every frame, whatever Quality's frame rate and resolution are, cleaned up in the same re-render when `Ctrl+p` is on ("Cleaning up the frame at full resolution…"). Playing on goes back to the playback settings at once. Quality → Paused frame → At full size does it a moment after each pause | `gyroflow/full` |
+| `Ctrl+p` | Temporal denoise on/off (none with Performance & Quality's Temporal denoise off): each frame, while it plays and paused, from it and the 5 frames on each side of it (3 with Light), each moved onto it by the motion between them, so its noise and the particles in the water mostly go and the detail stays (the stabilization must be on; the picture shows 5 frames later, the sound follows). It's the clip's: kept with its transform (the panel's Save), so a clip it harms (the water's surface) keeps it off; clips with nothing saved play with the session's. Exports have it too (not fully tested yet: measured headless, not tried in the app or on Windows/Linux) (`Shift+E`, moments, the Library's batches, a Live Photo's video): each frame cleaned from the frames on both sides of it by the player's own shader (Full or Light as Performance & Quality has it, and Stronger), which gyroflow-export runs offline | `gyroflow/still` |
 | `c` | Save frame (the side panel's camera): a frame over the video for a photo of this frame — the whole video's crop is Gyroflow's (`Ctrl+e`) (16:9, 4:3, 1:1, 4:5, 3:4, 9:16 or the video's own; `a` changes it), what's around it dimmed, and the picture moved under it. A drag, or two fingers on a trackpad, pans; the mouse wheel or a pinch zooms; `Alt`+drag or a two-finger rotation levels the horizon; a double click puts it back. Where the clip is stabilized, panning turns the stabilized camera (Gyroflow re-renders the frame looking that way) and zoom is its field of view; elsewhere it moves and scales the picture. `Enter` saves it as a photo; `c` or `Esc` leaves | `gyroflow/crop` |
 | `Alt+s` | The frame on screen as a **photo link**, in a project: a small picture of the frame as it shows (at most 1280 px, Save frame's crop) with its link inside (the clip, the time, the crop and camera), `_Stills/Generated/<clip>_<time>s.afplink.jpg`, made at once with nothing rendered. The Library shows it in its albums and its Share renders the photo when it's shared (HEIC with a gain map). Outside a project, as `Alt+Shift+s` | `gyroflow/photo` |
 | `Alt+Shift+s` | The frame on screen as a full photo, rendered now, in the project's `_Stills/` folder (beside `_Exports/`; with no project, `stabilized/` next to the clip): stabilized as it plays, cleaned up from the frames around it (as `Ctrl+p` does), with Save frame's frame and camera. The SDR look is the image, with a gain map to the HDR one (HLG), so an HDR screen shows it brighter: a HEIC on macOS, an Ultra HDR JPEG elsewhere (Android, Chrome and Apple read its ISO gain map). With 3 s of the video around it, as a phone's (the Save frame panel's Still / Live Photo / Motion Photo), exported as `Shift+E` would, at most 1920 wide or high: a Live Photo for Apple's devices (macOS: a `.mov` next to the HEIC; Photos and the iPhone take the two as one) or a Motion Photo for Android's (`<name>.MP.jpg`, an Ultra HDR JPEG with the video inside it, as Android's cameras write it) | `gyroflow/photo-full` |
@@ -349,12 +348,8 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `dlogm.conf`: `mode=hdr` | what D-Log M clips start in: `hdr`, or `sdr` (DJI's Rec.709 LUT) |
 | `dlogm.conf`: `dv_live_l1=yes` | Mac, the app: *HLG+DV* measures each frame's light levels as it plays and sends them with it (`--macos-dovi-live-l1`); `no`: the trims' fixed ones, and the side panel's scene-level sliders back |
 | `dlogm.conf`: `denoise=no` | `yes`: the noise reduction while it plays (no key or menu item any more: at playback rates the eye evens the noise out, and `Ctrl+p` cleans the paused frame). How strong it is: `glsl-shader-opts=denoise_strength=2` in `mpv.conf` |
-| `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes with VideoToolbox (Linux, Windows: `auto-copy`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
-| `gyroflow.conf`: `workers=3` | GPU worker threads for the stabilization |
-| `gyroflow.conf`: `max_fps=0` | every frame plays. Above 0, clips faster than this play every other frame (`30`: 60 fps at 30) when the stabilized frame leaves edges anywhere in the clip, as Gyroflow measures it for the project and view, and they're filled: for a computer where the fill doesn't keep up |
-| `gyroflow.conf`: `fps_limit=0` | every frame is stabilized. `30` or `15`: faster clips play at that rate (60 fps at 30 or 15), the other frames skipped before anything else is done with them; at full size while paused (`Ctrl+f`, `paused_full_size=auto`) every frame is there again (stepping through them, the clean still frame). Right click > Quality sets it |
-| `gyroflow.conf`: `edge_fill_rate=auto` | the edge fill rate: how often the sphere trail (`edges=sphere`) is written while playing. `auto`: whenever a GPU worker is free; `50` or `25`: from that % of the frames that play (with `fps_limit=30`, 25 % is ~7.5 a second), for a laptop whose CPU and GPU share their power, where the writes take what the frames need even while a worker is free. Changes without setting the chain up again. Right click > Quality > Edge fill rate sets it |
-| `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a lower frame rate, resolution or edge fill; what's picked is kept here. `no`: it plays on as it can |
+| `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes on the GPU (`hwdec=auto`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
+| `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a smaller resolution, a lighter denoise or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
@@ -366,11 +361,10 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `lens=corrected` | the default lens: `corrected` (Gyroflow's lens correction and the projection, with the stabilization off too: the lens alone) or `as-recorded`; **Use as default** writes it |
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
-| `gyroflow.conf`: `resolution=auto` | the stabilized frame rendered no bigger than the display the window is on shows it fullscreen (a 1080p display: a quarter of 4K's pixels to stabilize and shade), from video scaled down to match first; a move to a display of another size sets it up again, paused for a moment. On the Mac's GPU path, at most 1080p while the temporal denoise (`Ctrl+p`) is on: at a Retina screen's size it drops frames full screen. `display`: the display's size, denoise or not. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that. Right click > Quality, or the panel's Performance & Quality › Size, sets it |
+| `gyroflow.conf`: `resolution=auto` | the stabilized frame rendered as big as the window shows it (a 1080p display: a quarter of 4K's pixels to stabilize and shade), mpv scaling it to the screen; at most 1080p while the temporal denoise (`Ctrl+p`) is on: at a Retina screen's size it drops frames full screen. `display`: the display's size, denoise or not. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that. Right click > Quality, or the panel's Performance & Quality › Size, sets it |
 | `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
-| `gyroflow.conf`: `paused_full_size=off` | paused, the frame stays as it played; `Ctrl+f` renders it at full size. `auto`: `still_delay` after each pause it's rendered at full size (every frame, whatever `resolution` and `fps_limit` are), in the same re-render as the clean still frame; on a slow GPU each pause and each play costs a moment for it. Right click > Quality > Paused frame sets it |
-| `gyroflow.conf`: `zoom_margin=1.25` | how much more of the video it keeps than the display shows, for the stabilization's zoom, which enlarges the part that shows |
+| `gyroflow.conf`: `workers`, `max_fps`, `fps_limit`, `edge_fill_rate`, `paused_full_size`, `zoom_margin`, `sphere_max_fps`, `sphere_cache_mb`, `gpu` | the VapourSynth path's (taken out, 2026-11): read and ignored |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -621,8 +615,9 @@ blue land apart from green towards the edges of the frame (lateral chromatic abe
 of the water. Wherever the stabilization has the lens under water (its refraction, frame by frame: as the camera's
 *In water* / *Out of water* says, or the project or preset, or as Stabilization → Lens / `Ctrl+u` sets it), each color is taken from where its own ray lands, with water's index for that color: blue, which lands
 furthest out, stays, and red and green are moved out to it, so nothing is taken from past the picture's edge. It's
-done on the GPU in RGB (`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
-from the plugin (`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
+done on the GPU in RGB, inside the warp (`shaders/gyroflow/warp.glsl`; the export's pipes path runs
+`mpv/scripts/gyroflow/chromatic.glsl`), with where the lens's axis is in each stabilized frame
+(`vs-gyroflow/src/dispersion.rs`). How far each color goes is physics only, nothing fitted to footage
 (`tools/water_dispersion.py`): the lens profile gives each pixel's angle to the flat port, and water's index for each
 channel is averaged over its spectrum, for a grey object in daylight through 3 m of water. On Osmo Action 6 dive clips
 red's fringe at the edges of the frame, up to 3-7 px, goes to within about a pixel; blue's, up to 2-4 px, turns over
@@ -631,7 +626,7 @@ the edge fill or the background alike. Out of the water nothing moves. `Ctrl+a` 
 takes them out again; it switches nothing on above water (the lens stays as it is). Exports and photos have it too
 (not fully tested yet in video exports: measured headless only), as the clip plays (`Shift+E`, moments, the Library's batches, `Alt+s`): gyroflow-export runs the same shader on each
 stabilized frame (`vs-gyroflow/src/user_shader.rs`; `--chromatic yes|no`), whatever Performance & Quality skips on
-this screen. It needs `vo=gpu-next` or `gpu` (mpv's default is `gpu-next`).
+this screen. It needs `vo=gpu-next` (mpv's default).
 
 **Edges.** When the project's zoom isn't enough to hide them (a fixed zoom, or zooming off), the stabilized frame
 leaves parts of the window empty, which Gyroflow fills with the project's background color. Here they're filled
@@ -660,9 +655,7 @@ stabilized picture covers. A clip without one plays before the rest of its motio
 edges wherever they show. A clip with edges anywhere gets the sphere written as it plays,
 edges showing or not, so it has what to fill them with when they show. That's on a thread of its own, and only while
 the GPU has room: the frames come first, and where they need all of it the sphere is written less often, what it has
-fades into the trail by place, and every frame still plays. Where the GPU shares its power with the CPU (a 15 W
-laptop), a free worker doesn't mean free power: Quality > Edge fill rate has the sphere written from only 50 % or
-25 % of the frames that play (`edge_fill_rate`, Options). A clip without any has no sphere to write. The wider view of
+fades into the trail by place, and every frame still plays. A clip without any has no sphere to write. The wider view of
 `Ctrl+g` shows more of the picture and has edges throughout: it turns the zoom off and picks Gyroflow's FOV for the
 clip so the stabilized picture covers about as much area as the frame, what falls outside the frame and the edges
 inside it taken together. That's the area of the frame's outline after the lens correction (the one Gyroflow's zoom
@@ -745,7 +738,7 @@ What it renders:
   clip, or as the project or preset says, as the menu's Lens has it (see Stabilization).
 - `--chromatic yes|no`: the water's color fringes taken out where the lens is under water (the default), as `Ctrl+a`
   does it, or left as recorded. `--denoise light|full` (`--denoise-strong`, `--grain <0-1>`): the temporal denoise as
-  `Ctrl+p` plays it on the Mac's GPU path, each frame from the 3 or 5 frames on each side of it, the frames before
+  `Ctrl+p` plays it, each frame from the 3 or 5 frames on each side of it, the frames before
   and after the part decoded for it; off by default. Both run the player's own shaders on the stabilized frame
   (`chromatic.glsl`, `warp.glsl`'s denoise) on the GPU, as `Shift+E` passes them for the clip.
 - `--prores`: ProRes 422 HQ instead of HEVC, for editing. The bit rate of HEVC follows the source's.
@@ -1156,7 +1149,7 @@ tools/dev_app.sh
 `tools/build_mpv.sh` builds the app's mpv once (a few minutes): the commit in `tools/mpv.lock`, with libplacebo
 linked in, the other libraries Homebrew's (it installs mpv's dependencies with Homebrew first; `--no-deps` skips
 that). `tools/dev_app.sh` then builds ActionFootagePlayer the way the release does: the plugins, that mpv, and
-Homebrew's ffmpeg, Python and VapourSynth in the app (so it needs no Homebrew to run). Without `tools/build_mpv.sh`'s
+Homebrew's ffmpeg and Python (for the setup) in the app (so it needs no Homebrew to run). Without `tools/build_mpv.sh`'s
 mpv it takes Homebrew's (`brew install mpv`); `MPV_BIN` names another. Then it puts it in `~/Applications` in place of the one
 there, which it keeps as `build/ActionFootagePlayer-previous.app`, and runs the setup (the default app for MP4, the
 Quick Actions, DJI's LUT).
@@ -1173,12 +1166,11 @@ Quick Actions, DJI's LUT).
 The gyroflow plugin runs there too, with binaries of its own; dlogm, dji-telemetry and highlights are the same zips as on a Mac.
 None of it has been tried there by hand yet (the release builds it on Linux and Windows). It needs:
 
-- **mpv built with VapourSynth**: `mpv --vf=help` lists `vapoursynth`. On Windows, the usual builds
-  ([shinchiro's](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) have it. On Linux, it depends on the
-  distribution: Debian's and Ubuntu's mpv doesn't have it, and needs building with `-Dvapoursynth=enabled`.
-- **[VapourSynth](https://github.com/vapoursynth/vapoursynth/releases)** itself, with its Python.
-- **A GPU with Vulkan** (on Windows DirectX 12 or Vulkan), which the stabilization renders on. Without one,
-  Gyroflow's engine falls back to the CPU, far from realtime.
+- **mpv 0.42 or later, with `vo=gpu-next`** (its default): the stabilization is Gyroflow's warp as an mpv shader,
+  which finds each frame by its time stamp, and mpv gives shaders that from 0.42. On Windows, the usual builds
+  ([shinchiro's](https://github.com/shinchiro/mpv-winbuild-cmake/releases)) are recent enough. On Linux, it depends
+  on the distribution: one whose mpv is older plays the clips as recorded, with a card saying so (`install.sh` warns).
+- **A GPU with Vulkan** (on Windows DirectX 12 or Vulkan), which the stabilization renders on.
 - **ffmpeg** for exporting: in `PATH`, or on Windows `ffmpeg.exe` and `ffprobe.exe` copied next to
   `gyroflow-export.exe`.
 
@@ -1191,8 +1183,7 @@ has all of it: [The Windows app](#the-windows-app).
 
 What differs from macOS:
 
-- Decoding is mpv's `hwdec=auto-copy` (VAAPI, NVDEC, D3D11...) for clips it stabilizes, and video bigger than the
-  display (or than 4K) is scaled down on the CPU.
+- Decoding is mpv's `hwdec=auto` (VAAPI, NVDEC, D3D11...) for clips it stabilizes.
 - `Ctrl+e` starts `gyroflow` from `PATH` on Linux, and on Windows the app `.gyroflow` files open with (Gyroflow's
   installer sets it). Another one: `gyroflow_app=<path>` in `gyroflow.conf`.
 - Exports are encoded with the first of NVENC, VAAPI (Linux), Quick Sync and AMF (Windows) that works, else x265 on the
@@ -1204,11 +1195,11 @@ What differs from macOS:
 ### The Windows app
 
 The installer (`tools/make_windows_app.sh`, `windows/`) puts everything in the app's folder, so nothing else needs
-installing: mpv ([shinchiro's build](https://github.com/shinchiro/mpv-winbuild-cmake), with VapourSynth support,
-and with the app's icon), Python with VapourSynth, the VC++ runtime VapourSynth needs, a Vulkan loader for a PC whose graphics driver hasn't
+installing: mpv ([shinchiro's build](https://github.com/shinchiro/mpv-winbuild-cmake), with the app's icon), Python
+for the setup, a Vulkan loader for a PC whose graphics driver hasn't
 installed one (mpv can't start without), ffmpeg and ffprobe for exports
 ([Gyan's build](https://www.gyan.dev/ffmpeg/builds/)), and the plugins. `ActionFootagePlayer.exe`
-(`windows/launcher/`) starts that mpv with the plugins and tells it where VapourSynth is, and plays a video opened
+(`windows/launcher/`) starts that mpv with the plugins, and plays a video opened
 while one plays in its place. Like the Mac app, it's whole by itself: its own plugins only, and its own mpv settings
 and config folder, not an mpv you may also have (`%APPDATA%\mpv`). What's yours is in
 `%LOCALAPPDATA%\ActionFootagePlayer\`: what you set in the plugins (`mpv\script-opts\`), DJI's LUT and its shader
@@ -1415,16 +1406,17 @@ with the camera and firmware (`mpv/scripts/dlogm/gopro_color.lua`), or `Ctrl+l`.
 
 ### Gyroflow
 
-The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) adds `vf=vapoursynth` with its `gyroflow.vpy`, which runs the
-`gyroflow.Stabilize` plugin from `vs-gyroflow/`. Without a `.gyroflow` next to the video, `gyroflow-probe`
-decides first whether the video carries a project, or its own gyro data recorded with the camera's stabilization
-off (where each camera records that: `vs-gyroflow/src/probe.rs`). Frames are
-stabilized plane by plane at the source bit depth, so 10-bit D-Log M reaches the shaders as 10-bit, and rendered no
-bigger than the display shows it: video larger than that (with a margin for the zoom), and 8K always to 4K, is scaled
-down on the GPU first. It renders the stabilization while mpv plays, the way Gyroflow would render it
-(smoothing, zoom, lens, horizon): 4K60 at ~87 fps of capacity on an M1 Pro. Clips up to 30 fps get Lanczos
-interpolation, faster ones bicubic (Lanczos holds only ~38 fps at 4K). Details, measurements and the plugin's
-options: [vs-gyroflow/README.md](vs-gyroflow/README.md).
+The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) asks `gyroflow-gpu-table` (from `vs-gyroflow/`) for the
+clip's warp: Gyroflow's own render of the project (smoothing, zoom, lens, horizon) as an mpv shader,
+`shaders/gyroflow/warp.glsl` with every frame's parameters in it, which libplacebo runs ahead of the looks, the frame
+never leaving the GPU ([docs/gpu-render.md](docs/gpu-render.md)). Without a `.gyroflow` next to the video,
+`gyroflow-probe` decides first whether the video carries a project, or its own gyro data recorded with the camera's
+stabilization off (where each camera records that: `vs-gyroflow/src/probe.rs`). It renders at the size the window
+shows the video. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic. What the warp can't do yet
+(other lens models such as Sony's, a lens mesh, in-body or optical stabilization, a sideways rolling shutter) plays as
+recorded, with a card saying why; so does every clip in an mpv older than 0.42 or with a `vo` other than `gpu-next`.
+Up to 2026-11 there was also a VapourSynth path for those; it was taken out. Details:
+[vs-gyroflow/README.md](vs-gyroflow/README.md).
 
 The plugin builds on `gyroflow-core` from Gyroflow master, which has the Static zoom modes
 ([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)) it renders; nothing else is needed
@@ -1475,12 +1467,12 @@ mpv/scripts/dlogm/            the log plugin  →  ~/.config/mpv/scripts/dlogm (
                               ActionFootagePlayer; dji_color.lua and gopro_color.lua read the cameras' color profile
 mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
                               ActionFootagePlayer
-mpv/scripts/gyroflow/still.lua  the clean still frame (Ctrl+p): the paused frame again, through vs-gyroflow's Still
-mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses and offers a lower frame rate, resolution
-                              or edge fill
+mpv/scripts/gyroflow/still.lua  the temporal denoise's switch (Ctrl+p); the denoise is the warp's
+mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses and offers a smaller resolution, a
+                              lighter denoise or edge fill
 mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
 mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
-mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out
+mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out, for the export's pipes path
 mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
 mpv/scripts/gyroflow/projectwatch.lua  Ctrl+e's watch on the Gyroflow project: when a save there is taken up
 mpv/scripts/gyroflow/measure.lua       Ctrl+m: the clip's motion measured from its picture into its .afp-motion
@@ -1516,7 +1508,7 @@ tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) �
                               formulas
 docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
 tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow VapourSynth plugin, gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut, afp-meta, afp-catalog (Rust)
+vs-gyroflow/                  Gyroflow's engine, gyroflow-gpu-table (the player's warp), gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut, afp-meta, afp-catalog (Rust)
 docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
 docs/360-cameras.md           360° cameras (design): the plugin's sphere in the camera's axes, the angles in the frame, the view in a shader
 docs/360-reframe.md           360° to flat (design): the view recorded as you look around, tidied (angles, horizon, the picture), exported
@@ -1531,7 +1523,7 @@ windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts 
                               gives mpv.exe the app's icon (Rust, no dependencies)
 windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
 windows/AppIcon.ico           the Windows app's icon (tools/make_icon.sh, tools/png_to_ico.py)
-tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python, VapourSynth and ffmpeg pinned
+tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python and ffmpeg pinned
 tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch), the stream and the links for Jellyfin in one
                               Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
 tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
@@ -1549,7 +1541,7 @@ GPL-3.0 (the plugin builds on Gyroflow, which is GPL-3.0). DJI's LUT belongs to 
 DJI's site at install.
 
 ActionFootagePlayer.app also carries mpv (GPL; built by `tools/build_mpv.sh` from the commit in `tools/mpv.lock`,
-with libplacebo, LGPL, linked in) and ffmpeg, Python, VapourSynth, MoltenVK and the libraries they use, as Homebrew
+with libplacebo, LGPL, linked in) and ffmpeg, Python, MoltenVK and the libraries they use, as Homebrew
 builds them, each under its own license (GPL, LGPL, PSF, Apache, MIT, BSD and others). The app's
 `Contents/Resources/ThirdParty/` has each one's license files (and for Homebrew's, the formula it was built by), and
 `SOURCES.txt` there lists the version of each and where its source is (`tools/bundle_runtime.py` writes them

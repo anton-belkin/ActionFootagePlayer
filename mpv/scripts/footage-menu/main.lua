@@ -70,10 +70,7 @@ local CURVE_NAMES = {}
 for _, c in ipairs(CURVES) do CURVE_NAMES[c[1]] = c[2] end
 local EDGES = { { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" }, { "off", "Background color" } }
 -- The stabilization's quality, lighter down the list, for a GPU that doesn't keep up (gyroflow's quality.lua)
-local FRAME_RATES = { { "0", "Every frame" }, { "30", "Up to 30 fps" }, { "15", "Up to 15 fps" } }
 local RESOLUTIONS = { { "auto", "Auto: fit the display, at most 1080p with temporal denoise" }, { "display", "Fit the display" }, { "1080", "Up to 1080p" }, { "720", "Up to 720p" }, { "video", "The video's own size" } }
-local FILL_RATES = { { "auto", "Auto, as the GPU has room" }, { "50", "50 % of the frames" }, { "25", "25 % of the frames" } }
-local PAUSED_SIZES = { { "off", "As it played (Ctrl+f: full size)" }, { "auto", "At full size, a moment after pausing" } }
 -- How much temporal denoise (Ctrl+p) this computer does: gyroflow.conf's temporal_denoise
 local DENOISE_LEVELS = { { "full", "Full: 5 frames on each side" }, { "light", "Light: 3 frames, lighter on the GPU" }, { "off", "Off on this computer" } }
 local CORNERS = { { "top-left", "Top left" }, { "top-right", "Top right" }, { "bottom-left", "Bottom left" }, { "bottom-right", "Bottom right" } }
@@ -105,7 +102,6 @@ local KEY_LABELS = {
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
     { "script-binding gyroflow/still", "Temporal denoise on / off" },
-    { "script-binding gyroflow/full", "The paused frame at full size" },
     { "script-binding gyroflow/crop", "Save frame: a frame for a photo, the picture panned and zoomed under it" },
     { "script-binding gyroflow/edit", "Open in Gyroflow" },
     { "script-binding dji_telemetry/toggle", "Telemetry on / off" },
@@ -298,34 +294,19 @@ local function stabilization_menu(g, key)
     }
 end
 
--- On the top level, to find quickly when playback drops frames: the stabilization's rate and size, the paused frame's,
--- how often the sphere trail is written, the color fringes (as in Lens), and whether it asks
+-- On the top level, to find quickly when playback drops frames: the stabilization's size, the temporal denoise, the
+-- color fringes (as in Lens), and whether it asks
 local function quality_menu(g)
     local items = {}
-    for _, r in ipairs(FRAME_RATES) do
-        table.insert(items, item(r[2], "script-message-to gyroflow quality fps_limit " .. r[1], { checked = tostring(g.fps_limit or 0) == r[1] }))
-    end
-    table.insert(items, SEPARATOR)
     for _, r in ipairs(RESOLUTIONS) do
         table.insert(items, item(r[2], "script-message-to gyroflow quality resolution " .. r[1], { checked = tostring(g.resolution) == r[1] }))
     end
-    local paused = {}
-    for _, r in ipairs(PAUSED_SIZES) do
-        table.insert(paused, item(r[2], "script-message-to gyroflow quality paused_full_size " .. r[1], { checked = (g.paused_full_size or "off") == r[1] }))
-    end
-    table.insert(items, submenu("Paused frame", paused))
     local dn = {}
     for _, r in ipairs(DENOISE_LEVELS) do
         table.insert(dn, item(r[2], "script-message-to gyroflow quality temporal_denoise " .. r[1], { checked = (g.temporal_denoise or "full") == r[1] }))
     end
     table.insert(items, submenu("Temporal denoise", dn))
     table.insert(items, SEPARATOR)
-    local fill = {}
-    for _, r in ipairs(FILL_RATES) do
-        table.insert(fill, item(r[2], "script-message-to gyroflow quality edge_fill_rate " .. r[1], { checked = tostring(g.edge_fill_rate or "auto") == r[1] }))
-    end
-    -- Only the sphere trail is written apart from the frames
-    table.insert(items, submenu("Edge fill rate", fill, { disabled = g.edges ~= "sphere" }))
     -- Smoother playback on this computer: the clip's transform keeps them taken out (exports and photos too)
     table.insert(items, item("Skip the color aberration correction", "script-message-to gyroflow quality chromatic_skip " .. (g.chromatic_skip and "no" or "yes"),
                              { checked = g.chromatic_skip == true }))

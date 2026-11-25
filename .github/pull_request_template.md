@@ -5,8 +5,7 @@
 ## Paths (CLAUDE.md, "A feature works on every path")
 
 <!-- Each: done / n/a because… / not done → issue #N. Delete none of the lines. -->
-- [ ] Player, VapourSynth path:
-- [ ] Player, GPU path:
+- [ ] Player:
 - [ ] Export (GPU path and pipes; live state and saved bundle):
 - [ ] Photo / Live Photo / Motion Photo:
 - [ ] Moment, Save frame:

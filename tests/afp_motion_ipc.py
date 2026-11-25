@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """A clip with motion measured from the picture beside it (<stem>.afp-motion, vs-gyroflow's afp_motion.rs) plays
-stabilized without a Gyroflow project, headless (macOS, the app's own mpv, no window), on the GPU path and through
-VapourSynth:
+stabilized without a Gyroflow project, headless (macOS, the app's own mpv, no window):
 
   motion    only the .afp-motion beside the clip: stabilized in the player's own mode (kind "default", optical),
             the horizon lock off and refused (no gravity in measured motion)
@@ -14,13 +13,12 @@ VapourSynth:
   none      neither: not stabilized (a clip without motion data: as recorded, or its lens alone corrected)
 
   tests/afp_motion_ipc.py [--keep] [--shots <dir>] <ActionFootagePlayer.app> <clip with a Gyroflow project of optical motion beside it>
-                          [gpu|vs ...]
 
 The app is cloned into a temporary folder (cp -c) with this checkout's mpv plugins and vs-gyroflow's release
-binaries (vs-gyroflow/target/release) put in it, and the GPU path allowed with vo=null (mpv parses the warp but draws
+binaries (vs-gyroflow/target/release) put in it, and the stabilization allowed with vo=null (mpv parses the warp but draws
 nothing). The clip and its project are copied there, and the .afp-motion made from the project with the rig's own
 gyroflow-optical --from-project. Nothing is written beside the original clip. --shots: the side panel's Source and
-Transform tabs for "motion" and "none" (on the GPU path) as pictures in <dir>, for the pull request.
+Transform tabs for "motion" and "none" as pictures in <dir>, for the pull request.
 """
 import glob, json, os, shutil, subprocess, sys, tempfile, time
 
@@ -29,11 +27,11 @@ REPO = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 from gyroflow_reload_ipc import PLUGINS, Player  # noqa: E402
 
-BINARIES = ["gyroflow-probe", "gyroflow-project", "gyroflow-gpu-table", "gyroflow-export", "gyroflow-optical", "libvs_gyroflow.dylib"]
+BINARIES = ["gyroflow-probe", "gyroflow-project", "gyroflow-gpu-table", "gyroflow-export", "gyroflow-optical"]
 
 
 def make_rig(app, clip):
-    rig = os.path.realpath(tempfile.mkdtemp(prefix="afp-motion-"))  # VSScript knows itself by its real path
+    rig = os.path.realpath(tempfile.mkdtemp(prefix="afp-motion-"))
     sock = os.path.join("/tmp", "afpmo-%d.sock" % os.getpid())  # short: macOS caps socket paths at 104
     subprocess.run(["cp", "-cR", app, rig + "/app.app"], check=True)
     plugins = rig + "/app.app/Contents/Resources/plugins"
@@ -47,9 +45,8 @@ def make_rig(app, clip):
         shutil.copy(os.path.join(REPO, "vs-gyroflow/target/release", b), g)
     main = open(g + "/main.lua").read()
     for a, b in [('"/usr/bin/open"', '"/usr/bin/true"'),
-                 ('if vo ~= "" and not vo:find("gpu-next", 1, true) then return false end',
-                  'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then return false end'),
-                 ('(vo == "" or vo:find("gpu-next", 1, true))', '(vo == "" or vo == "null" or vo:find("gpu-next", 1, true))')]:
+                 ('if vo ~= "" and not vo:find("gpu-next", 1, true) then',
+                  'if vo ~= "" and vo ~= "null" and not vo:find("gpu-next", 1, true) then')]:
         if a not in main:
             sys.exit("main.lua changed: the test's patch doesn't apply: " + a)
         main = main.replace(a, b)
@@ -96,7 +93,7 @@ def shots(pl, name):
         print("  shot", png)
 
 
-def case(rig, sock, name, path):
+def case(rig, sock, name):
     clips = rig + "/clips"
     project, motion = clips + "/a.gyroflow", clips + "/a.afp-motion"
     # Each case's files beside the clip: the project and motion file moved aside when it has none
@@ -108,10 +105,10 @@ def case(rig, sock, name, path):
             os.rename(aside, f)
         if not keep and os.path.exists(f):
             os.rename(f, aside)
-    pl = Player(rig, sock, clips + "/a.MP4", path, name not in ("none", "assign", "measure"))
+    pl = Player(rig, sock, clips + "/a.MP4", name not in ("none", "assign", "measure"))
     s, g = pl.state(), gyroflow_state(pl)
-    log = ["%s/%s: %s %s" % (name, path, s, json.dumps(g))]
-    stabilized = bool(s["warp"] or s["vf"])
+    log = ["%s: %s %s" % (name, s, json.dumps(g))]
+    stabilized = bool(s["warp"])
     if name == "motion":
         ok = stabilized and g["kind"] == "default" and isinstance(g["optical"], dict) and g["horizon_lock"] == "no"
         pl.cmd("script-message-to", "gyroflow", "horizon-lock", "yes")
@@ -150,17 +147,17 @@ def case(rig, sock, name, path):
                 s = pl.state()
             except OSError:
                 continue
-            if isinstance(g["optical"], dict) and (s["warp"] or s["vf"]):
+            if isinstance(g["optical"], dict) and s["warp"]:
                 break
         log.append("  Ctrl+m -> %s %s after %.1f s" % (s, json.dumps(g), time.time() - t))
-        ok = not before and isinstance(g["optical"], dict) and bool(s["warp"] or s["vf"]) and g["optical"].get("how") == "measured"
+        ok = not before and isinstance(g["optical"], dict) and bool(s["warp"]) and g["optical"].get("how") == "measured"
         # What it measured stays aside for the cases after (they bring the converted one back)
         if os.path.exists(motion):
             os.rename(motion, motion + ".measured")
     else:
         # Not stabilized: played as recorded, or with its lens alone corrected (kind "lens") where its lens is known
         ok = g["kind"] in ("", "lens") and not g["optical"]
-    if SHOTS and name in ("motion", "none") and path == "gpu":
+    if SHOTS and name in ("motion", "none"):
         shots(pl, name)
     steps = pl.quit()
     mlog = open(rig + "/mpv.log", errors="replace").read()
@@ -181,17 +178,16 @@ def main():
         del args[i:i + 2]
     if len(args) < 2:
         sys.exit(__doc__)
-    app, clip, paths = args[0], args[1], args[2:] or ["gpu", "vs"]
+    app, clip = args[0], args[1]
     rig, sock = make_rig(app, clip)
     # The player's own lens database and lens list: the rig's, not the user's (assign writes there)
     os.environ["AFP_CURATED_LENSES"] = os.path.join(rig, "lenses-home", "curated_lenses.json")
     failed = 0
     try:
-        for path in paths:
-            for name in ["motion", "project", "none", "assign", "measure"]:
-                ok, log = case(rig, sock, name, path)
-                print(("ok    " if ok else "FAIL  ") + "\n".join(log))
-                failed += not ok
+        for name in ["motion", "project", "none", "assign", "measure"]:
+            ok, log = case(rig, sock, name)
+            print(("ok    " if ok else "FAIL  ") + "\n".join(log))
+            failed += not ok
     finally:
         if keep:
             print("rig kept:", rig)
