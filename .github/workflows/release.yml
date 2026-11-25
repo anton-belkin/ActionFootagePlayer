@@ -86,6 +86,7 @@ jobs:
           luajit tests/timeline_test.lua
           luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
+          luajit tests/scrub_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/notify_test.lua
           luajit tests/uwcolor_test.lua
@@ -95,6 +96,7 @@ jobs:
           luajit tests/export_args_test.lua
           luajit tests/exportsettings_test.lua
           luajit tests/gpu_ahead_test.lua
+          luajit tests/dnstep_test.lua
           python3 tests/packaging_test.py
           luajit tests/tags_test.lua
           luajit tests/live_photo_test.lua

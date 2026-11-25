@@ -71,8 +71,8 @@ local function expect(what, got, want)
     end
 end
 
--- The panel's drawing with its places (the bar draws into its own)
-local panel
+-- The panel's drawing with its places (the bar draws into its own); the bar's track
+local panel, track
 local function redraw()
     events["file-loaded"]()
 end
@@ -85,6 +85,7 @@ ui.new = function(s)
     local hit = u.hit
     u.hit = function(self, x, y, w, h, id, cmd)
         if type(id) == "string" and id:find("^rail:") then panel = self end
+        if id == "bar:track" then track = { x0 = x, y0 = y, x1 = x + w, y1 = y + h } end
         return hit(self, x, y, w, h, id, cmd)
     end
     return u
@@ -540,6 +541,34 @@ expect("underwater: Use as default is the transform's", last_ran(), "script-mess
 mp.set_property_native("user-data/uwcolor", { uw = false, uw_highlights = false, uw_strength = 1, active = false, ok = true, stats = {} })
 expect("underwater: off, highlights can't be switched", (function() local before = #ran; click("uw-hl"); return #ran == before end)(), true)
 messages.tab("output")
+
+-- The seek bar's track: a click is one exact seek; a drag seeks keyframes as it moves (Anton kept that, after trying
+-- it), the exact frame where it's let go (docs/seek-and-scrub.md)
+redraw()
+local function seeks()
+    local out = {}
+    for _, c in ipairs(ran) do if c:find("^seek ") then out[#out + 1] = c end end
+    return out
+end
+expect("the bar's track drawn", track ~= nil, true)
+local ty = (track.y0 + track.y1) / 2
+local before = #seeks()
+click_at(track.x0 + 100, ty)
+local s1 = seeks()
+expect("a click: one seek", #s1 - before, 1)
+expect("…exact", s1[#s1]:match("absolute%+exact$") ~= nil, true)
+before = #s1
+move(track.x0 + 50, ty)
+bindings.click.fn({ event = "down" })
+move(track.x0 + 150, ty)
+move(track.x0 + 250, ty)
+local s2 = seeks()
+expect("dragged: keyframes as it moves", #s2 - before, 2)
+expect("…keyframes", s2[#s2]:match("absolute%+keyframes$") ~= nil, true)
+bindings.click.fn({ event = "up" })
+local s3 = seeks()
+expect("let go: the exact frame there", #s3 - #s2, 1)
+expect("…exact", s3[#s3]:match("absolute%+exact$") ~= nil, true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

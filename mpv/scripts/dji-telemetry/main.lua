@@ -54,6 +54,18 @@
 --   visible=yes          shown when a file starts; no: only after Ctrl+t
 
 local mp = require 'mp'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 -- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
 pcall(function()
     package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
@@ -269,7 +281,7 @@ local function offset()
 end
 
 local function update()
-    local t = mp.get_property_number("time-pos")
+    local t = shown_time()
     if t then t = t + offset() end
     if not visible or not track or not t then
         if shown then overlay:remove(); shown = nil end
@@ -433,6 +445,8 @@ mp.register_event("end-file", function()
 end)
 
 mp.observe_property("time-pos", "number", update)
+-- Paused, a frame step with the GPU denoise may change the frame on screen without time-pos (shown_time)
+mp.observe_property("user-data/gyroflow/gpu_delay", "native", update)
 mp.observe_property("osd-dimensions", "native", update)
 for _, side in ipairs({ "left", "right", "top", "bottom" }) do
     mp.observe_property("video-margin-ratio-" .. side, "number", function() shown = nil; update() end)

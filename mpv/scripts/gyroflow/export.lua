@@ -781,13 +781,15 @@ local function gpu_frame()
     return { "--image", file }, file
 end
 
--- The time of the frame on screen: on the GPU path with the denoise, up to its delay before time-pos, not before where
--- it last started (main.lua's dn_sync, user-data/gyroflow/gpu_delay)
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
     local t = mp.get_property_number("time-pos")
     local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
     if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
-    local restart = (d.restart and d.restart >= 0) and math.min(d.restart, t) or t
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
     return math.max(restart, t - d.delay)
 end
 

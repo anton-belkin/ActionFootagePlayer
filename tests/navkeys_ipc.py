@@ -104,7 +104,7 @@ def main():
     log = open(os.path.join(work, "mpv.log"), "w")
     m = Mpv(o.mpv, sock, log, work)
     try:
-        m.settle(lambda: winner(m.get("input-bindings"), "frame-step") == "Alt+RIGHT")
+        m.settle(lambda: winner(m.get("input-bindings"), "script-binding gyroflow/frame-on") == "Alt+RIGHT")
         mac = m.get("platform") == "darwin"
         clip = "Meta+" if mac else "Ctrl+"
         for c in clips:
@@ -137,8 +137,8 @@ def main():
 
         # What the bar's buttons name: these keys win for the commands
         b = m.get("input-bindings")
-        check("frame-step's key", winner(b, "frame-step"), "Alt+RIGHT")
-        check("frame-back-step's key", winner(b, "frame-back-step"), "Alt+LEFT")
+        check("frame-on's key", winner(b, "script-binding gyroflow/frame-on"), "Alt+RIGHT")
+        check("frame-back's key", winner(b, "script-binding gyroflow/frame-back"), "Alt+LEFT")
         check("playlist-next's key", winner(b, "playlist-next"), clip + "RIGHT")
         check("playlist-prev's key", winner(b, "playlist-prev"), clip + "LEFT")
     finally:
@@ -156,11 +156,11 @@ def main():
     m = Mpv(o.mpv, sock, log, work, ["--config=yes", f"--config-dir={conf}"])
     try:
         # (the plugins load after the IPC is up)
-        m.settle(lambda: winner(m.get("input-bindings"), "frame-step") == "Alt+RIGHT")
+        m.settle(lambda: winner(m.get("input-bindings"), "script-binding gyroflow/frame-on") == "Alt+RIGHT")
         b = m.get("input-bindings")
         mine = [x for x in b if x["key"] == clip + "RIGHT" and not x.get("is_weak")]
         check("your input.conf's key kept", [x["cmd"] for x in mine], ["seek 30"])
-        check("the others bound", winner(b, "frame-step"), "Alt+RIGHT")
+        check("the others bound", winner(b, "script-binding gyroflow/frame-on"), "Alt+RIGHT")
     finally:
         m.quit()
         log.close()
