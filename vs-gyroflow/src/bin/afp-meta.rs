@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // afp-meta: what the player keeps inside the library's own files, read and written from the command line: the
-// library is its files (docs/library-management.md §8), and this is the way to see and fix them without the app.
+// library is its files (docs/design/library-management.md §8), and this is the way to see and fix them without the app.
 //
 // A moment, clip preview, export or render keeps its link to its clip as the MP4 key ch.actionfootageplayer.link (JSON:
 // the clip's path in the project's tree where it was last seen, its size, creation time and fingerprint, the part's

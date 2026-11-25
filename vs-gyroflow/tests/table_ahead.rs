@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The GPU path's table extended ahead of where a clip plays (docs/gpu-table-ahead.md), on a real clip without a project:
+// The GPU path's table extended ahead of where a clip plays (docs/design/gpu-table-ahead.md), on a real clip without a project:
 // AFP_TEST_CLIP (e.g. an Osmo Action 6 or GoPro clip with its own motion data); skipped without it. The first stretch
 // (0-20 s, as the player opens it), extended to 50 s with it as the table before: the frames the first one had settled
 // are the same, bit for bit (nothing on screen changes as the new table comes in), and the extended table against the

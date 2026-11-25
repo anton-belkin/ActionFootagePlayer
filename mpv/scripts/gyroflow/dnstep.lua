@@ -1,5 +1,5 @@
 -- The frame on screen while the GPU path's temporal denoise is on, and frame steps and the paused frame around it
--- (docs/seek-and-scrub.md, problem 1). Plain Lua: main.lua feeds it the player's state and does what it says;
+-- (docs/design/seek-and-scrub.md, problem 1). Plain Lua: main.lua feeds it the player's state and does what it says;
 -- tests/dnstep_test.lua tries it.
 --
 -- warp.glsl's dn_ passes keep the last 11 frames rendered (a ring) and show one with up to `after` frames after it and

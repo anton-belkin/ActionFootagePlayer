@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A 360° clip's view recorded as you look around (docs/360-reframe.md), as the export reads it: the recording the player
+// A 360° clip's view recorded as you look around (docs/design/360-reframe.md), as the export reads it: the recording the player
 // keeps in the clip's own file, `<clip>.afp.json`, under `view360.recording`, and the head at any time of the clip.
 // The player's side is mpv/scripts/view360/recording.lua; the two hold and interpolate the same way:
 // - in a part, a straight line between two samples (the FOV in its log), held across a change of projection, which
 //   is a cut at the later sample;
 // - before the first part its first sample, between two parts the end of the one before, after the last its end.
 //
-// The tidying (docs/360-reframe.md, "Tidying") is here too, so the player's preview (`gyroflow-probe --reframe`) and
+// The tidying (docs/design/360-reframe.md, "Tidying") is here too, so the player's preview (`gyroflow-probe --reframe`) and
 // the export are the same code:
 // - level: the head's roll set to 0 (every heading frame is level already, so the picture is);
 // - smooth the turns: a Gaussian over time on the head's rotation (SO(3), as quaternions) and on the FOV's log,
@@ -79,13 +79,6 @@ impl Tidy {
     pub fn none(&self) -> bool { self.turns == Turns::Off && !self.level }
 }
 
-/// Where the player keeps the clip's file: the clip's path without its extension, `.afp.json` (sidecar.lua)
-pub fn sidecar_path(clip: &Path) -> PathBuf {
-    let name = clip.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let stem = match name.rfind('.') { Some(i) if i > 0 => &name[..i], _ => &name };
-    clip.with_file_name(format!("{stem}.afp.json"))
-}
-
 fn follows(s: &str) -> Option<Heading> {
     Some(match s { "travel" => Heading::Travel, "camera" => Heading::Camera, "north" => Heading::North, "world" => Heading::World, _ => return None })
 }
@@ -119,9 +112,9 @@ impl Recording {
         Ok(Recording { follows, parts, frame: text("frame"), size: text("size"), tidy: Tidy::from_json(v.get("tidy")) })
     }
 
-    /// The clip's recording, from its file beside it
+    /// The clip's recording, from its own file (over its project's locations, where the player saved it)
     pub fn read(clip: &Path) -> Result<Recording, String> {
-        let file = sidecar_path(clip);
+        let file = crate::workspace::own_file_of(clip);
         let text = std::fs::read_to_string(&file).map_err(|e| format!("no recording: {}: {e}", file.display()))?;
         let doc: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", file.display()))?;
         let rec = doc.get("view360").and_then(|v| v.get("recording"))
@@ -347,7 +340,7 @@ impl Recording {
 
 // The picture hold ---------------------------------------------------------------------------------------------------
 //
-// "Hold on what's in the middle" (docs/360-reframe.md): the view rendered small along the angle-tidied path, what's in
+// "Hold on what's in the middle" (docs/design/360-reframe.md): the view rendered small along the angle-tidied path, what's in
 // its middle matched frame to frame, and the head moved with it. The measuring renders (gyroflow-export
 // --measure-hold), so it's kept in the app's cache, keyed by the clip and the path it was measured along; the tidying
 // applies it when it's there.
@@ -628,12 +621,6 @@ mod tests {
         let v = serde_json::json!({ "follows": "camera", "parts": [{ "samples": [[0, 0, 0, 0, 50], [2, 0, 0, 0, 200]] }] });
         let r = Recording::from_json(&v).unwrap();
         assert!((r.head_at(1.0).0.fov - 100.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn sidecar_beside_the_clip() {
-        assert_eq!(sidecar_path(Path::new("/a.b/VID_1_00_005.insv")), PathBuf::from("/a.b/VID_1_00_005.afp.json"));
-        assert_eq!(sidecar_path(Path::new("clip")), PathBuf::from("clip.afp.json"));
     }
 
     fn path(from: f64, to: f64, hz: f64, f: impl Fn(f64) -> (f64, f64, f64, f64)) -> Vec<serde_json::Value> {

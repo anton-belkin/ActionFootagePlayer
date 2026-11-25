@@ -1,4 +1,4 @@
--- The picture over the seek bar under the mouse (docs/seek-and-scrub.md, "Preview on hover"): on plain hover and while
+-- The picture over the seek bar under the mouse (docs/design/seek-and-scrub.md, "Preview on hover"): on plain hover and while
 -- the knob is dragged, the frame at the mouse's time, from the camera's low-resolution copy beside the clip when it has
 -- one (DJI .LRF, GoPro .LRV: the exact frame), else the clip's keyframe at or before it. As the file has it: no LUT,
 -- no stabilization. Made by afp-scrub (tools/scrub/afp-scrub.c), a helper that keeps the files and their decoders

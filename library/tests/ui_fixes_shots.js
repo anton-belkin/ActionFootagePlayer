@@ -1,4 +1,4 @@
-// The four fixes from the first real try (docs/library-ui-fixes.md), in a headless Chrome against the mock (mock.js +
+// The four fixes from the first real try (docs/archive/library-ui-fixes.md), in a headless Chrome against the mock (mock.js +
 // views_mock.js with 700 more clips at 24 places): pictures, and the checks that need a real layout (jsdom has none):
 //   - the bar above the list stays in place on a long list (Originals' search, an album, Timeline, a Map place's list),
 //     and a Timeline day's header sticks below it, not under it;

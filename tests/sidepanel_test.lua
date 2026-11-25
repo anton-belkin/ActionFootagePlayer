@@ -1,9 +1,9 @@
 -- The side panel itself (mpv/scripts/side-panel/main.lua) over a stand-in for mpv: the properties the plugins publish
 -- are set, the panel draws, and the mouse clicks where it drew. For now: the Output tab's one Export button and its
--- list (docs/360-reframe.md, "One Export button in the Output tab").
+-- list (docs/design/360-reframe.md, "One Export button in the Output tab").
 -- From the repository's folder: luajit tests/sidepanel_test.lua
 
-package.path = "mpv/scripts/side-panel/?.lua;" .. package.path
+package.path = "mpv/scripts/side-panel/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 
 -- The stand-in: properties, observers, bindings, script messages; what's run is logged
 local props = {
@@ -383,7 +383,7 @@ mp.set_property_native("user-data/gyroflow", stab)
 click("lens")
 expect("no project: no project's own", find("lens:project"), nil)
 bindings["popover-esc"].fn()
--- Culling and tags (the workspace plugin's tags.lua, docs/tags-and-culling.md): Accept / Reject, the stars, the
+-- Culling and tags (the workspace plugin's tags.lua, docs/design/tags-and-culling.md): Accept / Reject, the stars, the
 -- original's tags (a click takes one off), the recent ones it hasn't (a click puts one on), Tag… (K); a moment's are
 -- the moment's; the clip preview button isn't culling any more
 mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", project = "/footage",
@@ -416,7 +416,7 @@ mp.set_property_native("user-data/workspace", { path = "https://x/y.mp4", clip =
 expect("tags: none for a stream", find("tag-ask"), nil)
 messages.tab("output")
 
--- The photo button and the export's settings (docs/export-settings.md): the Output tab's Export has its size, encoding
+-- The photo button and the export's settings (docs/design/export-settings.md): the Output tab's Export has its size, encoding
 -- and quality, and a button saving a photo of the frame as Alt+s does; Save frame has the photo's kind, size and quality
 -- and the same button, framing or not. The choices are the gyroflow plugin's (exportsettings.lua), published with them
 local es = dofile("mpv/scripts/gyroflow/exportsettings.lua")
@@ -545,7 +545,7 @@ expect("underwater: off, highlights can't be switched", (function() local before
 messages.tab("output")
 
 -- The seek bar's track: a click is one exact seek; a drag seeks keyframes as it moves (Anton kept that, after trying
--- it), the exact frame where it's let go (docs/seek-and-scrub.md)
+-- it), the exact frame where it's let go (docs/design/seek-and-scrub.md)
 redraw()
 local function seeks()
     local out = {}

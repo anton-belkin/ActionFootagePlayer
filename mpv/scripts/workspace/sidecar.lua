@@ -1,4 +1,4 @@
--- The clip's own file beside it, `<clip>.afp.json` (docs/moments-and-workspaces.md, "The clip's file"): its marks
+-- The clip's own file beside it, `<clip>.afp.json` (docs/design/moments-and-workspaces.md, "The clip's file"): its marks
 -- (the highlights plugin's) and the view it's saved to play in (the workspace plugin's: log curve, stabilization,
 -- lens, aspect and rotation). Each part is written on its own: the file is read again, the part replaced, the rest
 -- (and fields this doesn't know) kept, and it's written whole through a temporary file renamed over it.
@@ -8,9 +8,9 @@
 --
 -- `marks` absent: the camera's marks are the clip's (nothing changed yet); present, even empty: they're these.
 -- `view` absent: the clip plays as the defaults say.
--- `view360` (the view360 plugin's): a 360° clip's recorded view, `view360.recording` (docs/360-reframe.md).
+-- `view360` (the view360 plugin's): a 360° clip's recorded view, `view360.recording` (docs/design/360-reframe.md).
 -- `pick` ("accept"|"reject"), `rating` (1–5), `tags` (custom) and `synced` (what tag stores last agreed on): the
--- original's, set in the player or the Library (tags.lua, docs/tags-and-culling.md).
+-- original's, set in the player or the Library (tags.lua, docs/design/tags-and-culling.md).
 -- `comment` (free text: what happens in the clip): the Library's alone; the player shows and sets nothing of it, and
 -- keeps it as it keeps every field it doesn't know.
 --
@@ -100,7 +100,7 @@ function M.new(env)
 
     -- The doc read again, changed by fn, written as .afp.json; a .marks.json it came from removed. fn returning false:
     -- nothing written. A doc left with no marks, no view, no source (the input: curve, turn, lens under water), no
-    -- 360 recording, no location (the Library's, docs/geolocation.md), no tags, rating or pick (tags.lua; `synced` alone keeps nothing), no comment
+    -- 360 recording, no location (the Library's, docs/design/geolocation.md), no tags, rating or pick (tags.lua; `synced` alone keeps nothing), no comment
 -- (the Library's): the file removed
     function s.update(clip, fn)
         local p, list = own(clip)

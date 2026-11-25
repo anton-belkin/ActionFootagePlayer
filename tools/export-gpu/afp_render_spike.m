@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Zero-copy export spike (docs/export-gpu-path.md, "The zero-copy spike"): the player's GPU shaders through libplacebo
+// Zero-copy export spike (docs/design/export-gpu-path.md, "The zero-copy spike"): the player's GPU shaders through libplacebo
 // with the frame never leaving the GPU. VideoToolbox decodes (AVAssetReader) into IOSurface-backed P010 pixel buffers;
 // each plane is an MTLTexture on that IOSurface, imported into Vulkan (MoltenVK, VK_EXT_metal_objects) and wrapped for
 // libplacebo; libplacebo renders the shader file (PTS set per frame, as mpv's vo_gpu_next does) into the planes of a

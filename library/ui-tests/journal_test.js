@@ -1,5 +1,5 @@
 "use strict";
-// The responsiveness journal's page part (../ui/journal.js, docs/responsiveness-journal.md): a click, a keystroke in
+// The responsiveness journal's page part (../ui/journal.js, docs/design/responsiveness-journal.md): a click, a keystroke in
 // the search box and a double-click each come out as an action with its paint, its commands and its end; the
 // double-click hands its id to open_items; the polls are nobody's step; and what a record costs.
 //   cd library/ui-tests && npm install && node --test journal_test.js

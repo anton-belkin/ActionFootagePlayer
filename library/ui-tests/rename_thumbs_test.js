@@ -1,7 +1,7 @@
 "use strict";
 // A folder renamed (or moved) keeps its pictures (Anton, 2026-11-18: "when I rename a folder in Albums its four
 // previews turn into grey squares", for a long time). The window shows the new name at once and the disk is renamed
-// after (docs/library-responsiveness.md), so the pictures must come with the new paths: asked for before the disk has
+// after (docs/design/library-responsiveness.md), so the pictures must come with the new paths: asked for before the disk has
 // them, the app has no file there and the page kept "no picture" for good.
 //   cd library/ui-tests && npm install && node --test rename_thumbs_test.js
 

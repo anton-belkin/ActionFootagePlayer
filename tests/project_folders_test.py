@@ -5,10 +5,12 @@ The folders made are found in the code (mpv/scripts, vs-gyroflow, catalog, libra
 string, and "Generated", ".afp", "stabilized" where a path is made of them. A new "_Name" that isn't a folder (a
 property name, say) goes into NOT_FOLDERS.
 
-Each place that lists footage says which it leaves out: a list of the project's own folders (lower case), a rule for
-names starting with _ or ., or both (SCANNERS). A folder made has to be left out by each, or be in KNOWN with its issue.
-The lists themselves agree (the same names, "#recycle" aside: the walks skip # names anyway).
+Each place that lists footage says which it leaves out: the project's own folders (lower case: registry.json's
+own_folders, which index.rs, checks.rs and moments.lua read; the catalog's inspect.rs keeps a const, its own build
+having only its folder, and its test checks it against the registry), a rule for names starting with _ or ., or both
+(SCANNERS). A folder made has to be left out by each, or be in KNOWN with its issue.
 From the repository's folder: python3 tests/project_folders_test.py"""
+import json
 import re
 
 from twins import Checks, block, code_lines, files, read
@@ -20,13 +22,13 @@ NOT_FOLDERS = set()
 # The places that list a project's footage: the file, how its own-folders list is written (None: it has none), and the
 # rules it has for _ and . names, each as a regex that must be in its code (None: it doesn't have that rule)
 SCANNERS = {
-    "library/src/index.rs": {"list": r"pub const OWN_FOLDERS: \[&str; \d+\] = ", "under": r"top\.starts_with\('_'\)",
+    "library/src/index.rs": {"list": "registry", "under": r"top\.starts_with\('_'\)",
                              "dot": r"name\.starts_with\('\.'\)"},
     "catalog/src/inspect.rs": {"list": r"pub const OWN_FOLDERS: \[&str; \d+\] = ", "under": r"top\.starts_with\('_'\)",
                                "dot": r"name\.starts_with\('\.'\)"},
     # checks.rs walks with index.rs's walk (which skips . and # names)
-    "library/src/checks.rs": {"list": r"const OWN: \[&str; \d+\] = ", "under": None, "dot": r"crate::index::walk\("},
-    "mpv/scripts/workspace/moments.lua": {"list": r"local OWN_FOLDERS = ", "under": None, "dot": r'name:sub\(1, 1\) ~= "\."'},
+    "library/src/checks.rs": {"list": "registry", "under": None, "dot": r"crate::index::walk\("},
+    "mpv/scripts/workspace/moments.lua": {"list": "registry", "under": None, "dot": r'name:sub\(1, 1\) ~= "\."'},
     # The NAS stream's catalog: _ folders are left out (_Moments and _Clips listed as moments and clip previews)
     "tools/stream/afp_stream.py": {"list": None, "under": r'p\.startswith\("_"\)', "dot": r'x\.startswith\("\."\)'},
 }
@@ -53,11 +55,15 @@ for name in ("_Moments", "_Stills", "_Renders", "_Exports", "_Clips", "Generated
 for name in NOT_FOLDERS:
     c.expect(f"NOT_FOLDERS lists only names in the code: {name}", any(name in read(f) for f in sources))
 
+registry = json.loads(read("mpv/scripts/workspace/registry.json"))
 lists = {}
 for f, s in SCANNERS.items():
     text = read(f)
     own = None
-    if s["list"]:
+    if s["list"] == "registry":
+        own = set(registry["own_folders"])
+        c.expect(f"{f} reads registry.json's own folders", "own_folder" in text or "own_folders" in text)
+    elif s["list"]:
         body = block(text, s["list"], f"{f}'s own folders")
         own = set(re.findall(r'"([^"]+)"', body)) | set(re.findall(r'\[?"?([#\w]+)"?\]?\s*=\s*true', body))
         own = {x for x in own if x != "true"}
@@ -72,9 +78,8 @@ for f, s in SCANNERS.items():
             continue
         c.expect(f"{f} leaves {name} out of the footage (made at {where[0]})", out)
 
-# The lists agree
-names = {f: sorted(x for x in own if x != "#recycle") for f, own in lists.items()}
-first = next(iter(names))
-for f, own in names.items():
-    c.expect(f"{f}'s own folders are {first}'s", own == names[first], f"{f}: {own}; {first}: {names[first]}")
+# The catalog's const is the registry's (its cargo test too), the recycle bins with it
+want = sorted(registry["own_folders"] + registry["recycle_bins"])
+for f, own in lists.items():
+    c.expect(f"{f}'s own folders are registry.json's", sorted(own) == want, f"{f}: {sorted(own)}; registry: {want}")
 c.done()

@@ -2,7 +2,7 @@
 //
 // Whether a clip's picture is HDR, log or SDR, as gyroflow-export decides its look (vs-gyroflow/src/probe.rs's log_curve,
 // and the video's own transfer): the Library's Share renders an SDR clip once for both its HDR and SDR profiles
-// (docs/export-gpu-path.md, "HDR in, HDR out"). Read from the MP4 alone, the way the dlogm plugin reads it
+// (docs/design/export-gpu-path.md, "HDR in, HDR out"). Read from the MP4 alone, the way the dlogm plugin reads it
 // (mpv/scripts/dlogm/dji_color.lua, gopro_color.lua): DJI's ColorMode in the first sample of its metadata track, GoPro's
 // Protune color (PTCL) and firmware in moov/udta, and the first video track's `colr` (nclx) box. Keep the four in step.
 
@@ -198,6 +198,12 @@ fn transfer(moov: &[u8]) -> Option<u16> {
     moov.get(ca + 6..ca + 8).map(|b| u16::from_be_bytes([b[0], b[1]]))
 }
 
+/// A source's own curve as a name kept for good, "other" for one not known here: registry.json's log curves (a match,
+/// the catalog being built from its folder alone: registry.rs's test checks it knows each)
+pub fn log_curve(c: &str) -> &'static str {
+    match c { "dlogm" => "dlogm", "dlog" => "dlog", "gplog" => "gplog", "gplog2" => "gplog2", "ilog" => "ilog", _ => "other" }
+}
+
 /// What the clip is, by its file; None where it can't be read. `curve`: the clip's own source curve (its .afp.json),
 /// which goes over what the file says ("none": not log)
 pub fn of(path: &Path, curve: Option<&str>) -> Option<Range> {
@@ -206,7 +212,7 @@ pub fn of(path: &Path, curve: Option<&str>) -> Option<Range> {
     let hdr = match transfer(&moov) { Some(16) => Some(Range::Hdr("pq")), Some(18) => Some(Range::Hdr("hlg")), _ => None };
     match curve.filter(|c| !c.is_empty() && *c != "auto") {
         Some("none") => return Some(hdr.unwrap_or(Range::Sdr)),
-        Some(c) => return Some(Range::Log(match c { "dlogm" => "dlogm", "dlog" => "dlog", "gplog" => "gplog", "gplog2" => "gplog2", "ilog" => "ilog", _ => "other" })),
+        Some(c) => return Some(Range::Log(log_curve(c))),
         None => {}
     }
     if let Some(c) = dji_color(&mut f, &moov) {

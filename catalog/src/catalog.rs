@@ -2,7 +2,7 @@
 //
 // A project's catalog, as one computer has it: read from the newest snapshot and the journals' lines after it,
 // written to by appending to this computer's journal, folded into a new snapshot from time to time (the Library only).
-// docs/library-management.md §9.
+// docs/design/library-management.md §9.
 
 use crate::journal::{ self, segment_name, segment_number };
 use crate::snapshot::{ self, bits_for, bucket, bucket_key, decode_part, encode_part, name_parts, part_name, Manifest };

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""scrubbench: afp-scrub's timings as the seek bar would ask (docs/seek-and-scrub.md).
+"""scrubbench: afp-scrub's timings as the seek bar would ask (docs/design/seek-and-scrub.md).
 
   tools/scrub/scrubbench.py [--helper path] [--cold] [--n N] [--width W --height H] <clip> [<sidecar>]
 

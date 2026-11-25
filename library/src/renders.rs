@@ -1,4 +1,4 @@
-// The render cache (docs/albums-photos-share-concept.md, "Renders": found by recipe, not by path). A render is the
+// The render cache (docs/design/albums-photos-share-concept.md, "Renders": found by recipe, not by path). A render is the
 // real pixels of one item (a moment, a photo link, a whole clip) in one profile. What decides its pixels is its recipe;
 // the recipe's hash names its file: <project>/_Renders/<hash>.<profile>.<ext>. So a render is found whatever the item
 // is called and wherever it lies: moved, renamed or copied items keep theirs, two copies of a moment share one, and a
@@ -16,7 +16,7 @@ use std::path::{ Path, PathBuf };
 
 pub const DIR: &str = "_Renders";
 /// Raised when the renderer's pixels change for the same recipe: every render is then another one. 4: gyroflow-export
-/// renders on the GPU path where it can, the player's own shaders (docs/export-gpu-path.md), not Gyroflow's engine
+/// renders on the GPU path where it can, the player's own shaders (docs/design/export-gpu-path.md), not Gyroflow's engine
 pub const VERSION: u64 = 4;
 
 pub struct Profile {
@@ -219,6 +219,16 @@ fn defaults_of(conf: &str) -> Value {
     let get = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string();
     let yes = |k: &str, default: bool| match get(k).as_str() { "yes" => true, "no" => false, _ => default };
     let one = |k: &str, of: &[&str], default: &str| { let v = get(k); if of.contains(&v.as_str()) { v } else { default.to_string() } };
+    // A setting of registry.json as gyroflow.conf says it (its option, the values it can take there, else its default)
+    let reg = crate::lists::get();
+    let conf = |key: &str| -> Value {
+        let s = reg.setting(key).unwrap_or_else(|| panic!("registry.json: no setting {key}"));
+        let (name, default) = (s.conf.as_deref().unwrap_or(key), s.conf_default.clone().unwrap_or(Value::Null));
+        match s.kind.as_str() {
+            "bool" => json!(yes(name, default.as_bool().unwrap_or(false))),
+            _ => json!(one(name, &s.conf_values(), default.as_str().unwrap_or(""))),
+        }
+    };
     // The plugin's split_aspect: an aspect that isn't W:H is original; a portrait W:H (9:16, from before the orientation
     // was a setting) turned, portrait; else the orientation set (as-is by default), landscape for a W:H if that's no choice
     let split = {
@@ -238,59 +248,43 @@ fn defaults_of(conf: &str) -> Value {
     let blur: f64 = get("edges_blur").parse().unwrap_or(2.0);
     json!({
         "defaults": {
-            "view": if get("view") == "wide" { "wide" } else { "normal" },
-            "level": one("level", &["weak", "medium", "strong"], "medium"),
-            "horizon_lock": one("horizon_lock", &["yes", "no"], "no"),
-            "chromatic": yes("chromatic", true),
+            "view": conf("view"),
+            "level": conf("level"),
+            // Its default, the preset's horizon, isn't known here: no
+            "horizon_lock": one("horizon_lock", &reg.setting("horizon_lock").map(|s| s.conf_values()).unwrap_or_default(), "no"),
+            "chromatic": conf("chromatic"),
             "aspect": split["aspect"], "orientation": split["orientation"],
-            "projection": one("projection", &["linear", "stereographic", "equidistant", "equisolid", "orthographic"], "linear"),
-            "lens": if get("lens") == "as-recorded" { "as-recorded" } else { "corrected" },
-            "denoise": yes("still", true),
-            "denoise_strong": yes("denoise_strong", false),
+            "projection": conf("projection"),
+            "lens": conf("lens"),
+            "denoise": conf("denoise"),
+            "denoise_strong": conf("denoise_strong"),
             "preset_horizon": "no",
         },
-        // The plugin's EDGE_LABELS
-        "edges": one("edges", &["off", "sphere", "smooth"], "sphere"),
+        "edges": conf("edges"),
         "edges_blur": blur,
-        "temporal_denoise": one("temporal_denoise", &["full", "light", "off"], "full"),
+        "temporal_denoise": conf("temporal_denoise"),
     })
 }
 
 // ---------- What a render is made with: the player's transform.render_settings, the same way ----------
 // (mpv/scripts/workspace/transform.lua; both are checked against tests/render_settings.json)
 
-const BUNDLE_KEYS: [&str; 10] = ["view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong"];
-/// The underwater colour's keys (transform.UW_KEYS): the source's input, in the settings only when it's on
-const UW_KEYS: [&str; 3] = ["uw", "uw_highlights", "uw_strength"];
+// The keys and their values: registry.json's settings (transform.lua reads the same)
 
+/// The bundle's keys, in order (transform.KEYS)
+fn bundle_keys() -> Vec<&'static str> { crate::lists::get().keys("bundle") }
+/// The underwater colour's keys (transform.UW_KEYS): the source's input, in the settings only when it's on
+fn uw_keys() -> Vec<&'static str> { crate::lists::get().keys("uw") }
+
+/// A value the bundle's or the underwater colour's key takes (transform.valid)
 fn valid(k: &str, v: &Value) -> bool {
-    let s = v.as_str().unwrap_or("");
-    match k {
-        "view" => matches!(s, "normal" | "wide" | "off"),
-        "level" => matches!(s, "weak" | "medium" | "strong"),
-        "horizon_lock" => matches!(s, "yes" | "no"),
-        "chromatic" | "denoise" | "denoise_strong" | "uw" | "uw_highlights" => v.is_boolean(),
-        // Between the camera's colour (0) and the correction (1)
-        "uw_strength" => v.as_f64().is_some_and(|x| (0.0..=1.0).contains(&x)),
-        // Any ratio landscape-wise (W >= H), "original"
-        "aspect" => match s.split_once(':') {
-            Some((w, h)) if !w.is_empty() && !h.is_empty() && w.chars().chain(h.chars()).all(|c| c.is_ascii_digit()) => {
-                let (w, h): (f64, f64) = (w.parse().unwrap_or(0.0), h.parse().unwrap_or(0.0));
-                w >= h && h > 0.0
-            }
-            _ => s == "original",
-        },
-        "orientation" => matches!(s, "as-is" | "landscape" | "portrait"),
-        "projection" => matches!(s, "linear" | "stereographic" | "equidistant" | "equisolid" | "orthographic" | "project"),
-        "lens" => matches!(s, "corrected" | "as-recorded"),
-        _ => false,
-    }
+    crate::lists::get().setting(k).is_some_and(|s| (s.group == "bundle" || s.group == "uw") && s.valid(v))
 }
 
 /// The bundle's keys of a view, None for none (transform.pick)
 fn pick(view: &Value) -> Option<Value> {
     let o = view.as_object()?;
-    let out: serde_json::Map<String, Value> = BUNDLE_KEYS.iter().filter_map(|k| o.get(*k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect();
+    let out: serde_json::Map<String, Value> = bundle_keys().into_iter().filter_map(|k| o.get(k).filter(|v| !v.is_null()).map(|v| (k.to_string(), v.clone()))).collect();
     (!out.is_empty()).then_some(Value::Object(out))
 }
 
@@ -316,15 +310,15 @@ fn split_frame(b: &Value) -> Value {
 /// The bundle with every key: a missing one NEUTRAL's, else the session's (transform.complete)
 fn complete(bundle: &Value, session: &Value) -> serde_json::Map<String, Value> {
     let bundle = split_frame(bundle);
-    let neutral = json!({ "aspect": "original", "orientation": "as-is", "projection": "linear", "denoise_strong": false });
+    let neutral = |k: &str| crate::lists::get().setting(k).and_then(|s| s.neutral.clone()).unwrap_or(Value::Null);
     let mut out = serde_json::Map::new();
-    for k in BUNDLE_KEYS {
+    for k in bundle_keys() {
         let mut v = bundle.get(k).cloned().unwrap_or(Value::Null);
         if k == "horizon_lock" && v == json!("project") { v = session["preset_horizon"].clone(); }
         if !valid(k, &v) {
             v = if k == "lens" && bundle.as_object().is_some_and(|o| !o.is_empty()) {
                 json!(if out.get("view") == Some(&json!("off")) { "as-recorded" } else { "corrected" })
-            } else if !neutral[k].is_null() { neutral[k].clone() } else { session[k].clone() };
+            } else if !neutral(k).is_null() { neutral(k) } else { session[k].clone() };
             if !valid(k, &v) { continue; }
         }
         out.insert(k.to_string(), v);
@@ -358,14 +352,14 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
     if doc.is_object() { for (k, v) in migrated_source(doc) { out.insert(k, v); } }
     // The underwater colour (the source's): where the source doesn't say, the defaults' (the player's uwcolor.conf, in
     // its render-defaults.json); only when it's on, so a recipe without it keeps the hash it had
-    for k in UW_KEYS {
+    for k in uw_keys() {
         if out.get(k).is_none_or(Value::is_null) && valid(k, &defaults[k]) { out.insert(k.into(), defaults[k].clone()); }
     }
-    if out.get("uw") != Some(&json!(true)) { for k in UW_KEYS { out.remove(k); } }
+    if out.get("uw") != Some(&json!(true)) { for k in uw_keys() { out.remove(k); } }
     Value::Object(out)
 }
 
-/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/share-fixes.md):
+/// Everything that decides the pixels of `item` rendered in `profile`. Its fields (docs/archive/share-fixes.md):
 /// v, kind, clip { hash | path, size }, in / out / alone (a moment), t / crop / camera (a photo), settings (what it's
 /// rendered with: `settings` from the clip's own file, a moment's own bundle and the player's defaults: the player
 /// renders with exactly these, sent in its request), opts (the player's edge fill and temporal denoise), gyroflow (the
@@ -373,11 +367,11 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
 /// there is no project), profile { name, look }
 pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value { recipe_with(ctx, item, profile, &Value::Null) }
 
-/// The export's settings an item is rendered with (Share's dialog: docs/export-settings.md), the values that aren't
+/// The export's settings an item is rendered with (Share's dialog: docs/design/export-settings.md), the values that aren't
 /// the defaults: { size, encode, quality } for a video, { size, quality } for a photo. The defaults are what was
-/// rendered before there were settings, so with them the recipe, its hash and its render stay what they were
-pub const EXPORT_CHOICES: [(&str, &[&str]); 3] = [("size", &["original", "2160", "1080", "720"]), ("encode", &["fast", "quality"]),
-                                                  ("quality", &["displayed", "quickest", "highest"])];
+/// rendered before there were settings, so with them the recipe, its hash and its render stay what they were. Each
+/// setting's values, in order, the first its default: registry.json's export settings
+pub fn export_choices() -> Vec<(&'static str, Vec<&'static str>)> { crate::lists::get().export_choices() }
 
 /// `settings` (Share's: { video: {...}, photo: {...} }, or one kind's) as a recipe has them for a photo or a video:
 /// the valid values that aren't the defaults (each choice's first), nothing else
@@ -385,8 +379,10 @@ pub fn export_settings(settings: &Value, photo: bool) -> Value {
     let kind = if photo { "photo" } else { "video" };
     let s = if settings[kind].is_object() { &settings[kind] } else { settings };
     let mut out = serde_json::Map::new();
-    for (key, values) in EXPORT_CHOICES {
-        if photo && key == "encode" { continue; }
+    let kind_keys = &crate::lists::get().export.kinds;
+    let keys = if photo { &kind_keys.photo } else { &kind_keys.video };
+    for (key, values) in export_choices() {
+        if !keys.iter().any(|k| k == key) { continue; }
         if let Some(v) = s[key].as_str().filter(|v| values.contains(v) && *v != values[0]) { out.insert(key.into(), json!(v)); }
     }
     Value::Object(out)
@@ -836,6 +832,36 @@ mod tests {
         std::fs::write(cache_path(&root, &found.hash, hdr, "mov"), b"1080").unwrap();
         assert!(find_with(&look(&root, true), &moment, hdr, &json!({ "size": "1080" })).file.is_some());
         assert!(find(&look(&root, true), &moment, hdr).file.is_none());
+    }
+
+    /// What a recipe holds goes with VERSION, and a recipe keeps its hash: a render is found by it (its file is named
+    /// by it), so a hash that changes by itself leaves every render made before stale. Changing what goes into a recipe
+    /// is raising VERSION, and this test's lines with it; a change of hash alone (canonical, the hash, settings, the
+    /// registry's settings) is a mistake. The player's recipe of before the cache by hash is index.rs's (RENDER_VERSION)
+    #[test]
+    fn the_recipe_goes_with_its_version_and_keeps_its_hash() {
+        fn paths(v: &Value, at: &str, out: &mut Vec<String>) {
+            for (k, x) in v.as_object().into_iter().flatten() {
+                let p = if at.is_empty() { k.clone() } else { format!("{at}.{k}") };
+                if x.is_object() { paths(x, &p, out) } else { out.push(p) }
+            }
+        }
+        let shape = |v: &Value| { let mut out = Vec::new(); paths(v, "", &mut out); out.sort(); out.join(" ") };
+        let (root, moment, photo, clip) = project("recipe-version");
+        let ctx = look(&root, true);
+        let (hdr, ph) = (profile("HDR").unwrap(), profile("Photo").unwrap());
+        let (m, p, c) = (recipe(&ctx, &moment, hdr), recipe(&ctx, &photo, ph), recipe(&ctx, &clip, hdr));
+        let kept = format!("moment: {} / photo: {} / clip: {}", shape(&m), shape(&p), shape(&c));
+        assert_eq!((VERSION, kept.as_str()), (4, concat!("moment: clip.hash clip.size in kind out profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.orient",
+                               "ation settings.projection settings.view v / photo: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_",
+                               "strong settings.lens settings.level settings.orientation settings.projection settings.view t v / clip: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.level settings.orientation settings.projection settings.view v")), "what a recipe holds changed, or VERSION did: they change together");
+        assert_eq!([hash(&m), hash(&p), hash(&c)], ["c3d1323d60720559a14f227f", "2f58eb104de1ceca73053fe0", "5dd5a11539e16cd587d8f210"], "the same recipes hash otherwise: every render made before is stale");
+        let full = json!({ "v": 4, "kind": "moment", "clip": { "hash": "5f2c", "size": 1234567890 }, "in": 12.5, "out": 20.033333333,
+                           "settings": { "view": "wide", "level": "medium", "horizon_lock": "yes", "fov": 1.25 },
+                           "opts": { "edges": "fill", "temporal_denoise": "light" }, "gyroflow": "ab12", "profile": { "name": "HDR", "look": "hdr" },
+                           "export": { "size": "1080" }, "empty": {}, "none": null });
+        assert_eq!(hash(&full), "4d6e970673332a22ea71d399");
+        std::fs::remove_dir_all(&root).ok();
     }
 
     #[test]

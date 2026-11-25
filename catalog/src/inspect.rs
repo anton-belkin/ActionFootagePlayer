@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// What the catalog keeps of what's inside the project's files (docs/library-management.md §9), read the same way by
+// What the catalog keeps of what's inside the project's files (docs/design/library-management.md §9), read the same way by
 // every program that looks: the Library's looks, afp-catalog's notes for the player.
 //
 // - a moment, clip preview, export or render (a video in the project's own area, or a .afplink.mp4 anywhere): its link,
@@ -18,7 +18,8 @@ use std::path::Path;
 
 pub const LINK_KEY: &str = "ch.actionfootageplayer.link";
 pub const LINK_EXT: &str = ".afplink.mp4";
-/// A project's own folders (at its top, or at a location's top where they aren't footage)
+/// A project's own folders (at its top, or at a location's top where they aren't footage): registry.json's own_folders and
+/// recycle_bins (a const, the catalog being built from its folder alone: registry.rs's test checks it)
 pub const OWN_FOLDERS: [&str; 13] = ["_moments", "_clips", "_exports", "_stills", "_renders", "_cache", "moments", "clips", "exports", "stabilized",
                                      "_actionfootageplayer", "generated", "#recycle"];
 
@@ -97,57 +98,10 @@ pub fn mp4_keys(path: &Path) -> io::Result<Vec<(String, String)>> {
     Ok(keys)
 }
 
-fn unescape(s: &str) -> String {
-    // Numeric ones too (&#10;, &#x41F;: what a writer of XMP may use for any character), each once, left to right
-    let mut out = String::with_capacity(s.len());
-    let mut rest = s;
-    while let Some(i) = rest.find('&') {
-        out.push_str(&rest[..i]);
-        rest = &rest[i..];
-        let Some(end) = rest.bytes().take(12).position(|b| b == b';') else { out.push('&'); rest = &rest[1..]; continue };
-        let name = &rest[1..end];
-        let ch = match name {
-            "lt" => Some('<'), "gt" => Some('>'), "quot" => Some('"'), "apos" => Some('\''), "amp" => Some('&'),
-            _ => name.strip_prefix("#x").or_else(|| name.strip_prefix("#X")).map(|h| u32::from_str_radix(h, 16).ok())
-                     .unwrap_or_else(|| name.strip_prefix('#').and_then(|d| d.parse::<u32>().ok())).and_then(char::from_u32),
-        };
-        match ch { Some(c) => { out.push(c); rest = &rest[end + 1..]; } None => { out.push('&'); rest = &rest[1..]; } }
-    }
-    out.push_str(rest);
-    out
-}
-
-/// A photo's link and tags, from the XMP in its first 64 KiB
+/// A photo's link and tags, from the XMP in its first 64 KiB (xmp.rs)
 pub fn photo_meta(path: &Path) -> io::Result<(Option<Value>, Vec<String>)> {
-    let mut head = Vec::with_capacity(65536);
-    File::open(path)?.take(65536).read_to_end(&mut head)?;
-    let s = String::from_utf8_lossy(&head);
-    let Some(a) = s.find("<x:xmpmeta") else { return Ok((None, Vec::new())) };
-    let Some(len) = s[a..].find("</x:xmpmeta>") else { return Ok((None, Vec::new())) };
-    let s = &s[a..a + len];
-    let text = if let Some(i) = s.find("<afp:link>") {
-        let from = i + "<afp:link>".len();
-        s[from..].find("</afp:link>").map(|e| s[from..from + e].to_string())
-    } else if let Some(i) = s.find("afp:link=\"") {
-        let from = i + "afp:link=\"".len();
-        s[from..].find('"').map(|e| s[from..from + e].to_string())
-    } else { None };
-    let link = text.and_then(|t| serde_json::from_str(&unescape(&t)).ok());
-    let mut tags = Vec::new();
-    if let Some(i) = s.find("<dc:subject") {
-        if let Some(len) = s[i..].find("</dc:subject>") {
-            let mut rest = &s[i..i + len];
-            while let Some(j) = rest.find("<rdf:li") {
-                let Some(gt) = rest[j..].find('>') else { break };
-                let from = j + gt + 1;
-                let Some(to) = rest[from..].find("</rdf:li>") else { break };
-                let t = unescape(rest[from..from + to].trim());
-                if !t.is_empty() { tags.push(t); }
-                rest = &rest[from + to..];
-            }
-        }
-    }
-    Ok((link, tags))
+    let Some(xml) = crate::xmp::of_file(path)? else { return Ok((None, Vec::new())) };
+    Ok((crate::xmp::link(&xml).and_then(|t| serde_json::from_str(&t).ok()), crate::xmp::tags(&xml)))
 }
 
 pub fn is_video(lower: &str) -> bool { lower.ends_with(".mp4") || lower.ends_with(".mov") || lower.ends_with(".m4v") }
@@ -181,7 +135,7 @@ pub fn read(path: &Path) -> io::Result<Option<Value>> {
     if is_sidecar(&lower) {
         let text = std::fs::read(path)?;
         // Not JSON (being written by something that doesn't write it whole, or written wrong): an error, not a clip
-        // without tags, so that its record stays as it was until the file reads right (docs/catalog-safeguards.md)
+        // without tags, so that its record stays as it was until the file reads right (docs/design/catalog-safeguards.md)
         let own = serde_json::from_slice::<Value>(&text).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{}: {e}", path.display())))?;
         return Ok(Some(json!({ "own": own_kept(&own) })));
     }
@@ -268,7 +222,7 @@ mod tests {
     fn an_unknown_field_is_kept() {
         let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "clip": { "file": "A.MP4" }, "synced": {}, "pick": "reject", "later": { "x": 1 } });
         assert_eq!(own_kept(&own), json!({ "marks": null, "view": null, "source": null, "tags": null, "rating": null, "pick": "reject", "location": null, "later": { "x": 1 } }));
-        // The Library's comment (docs/tags-and-culling.md, "The comment") is such a field: not in OWN_KEPT, so a
+        // The Library's comment (docs/design/tags-and-culling.md, "The comment") is such a field: not in OWN_KEPT, so a
         // catalog of this version, or an older one since 2026-11-17 (the NAS Helper's), keeps it as it is
         let own = json!({ "format": "actionfootageplayer-clip", "version": 1, "rating": 3, "comment": "Черепаха у рифа\nthen the wreck" });
         assert_eq!(own_kept(&own)["comment"], json!("Черепаха у рифа\nthen the wreck"));
@@ -277,8 +231,7 @@ mod tests {
     /// A photo's link as a writer of XMP may put it: entities by name and by number
     #[test]
     fn a_photos_link_with_entities() {
-        assert_eq!(unescape("&quot;a&amp;b&lt;c&gt;&#34;&#x41F;&#1088;&#10;&amp;amp;&bogus;&"), "\"a&b<c>\"Пр\n&amp;&bogus;&");
-        let dir = std::env::temp_dir().join(format!("afp-photo-ent-{}", std::process::id()));
+                let dir = std::env::temp_dir().join(format!("afp-photo-ent-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let photo = dir.join("B.jpg");
         std::fs::write(&photo, "\u{ff}\u{d8}<x:xmpmeta><afp:link>{&quot;v&quot;:1,&quot;comment&quot;:&quot;&#x427;ерепаха &amp; риф&quot;}</afp:link></x:xmpmeta>").unwrap();

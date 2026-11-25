@@ -1,5 +1,5 @@
 "use strict";
-// Screen first, disk after (../ui/writes.js, docs/library-responsiveness.md): the page against a mock of the app.
+// Screen first, disk after (../ui/writes.js, docs/design/library-responsiveness.md): the page against a mock of the app.
 //   cd library/ui-tests && npm install && node --test
 
 const test = require("node:test");

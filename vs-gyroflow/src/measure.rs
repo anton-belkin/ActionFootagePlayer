@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // A clip's motion measured from its picture by the player itself, kept in its <stem>.afp-motion (afp_motion.rs): no
-// Gyroflow app, no project in between (docs/optical-without-gyroflow.md, step 2).
+// Gyroflow app, no project in between (docs/design/optical-without-gyroflow.md, step 2).
 //
 // The measuring is Gyroflow's own: gyroflow-core's OpticalMotionAnalysis, the code behind Gyroflow's "Analyze image
 // optically", the same KLT tracking and the same fit (StabilizationManager::set_optical_measurements). Only the frames

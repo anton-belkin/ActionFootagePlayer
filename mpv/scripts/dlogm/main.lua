@@ -20,7 +20,7 @@
 --          result through as it is; target-colorspace-hint=yes switches the display to HDR (vo=gpu-next). On an SDR
 --          display macOS tone-maps the HLG output down. D-Log M's LUT is luts/dlogm_hlg.cube and GP-Log's
 --          luts/gplog_hlg.cube, both from Zeb Gardner's LUTs; the others are made by tools/make_hdr_lut.py from
---          their makers' published formulas (docs/luts.md).
+--          their makers' published formulas (docs/design/luts.md).
 --   maker  the camera maker's own LUT to Rec.709, in SDR: dlogm_lut3d.glsl, DJI's D-Log M -> Rec.709. D-Log M only,
 --          so far.
 --   nbcu   the hdr look's HLG, then NBCUniversal's HLG -> SDR conversion (nbcu_hlg2sdr.glsl, from
@@ -107,7 +107,7 @@ mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.
 mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
 do
     package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
@@ -123,7 +123,7 @@ do
 end
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
--- user-data/workspace/clip, docs/moments-and-workspaces.md)
+-- user-data/workspace/clip, docs/design/moments-and-workspaces.md)
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
@@ -143,15 +143,11 @@ local DATA = os.getenv("DLOGM_DATA")
 local DIRS = {}
 if DATA and DATA ~= "" then table.insert(DIRS, DATA) end
 table.insert(DIRS, DIR)
--- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr)
-local CURVES = {
-    { id = "dlogm", name = "D-Log M", hdr = "shaders/dlogm_hlg.glsl", sdr = "shaders/dlogm_lut3d.glsl", maker = "DJI",
-      lut = "DJI's D-Log M to Rec.709 LUT 11.17, for the Osmo Action 6, downloaded from DJI's site at setup" },
-    { id = "dlog", name = "D-Log", hdr = "shaders/dlog_hlg.glsl" },
-    { id = "gplog", name = "GP-Log", hdr = "shaders/gplog_hlg.glsl" },
-    { id = "gplog2", name = "GP-Log2", hdr = "shaders/gplog2_hlg.glsl" },
-    { id = "ilog", name = "I-Log (10-bit)", hdr = "shaders/ilog_hlg.glsl" },
-}
+-- The log curves, in Ctrl+l's order, with their shaders: to HLG (hdr) and the maker's to Rec.709 (sdr, maker,
+-- maker_lut). registry.json's (the workspace plugin's, beside this one), which gyroflow-export and the Library read too
+local registry = require 'registry'
+local CURVES = {}
+for _, c in ipairs(registry.curves) do if c.log then table.insert(CURVES, c) end end
 -- NBCU's HDR -> SDR, by the transfer it takes
 local NBCU = { hlg = "shaders/nbcu_hlg2sdr.glsl", pq = "shaders/nbcu_pq2sdr.glsl" }
 -- The noise reduction's shader
@@ -174,7 +170,7 @@ local CURVE = {}
 for _, c in ipairs(CURVES) do CURVE[c.id] = c end
 -- Underwater colour (uwcolor.lua's switch): a plain SDR clip (GoPro's, not log) corrected and turned into HLG
 -- by its shader, then shown in the looks like a log curve. Not in Ctrl+l's round, never saved as the clip's curve
-local UW = { id = "uw", name = "Underwater colour", hdr = "shaders/underwater_hlg.glsl" }
+local UW = registry.curve("uw")
 CURVE.uw = UW
 local uwcolor = require 'uwcolor'
 
@@ -429,7 +425,7 @@ local function publish()
         log = curve ~= nil, recorded = recorded and recorded.id or "", curve = curve and curve.id or "",
         look = current or "", looks = looks(), maker = curve and c.sdr and plugin_file(c.sdr) and c.maker or "",
         sdr_look = sdr_look, screen = screen_kind() or "", hdr = hdr and hdr.trc or "", denoise = denoise, dv = DV_OK,
-        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
+        maker_lut = curve and c.sdr and plugin_file(c.sdr) and c.maker_lut or "", dv_trims = dv_trims(), dv_custom = dv_user_rpu ~= nil, dv_neutral = dv_neutral(), dv_live = dv_live(),
         dv_own = hdr ~= nil and not curve and hdr.dv_signaled == true,
         -- What the file is, for the Source tab: its primaries, its Dolby Vision ("8.4", "8.1", "5", "" none)
         prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
@@ -684,7 +680,7 @@ end
 local follow_screen
 ask_screens(function() if follow_screen then follow_screen() end end)
 
--- The log curve the source is read with (the workspace plugin's input, from its own file; docs/moments-and-workspaces.md
+-- The log curve the source is read with (the workspace plugin's input, from its own file; docs/design/moments-and-workspaces.md
 -- "Source and transform"): a curve's id, auto (its metadata's), or nil (nothing set)
 local function saved_curve()
     local ws = mp.get_property_native("user-data/workspace")

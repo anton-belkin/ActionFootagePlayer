@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The player's own lens database (docs/optical-without-gyroflow.md, step 3): lens profiles in Gyroflow's own format,
+// The player's own lens database (docs/design/optical-without-gyroflow.md, step 3): lens profiles in Gyroflow's own format,
 // each kept for one exact camera mode, searched before Gyroflow's database. Built in: the profiles Anton estimated from
 // his own footage (lens_profiles#41, in Gyroflow's database only from its v43). Then the user's own, beside the app's
 // data (`user_dir`: <App Support>/ActionFootagePlayer/lenses): a lens assigned to a clip there is the default of its

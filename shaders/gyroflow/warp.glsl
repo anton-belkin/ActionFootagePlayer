@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Gyroflow's per-frame warp as an mpv/libplacebo user shader (docs/gpu-render.md, step 1: the spike). A derivative of
+// Gyroflow's per-frame warp as an mpv/libplacebo user shader (docs/design/gpu-render.md, step 1: the spike). A derivative of
 // gyroflow-core's kernel (src/core/stabilization/cpu_undistort.rs, gpu/wgpu_undistort.wgsl, qt_gpu/undistort.frag;
 // Copyright © 2021-2022 Adrian <adrian.eddy at gmail>, GPL-3.0-or-later).
 //
@@ -1603,7 +1603,7 @@ void dn_window()
     dn_kc = min(dn_after(), back);
     dn_nb_fwd = dn_kc;
     dn_nb_back = min(dn_radius(), back - dn_kc);
-    // Paused, the frame main.lua asks for (gyroflow_dn_show, its time; -1: none; docs/seek-and-scrub.md): a frame step
+    // Paused, the frame main.lua asks for (gyroflow_dn_show, its time; -1: none; docs/design/seek-and-scrub.md): a frame step
     // back shows the frame before from the ring, at once, and while the ring is filled again around a frame (a seek to
     // 5 frames before it, 10 frames played) that frame stays on screen. In the row: with what the row has on each side
     // of it; elsewhere in the ring (the row just broken by that seek): by itself, as it was decoded
@@ -2118,7 +2118,7 @@ void hook()
 #endif
 
 // ==== pass sphere360 ====
-// A 360 camera's sphere (the GPU path's 360 mode: gpu_table::sphere_shader; docs/gpu-render.md, "360 on the GPU"):
+// A 360 camera's sphere (the GPU path's 360 mode: gpu_table::sphere_shader; docs/design/gpu-render.md, "360 on the GPU"):
 // the lens tracks joined side by side (mpv's lavfi-complex hstack) in, the equirect sphere in the camera's axes out,
 // as vs-gyroflow's Sphere360 renders it: each lens through gyroflow-core's kernel (the equirect output, its RigLens
 // folded into its rows' rotations and translation3d, its validity the field limit, its rolling shutter), blended by

@@ -1,5 +1,5 @@
 "use strict";
-// The Library's window (docs/library-management.md, the mockup it was settled on): a project's footage, moments,
+// The Library's window (docs/design/library-management.md, the mockup it was settled on): a project's footage, moments,
 // photos and exports browsed as folders; filters that narrow the folder you're in, or a search that lists every match;
 // what's selected and the commands on it in one side panel, its parts chosen with a column of icons at its edge (the
 // queue one of them). What it shows comes from the app
@@ -22,7 +22,7 @@ const ICON = {
   list: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/></svg>',
   grid: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>',
 };
-// Originals and Albums (docs/albums-photos-share-concept.md): moments, photos and exports are items of albums, not tabs
+// Originals and Albums (docs/design/albums-photos-share-concept.md): moments, photos and exports are items of albums, not tabs
 // of their own. Their scans are still read as "moments", "stills" and "exports" (DATA has them), for Albums to show
 const VIEWS = [["sources", "Originals"], ["footage", "Albums"]];
 // Each view's own folder in the project (Anton, 2026-11-10): what's in it is the view's top; what's anywhere else in the
@@ -61,7 +61,7 @@ function rooted(view, d) {
 // preview are in this one
 const NOPREV = "Without a clip preview";
 // Where each view is in the project, for the paths a batch is kept to: the project's folder itself (its own files are
-// wherever they were put in it, docs/library-management.md §8)
+// wherever they were put in it, docs/design/library-management.md §8)
 const BASE = { footage: "", sources: "", moments: "", stills: "", exports: "", clip: "" };
 const KIND_BASE = { moment: "", still: "", export: "" };
 const NOUN = { footage: ["item", "items"], sources: ["clip", "clips"], moments: ["moment", "moments"], stills: ["photo", "photos"], exports: ["export", "exports"], clip: ["item", "items"] };
@@ -1124,7 +1124,8 @@ function momentsBody(c) {
 // database's: every clip of that mode takes it. What's read from the clip itself (its camera, colour, lens, motion
 // data) is the index's (gyroflow-probe --library, its lens_info too): nothing is read from the clip to show this.
 // Stabilize optically and Find / Estimate lens are tasks, started at once from their attribute's row.
-const SRC_CURVES = [["auto", "From the clip"], ["dlogm", "D-Log M"], ["dlog", "D-Log"], ["gplog", "GP-Log"], ["gplog2", "GP-Log2"], ["ilog", "I-Log (10-bit)"]];
+// (the log curves: registry.json's, window.AFP_LISTS)
+const SRC_CURVES = [["auto", "From the clip"]].concat(window.AFP_LISTS.curves.filter((c) => c.log).map((c) => [c.id, c.name]));
 const SRC_TURNS = [["0", "As is"], ["90", "90° ↻"], ["180", "180°"], ["270", "90° ↺"]];
 const SRC_WATER = [["auto", "Auto: as the camera says"], ["yes", "Yes (a flat port)"], ["no", "No"]];
 const SRC_UW = [["off", "Off"], ["on", "On"], ["bright", "On, brighter highlights"]];
@@ -1568,7 +1569,7 @@ function checksBody(c) {
   }
   return body;
 }
-// The catalog against the files (library/src/seen.rs, docs/catalog-safeguards.md): what the Library shows is kept as
+// The catalog against the files (library/src/seen.rs, docs/design/catalog-safeguards.md): what the Library shows is kept as
 // the files were last seen, and seen again as they change. On demand: every folder looked at again (after a script or
 // Finder changed files while nothing was watching), or every file of ours read again (after a restore that kept times)
 function catalogBody() {
@@ -1825,7 +1826,7 @@ function renderSheet() {
       '<p class="sub wrap">Saving writes them into Project.afproject, and a ' + esc(st.name) + '.afplocation file at the top of each, so a clip opened from Finder finds this project. A location taken out loses its file; nothing else in it changes.</p></div>' +
       '<footer><span class="sp"></span><button type="button" class="btn" data-a="closesheet">Cancel</button><button type="button" class="btn pri" data-a="savelocs">Save</button></footer>';
   } else if (S.stab === "tags") {
-    // The tag stores (docs/tags-and-culling.md): the library's own always; the others synced both ways when on, a
+    // The tag stores (docs/design/tags-and-culling.md): the library's own always; the others synced both ways when on, a
     // choice of this computer's (kept in its own file for the project, never in Project.afproject)
     const on = (k) => S.tagStores.indexOf(k) >= 0;
     const row = (k, name, what, can) => '<label class="switch"><input type="checkbox" data-a="tagstore" data-v="' + k + '"' + (k === "library" || on(k) ? " checked" : "") + (k === "library" || !can ? " disabled" : "") + '><span class="wrap"><b>' + esc(name) + '</b> · ' + what + '</span></label>';
@@ -2236,7 +2237,7 @@ function infoHtml(c) {
   return manyInfo(c);
 }
 
-// ---------- locations (library/src/geo.rs, docs/geolocation.md) ----------
+// ---------- locations (library/src/geo.rs, docs/design/geolocation.md) ----------
 // A clip's location is the original's: set from Apple Photos (the photos nearest in time) or by hand, kept in its own
 // file; else the camera's own GPS, read from the clip. Place names are looked up once on this computer.
 
@@ -3199,7 +3200,7 @@ document.addEventListener("change", (e) => {
   if (a === "sharelook") { if (S.share) { S.share.look = el.value === "SDR" ? "SDR" : "HDR"; S.share.sel = shareSel(S.share.list, S.share.look); remember("afl.share.look", S.share.look); renderSheet(); renderSide(); } return; }
   if (a === "fopt") setOpt(v, el.checked);
   else if (a === "pkind") S.photoKind = el.value;
-  // Chosen for each run, remembered on this computer (docs/library-management.md §8), not in the project
+  // Chosen for each run, remembered on this computer (docs/design/library-management.md §8), not in the project
   else if (a === "layout_set") { S.clipsLayout = el.value; remember("afl.layout", S.clipsLayout); return; }
   else if (a === "alone_set") { S.alone = el.checked; remember("afl.alone", S.alone ? "1" : ""); return; }
   else if (a === "srcstrength") { S.srcDraft.uw_strength = (+el.value || 0) / 100; renderSide(); return; }

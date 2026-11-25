@@ -142,15 +142,15 @@ published metadata layout or sample clips, but not tried on real footage yet. **
 Export covers what plays: stabilized, in color, or both. Details, and how clips from your camera
 would help: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
-The table is for the Mac app (Apple Silicon). Nothing has been tried on Linux or Windows yet: the Windows app
-carries the same plugins, and on Linux they're in an mpv of your own:
+The table is for the Mac app (Apple Silicon). The Windows app has been tried only a little (an alpha), Linux not
+at all yet: the Windows app carries the same plugins, and on Linux they're in an mpv of your own:
 
 1. D-Log M is plain Lua and GPU shaders, for any mpv on any system. Whether HDR reaches the screen there depends on
    mpv and the system. The Rec.709 LUT is baked in from a checkout of this repo (`install.sh` does it on Linux).
 2. The stabilization needs mpv 0.42 or later (the app's own is) with `vo=gpu-next`, and binaries for macOS on Apple
    Silicon, Linux x86-64 or Windows x86-64: see [Linux and Windows](#linux-and-windows). Projects are made in Gyroflow.
 3. Plain Lua, any mpv on any system.
-4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](#other-log-curves)),
+4. From the makers' published formulas, or for GP-Log Zeb Gardner's LUT ([Other log curves](docs/reference/architecture.md#other-log-curves)),
    checked against the makers' own LUTs; on footage, so far only GP-Log, on a HERO12 Black. HDR only (no Rec.709 LUT yet), in exports too. `Ctrl+l`
    picks the curve for a clip whose metadata doesn't say it.
 
@@ -282,7 +282,7 @@ The keys are beside what they do. Look, Stabilization, Quality and Telemetry hav
 bottom, as the menu's Remember as default. `Tab` hides the panel and its rail, and shows them again; clicking the
 chosen icon, or the arrow at the top of the panel, leaves only the rail.
 
-**The navigation bar** at the bottom of the video (in place of mpv's own controls, [docs/navigation-bar.md](docs/navigation-bar.md)):
+**The navigation bar** at the bottom of the video (in place of mpv's own controls, [docs/design/navigation-bar.md](docs/design/navigation-bar.md)):
 the track, with the camera's highlights (amber) and your marks (white) over it, the part marked with `l` behind it and
 the project's moments under it. Over the track, the time under the mouse in hundredths; near a mark it lands on the
 mark, and says its name. A click goes to that exact frame; dragging is quick (keyframes), the frame where it's let
@@ -312,11 +312,11 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `Shift+E` | Export the clip as it plays; with an A-B loop (`l`), only that part. On a clip being exported, twice: cancel | `gyroflow/export` |
 | `k` | Save the A-B part (`l`) as a moment, asking its name; on a moment whose part was moved: update it | `workspace/moment` |
 | `M` | A mark here; on a mark (within half a second), the camera's too: remove it | `highlights/mark` |
-| `P` / `X` / `U` | Culling ([how](docs/tags-and-culling.md)): **Accept** / **Reject** the original or the moment playing (again: neither) / neither. A clip preview playing culls its original; an export isn't culled. Kept with it as the Library keeps it, and as Finder tags when the library has them on (Project settings → Tags, both ways). `X` used to remove the clip preview: that's the menu's *Remove this clip's preview* now | `workspace/accept`, `workspace/reject`, `workspace/unpick` |
+| `P` / `X` / `U` | Culling ([how](docs/design/tags-and-culling.md)): **Accept** / **Reject** the original or the moment playing (again: neither) / neither. A clip preview playing culls its original; an export isn't culled. Kept with it as the Library keeps it, and as Finder tags when the library has them on (Project settings → Tags, both ways). `X` used to remove the clip preview: that's the menu's *Remove this clip's preview* now | `workspace/accept`, `workspace/reject`, `workspace/unpick` |
 | `1`–`5`, `0` | That many stars on the original or moment playing (the same again: none); `0`: none. These keys were mpv's contrast, brightness, gamma and volume up | `workspace/rate-1` … `workspace/rate-0` |
 | `K` | A tag of your own on the original or moment playing: type it to put it on, or one it has to take it off (`-name` off, `+name` on, commas for several; Tab completes the tags used last). The Project tab has Accept / Reject, the stars, its tags and the recent ones a click away | `workspace/tags` |
 | (menu, the Project tab) | This clip out of its album: its link in `_Clips/` to the Trash (the clip stays) | `workspace/not-interesting` |
-| `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/lossless-cut.md)) | `workspace/cut-out` |
+| `Ctrl+x` | Cut the A-B part out of a clip spoiled in part, without re-encoding, after asking: the original to the Trash, its marks and moments following ([how](docs/design/lossless-cut.md)) | `workspace/cut-out` |
 | `Ctrl+e` | Open the clip's project in Gyroflow (written next to the clip first when it has none); saving it there reloads the stabilization here. A clip without motion data opens in Gyroflow as it is, to stabilize it from the picture | `gyroflow/edit` |
 | `Ctrl+t` | Telemetry off/on; it sticks for the next clips | `dji_telemetry/toggle` |
 | `v` | Subtitles off/on: the clip's own, or the camera's data that DJI's drones write as subtitles, which is off when a clip starts (see Telemetry); the camera's turned on sticks for the next clips | `dji_telemetry/subtitles` |
@@ -752,7 +752,7 @@ What it renders:
   writes the progress there as JSON twice a second (that's how mpv shows it).
 - `--output <file>` writes that file instead (one clip).
 
-**Previews** are what the player's moments are made of ([Moments](#moments), [docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)):
+**Previews** are what the player's moments are made of ([Moments](#moments), [docs/design/moments-and-workspaces.md](docs/design/moments-and-workspaces.md)):
 a small MP4 that Finder, Explorer and a phone show and play, in SDR whatever the clip is.
 
 ```bash
@@ -868,7 +868,7 @@ A `<clip>.marks.json` from 0.8 is read, and becomes the `.afp.json` at the next 
 
 Each file of a recording the camera split has its own. None of it has been tried on a real clip yet: the layouts
 come from ExifTool (DJI, from an Action 4) and from a HERO7 Black's header (GoPro); see
-[Highlights](#highlights) in How it works. A clip with a few marked, and the seconds they were marked at, would
+[Highlights and marks](docs/reference/architecture.md#highlights-and-marks) in the architecture. A clip with a few marked, and the seconds they were marked at, would
 settle it: [Other cameras, and how to help](#other-cameras-and-how-to-help).
 
 ### Source and transform
@@ -1036,7 +1036,7 @@ Project). Then, as buttons:
   **Ctrl+m** in the player (or the panel's *Measure motion from the picture*) measures the clip playing, and Library's
   *Stabilize optically* the selected ones: Gyroflow's own analysis, run by the player, no Gyroflow app needed, about
   three times faster than the clip plays. Design:
-  [docs/optical-without-gyroflow.md](docs/optical-without-gyroflow.md).
+  [docs/design/optical-without-gyroflow.md](docs/design/optical-without-gyroflow.md).
 
 They wait in a **queue** and run one at a time, each with how far it is, what it's on and **Stop** (an export
 stops at once and leaves no half-written file; the others after the one being made); what failed is listed with
@@ -1309,231 +1309,12 @@ plugins, which don't depend on Gyroflow, so they work in any mpv on any system.
 
 ## How it works
 
-It's four mpv plugins, each a folder in `~/.config/mpv/scripts/` that works without the others, and
-ActionFootagePlayer, a Mac app that carries them and opens your MP4s with them:
-
-- **`dlogm`**: D-Log M recognized from the camera's metadata, and shown in HDR or through DJI's Rec.709 LUT; D-Log,
-  GoPro's GP-Log and GP-Log2, and Insta360's 10-bit I-Log in HDR. Plain Lua and GPU shaders, so it runs in any mpv on any
-  system (`vo=gpu-next`).
-- **`gyroflow`**: the stabilization and the export, with the binaries built from `vs-gyroflow/` (macOS on Apple
-  Silicon; Linux and Windows on x86-64, see [Linux and Windows](#linux-and-windows)).
-- **`dji-telemetry`**: the camera's telemetry over the video (DJI, GoPro). Plain Lua, any mpv on any system.
-- **`highlights`**: the moments the camera marked (DJI, GoPro), on the seek bar and a key away. Plain Lua, any mpv
-  on any system.
-- **`workspace`**: the project a clip belongs to, its trip folder, for the other plugins, and its moments (`k`,
-  [Moments](#moments)): where a clip's Gyroflow project is, and soon its marks and exports
-  ([docs/moments-and-workspaces.md](docs/moments-and-workspaces.md)). Plain Lua, any mpv 0.38 or later for naming
-  moments (older ones save them with the suggested name); the moments' previews need the gyroflow plugin. Without
-  it, the gyroflow plugin looks next to the clip, which is the same place for now.
-
-None needs anything in `mpv.conf` or `input.conf`.
-
-### D-Log M
-
-DJI tags D-Log M files as BT.709 SDR, and names Normal-color clips `*_D.MP4` as well. The color profile is in
-DJI's own metadata, though: `ColorMode` in the stream metadata of the `CAM meta` track (19 is D-Log M).
-The dlogm plugin reads it in Lua (`mpv/scripts/dlogm/dji_color.lua`: the first sample of the metadata track,
-a few protobuf fields), for the Osmo Action 6 and Osmo 360, whose layouts are known; other models' clips play as
-they are. `gyroflow-probe` reads it the same way, for the export. The plugin
-(`mpv/scripts/dlogm/main.lua`) sets the shader and the display options as file-local options, added to any
-shaders of your own, so mpv undoes them when a playlist moves on to a clip that isn't D-Log M:
-
-- `hdr`, the default: a 65³ D-Log M → Rec.2100 HLG (1000 nit) LUT (`luts/dlogm_hlg.cube`, composed in DaVinci
-  Resolve from Zeb Gardner's D-Log M → DaVinci Wide Gamut/Intermediate shaper — see Credits) at `HOOK MAIN`.
-  A `format` filter at the end of the chain tags the video as HLG/BT.2020, the target is the same
-  (`target-trc=hlg`, `target-prim=bt.2020`, `target-peak=1000`), so mpv's color pipeline runs an HLG → HLG
-  identity; tagged as the file's BT.709, mpv would linearize the HLG output as BT.709 and encode it again.
-  `target-colorspace-hint=yes` switches the Metal layer to HDR. On an SDR display macOS tone-maps it down.
-  (Up to 0.5.0 the LUT was at `HOOK OUTPUT`, re-sampling the source through `BIND MAIN`: libplacebo redraws a
-  paused frame from its cache, where `MAIN` can't be bound, and skipped it, so paused video went grey.)
-- `maker`, on `Ctrl+s`: DJI's 33³ D-Log M → Rec.709 LUT at `HOOK MAIN`. The `format` filter tags the video
-  BT.709/BT.1886, so mpv's color pipeline runs a BT.709 → BT.709 identity and the LUT's output reaches the display
-  unchanged.
-- `nbcu`, on `Ctrl+s` again: the `hdr` shader, then NBCUniversal's 33³ HLG → SDR (BT.709) display-light
-  conversion (`luts/3-NBCU_HLG2SDR_DL_v1.2.cube`, `shaders/nbcu_sdr.glsl.in`), tagged as `maker`. NBCU's are Type III
-  LUTs (full range processing of narrow range signals: the signal's 0..1 is 64..940 of 1023 of the LUT's domain,
-  in and out) and their highlight knee needs tetrahedral interpolation, so the shader does it from the texels.
-  HLG's 75 % maps to 95 % SDR, highlights roll off to 109 %, clipped at 100 % here. It's a standard for single-master
-  HDR/SDR broadcasting rather than a look: next to DJI's, the same clip is brighter in the mid-tones (18 % grey at
-  ~0.40 in Rec.709 against DJI's ~0.32) and more saturated. On a file tagged HDR: NBCU's HLG or PQ → SDR alone,
-  with its Dolby Vision metadata set aside (`format=dolbyvision=no`): VideoToolbox writes HLG as Dolby Vision 8.4,
-  which mpv would otherwise reshape into PQ before the shader sees it; the HLG underneath is what NBCU's LUT takes.
-
-Which one a clip starts in depends on the screen its window is on: macOS's EDR headroom (`NSScreen`'s
-`maximumPotentialExtendedDynamicRangeColorComponentValue`, asked once with `osascript`), above 1 on a screen that
-shows HDR. A clip keeps its look when its window goes to a screen of the other kind. On Windows and Linux
-every screen counts as HDR, as before.
-
-The LUTs are baked into the shaders as 3D `rgba16` textures (`tools/cube_to_glsl.py`, templates in
-`shaders/`), so the GPU does the trilinear interpolation in one tap (NBCU's: four texel reads, tetrahedral).
-
-### Other log curves
-
-D-Log, GP-Log, GP-Log2 and 10-bit I-Log get the same `hdr` mode as D-Log M, a 65³ LUT to Rec.2100 HLG at
-`HOOK MAIN` (`shaders/log_hlg.glsl.in`). D-Log's, GP-Log2's and I-Log's aren't in the repo: `tools/make_hdr_lut.py`
-makes them at install from each maker's own publication, which [docs/luts.md](docs/luts.md) lists with the rest of
-what the makers publish:
-
-| Curve | Decoding, and the gamut | From |
-|---|---|---|
-| DJI D-Log | DJI's `dlog_to_lin`, D-Gamut | DJI's ACES input transform (`Dlog_DGamut_to_ACES_AP0_cat02_v1`, in its ACES Workflow Guide, 2023) |
-| GoPro GP-Log2 | log base 600, +1.8 EV (18 % grey at 0.542), Rec.2020 | GoPro Labs' [GP-Log2 LUT Generator](https://gopro.github.io/labs/gplog2/) (Apache-2.0; formulas reimplemented) |
-| Insta360 10-bit I-Log | the white paper's I-Log to scene-linear, BT.2020 | Insta360's 10-bit I-Log White Paper (2026) |
-
-From scene light, every curve is rendered the way `luts/dlogm_hlg.cube` renders D-Log M, so they look alike: scaled
-by 0.254 and rolled off by `x / (1 + (x/0.69)^1.5)^(2/3)`, numbers fitted to that LUT (18 % grey at about 37 % HLG;
-ITU-R BT.2408 says 38 %), then HLG-encoded in Rec.2020. Checked against the makers' own LUTs: the GP-Log2 decoding
-gives GoPro's Rec.709 LUT to within 0.001 in the mid-tones; 18 % grey lands where Insta360's I-Log → HLG and
-DJI's (Zenmuse X9) D-Log → HLG LUTs put it, theirs with a contrast curve on top; and rebuilt this way from Zeb
-Gardner's D-Log M → DWG/I, D-Log M comes within about 0.025 of `dlogm_hlg.cube` on natural colors.
-
-GoPro publishes no gamut for GP-Log, so its LUT, `luts/gplog_hlg.cube`, is made from
-[Zeb Gardner](https://www.zebgardner.com/photo-and-video-editing/gopro-log-color-management-accuracy-testing)'s
-GP-Log → DaVinci Wide Gamut/Intermediate shaper LUT, fitted from test charts, with the same rendering. The tool
-takes any LUT that ends in DWG/I (`--from-dwgi`), and keeps its comments and `--note`s as credits:
-
-```bash
-python3 tools/make_hdr_lut.py --from-dwgi GP_LOG-to-DWG_I-ZRG-V1-j3dz.cube luts/gplog_hlg.cube --note "..."
-```
-
-GoPro moved GP-Log's exposure with firmware: its own LUTs put 18 % grey at GP-Log 0.33 for HERO12 Black firmware
-1.10/1.12, 0.53 for 1.20 and later and for HERO13 Black, 0.72 for MAX2. Zeb Gardner's puts it at 0.50, so only
-the middle ones are recognized as GP-Log; the others would play two stops off, and `Ctrl+l` picks it for them by
-hand.
-
-Which curve a clip is in: DJI's `ColorMode` (2 is D-Log, from the same metadata as D-Log M), GoPro's `PTCL`
-with the camera and firmware (`mpv/scripts/dlogm/gopro_color.lua`), or `Ctrl+l`.
-
-### Gyroflow
-
-The gyroflow plugin (`mpv/scripts/gyroflow/main.lua`) asks `gyroflow-gpu-table` (from `vs-gyroflow/`) for the
-clip's warp: Gyroflow's own render of the project (smoothing, zoom, lens, horizon) as an mpv shader,
-`shaders/gyroflow/warp.glsl` with every frame's parameters in it, which libplacebo runs ahead of the looks, the frame
-never leaving the GPU ([docs/gpu-render.md](docs/gpu-render.md)). Without a `.gyroflow` next to the video,
-`gyroflow-probe` decides first whether the video carries a project, or its own gyro data recorded with the camera's
-stabilization off (where each camera records that: `vs-gyroflow/src/probe.rs`). It renders at the size the window
-shows the video. Clips up to 30 fps get Lanczos interpolation, faster ones bicubic. What the warp can't do yet
-(other lens models such as Sony's, a lens mesh, in-body or optical stabilization, a sideways rolling shutter) plays as
-recorded, with a card saying why; so does every clip in an mpv older than 0.42 or with a `vo` other than `gpu-next`.
-Up to 2026-11 there was also a VapourSynth path for those; it was taken out. Details:
-[vs-gyroflow/README.md](vs-gyroflow/README.md).
-
-The plugin builds on `gyroflow-core` from Gyroflow master, which has the Static zoom modes
-([gyroflow/gyroflow#1264](https://github.com/gyroflow/gyroflow/pull/1264)) it renders; nothing else is needed
-beyond stock Gyroflow.
-
-### Telemetry
-
-The metadata track (the first with a `meta` handler, as for D-Log M) holds one protobuf message per frame,
-`ProductMeta` in DJI's `dvtm_*.proto`: the clip's and the stream's metadata in the first, then `FrameMeta` in each.
-`mpv/scripts/dji-telemetry/telemetry.lua` finds every sample through the track's sample table (`stts`, `stsc`,
-`stsz`, `stco`/`co64`), reading each chunk of samples at once, and decodes just the values the fields shown need,
-along paths of field numbers per model (`LAYOUTS`, by `proto_file_name`). Each value is kept only where it changes;
-`main.lua` looks it up by `time-pos` and redraws the OSD overlay (ASS) when the text changes. A 3.7-minute 4K60 clip
-(2.5 GB) is read in 0.4 s.
-
-On the Action 6 the barometer is `Barometer { is_in_water = 1; altitude_dm = 2; atmospheric_hpa = 3; }` at
-field 13 of the frame's camera part (`3.2.13`); the other camera fields are numbered as on the Osmo 360.
-
-GoPro's metadata track is the one whose samples are `gpmd`: GPMF, nested KLV items (`DEVC` → `STRM` → `GPS5`,
-`SHUT`, ...), big-endian, each scaled by the `SCAL` before it. A sample holds about a second; its values are spread
-evenly over it. GPS5 (HERO5-10) has the fix for the whole sample in `GPSF`, GPS9 (HERO11 and later) in each row.
-
-### Highlights and marks
-
-`mpv/scripts/highlights/markers.lua` walks the file's boxes with seeks (mdat isn't read) and reads the few that
-hold the highlights:
-
-- **DJI** (Osmo Action 4, 5 Pro, 6): a `free` box at the top level that starts `data`, then a box `hglg` (size
-  32-bit big-endian, its type, 5 bytes), then 5 bytes per highlight: a byte, and the time in ms, 32-bit
-  little-endian. Another `free` box lists where `hglg` is, with the cover (`covr`): the camera seems to keep room
-  to write it again. The layout is ExifTool's (`HighlightMarkers`, worked out on an Action 4); what the single
-  byte and the 5 bytes say isn't known.
-- **GoPro HERO5 and HERO6**: `moov/udta/HMMT`, the count, then each time in ms, 32-bit big-endian. FFmpeg already
-  makes chapters of these: the plugin gives them their titles rather than adding them twice.
-- **GoPro HERO7 and later**: `udta`'s `GPMF` box (the one the Protune settings are in), the `DEVC` whose `DVID` is
-  `HLMT` ("Highlights"): an `HLMT` item of one struct per highlight, as its `TYPE` lays it out (on a HERO7 Black
-  `LLLllfFff`: time, in, out in ms, the place, the type, `MANL` for one marked by hand, a confidence and a score).
-  The time is the first.
-
-`main.lua` adds them to mpv's `chapter-list`, next to the file's own chapters, and its keys seek to them
-themselves, `before=` seconds early.
-
-## Layout
-
-```
-install.sh                    builds and installs everything
-mpv/scripts/dlogm/            the log plugin  →  ~/.config/mpv/scripts/dlogm (+ shaders/, luts/ at install), and in
-                              ActionFootagePlayer; dji_color.lua and gopro_color.lua read the cameras' color profile
-mpv/scripts/gyroflow/         the stabilization plugin  →  ~/.config/mpv/scripts/gyroflow (+ the binaries), and in
-                              ActionFootagePlayer
-mpv/scripts/gyroflow/still.lua  the temporal denoise's switch (Ctrl+p); the denoise is the warp's
-mpv/scripts/gyroflow/quality.lua  when the stabilization drops frames: pauses and offers a smaller resolution, a
-                              lighter denoise or edge fill
-mpv/scripts/gyroflow/platform.lua  what differs between macOS, Linux and Windows (binaries' names, temp folder)
-mpv/scripts/gyroflow/underwater.gyroflow  the default preset for clips without a project
-mpv/scripts/gyroflow/chromatic.glsl  the color fringes under water taken out, for the export's pipes path
-mpv/scripts/gyroflow/gestures.lua  the mouse and the trackpad turning a view: crop mode's and the 360 view's
-mpv/scripts/gyroflow/projectwatch.lua  Ctrl+e's watch on the Gyroflow project: when a save there is taken up
-mpv/scripts/gyroflow/measure.lua       Ctrl+m: the clip's motion measured from its picture into its .afp-motion
-mpv/scripts/view360/          360° clips as a view to look around in: main.lua, view360.glsl (the view, at the screen's
-                              rate), view.lua (its geometry in Lua, for the mouse and the tests)  →
-                              ~/.config/mpv/scripts/view360, and in ActionFootagePlayer
-mpv/scripts/dji-telemetry/    the telemetry plugin  →  ~/.config/mpv/scripts/dji-telemetry
-mpv/scripts/highlights/       the highlights plugin  →  ~/.config/mpv/scripts/highlights, and in ActionFootagePlayer;
-                              markers.lua reads them from the file
-mpv/scripts/footage-menu/     the right-click menu for the plugins  →  ~/.config/mpv/scripts/footage-menu, and in
-                              ActionFootagePlayer
-mpv/scripts/side-panel/       the plugins' settings in a panel beside the video (ui.lua draws it)  →
-                              ~/.config/mpv/scripts/side-panel, and in ActionFootagePlayer
-mpv/scripts/agent/            notes for an AI agent (Ctrl+r), and the player's IPC for it  →
-                              ~/.config/mpv/scripts/agent, and in ActionFootagePlayer
-mpv/scripts/workspace/        the project a clip belongs to, for the other plugins (workspace.lua finds it, plain
-                              Lua; vs-gyroflow/src/workspace.rs is its twin), and link.lua, which reads the link in a
-                              moment's MP4 (vs-gyroflow/src/mp4meta.rs writes it), and moments.lua, the moments'
-                              part with no mpv in it  →  ~/.config/mpv/scripts/workspace, and
-                              in ActionFootagePlayer
-tests/                        workspace_test.lua (luajit tests/workspace_test.lua) and workspace_cases.txt, which
-                              `cargo test` in vs-gyroflow/ reads too; link_test.lua, the MP4 link reader over
-                              files made here, by ffmpeg and (GYROFLOW_EXPORT=<binary>) by gyroflow-export;
-                              moments_test.lua; view360_test.lua, the 360 view's geometry, gestures and what it does
-                              with a 360° clip and any other; make_equirect.py, synthetic 360° clips to try it on
-mpv/mpv.conf                  recommended settings, installed when there's no mpv.conf
-shaders/*.glsl.in             shader templates; the LUT goes in at install
-shaders/denoise.glsl          the noise reduction while it plays (off; dlogm.conf denoise=yes), installed with the log plugin
-luts/dlogm_hlg.cube           D-Log M → Rec.2100 HLG LUT (DJI's Rec.709 one is downloaded)
-luts/gplog_hlg.cube           GoPro GP-Log → Rec.2100 HLG LUT
-tools/cube_to_glsl.py         .cube → mpv shader
-tools/make_hdr_lut.py         D-Log, GP-Log2, 10-bit I-Log (or a LUT to DWG/I) → Rec.2100 HLG LUT, from the makers'
-                              formulas
-docs/luts.md                  the makers' log LUTs and formulas: where they are, what's in them, their terms
-tools/dji_meta_dump.py        what's in a DJI clip's metadata track: every field, or some over time
-vs-gyroflow/                  Gyroflow's engine, gyroflow-gpu-table (the player's warp), gyroflow-probe, gyroflow-project, gyroflow-export, afp-cut, afp-meta, afp-catalog (Rust)
-docs/lossless-cut.md          cutting a spoiled part out of a clip without re-encoding: how afp-cut keeps what the camera wrote
-docs/360-cameras.md           360° cameras (design): the plugin's sphere in the camera's axes, the angles in the frame, the view in a shader
-docs/360-reframe.md           360° to flat (design): the view recorded as you look around, tidied (angles, horizon, the picture), exported
-macos/                        ActionFootagePlayer: player.sh (the app's executable, mpv), setup.sh (default app, Quick
-                              Actions, DJI's LUT) and setup-offer.lua (offers it at first launch), default-app.py,
-                              the Quick Actions' export script
-macos/icon/                   its icon: AppIcon.svg, and the AppIcon.icns made from it (tools/make_icon.sh)
-tools/make_app.sh             builds ActionFootagePlayer.app, with the plugins in it
-tools/dev_app.sh              builds it from the checkout as the release does, and puts it in ~/Applications
-tools/build_mpv.sh            builds the app's mpv (tools/mpv.lock: mpv's commit and libplacebo's, linked in)
-windows/launcher/             the Windows app's ActionFootagePlayer.exe (starts the mpv it carries), and set-icon, which
-                              gives mpv.exe the app's icon (Rust, no dependencies)
-windows/setup.py              fetches DJI's LUT for the Windows app; windows/installer.iss is its installer (Inno Setup)
-windows/AppIcon.ico           the Windows app's icon (tools/make_icon.sh, tools/png_to_ico.py)
-tools/make_windows_app.sh     builds the Windows app and its installer, with mpv, Python and ffmpeg pinned
-tools/nas-helper/             the NAS Helper: collaboration (afp-catalog watch), the stream and the links for Jellyfin in one
-                              Docker image (Dockerfile, helper.py, its settings in nas_settings.py)
-tools/stream/                 the stream (afp_stream.py, the renderer afp-render.c) and the links for Jellyfin (jellyfin.py)
-tools/make_icon.sh            macos/icon/AppIcon.svg → AppIcon.icns and windows/AppIcon.ico (renders with Google Chrome)
-tools/make_workflow.py        writes the Finder Quick Actions
-tools/make_release.sh         release files: ActionFootagePlayer, each plugin alone, and the tree plus prebuilt binaries
-tools/make_plugin_zip.sh      the gyroflow plugin alone with its binaries, for Linux or Windows
-.github/workflows/release.yml builds the release on macOS, Linux and Windows (with the Windows app) and publishes it
-                              for a pushed v* tag
-```
+The player is mpv with twelve plugins of ours (`mpv/scripts/`) and Rust programs beside them (`vs-gyroflow/`): the
+stabilization's warp runs on the GPU as a libplacebo shader, the looks are shaders too. Action Footage Library
+(`library/`) is an app of its own that keeps a trip's project and runs the player without a window for what it
+makes. How the parts fit, the layout of this repository and how a frame is drawn: [docs/reference/architecture.md](docs/reference/architecture.md).
+Everything else for developers, the formats, the contracts between the parts, the tests and the release, is listed in
+[docs/README.md](docs/README.md).
 
 ## License
 

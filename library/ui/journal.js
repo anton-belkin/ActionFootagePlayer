@@ -1,4 +1,4 @@
-// The responsiveness journal, the page's part (docs/responsiveness-journal.md): each thing asked of the Library (a
+// The responsiveness journal, the page's part (docs/design/responsiveness-journal.md): each thing asked of the Library (a
 // click, a double-click, a key, a keystroke in a box, a choice), when it was asked, what it then waited for (the app's
 // commands, the page's drawing, the pictures) and when its result was on screen. Loaded first, before every other
 // script, so that by default:

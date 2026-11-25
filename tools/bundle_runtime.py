@@ -28,7 +28,7 @@ import sys
 app, prefix = sys.argv[1], os.path.realpath(sys.argv[2])
 mpv_bin = os.environ.get("MPV_BIN") and os.path.realpath(os.environ["MPV_BIN"])
 # FFMPEG_BIN: tools/export-gpu/build_ffmpeg_libplacebo.sh's ffmpeg (libplacebo, Vulkan, VideoToolbox frames in and out
-# of the libplacebo filter: gyroflow-export's GPU path, docs/export-gpu-path.md) in place of Homebrew's; its ffprobe
+# of the libplacebo filter: gyroflow-export's GPU path, docs/design/export-gpu-path.md) in place of Homebrew's; its ffprobe
 # beside it
 ffmpeg_bin = os.environ.get("FFMPEG_BIN") and os.path.realpath(os.environ["FFMPEG_BIN"])
 contents = os.path.join(app, "Contents")

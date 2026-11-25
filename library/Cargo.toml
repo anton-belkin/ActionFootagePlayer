@@ -19,7 +19,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 notify = "8"
-# The project's catalog and its locations (catalog/, docs/library-management.md §9)
+# The project's catalog and its locations (catalog/, docs/design/library-management.md §9)
 afp-catalog = { path = "../catalog" }
 # A clip's thumbnail from log to normal colour for its album link (albums.rs): decoded, through the LUT, encoded
 zune-jpeg = "0.5"

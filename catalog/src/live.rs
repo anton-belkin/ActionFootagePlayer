@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The programs running on this computer tell each other at once what they changed in a project: the catalog's journals
-// are on the share, and reading them every few seconds is what this saves (docs/library-management.md §9, "Who tells
+// are on the share, and reading them every few seconds is what this saves (docs/design/library-management.md §9, "Who tells
 // the catalog"). In <cache>/live/, this computer's own folder:
 //
 // - library-<pid>.json  { pid, port }: an Action Footage Library listening on 127.0.0.1:<port>. Each player write goes

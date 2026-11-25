@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// gyroflow-export's GPU path against its pipes (docs/export-gpu-path.md), on a real clip: AFP_GPU_CLIP (a stabilized
+// gyroflow-export's GPU path against its pipes (docs/design/export-gpu-path.md), on a real clip: AFP_GPU_CLIP (a stabilized
 // clip, e.g. ~/Movies/afp-perf-clips/DJI_20261022152937_0069_D.MP4) and AFP_GPU_FFMPEG (an ffmpeg the GPU path runs,
 // tools/export-gpu/build_ffmpeg_libplacebo.sh's on a Mac), or AFP_GPU_EXPORT (a gyroflow-export to run instead of this
 // build's, e.g. the one inside a built ActionFootagePlayer.app, which finds the app's own ffmpeg). Without them it's skipped. Two seconds rendered both ways:

@@ -1,4 +1,4 @@
-// Text keys in an MP4's QuickTime metadata (docs/moments-and-workspaces.md, "The link inside"): the link a moment's
+// Text keys in an MP4's QuickTime metadata (docs/design/moments-and-workspaces.md, "The link inside"): the link a moment's
 // or clip's preview keeps to its original (`ch.actionfootageplayer.link`), and the day Photos files it under
 // (`com.apple.quicktime.creationdate`).
 //

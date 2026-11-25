@@ -1,4 +1,4 @@
--- What a clip is read as and shown with (docs/moments-and-workspaces.md, "Source and transform"), with no mpv in it
+-- What a clip is read as and shown with (docs/design/moments-and-workspaces.md, "Source and transform"), with no mpv in it
 -- (tests/transform_test.lua).
 --
 -- Input: how to read the source right, set once, kept only beside the source (its .afp.json's `source`): the log
@@ -42,43 +42,45 @@
 
 local M = {}
 
-M.KEYS = { "view", "level", "horizon_lock", "chromatic", "aspect", "orientation", "projection", "lens", "denoise", "denoise_strong" }
-M.INPUT_KEYS = { "curve", "rotation", "underwater" }
+-- The keys, their values, what a key that didn't exist yet plays as and what a project owns: registry.json's settings
+-- (shared with the Library's renders.rs and gyroflow-export)
+local reg = require 'registry'
+M.KEYS = reg.keys("bundle")
+M.INPUT_KEYS = reg.keys("input")
 -- The underwater colour (the dlogm plugin's uwcolor.lua): the source's, as its input (tools/migrate_uw_to_source.py
 -- moves an old bundle's there once). A bundle from before keeps them unread: not the bundle's any more
-M.UW_KEYS = { "uw", "uw_highlights", "uw_strength" }
+M.UW_KEYS = reg.keys("uw")
 -- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not
 -- used) or Wider (its zoom left out) and saved so (Anton, 2026-11-10). Nor the lens and its projection: the player's
 -- choice over the project's, for viewing and exports (Anton, 2026-11-11, #196)
-M.PROJECT_KEYS = { level = true, horizon_lock = true, aspect = true, orientation = true }
-M.NEUTRAL = { aspect = "original", orientation = "as-is", projection = "linear", denoise_strong = false }
-
-local VALID = {
-    view = { normal = true, wide = true, off = true },
-    level = { weak = true, medium = true, strong = true },
-    horizon_lock = { yes = true, no = true },
-    chromatic = { [true] = true, [false] = true },
-    aspect = { original = true, ["16:9"] = true, ["4:3"] = true, ["5:4"] = true, ["1:1"] = true },
-    orientation = { ["as-is"] = true, landscape = true, portrait = true },
-    -- project: a Gyroflow project's own (linear without one)
-    projection = { linear = true, stereographic = true, equidistant = true, equisolid = true, orthographic = true, project = true },
-    lens = { corrected = true, ["as-recorded"] = true },
-    denoise = { [true] = true, [false] = true },
-    denoise_strong = { [true] = true, [false] = true },
-    uw = { [true] = true, [false] = true },
-    uw_highlights = { [true] = true, [false] = true },
-}
+M.PROJECT_KEYS, M.NEUTRAL = {}, {}
+-- Each listed key's valid values (projection's project: a Gyroflow project's own, linear without one)
+local VALID = {}
+for _, k in ipairs(M.KEYS) do
+    local s = reg.setting(k)
+    if s.project then M.PROJECT_KEYS[k] = true end
+    if s.neutral ~= nil then M.NEUTRAL[k] = s.neutral end
+end
+for _, s in ipairs(reg.settings) do
+    if s.group == "bundle" or s.group == "uw" then
+        local v = {}
+        if s.kind == "bool" then v[true], v[false] = true, true end
+        for _, x in ipairs(s.values or {}) do v[x] = true end
+        VALID[s.key] = v
+    end
+end
 
 local function valid(k, v)
     if v == nil then return false end
-    -- Between the camera's colour (0) and the correction (1), in hundredths
-    if k == "uw_strength" then return type(v) == "number" and v >= 0 and v <= 1 end
+    local s = reg.setting(k)
+    -- Between its min and max (uw_strength: between the camera's colour, 0, and the correction, 1)
+    if s and s.kind == "number" then return type(v) == "number" and v >= s.min and v <= s.max end
     -- Any other ratio, landscape-wise (W >= H)
-    if k == "aspect" and type(v) == "string" then
+    if s and s.kind == "ratio" and type(v) == "string" then
         local w, h = v:match("^(%d+):(%d+)$")
         if w then return tonumber(w) >= tonumber(h) and tonumber(h) > 0 end
     end
-    return VALID[k][v] == true
+    return VALID[k] ~= nil and VALID[k][v] == true
 end
 M.valid = valid
 

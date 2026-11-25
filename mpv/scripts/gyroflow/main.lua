@@ -15,7 +15,7 @@
 -- before playback starts. The motion data itself gyroflow-gpu-table reads as the clip opens (a stretch of it first for a
 -- clip without a project, the rest as it plays: gpu_ahead).
 --
--- The stabilization is Gyroflow's warp as an mpv shader (the GPU path, docs/gpu-render.md): gyroflow-gpu-table loads
+-- The stabilization is Gyroflow's warp as an mpv shader (the GPU path, docs/design/gpu-render.md): gyroflow-gpu-table loads
 -- the clip with gyroflow-core, as Gyroflow renders the project (its smoothing, zoom and output size), and writes
 -- shaders/gyroflow/warp.glsl with every frame's parameters in it; libplacebo runs it ahead of the looks (the dlogm
 -- plugin's), the frame never leaving the GPU. It needs mpv 0.42 (or the app's own) with vo=gpu-next. What the shader
@@ -147,7 +147,7 @@
 --   (gpu, workers, max_fps, fps_limit, edge_fill_rate, paused_full_size, zoom_margin, sphere_max_fps and sphere_cache_mb,
 --   the VapourSynth path's, from before: read and ignored)
 --
--- A 360 camera's own file (an Insta360 .insv with both lenses in it; docs/360-cameras.md): gyroflow-probe reads its
+-- A 360 camera's own file (an Insta360 .insv with both lenses in it; docs/design/360-cameras.md): gyroflow-probe reads its
 -- rig. Its lens tracks are joined side by side (the app's mpv on the GPU, --video-join; elsewhere lavfi-complex hstack),
 -- gyroflow-gpu-table --sphere360's shader makes the sphere in the camera's axes with the rolling shutter taken out and
 -- stamps each frame with the camera in the world and its headings, and the view360 plugin shows it, the horizon level. user-data/gyroflow/rig360 has its rig (brand, model,
@@ -166,7 +166,7 @@ mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.
 mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default; its own steps through package.loaded.journal (no local: this file is
 -- at Lua's 200). Nothing where the workspace plugin isn't beside this one
 do
@@ -183,7 +183,7 @@ do
 end
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
--- user-data/workspace/clip, docs/moments-and-workspaces.md)
+-- user-data/workspace/clip, docs/design/moments-and-workspaces.md)
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
@@ -277,7 +277,7 @@ end
 -- What a stitched 360° clip without a project says it is (gyroflow-probe's "spherical": its projection, stereo
 -- layout, pose or initial view), false for any other: published as user-data/gyroflow/spherical, for the view360
 -- script, which shows it as a sphere to look around in. Such a clip isn't stabilized: it plays as it is, with mpv's
--- own hwdec (zero-copy), whatever motion data it has (docs/360-cameras.md, "Stitched clips")
+-- own hwdec (zero-copy), whatever motion data it has (docs/design/360-cameras.md, "Stitched clips")
 local spherical = false
 -- A 360 camera's own file: its rig as gyroflow-probe read it (brand, model, lenses, tracks, width, height of a track),
 -- false for any other clip
@@ -475,7 +475,7 @@ local function preset_horizon()
     return "no"
 end
 
--- The transform bundle (docs/moments-and-workspaces.md, "Source and transform"): the stabilization (normal, wide; off is
+-- The transform bundle (docs/design/moments-and-workspaces.md, "Source and transform"): the stabilization (normal, wide; off is
 -- a saved bundle's or this viewing's), level, horizon lock, color fringes, aspect, projection, and the lens (corrected,
 -- or as recorded) apart from the stabilization. The app's defaults are
 -- gyroflow.conf's; the session's start as them and change only by hand, on a file that plays with them (nothing saved
@@ -806,7 +806,7 @@ end
 -- A clip played again from where it was (play_again)
 local resume = nil
 
--- The GPU path (docs/gpu-render.md): Gyroflow's warp as an mpv shader, the frame never leaving the GPU.
+-- The GPU path (docs/design/gpu-render.md): Gyroflow's warp as an mpv shader, the frame never leaving the GPU.
 -- gyroflow-gpu-table loads the clip from the player's arguments (player_args) and writes a shader with every frame's
 -- parameters in it; mpv's PTS finds the frame (mpv 0.42, or the app's mpv, 0.41.0 + 499 commits or later). The warp is
 -- the scaler too: it renders at the size of the video's rectangle on screen, turned and cut as the frame says. What it
@@ -870,7 +870,7 @@ local function play_unstabilized(why)
     mp.notify({ id = "gyroflow:unstabilized", kind = "info", seconds = 6, title = "Playing without stabilization", detail = why })
 end
 
--- The shaders mpv keeps (docs/gpu-render.md, "Each change is a new shader file"). Each version of the warp is a file
+-- The shaders mpv keeps (docs/design/gpu-render.md, "Each change is a new shader file"). Each version of the warp is a file
 -- of its own: mpv parses a path once and gives the same parse back for it. The app's mpv (patch 0015) lets go of a
 -- shader once it's out of glsl-shaders; another keeps every one, with its textures, until its window closes. So:
 -- - the same settings for the same clip get the same file again (gpu_reuse), the table not written again, and an mpv
@@ -1188,7 +1188,7 @@ end
 
 -- A clip without a project plays from a stretch of its motion data: the table is extended ahead of where it plays,
 -- a step at a time, the new one in place of the one before as it comes in (its frames where both have them are the
--- old one's: nothing on screen changes), ahead.lua says when and how far (docs/gpu-table-ahead.md). Before, the whole
+-- old one's: nothing on screen changes), ahead.lua says when and how far (docs/design/gpu-table-ahead.md). Before, the whole
 -- clip's motion data was read in one go after the first stretch: 1.7 GB from the NAS, 35-48 s, and playback ran past
 -- the stretch's 20 s into the unstabilized picture until it came (2026-11-19).
 -- If it still plays up to the end of what the table knows (a share slower than the video), it waits there, paused
@@ -1294,7 +1294,7 @@ end
 -- screen is sought to exactly, so the picture stays where it was. user-data/gyroflow/gpu_delay: { delay, restart, show }
 -- for what's on screen (the seek bar, marks, the part, export's photo: their shown_time()).
 --
--- Paused (docs/seek-and-scrub.md, dnstep.lua): frame steps (`,` `.`, Option+arrows, the bar's buttons and wheel: this
+-- Paused (docs/design/seek-and-scrub.md, dnstep.lua): frame steps (`,` `.`, Option+arrows, the bar's buttons and wheel: this
 -- plugin's frame-back / frame-on) go from the frame on screen; a step back shows the frame before from the ring at
 -- once (gyroflow_dn_show), a step on plays the frames after it first. Where the frame on screen hasn't all its
 -- neighbours (after a seek, a step back past the ring, a clip opened paused), the ring is filled again around it, the
@@ -1695,7 +1695,7 @@ local function add_sphere(source)
             for i = 1, tracks do inputs = inputs .. "[vid" .. i .. "]" end
             mp.set_property("file-local-options/lavfi-complex", inputs .. "hstack=inputs=" .. tracks .. "[vo]")
         end
-        -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/360-throughput-spike.md)
+        -- VideoToolbox's zero-copy has no device under lavfi-complex and turns into software decoding (docs/archive/360-throughput-spike.md)
         if o.hwdec then mp.set_property("file-local-options/hwdec", platform.macos and "videotoolbox-copy" or "auto-copy") end
     end
     -- Each track decoded on a thread of its own: in the playback thread mpv decodes them one after the other, and two
@@ -1709,7 +1709,7 @@ local function add_sphere(source)
         local h = r and r.status == 0 and utils.parse_json(r.stdout or "") or nil
         mp.set_property_native("user-data/gyroflow/headings360", type(h) == "table" and h or { error = "gyroflow-probe --headings failed" })
     end)
-    -- The GPU path (docs/gpu-render.md, "360 on the GPU"): the sphere made by a shader from the joined tracks
+    -- The GPU path (docs/design/gpu-render.md, "360 on the GPU"): the sphere made by a shader from the joined tracks
     -- (gyroflow-gpu-table --sphere360: each lens through gyroflow-core's kernel, blended by its share, the stamp for the
     -- view shader), every frame. The clip opens meanwhile, paused on black
     do

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // pipebench: how long libplacebo spends building shader pipelines for the player's shader lists, with no window
-// (docs/gpu-render.md, "Pipeline builds"). One renderer, as one player process has one, renders a few frames with each
+// (docs/design/gpu-render.md, "Pipeline builds"). One renderer, as one player process has one, renders a few frames with each
 // phase's list of mpv user shaders in turn (a phase: the list after a change, e.g. underwater colour turned on), and
 // prints per phase what libplacebo logged: how many SPIR-V compiles (glslang), pipelines created (MoltenVK: SPIR-V to
 // MSL, Metal's compile), re-specializations, and their milliseconds; and the first render's wall time.

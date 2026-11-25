@@ -19,7 +19,7 @@
 --                        it plays in, else the one the dlogm plugin would choose (its sdr_look); for YouTube: HDR10 in
 --                        an MKV with that SDR look's LUT inside for YouTube's SDR version (gyroflow-export --youtube,
 --                        a .mkv; issue #95); for a 360 camera's file the whole sphere (360) or the view recorded as you
---                        looked around (flat: docs/360-reframe.md)
+--                        looked around (flat: docs/design/360-reframe.md)
 --   cancel-export        cancel this clip's export, without asking
 --   reveal-last-export   show the last exported file in Finder (Explorer, the file manager)
 --   preview <json>       a moment's preview for the workspace plugin (gyroflow-export --preview still), in SDR
@@ -259,7 +259,7 @@ end
 
 local run_export
 
--- The export's settings (exportsettings.lua, docs/export-settings.md): a video's (size, encode, quality) and a photo's
+-- The export's settings (exportsettings.lua, docs/design/export-settings.md): a video's (size, encode, quality) and a photo's
 -- (size, quality), kept in gyroflow.conf (export_*, photo_*), published by main.lua as user-data/gyroflow/export_settings
 local function settings(kind)
     local all = mp.get_property_native("user-data/gyroflow/export_settings")
@@ -800,7 +800,7 @@ local function gpu_frame()
     return { "--image", file }, file
 end
 
--- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
 -- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
 -- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
@@ -846,7 +846,7 @@ mp.register_script_message("moment-picture", function(json)
     end
 end)
 
--- Where a photo goes: the project's _Stills/Generated/ (docs/library-management.md §8), as the workspace plugin says
+-- Where a photo goes: the project's _Stills/Generated/ (docs/design/library-management.md §8), as the workspace plugin says
 -- the project is; with the project's generated_runs, a folder a day in it (<date>); nil: gyroflow-export's own choice
 -- (stabilized/ beside a clip of no project)
 local function photo_dir()
@@ -948,7 +948,7 @@ local function photo_full()
     end)
 end
 
--- A photo link (Alt+s; Enter in crop mode; docs/albums-photos-share-concept.md, "Photos as objects"): the frame as it
+-- A photo link (Alt+s; Enter in crop mode; docs/design/albums-photos-share-concept.md, "Photos as objects"): the frame as it
 -- shows now, Save frame's crop and camera, made into a small picture with its link (clip, time, crop, camera) by the
 -- workspace plugin, in the project's _Stills/Generated/. Nothing is rendered: Action Footage Library's Share renders
 -- it when it's shared, in the form the destination wants. Playback doesn't stop. Outside a project (nothing would

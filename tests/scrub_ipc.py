@@ -212,6 +212,12 @@ def shots(a, work):
     for f in files:
         with open(os.path.join(before_panel, os.path.basename(f)), "wb") as out:
             out.write(subprocess.run(["git", "-C", REPO, "show", f"{a.before}:{f}"], capture_output=True, check=True).stdout)
+    # The shared lists the panel reads (the workspace plugin's, beside it in the app), where that commit has them
+    for f in ("mpv/scripts/workspace/registry.lua", "mpv/scripts/workspace/registry.json"):
+        r = subprocess.run(["git", "-C", REPO, "show", f"{a.before}:{f}"], capture_output=True)
+        if r.returncode == 0:
+            with open(os.path.join(before_panel, os.path.basename(f)), "wb") as out:
+                out.write(r.stdout)
     for name, panel, clip, preview in (("before.png", before_panel, a.clip, False), ("after.png", PANEL, a.clip, True),
                                        ("after-keyframe.png", PANEL, a.clip2, True)):
         if not clip:

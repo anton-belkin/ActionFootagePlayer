@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A 360 camera's clip exported (docs/360-cameras.md, "Exports"; step 7 of docs/360-implementation-plan.md), frame by
+// A 360 camera's clip exported (docs/design/360-cameras.md, "Exports"; step 7 of docs/archive/360-implementation-plan.md), frame by
 // frame as the player shows it: the lens tracks joined side by side, the plugin's 360 mode (sphere360.rs) makes the
 // sphere in the camera's axes with its stamp, the stamp is read back from the frame (stamp.rs, as the view shader
 // reads it), and the view (view360.rs, the WGSL twin of the player's GLSL) draws:
 // - a stabilized 360 video: the whole sphere turned into the world and the chosen heading, equirect, for YouTube and
 //   editors (gyroflow-export adds the spherical metadata, mp4meta::write_spherical);
 // - a flat reframe: the view along keyframes of the head (yaw, pitch, roll, FOV), as crop mode's photos are made, or
-//   along the view recorded in the player as you looked around (reframe.rs: docs/360-reframe.md).
+//   along the view recorded in the player as you looked around (reframe.rs: docs/design/360-reframe.md).
 // gyroflow-export runs ffmpeg around it (decoding, joining, encoding).
 //
 // The heading mode by default: along the way you move when the clip has it (GPS), else along the camera, as the player

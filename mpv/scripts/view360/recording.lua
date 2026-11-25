@@ -1,4 +1,4 @@
--- The 360 view recorded as you look around (docs/360-reframe.md, "Recording"): takes of the head, frame by frame,
+-- The 360 view recorded as you look around (docs/design/360-reframe.md, "Recording"): takes of the head, frame by frame,
 -- relative to what the view follows; punch-in, undo, thinning, and the head at any time of the clip. Plain Lua, no mpv
 -- (tests/view360_test.lua); main.lua feeds it the frames shown and keeps it in the clip's .afp.json.
 --

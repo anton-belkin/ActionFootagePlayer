@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# The GPU path's table kept ahead of where a clip plays (docs/gpu-table-ahead.md), end to end and headless: a clip
+# The GPU path's table kept ahead of where a clip plays (docs/design/gpu-table-ahead.md), end to end and headless: a clip
 # "plays" in real time (a clock, and optionally the video's own reads paced at its bitrate) against gyroflow-gpu-table
 # --serve, the table asked for as the player does it: ahead.lua's own decisions, through luajit, each quarter second.
 # It fails if any moment played without motion data in the table (it must wait there instead).

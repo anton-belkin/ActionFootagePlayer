@@ -238,7 +238,7 @@ function fake(views, o) {
       }
       app.done.push(["delete_items", a]);
       told(folders ? null : what, files);
-      // (which links an album has left isn't said item by item: Footage is read again, docs/night-handover-responsive.md)
+      // (which links an album has left isn't said item by item: Footage is read again, docs/archive/night-handover-responsive.md)
       return answer({ done, to: done ? ["the Trash"] : [], problems }, folders ? [] : what, folders ? { reload: ALL } : links ? { reload: ["footage"] } : null);
     },
   };

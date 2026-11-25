@@ -55,7 +55,7 @@
 
 local mp = require 'mp'
 
--- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
 -- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
 -- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
@@ -76,7 +76,7 @@ mp.notify = mp.notify or function(t) if t.kind ~= "hide" then mp.osd_message((t.
 mp.ask = mp.ask or function() return false end
 local options = require 'mp.options'
 local utils = require 'mp.utils'
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
 do
     package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
@@ -92,7 +92,7 @@ do
 end
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin's
--- user-data/workspace/clip, docs/moments-and-workspaces.md)
+-- user-data/workspace/clip, docs/design/moments-and-workspaces.md)
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")

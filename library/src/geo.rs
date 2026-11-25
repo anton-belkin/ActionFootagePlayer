@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Where clips were recorded (docs/geolocation.md): a location suggested from Apple Photos (the photos taken nearest in
+// Where clips were recorded (docs/design/geolocation.md): a location suggested from Apple Photos (the photos taken nearest in
 // time, which have a place), set by hand, or the camera's own GPS; place names by reverse geocoding, cached on this
 // computer so each place is looked up once.
 //

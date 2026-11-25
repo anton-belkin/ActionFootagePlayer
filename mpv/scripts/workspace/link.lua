@@ -1,4 +1,4 @@
--- The link a moment's, clip preview's or export's MP4 keeps to its original (docs/moments-and-workspaces.md, "The
+-- The link a moment's, clip preview's or export's MP4 keeps to its original (docs/design/moments-and-workspaces.md, "The
 -- link inside"): the text key `ch.actionfootageplayer.link`, JSON, read without mpv opening the file, so that the
 -- player can go through a folder of them. Plain Lua (5.1/LuaJIT), as markers.lua in the highlights plugin;
 -- tests/link_test.lua.

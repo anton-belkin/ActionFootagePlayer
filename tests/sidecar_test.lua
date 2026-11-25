@@ -91,7 +91,7 @@ expect("recording alone: follows", s.read(clip).view360.recording.follows, "trav
 s.update(clip, function(d) d.view360 = nil end)
 expect("recording gone: removed", exists(s.path(clip)), false)
 
--- A location the Library set (docs/geolocation.md): the last mark going keeps the file, and the location in it
+-- A location the Library set (docs/design/geolocation.md): the last mark going keeps the file, and the location in it
 s.update(clip, function(d) d.location = { lat = 27.73, lon = 34.25, source = "photos" }; d.marks = { { t = 4 } } end)
 s.update(clip, function(d) d.marks = nil end)
 expect("location alone: kept", exists(s.path(clip)), true)
@@ -99,7 +99,7 @@ expect("location kept", (s.read(clip)).location.lon, 34.25)
 s.update(clip, function(d) d.location = nil end)
 expect("location gone: removed", exists(s.path(clip)), false)
 
--- A comment the Library wrote (docs/tags-and-culling.md, "The comment"): the player's own writes keep it, and the
+-- A comment the Library wrote (docs/design/tags-and-culling.md, "The comment"): the player's own writes keep it, and the
 -- last of the player's parts going keeps the file with it
 s.update(clip, function(d) d.comment = "Черепаха у рифа, then the wreck"; d.rating = 3 end)
 s.update(clip, function(d) d.marks = { { t = 5 } } end)
@@ -138,7 +138,7 @@ mode = "one"
 expect("one again: read", o.read(clip).marks[1].t, 1)
 os.remove(elsewhere)
 
--- What's written or removed is told (the project's catalog notes it: docs/library-management.md §9)
+-- What's written or removed is told (the project's catalog notes it: docs/design/library-management.md §9)
 do
     local told = {}
     local n = sidecar_lib.new({ format_json = serialize, parse_json = env.parse_json, note = function(f) told[#told + 1] = f end })

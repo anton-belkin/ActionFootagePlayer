@@ -51,7 +51,7 @@ local utils = {
 }
 package.loaded['mp'] = mp
 package.loaded['mp.utils'] = utils
-package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path
+package.path = "mpv/scripts/gyroflow/?.lua;mpv/scripts/workspace/?.lua;" .. package.path
 assert(loadfile("mpv/scripts/gyroflow/export.lua"))()
 
 -- The arguments of the last gyroflow-export run, as a string, and whether it has a run of them
@@ -122,7 +122,7 @@ expect("photo-at: --photo", has(a, "--photo 4.5000"), true)
 expect("photo-at: the view's fringes", has(a, "--chromatic no"), true)
 expect("photo-at: the session's denoise for its motion", has(a, "--denoise full"), true)
 
--- The export's settings (docs/export-settings.md): the player's own, kept in gyroflow.conf by export-setting, and the
+-- The export's settings (docs/design/export-settings.md): the player's own, kept in gyroflow.conf by export-setting, and the
 -- Library's, in its request
 local saved = {}
 require('platform').save_options = function(name, kv) for _, p in ipairs(kv) do saved[name .. "." .. p[1]] = p[2] end end

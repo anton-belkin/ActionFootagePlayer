@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frame steps and the paused frame with the GPU path's temporal denoise (docs/seek-and-scrub.md, problem 1), in the
+"""Frame steps and the paused frame with the GPU path's temporal denoise (docs/design/seek-and-scrub.md, problem 1), in the
 app's own mpv with its plugins, headless (macOS, --vo=null: the shader is parsed, not drawn; which frame it shows is
 tests/dnstep_test.lua's model). Over the JSON IPC, keys pressed as you would: after each, the frame on screen (the
 gyroflow plugin's user-data/gyroflow/gpu_delay, what the seek bar shows), the frame it asks of the shader

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A part of a camera's MP4 kept without re-encoding (docs/lossless-cut.md): for a clip spoiled in part, the record
+// A part of a camera's MP4 kept without re-encoding (docs/design/lossless-cut.md): for a clip spoiled in part, the record
 // button pressed by accident. The footage itself isn't changed: every sample of every track (video, audio, the
 // camera's metadata, its cover) is copied byte for byte, and only the tables that say where they are and how long
 // they last are written anew, with the durations and edit lists. The start goes back to the keyframe at or before it

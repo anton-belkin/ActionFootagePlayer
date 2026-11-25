@@ -6,7 +6,7 @@
 //   gyroflow-project [--preset <preset.gyroflow>] [--underwater yes|no|auto|project] [--horizon-lock <%>]
 //                    [--level weak|medium|strong] [--wide] <video> [project.gyroflow]
 //
-// For a moment of the player's (docs/moments-and-workspaces.md), a project of its own:
+// For a moment of the player's (docs/design/moments-and-workspaces.md), a project of its own:
 //   --trim <in>,<out>   its part (seconds of the video) as the project's trim range, which Gyroflow opens at
 //   --alone yes|no      smoothed within it only (Gyroflow's trim_range_only), or as part of the whole video
 //   --copy <project>    a copy of the video's own project (its settings, sync, lens) instead of a new one

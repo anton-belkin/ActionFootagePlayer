@@ -1,5 +1,5 @@
 "use strict";
-// Albums (docs/albums-photos-share-concept.md, "Albums"; the app's src/albums.rs): the view that was Footage. An album
+// Albums (docs/design/albums-photos-share-concept.md, "Albums"; the app's src/albums.rs): the view that was Footage. An album
 // is a folder of links in the project's folder: `_Clips/` holds the user's own ("Your albums", the view's top), what's
 // anywhere else in the project's folder is under Other folders (Generated among them). An item is a link, shown with
 // what's known of its original. Loaded before app.js, whose state (S, DATA, RAW_FOOTAGE, PROBES) and helpers it uses
@@ -47,8 +47,9 @@ function albumRealDirs(shown) {
 function userAlbum(d) { return !!d && d !== OTHER && !d.startsWith(OTHER + "/") && d !== GENERATED && !d.startsWith(GENERATED + "/"); }
 // Views inside Albums that aren't folders: [id, label, draw, items, meta] (albumviews.js): Timeline, Map, the media types
 const ALBUM_VIEWS = [];
-// The log curves a thumbnail is turned to normal colour from (the player's luts/<curve>_hlg.cube)
-const ALBUM_CURVES = ["dlogm", "dlog", "gplog", "gplog2", "ilog"];
+// The log curves a thumbnail is turned to normal colour from (the player's luts/<curve>_hlg.cube): registry.json's
+// (window.AFP_LISTS) log curves with a LUT
+const ALBUM_CURVES = window.AFP_LISTS.curves.filter((c) => c.log && c.lut).map((c) => c.id);
 
 // Every clip link of the project (the scan's `links`), as its clip with the link's own place: one item a link, so a
 // clip in two albums is two items. A link whose clip isn't among the footage isn't shown (the strip on top counts it)
@@ -281,7 +282,7 @@ async function albumGo() {
   }
 }
 
-// ---------- shown at once, written after (docs/library-responsiveness.md) ----------
+// ---------- shown at once, written after (docs/design/library-responsiveness.md) ----------
 //
 // Each album command is a change of writes.js: what it will make is worked out here by the command's own rules
 // (src/albums.rs: a name taken gets " 2", " 3"…; a clip already in the album, a photo of a time already there, is

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// afp-render: a clip rendered on the GPU, start to end, as an HLS stream (docs/gpu-render.md, "The streaming
+// afp-render: a clip rendered on the GPU, start to end, as an HLS stream (docs/design/gpu-render.md, "The streaming
 // server"). Linux with VAAPI and Vulkan (the NAS's Intel N100): the frame never leaves the GPU.
 //
 //   VAAPI decode -> each plane imported into Vulkan as a dmabuf (as mpv does) -> libplacebo renders the frame with

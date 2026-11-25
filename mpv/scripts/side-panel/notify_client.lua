@@ -1,5 +1,5 @@
 -- What a plugin loads to show what it does in the side panel's cards and to ask a name in its dialog (notify.lua,
--- docs/notifications.md). Required for its effect, from the plugin's main.lua (the plugins are side by side in
+-- docs/design/notifications.md). Required for its effect, from the plugin's main.lua (the plugins are side by side in
 -- scripts/, so it's found beside them; without the side panel nothing changes):
 --
 --   pcall(function() package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
@@ -40,7 +40,7 @@ function M.split(text)
     return title, rest
 end
 
--- The responsiveness journal's action this card is for (docs/responsiveness-journal.md): the panel records it shown
+-- The responsiveness journal's action this card is for (docs/design/responsiveness-journal.md): the panel records it shown
 local function journal_owner()
     local j = package.loaded.journal
     return j and j.owner and j.owner() or nil
