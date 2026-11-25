@@ -1,5 +1,6 @@
 # Architecture
 Covers: `mpv/scripts/`, `vs-gyroflow/`, `catalog/`, `library/`, `tools/nas-helper/`, `tools/stream/`, `shaders/`, `macos/`, `windows/`
+
 Checked against 295101c (2026-11-25).
 
 The system as it is. The contracts between its processes are in [contracts.md](contracts.md); the files it keeps on

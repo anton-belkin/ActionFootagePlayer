@@ -1,5 +1,6 @@
 # Contracts between processes
 Covers: `mpv/scripts/workspace/main.lua`, `mpv/scripts/gyroflow/{main,export,ahead}.lua`, `library/src/{main,index,seen,share}.rs`, `catalog/src/live.rs`, `vs-gyroflow/src/{gpu_table.rs,bin/*.rs}`, `tools/stream/`, `tools/nas-helper/`
+
 Checked against 295101c (2026-11-25).
 
 What one process hands another: request files, status files, lines on a socket, JSON on stdout. The files a project

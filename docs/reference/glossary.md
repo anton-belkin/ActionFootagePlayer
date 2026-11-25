@@ -1,6 +1,7 @@
 # Glossary
 
 Covers: the words the code, the docs and Anton use, each with where it lives in the code.
+
 Checked against 295101c (2026-11-25).
 
 The same word means the same thing in Lua, Rust, JS and the docs. When a word here and the code disagree, the code

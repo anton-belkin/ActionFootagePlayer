@@ -1,5 +1,6 @@
 # Settings: where each one is stored and who reads it
 Covers: the player (mpv plugins, `gyroflow-gpu-table`, `warp.glsl`), the export (`export.lua` → `gyroflow-export`), photos and Live Photos, moments, the Library (`renders.rs`, Source settings, Share) and the NAS stream (`afp_stream.py`).
+
 Checked against 295101c (2026-11-25).
 
 This is a map, not a design. When a row and the code disagree, the code is right: fix the row.

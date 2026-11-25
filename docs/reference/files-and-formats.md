@@ -4,6 +4,7 @@ projectcache), `mpv/scripts/gyroflow/`, `mpv/scripts/dlogm/`, `vs-gyroflow/src/`
 afp_motion, reframe, lens_pick, lens_db, lib.rs `file_cache`), `catalog/src/` (project, locations, journal, snapshot,
 catalog, inspect, care, live, finder), `library/src/` (main, tags, renders, index, geo, journal, albums),
 `macos/player.sh`, `windows/launcher/`, `tools/nas-helper/`, `tools/stream/`.
+
 Checked against 295101c (2026-11-25).
 
 Every file the programs read or write, as the code has it. Where a design doc says otherwise, the code is right and
