@@ -82,17 +82,18 @@ Older page tests by hand live in `library/tests/` (`albums.js`, `share.js`, `vie
 One workflow, [.github/workflows/release.yml](../../.github/workflows/release.yml). It runs on every pull request,
 every push to `main`, every `v*` tag, and by hand. A newer push to a PR cancels its older run.
 
-| Job | Runner | Tests |
-|---|---|---|
-| `macos` | macos-15 | Builds our mpv (cached), then `sh tools/run_tests.sh`, `cargo test --release` in `vs-gyroflow`, the release build, then the "Preview test" (`link_test.lua` with this build's `gyroflow-export`). |
-| `tests` | macos-15 | `catalog`: `cargo test --release`; `library`: `cargo test`; `library/ui-tests`: `npm ci && npm test`. |
-| `plugin` | ubuntu-22.04, windows-2022, windows-11-arm | Builds the gyroflow plugin zip; on Windows the app's installer and a smoke test: silent install, files present, mpv plays a test source with `--vo=null`, `gyroflow-probe` runs (no GPU there: no stabilization). |
-| `nas-helper` | ubuntu-latest | Builds the Docker image; smoke test: `--help`, `--check` on a fake project, `mpv --version` inside. |
-| `plugins` | ubuntu-latest | Bundles all plugins per system. |
+| Job | Runner | When | Tests |
+|---|---|---|---|
+| `macos` | Anton's Mac (`anton-mac`) for this repository's PRs and `main`; macos-15 for tags, forks, by hand | always | Builds our mpv (incrementally on the Mac, cached on GitHub), then `sh tools/run_tests.sh`, `cargo test --release` in `vs-gyroflow`, the release build, then the "Preview test" (`link_test.lua` with this build's `gyroflow-export`). On the Mac, `dist/` is emptied first and a crate's `target/` over 20 GB is cleaned at the end. |
+| `tests` | as `macos` | always | `catalog`: `cargo test --release`; `library`: `cargo test`; `library/ui-tests`: `npm ci && npm test`. |
+| `plugin` | ubuntu-22.04, windows-2022, windows-11-arm | `main`, tags, by hand | Builds the gyroflow plugin zip; on Windows the app's installer and a smoke test: silent install, files present, mpv plays a test source with `--vo=null`, `gyroflow-probe` runs (no GPU there: no stabilization). |
+| `nas-helper` | ubuntu-latest | `main`, tags, by hand | Builds the Docker image; smoke test: `--help`, `--check` on a fake project, `mpv --version` inside. |
+| `plugins` | ubuntu-latest | `main`, tags, by hand | Bundles all plugins per system. |
 
 `publish` and `website` run only for a tag ([release.md](release.md)). `main` is protected (admins too): a change
-goes in by a PR, up to date with `main`, with `macos`, `tests`, the three `plugin` jobs and `plugins` green.
-`nas-helper` is not a required check.
+goes in by a PR, up to date with `main`, with `macos` and `tests` green. The Windows, Linux and NAS jobs don't run on
+pull requests; they run on every push to `main` and every release, so after a merge look at `main`'s run
+(`gh run list --branch main`) for a break there, and fix it in a PR of its own.
 
 CI has no GPU, no screen, no NAS and no real clips. Everything below is for you to run.
 
