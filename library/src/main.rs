@@ -448,6 +448,8 @@ fn remember(app: &tauri::AppHandle, root: &Path) {
     let hosts = other_names(root, share.as_deref());
     let list = remembered(recent_list(app), RecentEntry { path: p, share, rel, hosts, at_start: false });
     write_recent(app, &list);
+    // Where it is here, by its id, for the pointers of its locations (the player finds it so)
+    locations::note_here(root);
 }
 
 // ---------- the project ----------
@@ -940,7 +942,7 @@ async fn recent(app: tauri::AppHandle) -> Result<Vec<Recent>, String> {
             let names = other_names(h, e.share.as_deref());
             if e.hosts != names { e.hosts = names; changed = true; }
             let hp = h.display().to_string();
-            if e.path != hp { e.path = hp; changed = true; }
+            if e.path != hp { e.path = hp; changed = true; locations::note_here(h); }
         }
         // Its share not kept (a list of before): guessed, to connect it all the same
         let guess = if here.is_none() { guess_share(e, &mounts, &kept) } else { None };
@@ -980,6 +982,8 @@ async fn open_at_start(app: tauri::AppHandle, shared: State<'_, Shared>) -> Resu
         // One opened meanwhile (a double click) stays
         if inner.project.is_some() { return None; }
         inner.project = Some(root.clone());
+        drop(inner);
+        locations::note_here(&root);
         Some(root.display().to_string())
     }).await.map_err(|e| e.to_string())
 }
@@ -1304,7 +1308,7 @@ async fn save_local(shared: State<'_, Shared>, list: Vec<Value>, never_rename: O
     let never_rename = never_rename.unwrap_or_else(|| locations::never_rename(&root));
     // The tag stores chosen on this computer (save_tag_stores) stay
     let stores = locations::read_json(&file).map(|d| locations::tag_stores_in(&d)).unwrap_or_default();
-    if clean.is_empty() && !never_rename && stores.is_empty() { let _ = std::fs::remove_file(&file); return Ok(()); }
+    // Kept with nothing else in it too: it says where the project is here (locations::note_here)
     let mut doc = json!({ "project": root.display().to_string(), "locations": clean });
     if never_rename { doc["never_rename"] = json!(true); }
     if !stores.is_empty() { doc["tag_stores"] = json!(stores); }
@@ -1728,8 +1732,8 @@ fn write_tag_stores(file: &Path, root: &Path, stores: &[String]) -> Result<(), S
     let mut doc = locations::read_json(file).filter(Value::is_object).unwrap_or_else(|| json!({ "project": root.display().to_string(), "locations": [] }));
     let o = doc.as_object_mut().unwrap();
     if list.is_empty() { o.remove("tag_stores"); } else { o.insert("tag_stores".into(), json!(list)); }
-    let nothing = o.get("locations").and_then(Value::as_array).is_none_or(|l| l.is_empty()) && o.get("never_rename").and_then(Value::as_bool) != Some(true) && list.is_empty();
-    if nothing { let _ = std::fs::remove_file(file); return Ok(()); }
+    // Kept with nothing else in it too: it says where the project is here (locations::note_here)
+    o.insert("project".into(), json!(root.display().to_string()));
     if let Some(d) = file.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
     std::fs::write(file, serde_json::to_vec_pretty(&doc).unwrap()).map_err(|e| e.to_string())
 }
@@ -2982,9 +2986,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&top);
         std::fs::create_dir_all(&top).unwrap();
         let (file, root) = (top.join("abc.json"), top.join("P"));
-        // None yet, none chosen: no file made
+        // None yet, none chosen: the file says where the project is here all the same (locations::note_here)
         write_tag_stores(&file, &root, &[]).unwrap();
-        assert!(!file.exists());
+        assert_eq!(locations::read_json(&file).unwrap()["project"], json!(root.display().to_string()));
         write_tag_stores(&file, &root, &["finder".into(), "nonsense".into()]).unwrap();
         let doc = locations::read_json(&file).unwrap();
         assert_eq!(doc["tag_stores"], json!(["finder"]));
@@ -2998,10 +3002,11 @@ mod tests {
         write_tag_stores(&file, &root, &[]).unwrap();
         let doc = locations::read_json(&file).unwrap();
         assert!(doc.get("tag_stores").is_none() && doc["never_rename"] == json!(true));
-        // Nothing of this computer's left: the file goes
+        // Nothing of this computer's left: the file stays, saying where the project is
         std::fs::write(&file, r#"{"project":"/p","locations":[],"tag_stores":["finder"]}"#).unwrap();
         write_tag_stores(&file, &root, &[]).unwrap();
-        assert!(!file.exists());
+        let doc = locations::read_json(&file).unwrap();
+        assert!(doc.get("tag_stores").is_none() && doc["project"] == json!(root.display().to_string()));
         let _ = std::fs::remove_dir_all(&top);
     }
 

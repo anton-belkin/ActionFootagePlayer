@@ -135,10 +135,10 @@ function M.new(fs)
         h = (h or ""):lower():gsub("^[^@]*@", "")
         return (h:gsub("%._smb%._tcp%.local%.?$", ""):gsub("%.local%.?$", ""):gsub("%.$", ""))
     end
-    local mounts_cache = nil
+    -- The shares mounted here (fs.mounts keeps them a little: projectcache.lua records each call, a project found
+    -- through a share holding while the mounts are as they were)
     local function mounted()
-        if not mounts_cache then mounts_cache = fs.mounts and fs.mounts() or {} end
-        return mounts_cache
+        return fs.mounts and fs.mounts() or {}
     end
 
     -- Where a location's path is on this computer: a network path through the share mounted (`hosts`: other names
@@ -259,8 +259,28 @@ function M.new(fs)
         return found[1] or home or ws.sidecar_file(clip), others
     end
 
+    -- A pointer's id: an .afplocation counts only for the project of its id (none: it counts for none), so a path
+    -- that reaches another project (a share mounted from elsewhere, a project made again in its place) is never taken
+    local function pointer_id(p)
+        return type(p) == "table" and type(p.id) == "string" and p.id:match("^[%w%-]+$") or nil
+    end
+    -- Whether the project at a folder is the one of that id
+    local function is_project(where, id)
+        local doc = where and read_doc(where)
+        return type(doc) == "table" and doc.id == id
+    end
+    -- A pointer's project where this computer last had it open (fs.projects_dir: the Library's own record of each
+    -- project, by its id, "project" its folder here), when the pointer's path doesn't reach it (a share mounted by
+    -- another name of the NAS than the pointer has: 24 Nov 2026). nil: none
+    local function known(id)
+        if type(fs.projects_dir) ~= "string" then return nil end
+        local mine = fs.read_json(ws.join(fs.projects_dir, id .. ".json"))
+        local where = type(mine) == "table" and type(mine.project) == "string" and mine.project ~= "" and ws.normalize(mine.project)
+        return where and is_project(where, id) and where or nil
+    end
+
     -- The projects whose markers are in a folder: its Project.afproject, its .afplocation files' projects (those that
-    -- exist), in the order of their names
+    -- exist, of the pointer's id), in the order of their names
     local function projects_in(dir)
         local out = {}
         if fs.is_file(ws.join(dir, M.PROJECT_FILE)) or fs.is_dir(ws.join(dir, M.LEGACY_DIR)) then out[#out + 1] = dir end
@@ -272,8 +292,10 @@ function M.new(fs)
             table.sort(names)
             for _, n in ipairs(names) do
                 local p = fs.read_json(ws.join(dir, n))
-                local where = type(p) == "table" and ws.place(p.project, dir, p.hosts)
-                if where and fs.is_file(ws.join(where, M.PROJECT_FILE)) then
+                local id = pointer_id(p)
+                local where = id and ws.place(p.project, dir, p.hosts)
+                if id and not is_project(where, id) then where = known(id) end
+                if where then
                     local dup = false
                     for _, x in ipairs(out) do if same(x, where) then dup = true end end
                     if not dup then out[#out + 1] = where end

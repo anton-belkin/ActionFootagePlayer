@@ -13,10 +13,13 @@
 --   cache.saw("list", dir, info)      -- a folder's names read
 --   cache.saw("read", file, info)     -- a file's text read
 --   cache.saw("exists", path, info)   -- whether a path is there (info nil: it isn't)
+--   cache.saw_mounts(list)            -- the shares mounted here ({ source, dir }), a network path placed by them
 --   cache.recording()                 -- whether a lookup is under way (then a read file's info is wanted)
 --
 -- info(path) -> { is_dir, is_file, mtime, size } or nil; parent(path) -> its folder; now() -> s (os.time, the clock
--- the files' times are on); load() -> the table saved, or nil; save(table). Plain Lua with no mpv in it
+-- the files' times are on); load() -> the table saved, or nil; save(table); mounts() -> the shares mounted now (an
+-- answer found through them, or not found, holds while they're the same: a share mounted again by another name of
+-- its NAS moves or finds a project, 24 Nov 2026). Plain Lua with no mpv in it
 -- (tests/projectcache_test.lua).
 
 local M = {}
@@ -28,6 +31,17 @@ M.RECENT_S = 60
 M.FRESH_S = 30
 -- Folders kept, the ones used longest ago dropped first
 M.MAX = 2000
+-- The saved table's version
+M.V = 2
+
+-- The mounts as one text, in their order
+local function mounts_text(list)
+    local parts = {}
+    for _, m in ipairs(type(list) == "table" and list or {}) do
+        if type(m) == "table" then parts[#parts + 1] = tostring(m.source) .. "=" .. tostring(m.dir) end
+    end
+    return table.concat(parts, "\n")
+end
 
 function M.new(o)
     local self = {}
@@ -38,7 +52,8 @@ function M.new(o)
     local function loaded()
         if not data then
             local t = o.load and o.load()
-            data = type(t) == "table" and type(t.folders) == "table" and t or { v = 1, folders = {} }
+            -- v 2: answers depend on the mounts (v 1's "no project" for a share mounted by another name held on)
+            data = type(t) == "table" and t.v == M.V and type(t.folders) == "table" and t or { v = M.V, folders = {} }
         end
         return data
     end
@@ -53,8 +68,14 @@ function M.new(o)
         deps[#deps + 1] = d
     end
 
+    function self.saw_mounts(list)
+        if not deps then return end
+        deps[#deps + 1] = { k = "mounts", p = "", t = mounts_text(list) }
+    end
+
     -- Whether a recorded path is as it was
     local function same(d)
+        if d.k == "mounts" then return o.mounts ~= nil and mounts_text(o.mounts()) == d.t end
         local info = o.info(d.p)
         if d.k == "exists" then return (info ~= nil) == d.e and (not info or (info.is_dir == true) == (d.dir == true)) end
         if not info then return false end
@@ -140,7 +161,15 @@ function M.new(o)
     -- The lookup's file calls recorded as they're made: fs's is_dir, is_file, files and read_json (workspace.lua
     -- calls them through the table), and ws.projects_of kept
     function self.install(fs, ws)
-        local is_dir, is_file, files, read_json = fs.is_dir, fs.is_file, fs.files, fs.read_json
+        local is_dir, is_file, files, read_json, mounts = fs.is_dir, fs.is_file, fs.files, fs.read_json, fs.mounts
+        if mounts then
+            o.mounts = o.mounts or mounts
+            fs.mounts = function()
+                local r = mounts()
+                if deps then self.saw_mounts(r) end
+                return r
+            end
+        end
         local function exists(f)
             return function(p)
                 local r = f(p)
