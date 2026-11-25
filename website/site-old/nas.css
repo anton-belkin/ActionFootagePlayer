@@ -1,0 +1,10 @@
+/* NAS Helper page: the diagram. Builds on styles.css and stabilization.css (the limits list). */
+.nas-svg { display: block; width: 100%; height: auto; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.nas-svg .box { fill: var(--bg, transparent); stroke: var(--line); stroke-width: 1.5; }
+.nas-svg .nas { fill: color-mix(in srgb, var(--accent) 8%, var(--surface)); stroke: var(--accent); stroke-width: 2.5; }
+.nas-svg .part { fill: var(--surface); stroke: var(--accent); stroke-width: 1.2; }
+.nas-svg .t { font-family: var(--f-sans, system-ui); font-size: 15px; font-weight: 600; fill: var(--ink); }
+.nas-svg .s { font-family: var(--f-mono); font-size: 12px; fill: var(--muted); }
+.nas-svg .p { font-family: var(--f-mono); font-size: 12.5px; fill: var(--accent-ink); }
+.nas-svg .arrow { stroke: var(--accent); stroke-width: 2.2; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+@media (min-width: 900px) { .nas-three { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
