@@ -33,6 +33,18 @@ struct Params {
     in_kb: f32,
     out_kr: f32,
     out_kb: f32,
+    uw_on: u32,           // 1: the underwater colour first (shaders/underwater_hlg.glsl, its numbers below)
+    lut_on: u32,          // 0: no LUT (the underwater colour's HLG as it is)
+    _pad3: u32,
+    _pad4: u32,
+    uw_dr: f32,
+    uw_db: f32,
+    uw_k: f32,
+    uw_ev: f32,
+    uw_s: f32,
+    uw_hp: f32,
+    _pad5: f32,
+    _pad6: f32,
 }
 
 @group(0) @binding(0) var<uniform> p: Params;
@@ -95,6 +107,53 @@ fn apply_lut(c: vec3<f32>) -> vec3<f32> {
     return mix(mix(c00, c10, f.y), mix(c01, c11, f.y), f.z);
 }
 
+// The underwater colour, as shaders/underwater_hlg.glsl (and uwcolor.rs's Params::to_hlg): the decoded SDR signal
+// (BT.1886, Rec.709) to HLG in Rec.2020
+fn uw_dot(c: vec3<f32>) -> f32 { return dot(c, vec3<f32>(0.2627, 0.6780, 0.0593)); }
+
+fn uw_compose(y: f32, rg: f32, bg: f32) -> vec3<f32> {
+    let er = exp(rg);
+    let eb = exp(bg);
+    let g = y / (0.2627 * er + 0.6780 + 0.0593 * eb);
+    return vec3<f32>(g * er, g, g * eb);
+}
+
+fn uw_hlg1(e: f32) -> f32 {
+    return select(0.17883277 * log(12.0 * e - 0.28466892) + 0.55991073, sqrt(3.0 * e), e <= 1.0 / 12.0);
+}
+
+fn uw_hlg(c: vec3<f32>) -> vec3<f32> {
+    let lin = pow(max(c, vec3<f32>(0.0)), vec3<f32>(2.4));
+    let cam = vec3<f32>(dot(lin, vec3<f32>(0.6274, 0.3293, 0.0433)), dot(lin, vec3<f32>(0.0691, 0.9195, 0.0114)),
+                        dot(lin, vec3<f32>(0.0164, 0.0880, 0.8956)));
+    let y = uw_dot(cam);
+    let l = log(max(cam, vec3<f32>(4e-5)));
+    let rg = l.r - l.g;
+    let bg = l.b - l.g;
+    var o = uw_compose(y, rg + p.uw_dr, bg + p.uw_db);
+    if (p.uw_k > 0.0) {
+        var q = vec3<f32>(dot(o, vec3<f32>(1.343578253, -0.2821796705, -0.06139858206)),
+                          dot(o, vec3<f32>(-0.06529745279, 1.075787916, -0.01049046306)),
+                          dot(o, vec3<f32>(0.002821787262, -0.01959849452, 1.016776707)));
+        q.r -= p.uw_k * q.g;
+        o = vec3<f32>(dot(q, vec3<f32>(0.7538330344, 0.1985973691, 0.04756959659)),
+                      dot(q, vec3<f32>(0.04574384897, 0.9417772198, 0.01247893122)),
+                      dot(q, vec3<f32>(-0.001210340355, 0.0176017173, 0.9836086231)));
+        o *= y / max(uw_dot(o), 1e-6);
+    }
+    if (p.uw_s != 1.0) {
+        let lo = log(max(o, vec3<f32>(4e-5)));
+        o = uw_compose(y + p.uw_s * (uw_dot(o) - y), rg + p.uw_s * (lo.r - lo.g - rg), bg + p.uw_s * (lo.b - lo.g - bg));
+    }
+    let yo = uw_dot(o);
+    if (p.uw_hp != 1.0 && yo > 0.5) {
+        let q = (yo - 0.5) / 0.5;
+        o *= (yo + 0.5 * (p.uw_hp - 1.0) * select(2.0 * q - 1.0, q * q, q <= 1.0)) / yo;
+    }
+    o = clamp(o * exp2(p.uw_ev) * 0.26496256, vec3<f32>(0.0), vec3<f32>(1.0));
+    return vec3<f32>(uw_hlg1(o.r), uw_hlg1(o.g), uw_hlg1(o.b));
+}
+
 fn to_rgb(y: f32, cb: f32, cr: f32) -> vec3<f32> {
     let r = y + 2.0 * (1.0 - p.in_kr) * cr;
     let b = y + 2.0 * (1.0 - p.in_kb) * cb;
@@ -151,7 +210,10 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>, @builtin(local_invocation_
                 var out_y = array<f32, 2>(0.0, 0.0);
                 for (var h = 0u; h < 2u; h++) {
                     let y = (sample(word, h == 1u) - p.in_y_offset) / p.in_y_scale;
-                    let c = apply_lut(clamp(to_rgb(y, cb[w], cr[w]), vec3<f32>(0.0), vec3<f32>(1.0)));
+                    // The underwater colour takes what's over 1 as mpv hands it to the shader
+                    var c = max(to_rgb(y, cb[w], cr[w]), vec3<f32>(0.0));
+                    if (p.uw_on != 0u) { c = uw_hlg(c); } else { c = min(c, vec3<f32>(1.0)); }
+                    if (p.lut_on != 0u) { c = apply_lut(c); }
                     let yo = luma(c);
                     out_y[h] = 64.0 + 876.0 * yo;
                     sum_b[w] += (c.b - yo) / (2.0 * (1.0 - p.out_kb));
@@ -204,6 +266,8 @@ struct Params {
     width: u32, height: u32, lut_size: u32, measure: u32,
     in_y_offset: f32, in_y_scale: f32, in_c_scale: f32, _pad2: f32,
     in_kr: f32, in_kb: f32, out_kr: f32, out_kb: f32,
+    uw_on: u32, lut_on: u32, _pad3: u32, _pad4: u32,
+    uw: [f32; 6], _pad5: [f32; 2],
 }
 
 /// What GpuLut measures of each frame it writes
@@ -241,6 +305,8 @@ pub struct GpuLut {
 /// One worker's buffers: a frame is uploaded, converted in place and read back
 pub struct GpuLutWorker {
     lut: Arc<GpuLut>,
+    params: wgpu::Buffer,
+    uw: [f32; 6],
     frame: wgpu::Buffer,
     staging: wgpu::Buffer,
     parts: wgpu::Buffer,
@@ -282,9 +348,22 @@ pub(crate) fn read_cube(path: &std::path::Path) -> Result<(u32, Vec<f32>), Strin
 /// NBCU's knee by tetrahedral interpolation, its highlights above 100 % clipped
 pub fn compose_nbcu(log: &std::path::Path, nbcu: &std::path::Path, out: &std::path::Path) -> Result<(), String> {
     let (n, log_data) = read_cube(log)?;
+    compose_nbcu_with(n, &log_data, &file_name(log), nbcu, out)
+}
+
+/// NBCUniversal's HLG -> SDR alone as a plain 0..1 .cube (compose_nbcu with nothing before it), at its own grid's
+/// points: for what's made HLG on the GPU first (the underwater colour)
+pub fn compose_nbcu_after_hlg(nbcu: &std::path::Path, out: &std::path::Path) -> Result<(), String> {
+    let (m, _) = read_cube(nbcu)?;
+    let step = 1.0 / (m - 1) as f32;
+    let identity: Vec<f32> = (0..m * m * m).flat_map(|i| [(i % m) as f32 * step, ((i / m) % m) as f32 * step, (i / (m * m)) as f32 * step]).collect();
+    compose_nbcu_with(m, &identity, "HLG", nbcu, out)
+}
+
+fn compose_nbcu_with(n: u32, log_data: &[f32], log_name: &str, nbcu: &std::path::Path, out: &std::path::Path) -> Result<(), String> {
     let (m, nbcu_data) = read_cube(nbcu)?;
     let (lo, span) = (64.0 / 1023.0, 876.0 / 1023.0);
-    let mut text = format!("# {} then {}, by gyroflow-export\nLUT_3D_SIZE {n}\n", file_name(log), file_name(nbcu));
+    let mut text = format!("# {} then {}, by gyroflow-export\nLUT_3D_SIZE {n}\n", log_name, file_name(nbcu));
     for v in log_data.chunks(3) {
         let o = tetrahedral(m as usize, &nbcu_data, [v[0] * span + lo, v[1] * span + lo, v[2] * span + lo]);
         let c = |x: f32| ((x - lo) / span).clamp(0.0, 1.0);
@@ -325,10 +404,21 @@ impl GpuLut {
     /// `in_full_range`: the decoded frames' range; the output is always limited range. `measure`: what apply measures
     /// of each frame too
     pub fn new(cube: &std::path::Path, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32), measure: Measure) -> Result<Arc<GpuLut>, String> {
+        Self::with_look(Some(cube), false, width, height, in_matrix, in_full_range, out_matrix, measure)
+    }
+
+    /// `uw`: the underwater colour before the LUT (its numbers each frame's: GpuLutWorker::set_uw); `cube` None: no
+    /// LUT after it
+    #[allow(clippy::too_many_arguments)]
+    pub fn with_look(cube: Option<&std::path::Path>, uw: bool, width: usize, height: usize, in_matrix: (f32, f32), in_full_range: bool, out_matrix: (f32, f32), measure: Measure) -> Result<Arc<GpuLut>, String> {
         if width % 4 != 0 || height % 2 != 0 {
             return Err(format!("{width}x{height}: the GPU LUT needs a width divisible by 4"));
         }
-        let (lut_size, lut_data) = read_cube(cube)?;
+        let (lut_size, lut_data) = match cube {
+            Some(c) => read_cube(c)?,
+            // A LUT's binding all the same: a 2-point identity, unused
+            None => (2, (0..8).flat_map(|i| [(i & 1) as f32, ((i >> 1) & 1) as f32, (i >> 2) as f32]).collect()),
+        };
 
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -378,6 +468,8 @@ impl GpuLut {
             measure: match measure { Measure::None => 0, Measure::HlgL1 => 1, Measure::PqNits => 2 },
             in_y_offset, in_y_scale, in_c_scale, _pad2: 0.0,
             in_kr: in_matrix.0, in_kb: in_matrix.1, out_kr: out_matrix.0, out_kb: out_matrix.1,
+            uw_on: uw as u32, lut_on: cube.is_some() as u32, _pad3: 0, _pad4: 0,
+            uw: [0.0, 0.0, 0.0, 0.0, 1.0, 1.0], _pad5: [0.0; 2],
         };
         let groups = ((width / 4) as u64).div_ceil(8) * ((height / 2) as u64).div_ceil(8);
         Ok(Arc::new(GpuLut { device, queue, pipeline, layout, lut, params, frame_size, parts_size: groups * 16 }))
@@ -401,11 +493,19 @@ impl GpuLut {
                 wgpu::BindGroupEntry { binding: 3, resource: parts.as_entire_binding() },
             ],
         });
-        GpuLutWorker { lut: self.clone(), frame, staging, parts, parts_staging, bind_group }
+        GpuLutWorker { lut: self.clone(), params, uw: self.params.uw, frame, staging, parts, parts_staging, bind_group }
     }
 }
 
 impl GpuLutWorker {
+    /// The underwater colour's numbers for the frames this worker converts next (uwcolor::Params::array)
+    pub fn set_uw(&mut self, uw: [f32; 6]) {
+        if uw == self.uw { return; }
+        self.uw = uw;
+        let params = Params { uw, ..self.lut.params };
+        self.lut.queue.write_buffer(&self.params, 0, bytemuck::bytes_of(&params));
+    }
+
     /// Converts `frame` (planar 4:2:0, 16-bit samples) in place; measuring, also returns the lowest, average and
     /// highest max(R,G,B) of the frame written (Measure says in what)
     pub fn apply(&mut self, frame: &mut [u8]) -> Result<Option<[f64; 3]>, String> {
@@ -456,5 +556,68 @@ impl GpuLutWorker {
         }
         self.parts_staging.unmap();
         Ok((count > 0.0).then(|| [lo, sum / count, hi]))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The underwater colour on the GPU is the shader's (uwcolor::Params::to_hlg, the CPU's photo path): a frame of 2x2
+    // blocks each one colour, full-range BT.709 in, limited BT.2020 HLG out, decoded back and compared
+    #[test]
+    fn uw_on_the_gpu_as_on_the_cpu() {
+        let (w, h) = (64usize, 32usize);
+        let (kr, kb) = (0.2126f32, 0.0722f32);
+        let colour = |bx: usize, by: usize| -> [f32; 3] {
+            let x = bx as f32 / (w / 2) as f32;
+            let y = by as f32 / (h / 2) as f32;
+            [0.05 + 0.5 * x * y, 0.1 + 0.6 * y, 0.15 + 0.7 * x]
+        };
+        let mut planes = vec![vec![0u16; w * h], vec![0u16; w * h / 4], vec![0u16; w * h / 4]];
+        let mut want = vec![[0f32; 3]; (w / 2) * (h / 2)];
+        let p = crate::uwcolor::Params { dr: 0.3, db: 0.45, k: 0.25, ev: 0.9, s: 0.85, hp: 2.5 };
+        for by in 0..h / 2 {
+            for bx in 0..w / 2 {
+                let c = colour(bx, by);
+                let yy = kr * c[0] + (1.0 - kr - kb) * c[1] + kb * c[2];
+                let cb = (c[2] - yy) / (2.0 * (1.0 - kb));
+                let cr = (c[0] - yy) / (2.0 * (1.0 - kr));
+                let (y10, cb10, cr10) = ((yy * 1023.0).round() as u16, (512.0 + cb * 1023.0).round() as u16, (512.0 + cr * 1023.0).round() as u16);
+                for dy in 0..2 { for dx in 0..2 { planes[0][(by * 2 + dy) * w + bx * 2 + dx] = y10; } }
+                planes[1][by * (w / 2) + bx] = cb10;
+                planes[2][by * (w / 2) + bx] = cr10;
+                // What the shader gets: the 10-bit codes back to RGB
+                let (yn, cbn, crn) = (y10 as f32 / 1023.0, (cb10 as f32 - 512.0) / 1023.0, (cr10 as f32 - 512.0) / 1023.0);
+                let r = yn + 2.0 * (1.0 - kr) * crn;
+                let b = yn + 2.0 * (1.0 - kb) * cbn;
+                let g = (yn - kr * r - kb * b) / (1.0 - kr - kb);
+                want[by * (w / 2) + bx] = p.to_hlg([r.clamp(0.0, 1.0), g.clamp(0.0, 1.0), b.clamp(0.0, 1.0)]);
+            }
+        }
+        let mut frame: Vec<u8> = planes.iter().flatten().flat_map(|v| v.to_le_bytes()).collect();
+        let lut = match GpuLut::with_look(None, true, w, h, (kr, kb), true, (0.2627, 0.0593), Measure::None) {
+            Ok(l) => l,
+            Err(e) => { eprintln!("no GPU here, not checked: {e}"); return; }
+        };
+        let mut worker = lut.worker();
+        worker.set_uw(p.array());
+        worker.apply(&mut frame).unwrap();
+        let s: Vec<u16> = frame.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+        let (okr, okb) = (0.2627f32, 0.0593f32);
+        let mut worst = 0f32;
+        for by in 0..h / 2 {
+            for bx in 0..w / 2 {
+                let yn = (s[by * 2 * w + bx * 2] as f32 - 64.0) / 876.0;
+                let cb = (s[w * h + by * (w / 2) + bx] as f32 - 512.0) / 896.0;
+                let cr = (s[w * h + w * h / 4 + by * (w / 2) + bx] as f32 - 512.0) / 896.0;
+                let r = yn + 2.0 * (1.0 - okr) * cr;
+                let b = yn + 2.0 * (1.0 - okb) * cb;
+                let g = (yn - okr * r - okb * b) / (1.0 - okr - okb);
+                let e = want[by * (w / 2) + bx];
+                for (a, b) in [r, g, b].iter().zip(e) { worst = worst.max((a - b).abs() * 1023.0); }
+            }
+        }
+        assert!(worst < 2.5, "worst {worst:.2} codes");
     }
 }

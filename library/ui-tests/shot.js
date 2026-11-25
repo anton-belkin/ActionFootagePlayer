@@ -31,6 +31,23 @@ const STATES = {
   histleft: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4');" },
   histback: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4'); setTimeout(() => side(3), 200);" },
   histfwd: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4'); setTimeout(() => side(3), 200); setTimeout(() => side(4), 400);" },
+  // A clip's Info: no ready lens for its mode, the lenses of its camera to choose from (gyroflow-probe --lens's
+  // candidates), the one made for exactly its mode first
+  lenspick: { set_tags: { never: true }, lens_info: { camera: "GoPro HERO7 Black", lens: "", from: "", types: [], mode_key: "GoPro HERO7 Black · wide · hseis · 3840x2160 · 29.97 fps",
+    candidates: [{ id: "local:a", label: "GoPro HERO7 Black Wide HS EIS 4k 16by9 3840x2160-59.94fps, estimated from footage", local: true, exact: false, readout: false },
+                 { id: "db:b#0", label: "GoPro HERO7 Black 4k 16:9 Wide HS EIS 3840x2160 29.97fps (2.5★, no readout)", local: false, exact: false, readout: false },
+                 { id: "db:c#0", label: "GoPro HERO7 Black 4k 16:9 Wide HS EIS 3840x2160 59.94fps (official)", local: false, exact: false, readout: true }] },
+    does: "S.path = ['Day 1']; renderAll(); pick('A.MP4'); showTab('info'); renderAll();" },
+  // Stabilize optically's part after Find lens: one clip a known lens fits (its readout measured), one none fits
+  lensfound: { set_tags: { never: true }, jobs: [{ id: 3, kind: "lens-find", title: "Find lens · 2 clips", project: "/P", project_name: "Red Sea 2025", state: "done",
+      done: 2, total: 2, failed: 0, made: 1, failures: [], left_out: [], message: "a lens fits 1 of 2",
+      results: [{ path: "/P/Day 1/A.MP4", mode: "GoPro HERO4 Black · medium · 2704x1520 · 23.98 fps", accepted: "1", fragments_with_scene: 2,
+                  tried: [{ n: "0", name: "GoPro_HERO4 Black_Medium__2.7k_16by9_2704x1520-23.98fps - estimated from footage", verdict: "good", fits: true, refraction: 1, medium_sure: true, readout_ms: 30.6, readout_measured: false },
+                          { n: "1", name: "GoPro_HERO4 Black_Medium__2.7k_16by9_2704x1520-29.97fps - estimated from footage", verdict: "good", fits: true, refraction: 1, medium_sure: true, readout_ms: 30.2, readout_measured: true },
+                          { n: "2", name: "GoPro_HERO4 Black___2.7k_16by9_2704x1520-29.97fps", verdict: "poor", fits: false, refraction: 1, medium_sure: false }] },
+                { path: "/P/Day 1/B.MP4", mode: "GoPro HERO4 Black · wide · 2704x1520 · 29.97 fps", accepted: null, fragments_with_scene: 2,
+                  tried: [{ n: "0", name: "GoPro_HERO4 Black___2.7k_16by9_2704x1520-29.97fps", verdict: "poor", fits: false, refraction: 1 }] }] }],
+    does: "S.jobs = window.ST_JOBS; S.path = ['Day 1']; showTab('stabilize'); renderAll(); setTimeout(() => sel(['Day 1/A.MP4', 'Day 1/B.MP4']), 300);" },
   catalog: { set_tags: { never: true }, care: { kind: "check", busy: false, changes: 2, corrected: ["/P/Day 1/A.afp.json", "/P/Generated/2026-11-01 Moments/Day 1/A m.mp4"],
     unreadable_now: ["/P/Day 1/C.afp.json"] }, does: "S.path = ['Day 1']; showTab('checks'); renderAll(); sel(['Day 1/A.MP4']);" },
 };
@@ -43,9 +60,11 @@ function html(ui, state) {
     window.addEventListener("unhandledrejection", (e) => { document.title = "REJ " + e.reason; });
     const VIEWS = ${JSON.stringify(smallViews())}, ROOT = "/P", ST = ${JSON.stringify(st)};
     ${st.first || ""}
+    window.ST_JOBS = ST.jobs || [];
     const answers = {
-      snapshot: () => ({ project: ROOT, jobs: [], close_asked: false, close_waits: !!window.closeWaits, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),
+      snapshot: () => ({ project: ROOT, jobs: ST.jobs || [], close_asked: false, close_waits: !!window.closeWaits, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),
       project: () => ({ path: ROOT, name: "Red Sea 2025", legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
+      lens_info: () => ST.lens_info || {}, lens_types: () => [],
       engine: () => "", recent: () => [], catalog_care: () => ST.care || {}, catalog_look: () => null, cached_view: () => null, probes_since: () => ({ version: 1, items: {}, pending: 0 }), thumb: () => null, missing_links: () => [],
       scan: (a) => JSON.parse(JSON.stringify(VIEWS[a.view] || { root: ROOT, view: a.view, dirs: [], items: [] })),
       set_tags: (a) => {

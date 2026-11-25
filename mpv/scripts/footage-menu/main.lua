@@ -18,6 +18,18 @@
 --   version= the app's version, for the menu to show beside its name (ActionFootagePlayer sets its own)
 
 local mp = require 'mp'
+
+-- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
+-- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
+local function shown_time()
+    local t = mp.get_property_number("time-pos")
+    local d = mp.get_property_native("user-data/gyroflow/gpu_delay")
+    if not t or type(d) ~= "table" or not d.delay or d.delay <= 0 then return t end
+    if type(d.show) == "number" and d.show >= 0 then return d.show end
+    local restart = (type(d.restart) == "number" and d.restart >= 0) and math.min(d.restart, t) or t
+    return math.max(restart, t - d.delay)
+end
 -- What it says on screen goes to the side panel's cards and dialog (side-panel/notify_client.lua), when it's there
 pcall(function()
     package.path = package.path .. ";" .. mp.get_script_directory():gsub("[^/\\]*$", "") .. "side-panel/?.lua"
@@ -382,7 +394,7 @@ local function marks_menu(h, key)
         item("Previous", "script-binding highlights/prev", { shortcut = key["script-binding highlights/prev"], disabled = #h.times == 0 }),
         SEPARATOR,
     }
-    local pos = mp.get_property_number("time-pos", 0)
+    local pos = shown_time() or 0
     local here = false
     for i, t in ipairs(h.times) do
         local m = h.marks and h.marks[i] or {}

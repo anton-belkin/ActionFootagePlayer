@@ -108,7 +108,11 @@ fn disk_cache(j: &serde_json::Value) -> Option<(std::path::PathBuf, std::path::P
     } else { String::new() };
     // In key order: the player's JSON comes from a Lua table, in an order of its own each run
     let sorted: std::collections::BTreeMap<&String, &serde_json::Value> = obj.iter().collect();
-    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}|{translation}", serde_json::to_string(&sorted).ok()?))?;
+    // The motion measured from the picture beside the clip, as it is now (made or measured again since)
+    let measured = vs_gyroflow::afp_motion::stamp(std::path::Path::new(&project));
+    // and the lens it's decided to have as it is now (its lens type, a lens given to it alone, the user's lenses)
+    let lens = vs_gyroflow::lens_pick::lens_state_stamp(&project);
+    let base = vs_gyroflow::file_cache("gpu", &project, &format!("{}|{preset}|{build}|{translation}|{measured}|{lens}", serde_json::to_string(&sorted).ok()?))?;
     Some((base.with_extension("glsl"), base.with_extension("json")))
 }
 
@@ -316,8 +320,10 @@ const JOIN_S: f64 = 60.0;
 /// that clip, whose table the new one keeps where both have it. A project or a moment's part: as it asks
 fn stretch_to_load(cache: &[(String, std::sync::Arc<gpu_table::PlayerClip>)], key: &str, j: &serde_json::Value) -> (Option<(f64, f64)>, Option<std::sync::Arc<gpu_table::PlayerClip>>) {
     let is_project = j.get("project").and_then(|v| v.as_str()).is_some_and(vs_gyroflow::is_project_file);
+    // Motion measured from the picture is all there in its file: the whole clip at once, as a project's
+    let measured = !is_project && j.get("project").and_then(|v| v.as_str()).is_some_and(|p| vs_gyroflow::afp_motion::path_for(std::path::Path::new(p)).is_file());
     let (want, whole) = gpu_table::motion_range(j);
-    if is_project || whole || j.get("start").is_none() { return (if is_project { None } else { want }, None); }
+    if is_project || measured || whole || j.get("start").is_none() { return (if is_project || measured { None } else { want }, None); }
     let Some((c, d)) = want else { return (None, None) };
     // What playback waits for (a seek, "urgent"): joined only where they overlap, no gap read meanwhile
     let join = if j.get("urgent").and_then(|v| v.as_bool()).unwrap_or(false) { 0.0 } else { JOIN_S };
@@ -342,6 +348,8 @@ fn geometry_key(j: &serde_json::Value) -> String {
     let mut key: Vec<String> = gpu_table::PLAYER_GEOMETRY_KEYS.iter().map(|k| format!("{k}={}", j.get(*k).map(|v| v.to_string()).unwrap_or_default())).collect();
     key.push(stamp("project"));
     key.push(stamp("preset"));
+    key.push(j.get("project").and_then(|v| v.as_str()).map(|p| vs_gyroflow::afp_motion::stamp(std::path::Path::new(p))).unwrap_or_default());
+    key.push(j.get("project").and_then(|v| v.as_str()).map(vs_gyroflow::lens_pick::lens_state_stamp).unwrap_or_default());
     key.push(format!("version={}", j.get("version").map(|v| v.to_string()).unwrap_or_default()));
     key.join("|")
 }

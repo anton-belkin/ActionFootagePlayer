@@ -3,7 +3,9 @@
 --
 --   DJI_..._D.MP4  +  DJI_..._D.gyroflow   ->  plays through Gyroflow (vf=vapoursynth)
 --   DJI_..._D.MP4 with gyro data, recorded with EIS off   ->  stabilized with the default preset (also GoPro clips
---       with HyperSmooth off and Insta360 ones with FlowState off in the camera, when Gyroflow has their lens):
+--       with HyperSmooth off, or on from a HERO12 or later, which records how it turned the picture: stabilized on top
+--       of it with less crop, vs-gyroflow/src/in_camera.rs; and Insta360 ones with FlowState off in the camera, when
+--       Gyroflow has their lens):
 --       Gyroflow's own default preset, then default.gyroflow if there is one: in $GYROFLOW_DATA (where an app
 --       that ships this plugin read-only, ActionFootagePlayer, keeps yours), else in this folder (install.sh puts
 --       the underwater preset there)
@@ -93,6 +95,7 @@
 --                auto-copy), whatever mpv's hwdec is: software decoding doesn't keep up with 4K. no: leave it to
 --                mpv's hwdec
 --   workers=3    GPU worker threads
+--   lens_quick=yes  the lens dialog's Find lens stops at the first lens that fits (Quick); no: tries every one
 --   gpu=auto     Gyroflow's warp as a shader (the GPU path, docs/gpu-render.md) wherever mpv can (mpv 0.42 or the
 --                app's, vo=gpu-next): macOS, Windows and Linux (tried on all three); no: always through VapourSynth
 --   gpu_flush=auto  an mpv without the app's patch 0015 keeps every shader the GPU path has had until its window
@@ -221,7 +224,7 @@ local function clip_path()
     return path
 end
 
-local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "" }
+local o = { gpu = "auto", hwdec = true, workers = 3, max_fps = 0, fps_limit = 0, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, edge_fill_rate = "auto", resolution = "auto", paused_full_size = "off", zoom_margin = 1.25, still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, sphere_max_fps = 31, sphere_cache_mb = 1500, gpu_flush = "auto", render_args = "", lens_quick = true }
 options.read_options(o, "gyroflow")
 -- A whole % of the frames, as the plugin takes it, or auto
 do
@@ -371,9 +374,13 @@ local function find_source(path, done)
                 if not preset and file_exists(p) then preset = p end
             end
         end
-        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by
+        -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by.
+        -- optical: its motion measured from the picture (<stem>.afp-motion beside it, gyroflow-probe's "measured"), with
+        -- no horizon in it to lock. in_camera: how the camera stabilized it itself (GoPro HERO12+ HyperSmooth), stabilized
+        -- further on top of it
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
-               rotation = tonumber(info.rotation) or 0 })
+               rotation = tonumber(info.rotation) or 0, optical = info.motion == "optical" and (type(info.measured) == "table" and info.measured or {}) or nil,
+               in_camera = type(info.stabilized_in_camera) == "string" and info.stabilized_in_camera or nil })
     end)
 end
 
@@ -657,6 +664,7 @@ local function take(b)
     -- & Quality's Off leaves it out whatever this says (still.lua)
     if type(b.denoise) == "boolean" then still.set(b.denoise) else still.set(session.denoise) end
     if dn_sync then dn_sync() end
+    if (current_source and current_source.optical) then horizon = false end
     return b.view == "off"
 end
 
@@ -680,6 +688,9 @@ local function clip_settings(source)
     frame.rotation = (r == 90 or r == 180 or r == 270) and r or 0
     if has_project(source) then
         horizon, underwater = nil, "project"
+    elseif (source and source.optical) then
+        -- The refraction the motion was measured with: the measured motion's own, as a project's
+        horizon, underwater = false, "project"
     else
         underwater = (UNDERWATER_LABELS[i.underwater] and i.underwater ~= "project") and i.underwater or default_underwater
     end
@@ -924,6 +935,9 @@ function publish()
         -- The source's own ratio, upright (the file's turn and the input's): what the frame's "own" is
         source_aspect = source_aspect() or false,
         project_info = has_project(current_source) and current_source.info or false,
+        -- Motion measured from the picture (gyroflow-probe's "measured": how, at, lens, in_water, readout_ms, frames,
+        -- measured_frames), false for any other
+        optical = current_source and current_source.optical or false,
         -- The session's bundle and the app's defaults (the workspace plugin fills and makes bundles with them)
         session = session, defaults = DEFAULTS,
         -- The lens as Gyroflow takes it: { camera, lens ("in the file", a profile's name, "" unknown) }
@@ -937,7 +951,11 @@ function publish()
     if DATA and DATA ~= "" then
         local preset
         for _, p in ipairs(PRESETS) do if file_exists(p) then preset = p; break end end
-        local text = utils.format_json({ v = 1, defaults = DEFAULTS, edges = o.edges, edges_blur = o.edges_blur,
+        -- (the underwater colour's defaults with them: the dlogm plugin's uwcolor.conf)
+        local defaults = {}
+        for k, v in pairs(DEFAULTS) do defaults[k] = v end
+        for k, v in pairs(mp.get_property_native("user-data/uwcolor/defaults") or {}) do defaults[k] = v end
+        local text = utils.format_json({ v = 1, defaults = defaults, edges = o.edges, edges_blur = o.edges_blur,
                                          temporal_denoise = o.temporal_denoise, preset = preset })
         if text and text ~= PRESETS.defaults_written then
             local path = utils.join_path(DATA, "render-defaults.json")
@@ -1452,71 +1470,266 @@ end
 -- (audio-delay, by what this adds to it), and after a seek the first frame stays until the frames after it are there.
 -- In crop mode none after it (gyroflow_dn_after 0): its camera turns the newest frame as it's dragged. Where that
 -- changes, or the shader is new, the shader's ring of frames starts again from the newest frame: paused, the frame on
--- screen is sought to exactly, so the picture stays where it was. user-data/gyroflow/gpu_delay: { delay, restart } for
--- what's on screen (export.lua's photo)
-local DN_AFTER = 5
-local dn = { after = DN_AFTER, epoch = 0, delay = 0, restart = nil }
-local function dn_publish() mp.set_property_native("user-data/gyroflow/gpu_delay", { delay = dn.delay, restart = dn.restart or -1 }) end
-local function dn_shown()
-    local t = mp.get_property_number("time-pos")
-    if not t or dn.delay <= 0 then return t end
-    return math.max(math.min(dn.restart or t, t), t - dn.delay)
-end
--- The ring started again by its epoch (a shader file used before, which mpv may give back with its ring as it was)
-local function dn_new_ring()
-    dn.epoch = dn.epoch + 1
-    local opts = mp.get_property_native("glsl-shader-opts") or {}
-    opts.gyroflow_dn_after, opts.gyroflow_dn_epoch = tostring(dn.after), tostring(dn.epoch)
-    mp.set_property_native("glsl-shader-opts", opts)
-end
--- shown: the frame on screen before a new shader (gpu_apply), nil otherwise
-dn_sync = setmetatable({ shown = dn_shown, new_ring = dn_new_ring }, { __call = function(_, shown)
-    local crop_on = (mp.get_property_native("user-data/gyroflow/crop") or {}).active == true
-    local frames = DENOISE_FRAMES[o.temporal_denoise] or DN_AFTER
-    local after = crop_on and 0 or math.min(DN_AFTER, frames)
-    -- The frames on each side (Full or Light) and the grain kept: the shader's own parameters, nothing rebuilt
-    local want = { gyroflow_dn_radius = string.format("%d", frames), gyroflow_dn_keep = string.format("%.3f", o.still_grain),
-                   gyroflow_dn_strong = denoise_strong and "1" or "0" }
-    local opts = mp.get_property_native("glsl-shader-opts") or {}
-    local differ = false
-    for k, v in pairs(want) do if opts[k] ~= v then opts[k], differ = v, true end end
-    if differ then mp.set_property_native("glsl-shader-opts", opts) end
-    local fps = current_source and tonumber(current_source.fps)
-    local on = gpu ~= nil and gpu.shader ~= nil and gpu.denoise and fps and fps > 0
-    local before = shown or dn_shown()
-    local restart = shown ~= nil
-    if after ~= dn.after then
-        dn.after, dn.epoch = after, dn.epoch + 1
-        local opts = mp.get_property_native("glsl-shader-opts") or {}
-        opts.gyroflow_dn_after, opts.gyroflow_dn_epoch = tostring(after), tostring(dn.epoch)
-        mp.set_property_native("glsl-shader-opts", opts)
-        restart = true
+-- screen is sought to exactly, so the picture stays where it was. user-data/gyroflow/gpu_delay: { delay, restart, show }
+-- for what's on screen (the seek bar, marks, the part, export's photo: their shown_time()).
+--
+-- Paused (docs/seek-and-scrub.md, dnstep.lua): frame steps (`,` `.`, Option+arrows, the bar's buttons and wheel: this
+-- plugin's frame-back / frame-on) go from the frame on screen; a step back shows the frame before from the ring at
+-- once (gyroflow_dn_show), a step on plays the frames after it first. Where the frame on screen hasn't all its
+-- neighbours (after a seek, a step back past the ring, a clip opened paused), the ring is filled again around it, the
+-- frame held on screen meanwhile: after a seek at once (its frame is on screen as decoded first), after steps once
+-- they stop for still_delay. Playing on goes on from the frame on screen.
+-- (a block of its own: main.lua's chunk is near Lua's 200 locals)
+do
+    local DN_AFTER = 5
+    -- After a seek of someone else's, the fill waits this long for the next one (a drag over the bar)
+    local DN_FILL_AFTER_SEEK = 0.15
+    local dnstep = require 'dnstep'
+    local dn = { after = DN_AFTER, epoch = 0, delay = 0, restart = nil, show = nil }
+    -- Paused work under way: { kind = "frames" (frame-step N, until_ the newest frame it ends on), "fill-seek" (the
+    -- fill's seek, frames to play after it, until_) }; own_seek: the time a seek of ours goes to, until it's there (a
+    -- seek landing elsewhere was someone else's: theirs came last); steps waiting behind it
+    local dn_busy, dn_own_seek, dn_queue, dn_fill_timer = nil, nil, 0, nil
+    local function dn_publish()
+        mp.set_property_native("user-data/gyroflow/gpu_delay", { delay = dn.delay, restart = dn.restart or -1, show = dn.show or -1 })
     end
-    local delay = on and after / fps or 0
-    if delay ~= dn.delay then
-        mp.set_property_number("audio-delay", (mp.get_property_number("audio-delay") or 0) - dn.delay + delay)
-        dn.delay = delay
-    end
-    if restart then
+    local function dn_state()
+        local fps = current_source and tonumber(current_source.fps)
         local t = mp.get_property_number("time-pos")
-        if before and t and mp.get_property_native("pause") and fps and math.abs(t - before) > 0.25 / fps then
-            mp.commandv("seek", string.format("%.6f", before), "absolute+exact")
-            t = before
-        end
-        dn.restart = t
+        if not t or not fps or fps <= 0 then return nil end
+        return { t = t, F = 1 / fps, after = dn.after, radius = DENOISE_FRAMES[o.temporal_denoise] or DN_AFTER,
+                 restart = dn.restart or t, show = dn.show, duration = mp.get_property_number("duration") }
     end
-    dn_publish()
-end })
-mp.register_event("playback-restart", function()
-    dn.restart = mp.get_property_number("time-pos")
-    dn_publish()
-end)
-mp.observe_property("user-data/gyroflow/crop", "native", function() dn_sync() end)
--- A new size of the picture starts the ring again too
-mp.observe_property("osd-dimensions", "native", function()
-    gpu_render_scale()
-    if dn.delay > 0 then dn_sync(dn_shown()) end
-end)
+    local function dn_shown()
+        local t = mp.get_property_number("time-pos")
+        if not t or dn.delay <= 0 then return t end
+        local st = dn_state()
+        return st and dnstep.shown(st) or t
+    end
+    -- The frame asked of the shader, paused (nil: its own, newest - after)
+    local function dn_set_show(x)
+        dn.show = x
+        local opts = mp.get_property_native("glsl-shader-opts") or {}
+        local v = x and string.format("%.6f", x) or "-1"
+        if opts.gyroflow_dn_show ~= v then
+            opts.gyroflow_dn_show = v
+            mp.set_property_native("glsl-shader-opts", opts)
+        end
+        dn_publish()
+    end
+    -- Frame steps and the fill: paused, with the denoise's frames after the shown one (not crop mode)
+    local function dn_stepping() return dn.delay > 0 and dn.after > 0 and gpu ~= nil and gpu.shader ~= nil end
+    local function dn_seek(t)
+        dn_own_seek = t
+        mp.commandv("seek", string.format("%.6f", t), "absolute+exact")
+    end
+    local function dn_cancel()
+        if dn_fill_timer then dn_fill_timer:kill() end
+        dn_fill_timer, dn_busy, dn_queue = nil, nil, 0
+    end
+    -- The ring filled again around the frame on screen, when it hasn't all its neighbours
+    local function dn_fill()
+        dn_fill_timer = nil
+        -- Not over a seek under way (someone else's: its frame is filled once it's there)
+        if dn_busy or dn_own_seek or not dn_stepping() or not mp.get_property_native("pause") or mp.get_property_native("seeking") then return end
+        local st = dn_state()
+        if not st then return end
+        local x = dnstep.shown(st)
+        if dnstep.complete(st, x) then return end
+        local r = dnstep.refill(st, x)
+        mp.msg.verbose(string.format("denoise: the ring filled again around %.3f s (from %.3f s, %d frames)", x, r.from, r.frames))
+        dn_set_show(x)
+        dn_busy = { kind = "fill-seek", frames = r.frames, until_ = r.until_ }
+        dn_seek(r.from)
+    end
+    local function dn_schedule_fill(delay)
+        if dn_fill_timer then dn_fill_timer:kill() end
+        dn_fill_timer = nil
+        if not dn_stepping() or not mp.get_property_native("pause") then return end
+        dn_fill_timer = mp.add_timeout(delay, dn_fill)
+    end
+    -- Plays n frames (mpv's frame-step, sound off), up to the frame at until_
+    local function dn_play_frames(n, until_)
+        dn_busy = { kind = "frames", until_ = until_, started = false }
+        mp.commandv("frame-step", tostring(n), "mute")
+    end
+    local dn_step
+    -- A step done (or the fill): the next one waiting, else the fill once they stop
+    local function dn_done()
+        dn_busy = nil
+        if dn_queue ~= 0 then
+            local dir = dn_queue > 0 and 1 or -1
+            dn_queue = dn_queue - dir
+            return dn_step(dir)
+        end
+        dn_schedule_fill(o.still_delay)
+    end
+    dn_step = function(dir)
+        if not dn_stepping() then return mp.command(dir > 0 and "frame-step" or "frame-back-step") end
+        if not mp.get_property_native("pause") then
+            -- Playing: it pauses on the frame on screen, and steps from there
+            dn_cancel()
+            mp.set_property_native("pause", true)
+        end
+        if dn_busy then dn_queue = dn_queue + dir; return end
+        if dn_fill_timer then dn_fill_timer:kill(); dn_fill_timer = nil end
+        local st = dn_state()
+        local a = st and dnstep.step(st, dir)
+        if not a then return end
+        dn_set_show(a.show)
+        if a.seek then
+            dn_busy = { kind = "seek" }
+            dn_seek(a.seek)
+        elseif a.frames > 0 then
+            dn_play_frames(a.frames, st.t + a.frames * st.F)
+        else
+            dn_done()
+        end
+    end
+    mp.add_key_binding(".", "frame-on", function() dn_step(1) end, { repeatable = true })
+    mp.add_key_binding(",", "frame-back", function() dn_step(-1) end, { repeatable = true })
+
+    -- The ring started again by its epoch (a shader file used before, which mpv may give back with its ring as it was)
+    local function dn_new_ring()
+        dn.epoch = dn.epoch + 1
+        local opts = mp.get_property_native("glsl-shader-opts") or {}
+        opts.gyroflow_dn_after, opts.gyroflow_dn_epoch = tostring(dn.after), tostring(dn.epoch)
+        mp.set_property_native("glsl-shader-opts", opts)
+    end
+    -- shown: the frame on screen before a new shader (gpu_apply), nil otherwise
+    dn_sync = setmetatable({ shown = dn_shown, new_ring = dn_new_ring }, { __call = function(_, shown)
+        local crop_on = (mp.get_property_native("user-data/gyroflow/crop") or {}).active == true
+        local frames = DENOISE_FRAMES[o.temporal_denoise] or DN_AFTER
+        local after = crop_on and 0 or math.min(DN_AFTER, frames)
+        -- The frames on each side (Full or Light) and the grain kept: the shader's own parameters, nothing rebuilt
+        local want = { gyroflow_dn_radius = string.format("%d", frames), gyroflow_dn_keep = string.format("%.3f", o.still_grain),
+                       gyroflow_dn_strong = denoise_strong and "1" or "0" }
+        local opts = mp.get_property_native("glsl-shader-opts") or {}
+        local differ = false
+        for k, v in pairs(want) do if opts[k] ~= v then opts[k], differ = v, true end end
+        if differ then mp.set_property_native("glsl-shader-opts", opts) end
+        local fps = current_source and tonumber(current_source.fps)
+        local on = gpu ~= nil and gpu.shader ~= nil and gpu.denoise and fps and fps > 0
+        local before = shown or dn_shown()
+        local restart = shown ~= nil
+        if after ~= dn.after then
+            dn.after, dn.epoch = after, dn.epoch + 1
+            local opts = mp.get_property_native("glsl-shader-opts") or {}
+            opts.gyroflow_dn_after, opts.gyroflow_dn_epoch = tostring(after), tostring(dn.epoch)
+            mp.set_property_native("glsl-shader-opts", opts)
+            restart = true
+        end
+        local delay = on and after / fps or 0
+        if delay ~= dn.delay then
+            mp.set_property_number("audio-delay", (mp.get_property_number("audio-delay") or 0) - dn.delay + delay)
+            dn.delay = delay
+        end
+        if restart then
+            -- The ring is empty again: what was asked of it goes, the frame on screen is sought to (and filled again)
+            dn_cancel()
+            dn_set_show(nil)
+            local t = mp.get_property_number("time-pos")
+            if before and t and mp.get_property_native("pause") and fps and math.abs(t - before) > 0.25 / fps then
+                mp.commandv("seek", string.format("%.6f", before), "absolute+exact")
+                t = before
+            end
+            dn.restart = t
+        end
+        dn_publish()
+    end })
+    mp.register_event("seek", function()
+        -- Ours: told apart once it's there (playback-restart)
+        if dn_own_seek then return end
+        -- A seek of someone else's (the bar, a mark, the keys): what was under way stops; the frame asked of the shader
+        -- goes once the new one is there (until then the shader keeps the old one on screen, no flash of another).
+        -- Frames being played (frame-step N, which unpauses) stop too: mpv keeps the steps not played through a seek
+        -- and adds the next ones to them, so a drag over the bar while paused went on playing them once it stopped
+        local stepping = dn_busy and dn_busy.kind == "frames"
+        dn_cancel()
+        if stepping then mp.set_property_native("pause", true) end
+        dn.clear_show = true
+    end)
+    mp.register_event("playback-restart", function()
+        dn.restart = mp.get_property_number("time-pos")
+        if dn_own_seek then
+            local fps = current_source and tonumber(current_source.fps) or 60
+            local ours = dn.restart and math.abs(dn.restart - dn_own_seek) < 0.5 / fps
+            dn_own_seek = nil
+            if not ours then
+                -- Someone else's seek came after ours: theirs it is
+                dn_cancel()
+                dn.clear_show = true
+            end
+        end
+        if dn.clear_show then
+            dn.clear_show = false
+            dn_set_show(nil)
+            -- Paused there: filled as soon as the seeks stop (its frame is on screen as decoded; a drag over the bar
+            -- seeks on as the mouse moves, and each seek puts the fill off)
+            dn_schedule_fill(DN_FILL_AFTER_SEEK)
+            return dn_publish()
+        end
+        dn_publish()
+        local b = dn_busy
+        if b and b.kind == "fill-seek" then
+            -- The fill's seek: the frames up to the frame's last neighbour played, the frame held on screen
+            if b.frames > 0 then dn_play_frames(b.frames, b.until_) else dn_busy = nil end
+        elseif b and b.kind == "seek" then
+            dn_done()
+        elseif not b then
+            dn_schedule_fill(o.still_delay)
+        end
+    end)
+    mp.observe_property("time-pos", "number", function(_, t)
+        local b = dn_busy
+        if b and b.kind == "frames" and t and current_source and t >= b.until_ - 0.5 / tonumber(current_source.fps)
+           and mp.get_property_native("pause") then
+            dn_done()
+        end
+    end)
+    mp.observe_property("pause", "bool", function(_, paused)
+        local b = dn_busy
+        if b and b.kind == "frames" then
+            if not paused then b.started = true return end
+            -- Paused again: the steps done (time-pos says so), or cut short. Cut short by Space (mpv's cycle: the
+            -- frame-step had it playing), which on a paused picture means play: it plays on, from the frame on screen
+            local t = mp.get_property_number("time-pos")
+            local fps = current_source and tonumber(current_source.fps)
+            if b.started and t and fps and t >= b.until_ - 0.5 / fps then return dn_done() end
+            if b.started then
+                dn_busy = nil
+                mp.set_property_native("pause", false)
+            end
+            return
+        end
+        if paused then
+            -- Paused while playing: its frame has its neighbours, unless it played only a moment since a seek
+            if not b then dn_schedule_fill(o.still_delay) end
+            return
+        end
+        -- Playing on: from the frame on screen (a seek to it, when the shader would otherwise go on from another)
+        local st = dn.show and dn_state()
+        local from = st and dnstep.play_from(st)
+        dn_cancel()
+        if from then
+            dn.clear_show = true
+            mp.commandv("seek", string.format("%.6f", from), "absolute+exact")
+        elseif dn.show then
+            dn_set_show(nil)
+        end
+    end)
+    mp.register_event("end-file", function()
+        dn_cancel()
+        dn_own_seek, dn.clear_show = nil, false
+        if dn.show then dn_set_show(nil) end
+    end)
+    mp.observe_property("user-data/gyroflow/crop", "native", function() dn_sync() end)
+    -- A new size of the picture starts the ring again too
+    mp.observe_property("osd-dimensions", "native", function()
+        gpu_render_scale()
+        if dn.delay > 0 then dn_sync(dn_shown()) end
+    end)
+end
 
 -- What add_filter would play the clip with, when render_args asks for it instead
 local render_dump = nil
@@ -1629,6 +1842,7 @@ local function add_filter(source, done)
                 .. (sizes.input and string.format(" (input scaled to %dx%d)", sizes.input[1], sizes.input[2]) or "")
                 .. (sizes.output and string.format(" (rendered at %dx%d)", sizes.output[1], sizes.output[2]) or "") .. (view == "wide" and ", wider view" or "")
                 .. ((has_project(source) or filter_lens(source) == "only") and "" or ", " .. level)
+                .. (source.in_camera and (", on top of the camera's " .. source.in_camera) or "")
                 .. (filter_lens(source) == "only" and ", the lens alone corrected" or filter_lens(source) == "recorded" and ", the lens as recorded" or "")
                 .. ((horizon ~= nil and filter_lens(source) ~= "only") and (horizon and ", horizon locked" or ", horizon not locked") or "") .. (fast(source) and ", every other frame if it leaves edges" or ""))
     done()
@@ -1759,6 +1973,28 @@ local function add_sphere(source)
                               tracks, tostring(rig.width), tostring(rig.height), step > 1 and string.format(", every %s frames", step) or ""))
 end
 
+-- The card shown while a clip's loading waits for this plugin: first the check of what it can be stabilized with
+-- (gyroflow-probe: from a NAS a second or more), then, for a clip that has motion data, the reading of it for the
+-- filter. One that has none (a drone's, a phone's) is only checked. (In a block of its own with setup and the hook:
+-- the main chunk is at Lua's 200 local variables)
+do
+local loading = {
+    phase = "checking", shown = false,
+    cards = {
+        checking = { title = "Checking the clip for motion data", detail = "Whether it can be stabilized" },
+        reading = { title = "Reading the clip's motion", detail = "For the stabilization" },
+    },
+}
+function loading.card()
+    loading.shown = true
+    local card = loading.cards[loading.phase]
+    mp.notify({ id = "gyroflow:reading", kind = "working", title = card.title, detail = card.detail })
+end
+function loading.to(phase)
+    loading.phase = phase
+    if loading.shown then loading.card() end
+end
+
 -- The filter for the clip, to done() once it's decided
 local function setup(done)
     current_source, stab_off, spherical, rig360 = nil, false, false, false
@@ -1793,6 +2029,7 @@ local function setup(done)
             return done()
         end
         if not source then return done() end
+        if source.kind ~= "lens" then loading.to("reading") end
         add_filter(source, function()
             done()
             if source.kind == "project" then find_water(path, source) end
@@ -1803,18 +2040,19 @@ end
 -- Loading waits for the probe, with the script free meanwhile: quitting doesn't wait for it
 mp.add_hook("on_load", 50, function(hook)
     hook:defer()
-    local slow = mp.add_timeout(0.7, function()
-        mp.notify({ id = "gyroflow:reading", kind = "working", title = "Reading the clip's motion", detail = "For the stabilization" })
-    end)
+    loading.phase, loading.shown = "checking", false
+    local slow = mp.add_timeout(0.7, loading.card)
     setup(function()
-        if not slow:is_enabled() then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
+        if loading.shown then mp.notify({ id = "gyroflow:reading", kind = "hide" }) end
         slow:kill()
+        loading.shown = false
         -- Held for a clip before this one that didn't get to play on the GPU path
         if not (gpu and gpu.hold) then gpu_unhold() end
         publish()
         hook:cont()
     end)
 end)
+end
 
 -- The clip loaded again from where it plays: to stabilize it with a project that wasn't there when it loaded
 play_again = function()
@@ -1876,8 +2114,11 @@ mp.register_event("file-loaded", function()
                     if type(t) == "table" and t.id then label_of[t.id] = t.label or t.id end
                 end
                 local typ = type(info.type) == "string" and info.type or type(info.recorded) == "string" and info.recorded or nil
+                -- Where it comes from, the clip's mode as the player's own lens database keeps it, and the lenses to
+                -- choose for that mode (lens_pick::candidates)
                 current_lens = { camera = info.camera or "", lens = info.lens or "", mode = tonumber(info.mode),
-                                 type_label = typ and (label_of[typ] or typ) or nil }
+                                 type_label = typ and (label_of[typ] or typ) or nil, from = info.from or "", mode_key = info.mode_key,
+                                 candidates = type(info.candidates) == "table" and info.candidates or {} }
                 publish()
             end
         end)
@@ -1887,6 +2128,7 @@ mp.register_event("file-loaded", function()
         if filtering() then label = "Gyroflow: no motion data, the lens corrected" end
     elseif current_source and filtering() then
         label = "Gyroflow: " .. (stab_off and "the lens corrected, not stabilized" or "stabilized") .. KIND_LABELS[current_source.kind] .. (has_project(current_source) and "" or ", " .. level)
+                .. ((current_source.in_camera and not stab_off) and (", on top of " .. current_source.in_camera) or "")
                 .. (view == "wide" and ", wider view" or "")
     end
     if label then first_frame_message(label) end
@@ -2287,6 +2529,10 @@ end)
 -- Level (locked) or Free; "project", from before, as the preset has it
 mp.register_script_message("horizon-lock", function(value)
     if project_owns("the horizon") then return end
+    if (current_source and current_source.optical) then
+        return mp.notify({ id = "gyroflow:horizon", kind = "info", seconds = 4, title = "No horizon to lock",
+                           detail = "This clip's motion was measured from the picture: it has no gravity in it" })
+    end
     if value == "project" then value = DEFAULTS.preset_horizon end
     if value == "toggle" then
         horizon = not horizon
@@ -2303,6 +2549,13 @@ end)
 
 local function set_underwater(value)
     if value == "project" or project_owns("the lens") then return end
+    if (current_source and current_source.optical) then
+        -- Kept for the clip (the next measurement's medium), but the motion plays in the medium it was measured in
+        mp.commandv("script-message-to", "workspace", "input-set", "underwater", value)
+        local wet = current_source.optical.in_water == true
+        return mp.notify({ id = "gyroflow:water", kind = "info", seconds = 5, title = "Kept for the next measurement",
+                           detail = "The motion was measured " .. (wet and "in water" or "in air") .. ": it plays so until it's measured again" })
+    end
     underwater = value
     if value ~= "no" then underwater_back = value end
     -- Input: the source's correction, into its own file at once
@@ -2559,8 +2812,6 @@ mp.register_script_message("remember", function()
         for k, v in pairs(b) do session[k] = v end
         publish()
     end
-    -- The underwater colour's part of the transform (the dlogm plugin's uwcolor.conf)
-    mp.commandv("script-message-to", "dlogm", "uw-remember")
     mp.osd_message(saved and "Gyroflow: the transform as it plays is the default now (gyroflow.conf)" or "Gyroflow: couldn't write gyroflow.conf", 2)
 end)
 
@@ -2838,3 +3089,7 @@ if o.render_args ~= "" then
     mp.register_event("playback-restart", function() mp.add_timeout(0.05, dump) end)
     mp.register_event("end-file", function() dump() end)
 end
+
+-- Ctrl+m: the clip's motion measured from its picture into its .afp-motion (measure.lua), then played again with it.
+-- Not a local here: this chunk has as many as Lua allows
+require('measure').setup({ source = function() return current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify, options = o })

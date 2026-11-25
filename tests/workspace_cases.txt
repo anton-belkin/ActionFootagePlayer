@@ -6,6 +6,8 @@
 # tree             then one path per line, indented, made in it: a folder ends with /, else it's an empty file;
 #                  "<path> = <text>" a file with that text in it (a Project.afproject with locations, an .afplocation)
 # mount <//host/share> <dir>   this computer has that share mounted at <dir> (a folder of the case)
+# known <dir>     this computer's records of its projects by id (the Library's ActionFootage/projects) are in <dir>
+#                  (a folder of the case); "@/" in a file's text is the case's folder
 # clip <path>      then, indented, what's expected for that clip:
 #   project <dir>    the project it belongs to (- for none)
 #   projects <a|b>   all the projects found for it, in order
@@ -175,8 +177,8 @@ volume windows \\nas\video\Egypt no
 
 case a project apart from its footage, a location relative to it
 tree
-  SSD/Projects/Footage/Project.afproject = {"format":"actionfootage-project","version":2,"locations":[{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
-  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage"}
+  SSD/Projects/Footage/Project.afproject = {"id":"footage","format":"actionfootage-project","version":2,"locations":[{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
+  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage","id":"footage"}
   HDD/Footage/Action 6/A.MP4
   HDD/Footage/Action 6/A.gyroflow
 clip HDD/Footage/Action 6/A.MP4
@@ -187,10 +189,10 @@ clip HDD/Footage/Action 6/A.MP4
 
 case a working copy first, the archive keeps the clip's own file
 tree
-  SSD/Projects/Footage/Project.afproject = {"version":2,"locations":[{"name":"Working","at":"","path":"../../Work","copies":true},{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
-  SSD/Work/Footage.afplocation = {"project":"../Projects/Footage"}
+  SSD/Projects/Footage/Project.afproject = {"id":"footage","version":2,"locations":[{"name":"Working","at":"","path":"../../Work","copies":true},{"name":"Archive","at":"","path":"../../../HDD/Footage"}]}
+  SSD/Work/Footage.afplocation = {"project":"../Projects/Footage","id":"footage"}
   SSD/Work/Action 6/A.MP4
-  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage"}
+  HDD/Footage/Footage.afplocation = {"project":"../../SSD/Projects/Footage","id":"footage"}
   HDD/Footage/Action 6/A.MP4
   HDD/Footage/Action 6/A.afp.json
   HDD/Footage/Action 6/B.MP4
@@ -206,11 +208,11 @@ clip HDD/Footage/Action 6/B.MP4
 
 case two own files of one clip: the first location's is the main one, the other's read only
 tree
-  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Archive"},{"at":"Action 6","path":"../Inbox"}]}
-  Archive/x.afplocation = {"project":"../P"}
+  P/Project.afproject = {"id":"p","version":2,"locations":[{"at":"","path":"../Archive"},{"at":"Action 6","path":"../Inbox"}]}
+  Archive/x.afplocation = {"project":"../P","id":"p"}
   Archive/Action 6/A.MP4
   Archive/Action 6/A.afp.json
-  Inbox/x.afplocation = {"project":"../P"}
+  Inbox/x.afplocation = {"project":"../P","id":"p"}
   Inbox/A.MP4
   Inbox/A.afp.json
 clip Inbox/A.MP4
@@ -224,13 +226,13 @@ clip Archive/Action 6/A.MP4
 
 case a copies-only location first: its own file is the main one only when no other copy has one; then the archive's
 tree
-  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Work","copies":true},{"at":"","path":"../Archive"}]}
-  Work/x.afplocation = {"project":"../P"}
+  P/Project.afproject = {"id":"p","version":2,"locations":[{"at":"","path":"../Work","copies":true},{"at":"","path":"../Archive"}]}
+  Work/x.afplocation = {"project":"../P","id":"p"}
   Work/A.MP4
   Work/A.afp.json
   Work/B.MP4
   Work/B.afp.json
-  Archive/x.afplocation = {"project":"../P"}
+  Archive/x.afplocation = {"project":"../P","id":"p"}
   Archive/A.MP4
   Archive/B.MP4
   Archive/B.afp.json
@@ -243,10 +245,10 @@ clip Work/B.MP4
 
 case the inbox placed in a subfolder of the tree
 tree
-  P/Project.afproject = {"version":2,"locations":[{"at":"","path":"../Archive"},{"at":"/Action 6/","path":"../Inbox"}]}
-  Archive/x.afplocation = {"project":"../P"}
+  P/Project.afproject = {"id":"p","version":2,"locations":[{"at":"","path":"../Archive"},{"at":"/Action 6/","path":"../Inbox"}]}
+  Archive/x.afplocation = {"project":"../P","id":"p"}
   Archive/GoPro/G.MP4
-  Inbox/x.afplocation = {"project":"../P"}
+  Inbox/x.afplocation = {"project":"../P","id":"p"}
   Inbox/DJI_0141_D.MP4
 clip Inbox/DJI_0141_D.MP4
   project P
@@ -258,8 +260,8 @@ clip Archive/GoPro/G.MP4
 
 case a location on a share, by its network path
 tree
-  SSD/P/Project.afproject = {"version":2,"locations":[{"at":"","path":"//DiskStationDXP/video/Footage"}],"hosts":{"DISKSTATIONDXP":["web.nas"]}}
-  Mnt/video/Footage/F.afplocation = {"project":"../../../SSD/P"}
+  SSD/P/Project.afproject = {"id":"p","version":2,"locations":[{"at":"","path":"//DiskStationDXP/video/Footage"}],"hosts":{"DISKSTATIONDXP":["web.nas"]}}
+  Mnt/video/Footage/F.afplocation = {"project":"../../../SSD/P","id":"p"}
   Mnt/video/Footage/2026/A.MP4
 mount //antonadmin@diskstationdxp._smb._tcp.local/video Mnt/video
 clip Mnt/video/Footage/2026/A.MP4
@@ -267,13 +269,59 @@ clip Mnt/video/Footage/2026/A.MP4
   relative 2026/A.MP4
   own Mnt/video/Footage/2026/A.afp.json
 
+case a pointer whose path doesn't reach its project (the NAS mounted by another name): this computer's record of it
+tree
+  Mnt/ssd/Lib/Project.afproject = {"version":4,"id":"p-1","locations":[{"at":"","path":"//DISKSTATIONDXP/photo/DATA"}],"hosts":{"DISKSTATIONDXP":["192.168.50.186"]}}
+  Mnt/photo/DATA/Lib.afplocation = {"project":"//DISKSTATIONDXP/ssd/Lib","id":"p-1"}
+  Mnt/photo/DATA/Maldives/A.MP4
+  Support/projects/p-1.json = {"project":"@/Mnt/ssd/Lib"}
+mount //antonadmin@192.168.50.186/photo Mnt/photo
+mount //antonadmin@192.168.50.186/ssd Mnt/ssd
+known Support/projects
+clip Mnt/photo/DATA/Maldives/A.MP4
+  project Mnt/ssd/Lib
+  relative Maldives/A.MP4
+  own Mnt/photo/DATA/Maldives/A.afp.json
+
+case no record of the project on this computer: a share of the same name isn't searched
+tree
+  Mnt/ssd/Lib/Project.afproject = {"version":4,"id":"p-1","locations":[{"at":"","path":"//DISKSTATIONDXP/photo/DATA"}]}
+  Mnt/photo/DATA/Lib.afplocation = {"project":"//DISKSTATIONDXP/ssd/Lib","id":"p-1"}
+  Mnt/photo/DATA/Maldives/A.MP4
+mount //antonadmin@192.168.50.186/photo Mnt/photo
+mount //antonadmin@192.168.50.186/ssd Mnt/ssd
+known Support/projects
+clip Mnt/photo/DATA/Maldives/A.MP4
+  project -
+
+case the record's folder has a project of another id: not taken
+tree
+  Mnt/ssd/Lib/Project.afproject = {"version":4,"id":"other","locations":[{"at":"","path":"//DISKSTATIONDXP/photo/DATA"}]}
+  Mnt/photo/DATA/Lib.afplocation = {"project":"//DISKSTATIONDXP/ssd/Lib","id":"p-1"}
+  Mnt/photo/DATA/Maldives/A.MP4
+  Support/projects/p-1.json = {"project":"@/Mnt/ssd/Lib"}
+mount //antonadmin@192.168.50.186/photo Mnt/photo
+mount //antonadmin@192.168.50.186/ssd Mnt/ssd
+known Support/projects
+clip Mnt/photo/DATA/Maldives/A.MP4
+  project -
+
+case a pointer's path reaching a project of another id, or a pointer with no id: neither taken
+tree
+  P/Project.afproject = {"id":"p-2","version":2,"locations":[{"at":"","path":"../F"}]}
+  F/a.afplocation = {"project":"../P","id":"p-1"}
+  F/b.afplocation = {"project":"../P"}
+  F/A.MP4
+clip F/A.MP4
+  project -
+
 case two projects use one footage, the first by name; a pointer to a project that's gone is passed over
 tree
-  A/Project.afproject = {"version":2,"locations":[{"at":"","path":"../F"}]}
-  B/Project.afproject = {"version":2,"locations":[{"at":"Trips","path":"../F"}]}
-  F/a.afplocation = {"project":"../A"}
-  F/b.afplocation = {"project":"../B"}
-  F/c.afplocation = {"project":"../Gone"}
+  A/Project.afproject = {"id":"a","version":2,"locations":[{"at":"","path":"../F"}]}
+  B/Project.afproject = {"id":"b","version":2,"locations":[{"at":"Trips","path":"../F"}]}
+  F/a.afplocation = {"project":"../A","id":"a"}
+  F/b.afplocation = {"project":"../B","id":"b"}
+  F/c.afplocation = {"project":"../Gone","id":"gone"}
   F/Day 1/A.MP4
 clip F/Day 1/A.MP4
   projects A|B

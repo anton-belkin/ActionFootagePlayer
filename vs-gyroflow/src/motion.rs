@@ -45,20 +45,27 @@ const HOLE_US: i64 = 500_000;
 const FADE_IN_US: i64 = 500_000;
 
 /// What a level's stabilization is made of: the frame's geometry for its margin (levels.rs). `projection`: the
-/// output's (Gyroflow's OutputProjection, "Automatic" resolved for the lens)
+/// output's (Gyroflow's OutputProjection, "Automatic" resolved for the lens). `crop_share`: of the levels' crop, the
+/// clip's (in_camera.rs: less on top of HyperSmooth)
 #[derive(Clone, Copy)]
-pub struct Geometry { pub still_fov: f64, pub fx: f64, pub output_aspect: f64, pub width: f64, pub projection: i32 }
+pub struct Geometry { pub still_fov: f64, pub fx: f64, pub output_aspect: f64, pub width: f64, pub projection: i32, pub crop_share: f64 }
 
 impl Geometry {
     pub fn of(stab: &StabilizationManager, still_fov: f64) -> Geometry {
         let projection = ComputeParams::from_manager(stab).output_projection;
+        let crop_share = crate::in_camera::crop_share(stab);
         let p = stab.params.read();
         let fx = stab.lens.read().get_camera_matrix(p.size)[(0, 0)];
-        Geometry { still_fov, fx, output_aspect: p.output_size.0 as f64 / p.output_size.1.max(1) as f64, width: p.size.0 as f64, projection }
+        Geometry { still_fov, fx, output_aspect: p.output_size.0 as f64 / p.output_size.1.max(1) as f64, width: p.size.0 as f64, projection, crop_share }
     }
 
     pub fn smoothing(&self, level: Level) -> Predictive {
-        Predictive { smoothness: level.smoothness(), margin: levels::margin(level, self.still_fov, self.fx, self.output_aspect, self.width, self.projection) }
+        Predictive { smoothness: level.smoothness(), margin: levels::margin(level.crop() * self.crop_share, self.still_fov, self.fx, self.output_aspect, self.width, self.projection) }
+    }
+
+    /// The FOV `level` renders the clip at
+    pub fn fov(&self, level: Level) -> f64 {
+        level.fov(self.still_fov, self.crop_share)
     }
 }
 
@@ -151,6 +158,9 @@ pub struct Motion {
     /// The lens under water as the player has it, and the clip: Auto follows the camera's In water / Out of water as
     /// far as it's read (water.rs)
     underwater: Mutex<Option<(Underwater, String)>>,
+    /// The motion is all there from the start (measured from the picture, afp_motion.rs): the file's own isn't read
+    /// as it plays, only the level followed
+    frozen: AtomicBool,
 }
 
 impl Motion {
@@ -198,7 +208,7 @@ impl Motion {
             }
         }
         let len = clip.len;
-        Ok((Arc::new(Motion { clip, url: url.to_string(), lookahead, asked: Mutex::new(Instant::now()), stop: AtomicBool::new(false), underwater: Mutex::new(None) }), len))
+        Ok((Arc::new(Motion { clip, url: url.to_string(), lookahead, asked: Mutex::new(Instant::now()), stop: AtomicBool::new(false), underwater: Mutex::new(None), frozen: AtomicBool::new(false) }), len))
     }
 
     pub fn set_underwater(&self, underwater: Underwater, video: &str) {
@@ -224,6 +234,10 @@ impl Motion {
     }
 
     pub fn stop(&self) { self.stop.store(true, Ordering::Relaxed); }
+
+    /// See `frozen`
+    pub fn freeze(&self) { self.frozen.store(true, Ordering::Relaxed); }
+    pub fn is_frozen(&self) -> bool { self.frozen.load(Ordering::Relaxed) }
 
     /// The thread that reads the rest, adds it to `stab`'s motion data and smooths it again; and smooths again when the
     /// level changes (`level_now`, the control file's)
@@ -251,6 +265,7 @@ impl Motion {
                 level = now_level;
                 if !new_data { restabilize(&stab, &geometry, level); }
             }
+            if self.is_frozen() { continue; }
             let head = self.clip.playhead.load(Ordering::Relaxed) as f64 / 1_000_000.0;
             // Another engine of the clip plays it: it reads for both, and this one catches up if it's played again
             let idle = self.asked.lock().elapsed() >= PAUSED;

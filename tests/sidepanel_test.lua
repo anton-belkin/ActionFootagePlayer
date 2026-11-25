@@ -71,8 +71,8 @@ local function expect(what, got, want)
     end
 end
 
--- The panel's drawing with its places (the bar draws into its own)
-local panel
+-- The panel's drawing with its places (the bar draws into its own); the bar's track
+local panel, track
 local function redraw()
     events["file-loaded"]()
 end
@@ -85,6 +85,7 @@ ui.new = function(s)
     local hit = u.hit
     u.hit = function(self, x, y, w, h, id, cmd)
         if type(id) == "string" and id:find("^rail:") then panel = self end
+        if id == "bar:track" then track = { x0 = x, y0 = y, x1 = x + w, y1 = y + h } end
         return hit(self, x, y, w, h, id, cmd)
     end
     return u
@@ -518,9 +519,9 @@ expect("a part that fails: no error out of the panel", ok, true)
 expect("…the rail still drawn", find("rail:playlist") ~= nil, true)
 tl.playlist_rows = list_rows
 mp.set_property_native("osd-dimensions", { w = 1280, h = 1800 })
--- Underwater colour: its own tab, its switches and strength part of the clip's transform (the dot: what's saved)
+-- Underwater colour: its own tab, its switches and strength the source's input (Save to the source; the dot: what's saved)
 mp.set_property_native("user-data/workspace", { path = "/footage/DJI_0001.MP4", clip = "/footage/DJI_0001.MP4", view_target = "source",
-    view_status = "changed", view_from = "source", saved = { uw = false, uw_highlights = false, uw_strength = 1 } })
+    view_status = "saved", view_from = "source", input_status = "changed", input = { uw = false, uw_highlights = false, uw_strength = 1 } })
 mp.set_property_native("user-data/uwcolor", { uw = true, uw_highlights = false, uw_strength = 0.6, active = true, ok = true,
     session = {}, defaults = {}, stats = { under_water = 1, water = 0.48, water_hue = 263, water_hue_after = 263, water_a = -0.012,
     water_a_after = -0.043, leak = 0.5, red = 0.09, blue = 0.18, blue_water = 0, lift = 0.94, median = 0.12,
@@ -528,18 +529,47 @@ mp.set_property_native("user-data/uwcolor", { uw = true, uw_highlights = false, 
 messages.tab("water")
 expect("underwater: the rail has its button", find("rail:water") ~= nil, true)
 expect("underwater: its switches and strength", find("uw-on") ~= nil and find("uw-hl") ~= nil and find("uw-strength") ~= nil, true)
-expect("underwater: the transform's Save there too", find("view-save") ~= nil and find("view-revert") ~= nil, true)
+expect("underwater: the source's Save there, not the transform's", find("input-save") ~= nil and find("input-revert") ~= nil and find("view-save") == nil, true)
 click("uw-on")
 expect("underwater: the switch", last_ran(), "script-message-to dlogm uw-set uw toggle")
 click("uw-hl")
 expect("underwater: brighter highlights", last_ran(), "script-message-to dlogm uw-set uw_highlights toggle")
-click("view-save")
-expect("underwater: Save saves the transform", last_ran(), "script-message-to workspace view-save")
-click("view-default")
-expect("underwater: Use as default is the transform's", last_ran(), "script-message-to gyroflow remember")
+click("input-save")
+expect("underwater: Save saves the source", last_ran(), "script-message-to workspace input-save")
+messages.tab("source")
+expect("underwater: in Source's colour too", find("uw-pick") ~= nil, true)
+messages.tab("water")
 mp.set_property_native("user-data/uwcolor", { uw = false, uw_highlights = false, uw_strength = 1, active = false, ok = true, stats = {} })
 expect("underwater: off, highlights can't be switched", (function() local before = #ran; click("uw-hl"); return #ran == before end)(), true)
 messages.tab("output")
+
+-- The seek bar's track: a click is one exact seek; a drag seeks keyframes as it moves (Anton kept that, after trying
+-- it), the exact frame where it's let go (docs/seek-and-scrub.md)
+redraw()
+local function seeks()
+    local out = {}
+    for _, c in ipairs(ran) do if c:find("^seek ") then out[#out + 1] = c end end
+    return out
+end
+expect("the bar's track drawn", track ~= nil, true)
+local ty = (track.y0 + track.y1) / 2
+local before = #seeks()
+click_at(track.x0 + 100, ty)
+local s1 = seeks()
+expect("a click: one seek", #s1 - before, 1)
+expect("…exact", s1[#s1]:match("absolute%+exact$") ~= nil, true)
+before = #s1
+move(track.x0 + 50, ty)
+bindings.click.fn({ event = "down" })
+move(track.x0 + 150, ty)
+move(track.x0 + 250, ty)
+local s2 = seeks()
+expect("dragged: keyframes as it moves", #s2 - before, 2)
+expect("…keyframes", s2[#s2]:match("absolute%+keyframes$") ~= nil, true)
+bindings.click.fn({ event = "up" })
+local s3 = seeks()
+expect("let go: the exact frame there", #s3 - #s2, 1)
+expect("…exact", s3[#s3]:match("absolute%+exact$") ~= nil, true)
 
 print(("%d checks, %d failed"):format(checks, failures))
 os.exit(failures == 0 and 0 or 1)

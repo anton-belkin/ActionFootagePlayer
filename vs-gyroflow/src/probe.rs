@@ -9,12 +9,30 @@ use gyroflow_core::{ filesystem, util };
 use crate::lens_pick;
 use gyroflow_core::telemetry_parser::{ self, Input, InputOptions, util::SampleInfo, tags_impl::* };
 
+/// The most metadata samples (or Insta360 trailer records) a probe reads. telemetry-parser's probe stops at the first
+/// sample it decodes, but a DJI file whose samples it can't decode (a Mini 4 Pro's) has none, and the probe went on to
+/// every sample, one per frame spread over the whole file: 2-5 s from a NAS for a minute of 4K, 11 s for 900 MB, to
+/// learn there's no motion data. A file that can be read decodes at its first sample (DJI, GoPro, Sony, Blackmagic
+/// stop there), and an Insta360 trailer walk reads one record per call, a few dozen at most
+const PROBE_MAX_READS: usize = 64;
+
+/// telemetry-parser's probe of the file (`probe_only`, with `options` otherwise), stopped after [PROBE_MAX_READS]
+/// reads; Ok with no samples when it stopped there
+pub fn probe_input<T: Read + Seek>(file: &mut T, size: u64, path: &str, options: InputOptions) -> std::io::Result<Input> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    let reads = std::sync::atomic::AtomicUsize::new(0);
+    let stop = cancel.clone();
+    let progress = move |_: f64| {
+        if reads.fetch_add(1, Ordering::Relaxed) + 1 >= PROBE_MAX_READS { stop.store(true, Ordering::Relaxed); }
+    };
+    Input::from_stream_with_options(file, size, path, progress, cancel, InputOptions { probe_only: true, ..options })
+}
+
 /// The camera's maker and model as its metadata says (telemetry-parser's), for a still's Exif
 pub fn camera(path: &str) -> Option<(String, Option<String>)> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
-    let options = InputOptions { probe_only: true, ..Default::default() };
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
+    let input = probe_input(&mut file, size, path, InputOptions::default()).ok()?;
     let maker = input.camera_type();
     if maker.is_empty() { return None; }
     Some((maker, input.camera_model().map(|m| m.to_string()).filter(|m| !m.is_empty())))
@@ -42,8 +60,7 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     // Up to the first metadata sample and gyro reading, which have what's decided here: a long clip has one sample
     // per frame spread over the whole file (36 538 in 7 GB of 4K60), ~20 s of reads from an SD card. The plugin
     // reads them all once it plays (Engine::load)
-    let options = InputOptions { probe_only: true, ..Default::default() };
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).map_err(|e| e.to_string())?;
+    let input = probe_input(&mut file, size, path, InputOptions::default()).map_err(|e| e.to_string())?;
     let camera = input.camera_type();
     let samples = input.samples.as_deref().unwrap_or_default();
     *in_camera = stabilized_in_camera(&camera, samples);
@@ -66,7 +83,12 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     }
     match in_camera.as_deref() {
         Some("") => (),
+        // HyperSmooth on a HERO12 or later that recorded how it turned the picture (IORI): its motion data is the
+        // picture's own, which is stabilized further (in_camera.rs). HERO11 and older play as recorded
+        Some(_) if camera == "GoPro" && picture_turn_recorded(samples)
+            && input.camera_model().is_some_and(|m| crate::in_camera::restabilized_model(m)) => (),
         Some(how) => return Err(match camera.as_str() {
+            "GoPro" => format!("{how} is on in the camera: stabilized on top of it only from the HERO12 on, so it plays as recorded"),
             "DJI" => format!("in-camera stabilization is on ({how})"),
             _ => format!("{how} is on in the camera"),
         }),
@@ -76,16 +98,35 @@ fn probe_inner(path: &str, in_camera: &mut Option<String>) -> Result<serde_json:
     // DJI clips are left as they were before this check (the Osmo Action 6 plays well; no clip at hand to check that
     // its lens comes through here)
     if camera != "DJI" && !has_lens_profile(path, &input, samples, video.width, video.height, video.fps) {
-        return Err(format!("{camera}: no lens profile for this camera and mode in Gyroflow's database"));
+        return Err(format!("{camera}: no ready lens for this mode (none made for exactly it, with its readout): choose one in Source › Lens"));
     }
     Ok(serde_json::json!({ "mode": "default", "width": video.width, "height": video.height, "fps": video.fps }))
 }
 
+// Whether a GoPro recorded how HyperSmooth turned the picture: IORI, the image's orientation, next to CORI, the
+// camera's (HERO8 and later, HyperSmooth on or off; used from the HERO12 on, in_camera.rs). telemetry-parser gives Gyroflow CORI × IORI then, the picture's
+// own turn. Checked on HERO12 Black clips (HS EIS, HS AutoBoost: IORI turning the picture by up to several degrees) and a
+// HERO7 Black's (HS EIS: no CORI, no IORI)
+fn picture_turn_recorded(samples: &[SampleInfo]) -> bool {
+    samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::ImageOrientation)).any(|m| m.contains_key(&TagId::Data))
+}
+
 // Whether the camera stabilized the picture itself: its name for how ("HyperSmooth (HS EIS)", "EIS: RockSteady",
 // "FlowState"), "" when it recorded that it didn't, None when it doesn't say. Footage the camera already stabilized
-// gets worse stabilized again, so only "" is stabilized here; on, or not said, plays as it is. The signs are the ones
-// Gyroflow reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
-fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> {
+// gets worse stabilized again, so only "" is stabilized here, and HyperSmooth on a HERO12 or later that recorded how
+// it turned the picture (picture_turn_recorded); on otherwise, or not said, plays as it is. The signs are the ones Gyroflow
+// reads to pick a lens profile (gyroflow-core's camera_identifier.rs).
+/// How the camera stabilized the picture itself (`stabilized_in_camera`), read from the file's first samples; None when
+/// it doesn't say or the file can't be read
+pub fn in_camera_of(path: &str) -> Option<String> {
+    let mut file = std::fs::File::open(path).ok()?;
+    let size = file.metadata().ok()?.len();
+    let options = InputOptions { probe_only: true, ..Default::default() };
+    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok()?;
+    stabilized_in_camera(&input.camera_type(), input.samples.as_deref().unwrap_or_default())
+}
+
+pub fn stabilized_in_camera(camera: &str, samples: &[SampleInfo]) -> Option<String> {
     let default_tags = || samples.iter().filter_map(|s| s.tag_map.as_ref()?.get(&GroupId::Default));
     let metadata = || default_tags().filter_map(|m| match m.get(&TagId::Metadata).map(|t| &t.value) {
         Some(TagValue::Json(v)) => Some(v.get()),
@@ -179,6 +220,17 @@ pub struct LensInfo {
     /// default for the clip's camera, mode and size (`project_lens_answer`)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project: Option<serde_json::Value>,
+    /// Where the lens comes from: "file", "clip" (given to this clip alone, to try it: source.lens in its own file), "own"
+    /// (the player's own database: estimated or assigned), "builtin" (one built
+    /// into the player, lens_profiles#41), "list" (the curated
+    /// list), "database" (Gyroflow's, made for exactly this clip), "" for no ready lens
+    pub from: String,
+    /// The clip's mode as the player's own database keeps lenses ("GoPro HERO4 Black · medium · 2704x1520 · 29.97 fps"):
+    /// what a lens chosen for it is assigned to
+    pub mode_key: String,
+    /// The lenses to choose from (lens_pick::candidates), nearest first: only with --lens
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub candidates: Vec<lens_pick::Candidate>,
 }
 
 pub fn lens_info(path: &str) -> Option<LensInfo> {
@@ -194,15 +246,14 @@ fn lens_clip(path: &str) -> Option<(lens_pick::Clip, bool)> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();
     let video = util::get_video_metadata(&mut file, size, &url).ok()?;
-    let options = InputOptions { probe_only: true, ..Default::default() };
     // A file telemetry-parser doesn't read at all (a Mavic Pro's) can still name its camera itself
-    let input = Input::from_stream_with_options(&mut file, size, path, |_| (), Arc::new(AtomicBool::new(false)), options).ok();
+    let input = probe_input(&mut file, size, path, InputOptions::default()).ok();
     let in_file = input.as_ref().is_some_and(|i| lens_in_file(i.samples.as_deref().unwrap_or_default()));
     // The camera, Gyroflow's name for the lens mode it recorded ("Wide"), which the curated list's "recorded" can
     // name too, and the size
     let clip = match &input {
         Some(input) => lens_pick::Clip::from_input(path, input, video.width, video.height, video.fps),
-        None => lens_pick::Clip::from_file(path, video.width, video.height),
+        None => lens_pick::Clip::from_file(path, video.width, video.height, video.fps),
     };
     Some((clip, in_file))
 }
@@ -241,6 +292,16 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let (clip, in_file) = lens_clip(path)?;
     let pick = chosen_lens(path, &clip, in_file);
     let focal_only = pick.as_ref().is_some_and(|p| p.focal_only);
+    let from = match &pick {
+        Some(p) if p.local.as_deref() == Some(lens_pick::FOR_THIS_CLIP) => "clip",
+        Some(p) if p.local.as_deref() == Some("built in") => "builtin",
+        Some(p) if p.local.is_some() => "own",
+        Some(p) if p.curated.is_some() => "list",
+        Some(_) => "database",
+        None if in_file => "file",
+        None => "",
+    }.to_string();
+    let mode_key = lens_pick_mode_key(path, &clip);
     let lens = match pick {
         Some(p) => p.label(),
         None if in_file => "in the file".to_string(),
@@ -254,7 +315,49 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let lists = lens_pick::lists();
     let curated_file = lists.user_file.as_ref().map(|f| f.to_string_lossy().to_string());
     let project = project_lens_answer(path, &clip);
-    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone(), project })
+    Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone(), project,
+                    from, mode_key, candidates: Vec::new() })
+}
+
+fn lens_pick_mode_key(path: &str, clip: &lens_pick::Clip) -> String {
+    crate::lens_db::ModeKey::of(path, clip).describe()
+}
+
+/// Whether the clip plays with the lens its camera wrote into the file (`LensInfo::from` "file": a GoPro from the
+/// HERO11, a DJI): the camera's own calibration of this very clip, so no lens is chosen, found or estimated for it
+pub fn lens_in_the_file(path: &str) -> bool {
+    lens_read(path).is_some_and(|l| l.from == "file")
+}
+
+/// Why no lens is chosen, found or estimated for a clip whose camera wrote its lens into the file
+pub const LENS_IN_THE_FILE: &str = "the camera wrote this clip's lens into the file (its own calibration), which it plays with";
+
+/// `lens_info` with the lenses to choose from (at most `limit`), for the side panel's Source tab; none for a clip whose
+/// lens is in the file
+pub fn lens_info_with_candidates(path: &str, limit: usize) -> Option<LensInfo> {
+    let mut info = lens_info(path)?;
+    if info.from == "file" { return Some(info); }
+    if let Some((clip, _)) = lens_clip(path) {
+        info.candidates = lens_pick::candidates(path, &clip, limit).into_iter().map(|(c, _)| c).collect();
+    }
+    Some(info)
+}
+
+/// A lens chosen for the clip (a `lens_pick::candidates` id) kept as its whole mode's (lens_pick::assign):
+/// {"file", "mode", "lens"}
+pub fn assign_lens(path: &str, id: &str) -> Result<serde_json::Value, String> {
+    if lens_in_the_file(path) { return Err(LENS_IN_THE_FILE.into()); }
+    let (clip, _) = lens_clip(path).ok_or("the clip can't be read")?;
+    let (file, key, label) = lens_pick::assign(path, &clip, id)?;
+    Ok(serde_json::json!({ "file": file.to_string_lossy(), "mode": key.describe(), "lens": label }))
+}
+
+/// The lens assigned to the clip's mode taken away (the player's own database's, by the user): {"removed", "mode"}
+pub fn forget_lens(path: &str) -> Result<serde_json::Value, String> {
+    let (clip, _) = lens_clip(path).ok_or("the clip can't be read")?;
+    let key = crate::lens_db::ModeKey::of(path, &clip);
+    let n = crate::lens_db::forget(&key)?;
+    Ok(serde_json::json!({ "removed": n, "mode": key.describe() }))
 }
 
 /// The camera as Gyroflow tells it ("DJI OsmoAction6") and the lens profile the player corrects the video with

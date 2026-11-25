@@ -73,6 +73,10 @@
 //!TYPE DYNAMIC int
 0
 
+//!PARAM gyroflow_dn_show
+//!TYPE DYNAMIC float
+-1.0
+
 //!PARAM gyroflow_render_scale
 //!TYPE DYNAMIC float
 //!MINIMUM 0.1
@@ -1575,8 +1579,9 @@ bool dn_fresh() { return !dn_same() || dn_after() == 0; }
 int dn_newest() { return !dn_ok() ? 0 : dn_same() ? gdn_head : (gdn_head + 1) % DN_RING; }
 
 // The window (dn_window sets it, once a pass): the newest frame's slot, the shown frame (dn_kc before the newest), how
-// many it has before it and after it. Only frames in a row (none missing past a dropped one, none from before a seek)
-int dn_nw, dn_kc, dn_nb_back, dn_nb_fwd;
+// many it has before it and after it, and how many frames before the newest are in a row with it (dn_row). Only frames
+// in a row (none missing past a dropped one, none from before a seek)
+int dn_nw, dn_kc, dn_nb_back, dn_nb_fwd, dn_row;
 // The slot of the frame k before the newest
 int dn_back_slot(int k) { return (dn_nw - k + 2 * DN_RING) % DN_RING; }
 void dn_window()
@@ -1594,9 +1599,26 @@ void dn_window()
         if (!(dt > 1e-4 && dt < 2.6 / FPS)) break;
         back++;
     }
+    dn_row = back;
     dn_kc = min(dn_after(), back);
     dn_nb_fwd = dn_kc;
     dn_nb_back = min(dn_radius(), back - dn_kc);
+    // Paused, the frame main.lua asks for (gyroflow_dn_show, its time; -1: none; docs/seek-and-scrub.md): a frame step
+    // back shows the frame before from the ring, at once, and while the ring is filled again around a frame (a seek to
+    // 5 frames before it, 10 frames played) that frame stays on screen. In the row: with what the row has on each side
+    // of it; elsewhere in the ring (the row just broken by that seek): by itself, as it was decoded
+    if (gyroflow_dn_show >= 0.0 && ok) {
+        float tol = 0.5 / FPS;
+        for (int k = 0; k <= 2 * DN_RADIUS; k++) {
+            if (abs(pts[k] - gyroflow_dn_show) < tol) {
+                bool in_row = k <= back;
+                dn_kc = k;
+                dn_nb_fwd = in_row ? min(dn_radius(), k) : 0;
+                dn_nb_back = in_row ? min(dn_radius(), back - k) : 0;
+                break;
+            }
+        }
+    }
 }
 int dn_center() { return dn_back_slot(dn_kc); }
 // The slot o frames after the shown one (o < 0: before it)
@@ -1678,7 +1700,7 @@ void hook()
     dn_window();
     int s = dn_nw;
     vec4 res = vec4(0.0, 0.0, 1e9, 0.0);
-    if (dn_kc + dn_nb_back >= 1 && frame_setup()) {
+    if (dn_row >= 1 && frame_setup()) {
         int slot = dn_back_slot(1);
         vec2 c = (vec2(b) + 0.5) * 32.0;
         vec2 pred = predict(c, gdn_quat[slot], gdn_cam[slot], gdn_zoom[slot]) - c;

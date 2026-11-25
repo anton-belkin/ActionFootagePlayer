@@ -5,6 +5,8 @@
 # Homebrew's, with the libraries it links from <prefix>.
 #
 #   Contents/Helpers/            mpv, ffmpeg, ffprobe. macos/player.sh (Contents/MacOS/) runs this mpv when it's there
+#   Contents/Resources/plugins/  the plugins' own binaries that link <prefix>'s libraries (afp-scrub: the libav ones
+#                                mpv links), relinked to Frameworks/ in place
 #   Contents/Frameworks/         every library they link from <prefix>, and libMoltenVK.dylib, with
 #                                Python.framework: VapourSynth's scripts (gyroflow.vpy) run in it, with the
 #                                vapoursynth module in its site-packages. Pruned to what the plugins and the setup use
@@ -36,6 +38,8 @@ contents = os.path.join(app, "Contents")
 helpers = os.path.join(contents, "Helpers")
 frameworks = os.path.join(contents, "Frameworks")
 EXECUTABLES = ["mpv", "ffmpeg", "ffprobe"]
+# The plugins' binaries built on <prefix>'s libraries (tools/make_app.sh builds them in place)
+PLUGIN_BINARIES = ["Resources/plugins/gyroflow/afp-scrub"]
 # Python's extension modules that link libraries nothing here needs (OpenSSL, SQLite, Tk, readline...)
 DROP_MODULES = re.compile(r"^(_tkinter|_ssl|_hashlib|_sqlite3|readline|_curses|_curses_panel|_dbm|_gdbm|"
                           r"_test\w*|_ctypes_test|xxlimited\w*|xxsubtype)\.")
@@ -181,6 +185,10 @@ for exe in EXECUTABLES:
         src = os.path.join(os.path.dirname(ffmpeg_bin), exe)
     shutil.copy2(src, dst)
     origin[dst] = src
+for rel in PLUGIN_BINARIES:
+    path = os.path.join(contents, rel)
+    if is_macho(path):
+        origin[path] = path
 molten = os.path.join(prefix, "opt/molten-vk/lib/libMoltenVK.dylib")
 shutil.copy2(os.path.realpath(molten), os.path.join(frameworks, "libMoltenVK.dylib"))
 origin[os.path.join(frameworks, "libMoltenVK.dylib")] = os.path.realpath(molten)

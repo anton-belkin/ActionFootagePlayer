@@ -86,6 +86,7 @@ jobs:
           luajit tests/timeline_test.lua
           luajit tests/navkeys_test.lua
           luajit tests/exportkind_test.lua
+          luajit tests/scrub_test.lua
           luajit tests/sidepanel_test.lua
           luajit tests/notify_test.lua
           luajit tests/uwcolor_test.lua
@@ -95,13 +96,14 @@ jobs:
           luajit tests/export_args_test.lua
           luajit tests/exportsettings_test.lua
           luajit tests/gpu_ahead_test.lua
+          luajit tests/dnstep_test.lua
           python3 tests/packaging_test.py
           luajit tests/tags_test.lua
           luajit tests/live_photo_test.lua
           luajit tests/photo_link_fold_test.lua
           luajit tests/librarylist_test.lua
           luajit tests/projectcache_test.lua
-          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans export_settings an_image_is_made_smaller)
+          (cd vs-gyroflow && cargo test --release --lib --bin gyroflow-export -- workspace mp4meta dates preview_sizes flipbook zones cut:: probe:: rig:: heading:: sphere360::tests::the_spans export_settings an_image_is_made_smaller uwcolor:: uw_on_the_gpu)
 
       - name: Build
         run: |
