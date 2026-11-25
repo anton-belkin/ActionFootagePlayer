@@ -95,6 +95,9 @@ function M.setup(env)
                     or r and (r.stderr or ""):match("([^\n]+)\n?$") or "gyroflow-optical failed"
                 return env.notify({ id = "gyroflow:measure", kind = "error", title = "The motion couldn't be measured", detail = tostring(why) })
             end
+            -- The motion measured beside the clip (<stem>.afp-motion) noted to the project's catalog, as the player's
+            -- other writes are: the Library shows the clip as measured (its probe answer worked out again)
+            mp.commandv("script-message-to", "workspace", "catalog-note", (path:gsub("%.[^./\\]+$", "") .. ".afp-motion"))
             env.notify({ id = "gyroflow:measure", kind = "done", seconds = 4, title = "Motion measured", detail = name })
             -- Played again with it, from where it is, when it's still the clip playing
             if env.path() == path then env.again() end

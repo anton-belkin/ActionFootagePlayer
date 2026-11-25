@@ -373,10 +373,18 @@ mod tests {
         same_as_a_reading(p, &c, &[("footage", &clip2), ("moments", &new)], "from elsewhere");
         // The clip's own file written elsewhere (a lens tried on it in the player): its probe answer asked again
         assert_eq!(c.probe_again, vec![r.f.join(&clip2).display().to_string()]);
-        // …and its measured motion (measured again in the player)
+        // …and its measured motion (measured again in the player): an answer worked out before goes stale, also for
+        // a Library that wasn't running then (the answer remembers what the catalog had beside the clip)
+        let clip_path = r.f.join(&clip2).display().to_string();
+        let probes: SharedProbes = Default::default();
+        probes.lock().unwrap().put(&clip_path, json!({ "mode": null }));
+        probes.lock().unwrap().want(std::slice::from_ref(&clip_path));
+        assert_eq!(probes.lock().unwrap().since(0)["pending"], json!(0), "known and unchanged: not asked");
         let motion = r.f.join(&clip2).with_extension("afp-motion");
         std::fs::write(&motion, b"motion").unwrap();
         seen::note_now(std::slice::from_ref(&motion));
+        probes.lock().unwrap().want(std::slice::from_ref(&clip_path));
+        assert_eq!(probes.lock().unwrap().since(0)["pending"], json!(1), "its motion measured since: asked again");
         let c = of_files(p, std::slice::from_ref(&motion)).unwrap();
         assert_eq!(c.probe_again, vec![r.f.join(&clip2).display().to_string()]);
         assert_eq!(c.items["footage"].len(), 1);

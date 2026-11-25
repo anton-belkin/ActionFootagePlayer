@@ -757,6 +757,23 @@ pub struct Probes {
     pub busy: bool,
     /// The player's lens database as last looked at (lens_list_check): None, not looked at yet
     lenses_seen: Option<(String, BTreeMap<String, String>)>,
+    /// path -> its own file's and measured motion's stamps when its answer was worked out (beside_stamp)
+    beside: HashMap<String, String>,
+}
+
+/// What else of a clip its probe answer is worked out from: its own file beside it (source.lens, a lens tried on it)
+/// and its motion measured from the picture (.afp-motion), each as the project's catalog has it ("-": not there). No
+/// question to the share: None when the catalog doesn't know them (the answer is then taken as it is)
+pub fn beside_stamp(clip: &str) -> Option<String> {
+    let p = Path::new(clip);
+    let mut out = Vec::new();
+    for ext in ["afp.json", "afp-motion"] {
+        match crate::seen::file(&p.with_extension(ext))? {
+            Some(f) => out.push(format!("{}:{}", f.size, crate::seen::seconds(f.mtime))),
+            None => out.push("-".into()),
+        }
+    }
+    Some(out.join("|"))
 }
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
@@ -829,19 +846,27 @@ impl Probes {
             // HyperSmooth on (in_camera.rs): asked again
             if e["v"]["geotag"].as_u64().unwrap_or(0) < GEOTAG { continue; }
             self.known.insert(k.clone(), (s, m, e["l"].as_str().unwrap_or_default().to_string(), e["v"].clone()));
+            if let Some(b) = e["b"].as_str() { self.beside.insert(k.clone(), b.to_string()); }
         }
     }
     pub fn save(&self, file: &Path) {
-        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, l, v))| (k.clone(), json!({ "s": s, "m": m, "l": l, "v": v }))).collect();
+        let m: serde_json::Map<String, Value> = self.known.iter().map(|(k, (s, m, l, v))| {
+            let mut e = json!({ "s": s, "m": m, "l": l, "v": v });
+            if let Some(b) = self.beside.get(k) { e["b"] = json!(b); }
+            (k.clone(), e)
+        }).collect();
         if let Some(d) = file.parent() { let _ = std::fs::create_dir_all(d); }
         let tmp = file.with_extension("tmp");
         if std::fs::write(&tmp, serde_json::to_vec(&Value::Object(m)).unwrap()).is_ok() { let _ = std::fs::rename(&tmp, file); }
     }
-    /// Asked for these clips: the ones not known (or changed since, or known with another lens list) are queued
+    /// Asked for these clips: the ones not known (or changed since, or known with another lens list, or their own file
+    /// or measured motion changed: a lens tried on one in the player, the clip measured again) are queued
     pub fn want(&mut self, paths: &[String]) {
         let lenses = lens_list_stamp();
         for p in paths {
             let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, l, _)), Some((s2, m2))) => *s == s2 && *m == m2 && *l == lenses, _ => false };
+            // An answer kept from before this was noted has none: taken as it is until it's worked out again
+            let fresh = fresh && match (self.beside.get(p), beside_stamp(p)) { (Some(b), Some(now)) => *b == now, _ => true };
             if !fresh && self.queued.insert(p.clone()) { self.queue.push_back(p.clone()); }
         }
     }
@@ -914,6 +939,7 @@ impl Probes {
             self.version += 1;
             let v = self.version;
             self.known.insert(path.to_string(), (s, m, lens_list_stamp(), answer));
+            match beside_stamp(path) { Some(b) => { self.beside.insert(path.to_string(), b); } None => { self.beside.remove(path); } }
             self.log.push((v, path.to_string()));
         }
     }
@@ -942,6 +968,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
         };
         let stamp_before = stamp(&path);
         let lenses = lens_list_stamp();
+        let beside_before = beside_stamp(&path);
         let mut cmd = Command::new(&tool);
         cmd.arg("--library").arg(&path).stdin(Stdio::null()).stderr(Stdio::null());
         #[cfg(windows)]
@@ -954,6 +981,7 @@ pub fn probe_worker(probes: SharedProbes, keep: Option<PathBuf>) {
             p.version += 1;
             let v = p.version;
             p.known.insert(path.clone(), (s, m, lenses, answer));
+            match beside_before { Some(b) => { p.beside.insert(path.clone(), b); } None => { p.beside.remove(&path); } }
             p.log.push((v, path));
         }
         p.busy = false;
