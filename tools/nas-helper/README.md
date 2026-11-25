@@ -9,7 +9,7 @@ It does three things, each a setting of its own:
 
 - **Collaboration** (`AFP_COLLABORATION`, on): several people and computers working in one library at once. The
   NAS's system tells it what changes on its own disks, and it writes that into each project's catalog
-  (`<project>/.afp/catalog`, docs/library-management.md §9), so what one person does (a moment marked, clips sorted,
+  (`<project>/.afp/catalog`, docs/design/library-management.md §9), so what one person does (a moment marked, clips sorted,
   a trip added, or a change made on the NAS itself) reaches everyone else's player and Library in about a second,
   none of them walking the share. It writes nothing but the catalog. A project newer than the helper (its
   `version` in Project.afproject) is refused, not touched: then update the helper.

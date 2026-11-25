@@ -1,5 +1,5 @@
 "use strict";
-// Album actions shown at once (../ui/albums.js, docs/library-responsiveness.md "Albums"): the page against the fake app
+// Album actions shown at once (../ui/albums.js, docs/design/library-responsiveness.md "Albums"): the page against the fake app
 // answering as the app does (src/changed.rs's of_album: the links and items it made), each command slowed so what's
 // on screen before it answers can be looked at.
 //   cd library/ui-tests && npm install && node --test

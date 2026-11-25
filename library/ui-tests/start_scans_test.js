@@ -1,5 +1,5 @@
 "use strict";
-// The Library's start (../ui/app.js loadProject, docs/library-responsiveness.md): each view read once, and never two
+// The Library's start (../ui/app.js loadProject, docs/design/library-responsiveness.md): each view read once, and never two
 // reads of the views at the same time. The 2026-11-24 journal had moments and footage read twice at every start, side by
 // side: the catalog, read as the project opened, told the page "something changed, can't say what" and the page read
 // everything again alongside its own first read.

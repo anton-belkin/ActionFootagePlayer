@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Where the waiting is: reads the responsiveness journal (docs/responsiveness-journal.md) over a period and says, per
+"""Where the waiting is: reads the responsiveness journal (docs/design/responsiveness-journal.md) over a period and says, per
 action, how often it was done, how long its result took to show (median, p90, worst), the time lost in all (each
 time's wait, added up), what the slow ones spent their time on, and what the slow ones had in common (a NAS, a big
 file, the first open of a run, a file not opened before). Ranked by the time lost, for a person; and as JSON, every

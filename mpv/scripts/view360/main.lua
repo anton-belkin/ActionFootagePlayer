@@ -1,6 +1,6 @@
 -- view360: a 360° clip shown as a view to look around in, turned by the mouse and the trackpad as crop mode is. An mpv
 -- plugin: this folder goes into ~~/scripts/, next to the gyroflow plugin's folder (it uses its gestures.lua, and its
--- gyroflow-probe tells a 360° clip). docs/360-cameras.md has the design.
+-- gyroflow-probe tells a 360° clip). docs/design/360-cameras.md has the design.
 --
 -- Two kinds of clip:
 -- - Stitched (equirectangular, with spherical metadata: Spherical Video V2's sv3d, or V1's XMP, as Insta360 Studio,
@@ -30,7 +30,7 @@
 --                       little planet
 --   Alt+h   heading     what straight ahead follows, on a 360 camera's own file: along the way -> along the camera ->
 --                       north -> in the world, the ones the clip has
---   Alt+r   record      record where you look while the clip plays (a take), or stop (docs/360-reframe.md)
+--   Alt+r   record      record where you look while the clip plays (a take), or stop (docs/design/360-reframe.md)
 --   Alt+R   play-recording  the view follows the recording, or your gestures again (Alt+Shift+r)
 --
 -- Script messages (`script-message-to view360 <message>`, what the side panel runs):
@@ -62,7 +62,7 @@
 -- recording's: locked during a take and while the recording plays, and a take under another is refused.
 
 local mp = require 'mp'
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default. Nothing where the workspace plugin isn't beside this one
 do
     package.path = package.path .. ";" .. (mp.get_script_directory and mp.get_script_directory() or ".") .. "/../workspace/?.lua"
@@ -588,7 +588,7 @@ local function fit()
     mp.set_property("file-local-options/video-aspect-override", value)
 end
 
--- Turning the head shows sooner (docs/360-implementation-plan.md, step 6): a video frame is drawn a refresh before its
+-- Turning the head shows sooner (docs/archive/360-implementation-plan.md, step 6): a video frame is drawn a refresh before its
 -- time rather than 50 ms ahead (video-timing-offset), so the VO is free to redraw the view meanwhile and the frame has
 -- the newest head; and in a window the frames are shown as they come, not at a vsync first (the app's mpv,
 -- macos-display-sync: macOS composites a window at its refresh anyway; in full screen it would tear)
@@ -764,7 +764,7 @@ end
 local function set_heading(mode, by_viewer)
     if not HEADING_INDEX[mode] then return false end
     -- The recording's own while a take records or the recording plays (re-expressing it in another is step 2 of
-    -- docs/360-reframe.md)
+    -- docs/design/360-reframe.md)
     if mode ~= heading and (rec:taking() or rec_playing) then
         mp.osd_message(string.format("%s: following %s. %s", rec:taking() and "Recording" or "Playing the recording",
                                      FOLLOWS_NAMES[heading] or heading, rec:taking() and "Alt+r stops" or "A drag gives you the view"), 2.5)

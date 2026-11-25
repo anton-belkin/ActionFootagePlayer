@@ -46,7 +46,7 @@ if [ $arch = x86_64 ]; then
     PYTHON_SHA256="dce409744b088f94c6e37ba41f8100c384c27e029e843237364c602d30d475e5"
     VULKAN_RID=win-x64
     # ffmpeg for gyroflow-export: BtbN's build of the same release (x265, NVENC, Quick Sync, AMF, and libplacebo with
-    # Vulkan for the GPU path, docs/export-gpu-path.md: Gyan's essentials build has neither), from a month's last
+    # Vulkan for the GPU path, docs/design/export-gpu-path.md: Gyan's essentials build has neither), from a month's last
     # build, which BtbN keeps (checksums.sha256 in that release)
     FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/ffmpeg-n9.0.2-39-g7adfbe40dc-win64-gpl-9.0.zip"
     FFMPEG_SHA256="693f3e224bc184b40524a62ca47526cfebaf2504414021b92fe75f677ad868b9"

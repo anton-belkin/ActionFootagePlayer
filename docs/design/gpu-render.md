@@ -1,0 +1,871 @@
+# The render on the GPU: Gyroflow's warp as shaders
+
+**Status:** built in #144 (v0.10.0), with #146, #151, #153, #154, #193 (v0.11.0), #194 (v0.11.1), #219 (v0.13.0), #245, #247, #255, #272 (v0.14.0); the only player path since #304 (untagged, after v0.14.0); parts not built: a per-clip lens table replacing the Newton loops, measured quality presets from vo-passes, a prefiltered half-size source for shrinking, the Windows app's own mpv build (still shinchiro's), Dolby Vision 8.4 in the NAS stream, 8K60 360.
+
+Since 2026-11-25 (#304) the VapourSynth path (the filter, `gyroflow.vpy`, the Still filter, crop mode's preview
+shader) is taken out. A clip the warp can't do (`gpu_table.rs`'s `unsupported`) or an mpv that can't run it (older
+than 0.42, a `vo` other than `gpu-next`) plays as recorded, with a card saying why. What follows is the design as
+written, with the VapourSynth path as it was then, and the build log. How the GPU path works now, in short:
+[../reference/architecture.md](../reference/architecture.md); its traps: [../dev/gotchas.md](../dev/gotchas.md).
+
+How the player, a streaming server and the export could render a stabilized clip with the frame never leaving the
+GPU: Gyroflow's per-frame warp ported to GLSL and run by libplacebo, with the color fringes, the edge fill and the
+look as passes of the same render rather than steps after it.
+
+Written 2026-11-06 after measuring the Linux player on the NAS (a UGREEN DXP2800, Intel N100) and a prototype warp
+shader there. Anton's framing: port Gyroflow's render as a whole, not a stabilization shader on the side; the
+chromatic correction becomes natural instead of a patch at the end, the edge fill belongs in the same place, and a
+temporal denoise could later run in real time too.
+
+## In short
+
+- **Why.** Through the VapourSynth path (removed in #304) every frame went GPU → memory → GPU and back again, plane by plane. On the N100 that,
+  not the arithmetic, capped the stabilization at ~17 frames a second (6.8 as the plugin did it then, at 4K60). With
+  the warp as a shader the same machine plays 4K60 → 1080p HDR stabilized at 60 fps, and encodes a 1080p60 stream
+  beside it. On a Mac it means less CPU, less power and no frame copies for any clip.
+- **What moves to the GPU**: Gyroflow's undistort kernel (lens model, rolling shutter, IBIS/OIS, output projection,
+  digital lens, background), the chromatic correction under water, the edge fill, and the look after them.
+- **What stays on the CPU**: everything that is about the motion and the lens, not the pixels: reading the motion
+  data, smoothing, horizon lock, the zoom, lens profiles, the per-frame transforms. vs-gyroflow keeps doing that; it
+  hands each frame's numbers to the shader instead of rendering with them.
+- **The frame's identity is no longer a problem in mpv**: since mpv 0.42.0 a user shader can declare `//!PARAM PTS`
+  and mpv fills it with the time of the frame being drawn. The stamps in the pixels (chromatic, crop mode) were
+  workarounds for its absence; the 360 stamp stays, drawn under the sphere by the sphere shader.
+- **Quality is a setting per machine, measured**: interpolation, shrinking, render size, the lens's exactness,
+  chromatic, the edge fill and the frame rate are knobs in one Best-to-Lightest list, its default picked from mpv's
+  per-pass GPU times, not fixed by frame rate.
+- **One shader source, three hosts**: mpv's gpu-next (the player), a small libplacebo renderer of our own (the
+  streaming server, later the export), and checks against Gyroflow's own CPU reference.
+
+## What was measured
+
+On the NAS, 2026-11-06 (N100, iGPU at its 750 MHz maximum, 6 W, one DDR5-4800 module; clip 0126, Osmo Action 6,
+4K60 10-bit D-Log M with a Gyroflow project; output 1920×1080 HLG; mpv 0.40 gpu-next on a headless Wayland output;
+release 0.9.0 plugins):
+
+| Chain | Result |
+|---|---|
+| D-Log M → HDR, mpv's default downscaler | 35 fps shown, 489 drops in 20 s |
+| D-Log M → HDR, `--profile=fast` | 60 fps, no drops (75 fps untimed) |
+| Stabilization as the plugin does it on Linux (vaapi-copy, CPU scale, VapourSynth) | 0.3× speed, 6.8 fps shown |
+| Same, every 4th frame, scaled on the GPU before the copy | real time at 15 fps |
+| Prototype warp shader + D-Log M, VAAPI zero-copy | 60 fps, no drops (72 fps untimed) |
+| Same, with a 1080p60 HEVC Main10 encode (VDEnc) running beside it | 60 fps, no drops |
+
+Limits found on the way: VAAPI decodes this clip at ~280 fps; copying decoded 4K frames to memory tops out at ~36
+fps; the VapourSynth stage at ~16–19 fps whatever comes before it, with the GPU half idle and mpv's core thread at
+~80 %. VDEnc encodes 1080p60 Main10 at 126 fps; the default (VME) mode only 53.
+
+The prototype warp was close to Gyroflow's work per pixel but not the real thing: 32 rotation matrices per frame
+from a texture (synthetic), opencv fisheye, the two-step row lookup, bicubic through 4 or 16 bilinear fetches. The
+real kernel does more (below), so the ~20 % headroom on the N100 is the number to watch.
+
+## What Gyroflow's kernel is
+
+From gyroflow-core at the fork's d130105 (`src/core/`):
+
+- **The canonical GPU copy** is `gpu/wgpu_undistort.wgsl` (845 lines), assembled as text with the lens model's and
+  the digital lens's functions. `gpu/opencl_undistort.cl` is the same logic for OpenCL, `stabilization/cpu_undistort.rs`
+  the CPU reference. **`src/qt_gpu/undistort.frag` is already GLSL** (437 lines), Gyroflow's preview shader, with
+  every per-frame input in textures: simplified (bilinear only, no source/output rects), but the natural start.
+- **Inputs per frame**: `KernelParams` (416 bytes: focal length and center, lens coefficients `k[24]`, fov, field
+  limit, lens correction amount, background mode and margin, rotations, translations, rects, digital lens params,
+  light refraction, output projection, flags) and **one 4×4 block per sensor row** when the rolling shutter is
+  corrected (the frame's height in rows, else one): a 3×3 rotation, IBIS shift and roll, OIS shift, lens breathing.
+  The kernel projects through the middle row to find the source row, then uses that row's block, nearest.
+- **Lens models**, each written once per backend: opencv_fisheye, opencv_standard, poly3, poly5, ptlens, insta360,
+  sony, generic_polynomial, gopro; digital (output) lenses gopro_superview, gopro6_superview, gopro_hyperview,
+  gopro_warp, digital_stretch. The warp only needs `distort_point` per pixel at full lens correction; that is closed
+  form for opencv_fisheye (our DJI cameras) but iterative inside for gopro (10), sony (8), insta360 (20 × 3), and the
+  GoPro digital lenses (12). Below full correction a 6-step root solve runs per pixel.
+- **Interpolation**: bilinear, bicubic, Lanczos4 from 32-phase tables, and EWA (Robidoux etc., 3 transforms per pixel
+  and a loop up to 128 px). **Background**: solid, repeat, mirror, margin with feather.
+- **Mesh correction and focal-plane distortion** (Sony) read a third buffer; the drawing overlay a fourth.
+- **On the CPU per frame**: `FrameTransform::at_timestamp`, a quaternion product and a 3×3 matrix per row, in
+  parallel; 0.13–0.14 ms a frame with 2160 rows on the M1 (measured in the spike, [gpu-render-spike.md](../archive/gpu-render-spike.md)),
+  with a cache of 100 frames. Smoothing, horizon lock and the
+  adaptive zoom's per-frame FOVs are already done once per clip.
+- **License**: every kernel and model file is GPL-3.0-or-later, as this repository is; libplacebo (LGPL-2.1+) is fine
+  under it. The port is a derivative of Gyroflow's code and says so.
+
+Nothing in it is hard for GLSL: no doubles, no atomics, no subgroups. Storage buffers become textures (Qt's shader
+already does that), override constants become `#define`s (one shader per lens model and digital lens, as Gyroflow
+compiles them), the Newton loops keep their `break`s.
+
+## What vs-gyroflow does today, and where each part goes
+
+| Before (the VapourSynth path, removed in #304) | On the GPU |
+|---|---|
+| Stabilize: each plane uploaded, warped by gyroflow-core's wgpu kernel, read back; the row matrices rebuilt for each plane | **The warp pass**, once per frame, in RGB, at the output size |
+| Chromatic (dispersion.rs): the lens geometry stamped into the last luma row; chromatic.glsl re-samples red and blue at the end, from a picture already warped and resampled | **Inside the warp pass or not at all**: the green ray refracted per channel (Snell's law with water's indices) and each channel sampled once from the source; no pass at the end |
+| Edge fill (edges.rs, sphere.rs, smooth.rs): a mask rendered on the GPU, the fill and blur on a coarse CPU grid, the sphere (a cube map with a 5 s memory) on the CPU, the composite on the CPU | **Passes of the render**: the warp knows per pixel that its ray left the frame; the sphere is a storage texture written each frame from the covered pixels; pull-push and blur as a mip chain; the composite in the warp pass |
+| Crop mode's preview, the 360 stamp: identity marks in the pixels | `PTS` and parameters; the 360 stamp kept (the sphere shader draws it) |
+| Still (still.rs): on pause, ±5 neighbours re-decoded through VapourSynth, block matching and fusion on wgpu | The paused frame is cleaned by the GPU path's `dn_` passes; the Still filter left with VapourSynth (#304); still.rs stays for gyroflow-export's photos |
+| Levels, motion streaming, water spans, lens profiles, projects | **Unchanged**, CPU, in vs-gyroflow's engine |
+| gyroflow-export: the same engine called directly (no VapourSynth), frames through memory as in the player | Built: `gyroflow-export --gpu` runs the player's shaders (#245, v0.14.0); the pipes path stays for the rest |
+
+Two things the port fixed in passing (as written then): the export had no color-fringe correction (`marker = false`),
+and it interpolated with Lanczos where the player uses bicubic above 31 fps. Both export paths correct fringes now
+([export-gpu-path.md](export-gpu-path.md)).
+
+## The design
+
+### Two halves
+
+**The numbers** come from vs-gyroflow's engine as today (`Engine::load`, the views and levels, motion streaming),
+built as a library. What changes is the output: instead of rendering, it produces each frame's parameters: the
+`KernelParams` the frame needs (most fields are per clip; fov, lens coefficients from per-frame metadata, correction
+amount, background margin, zoom center and refraction can change per frame) and the row rotations.
+
+**The pixels** are one GLSL source, `shaders/gyroflow/` (new), generated per lens model and digital lens like
+Gyroflow's: the warp pass, the chromatic split inside it, the edge passes, sharing the kernel's lens functions.
+
+### The row rotations: knots, not rows
+
+At full resolution a frame needs 2160 blocks of 16 floats (138 kB); a 5-minute 4K60 clip 2.5 GB. The rotation
+along a frame is smooth (the camera can't change direction much in 16 ms), so the table keeps **knots**: a quaternion
+at, say, 33 evenly spaced row times per frame, interpolated in the shader (slerp or normalized lerp between the two
+nearest knots). That is ~600 bytes a frame with the per-frame parameters, 10 MB for a 5-minute 4K60 clip.
+
+This differs from Gyroflow's nearest-row lookup by at most 0.02 px with 33 knots, measured against `cpu_undistort.rs`
+on a vibrating HERO7 flight clip ([gpu-render-spike.md](../archive/gpu-render-spike.md)): 33 knots it is; 17 cost 0.04 px, 9 cost 0.07. IBIS/OIS and breathing (Sony, some others) go
+as further knot tracks only for clips that have them.
+
+### Getting the numbers to the shader
+
+**In mpv.** The shader takes `//!PARAM PTS` (mpv 0.42+, `video/out/gpu/utils.c`) and finds its frame in a table
+texture. The table has to be a `//!TEXTURE` in a shader file, which mpv loads with the file, so per clip the plugin
+writes a shader file (as dlogm writes its LUT shaders) with the clip's table embedded, and puts it in
+`file-local-options/glsl-shaders`. Questions this raises:
+
+- **Size and load time**: 10 MB of floats is 20 MB of hex for libplacebo to parse. Measured on the N100: a 3.2 MB table
+  shader adds 0.1 s to mpv's start, a 165 MB one 2.3 s ([gpu-render-spike.md](../archive/gpu-render-spike.md)). Long clips (an hour at 60 fps: 125 MB) need windows: a table per few minutes, the next one
+  written ahead and swapped in **(to try: whether swapping `glsl-shaders` drops a frame)**.
+- **Motion streaming** (#80: a clip without a project starts after ~1 s and its motion data keeps arriving): the
+  table grows as data comes in. Built: the shader is rewritten as data arrives (#193) and the table is extended ahead
+  of playback (#272, [gpu-table-ahead.md](gpu-table-ahead.md)). As designed: either the shader is rewritten a few times early in the clip (at 2 s, 8 s, then the
+  whole clip), with an identity correction where the table has no data yet, as motion.rs does now, or an mpv patch
+  lets a script replace a texture's contents. The patch is the cleaner way but only the Mac app has patches.
+- **Interpolation and frame mixing**: `PTS` is the current frame's, also for the frames libplacebo mixes in, so
+  `interpolation=yes` would warp them with the wrong motion. It is off by default and the app doesn't set it; the
+  plugin should turn it off for the clips it warps, in case a user's mpv.conf has it.
+- **Patch 0011** (parameter values in the mix cache's key) makes a changing `PTS` re-render the cached frames
+  **(to try: with interpolation off, one frame per mix, it should not matter)**.
+- **What is drawn when the table is missing** (a seek past what has been read, a failed load): the frame as it is,
+  as now.
+
+**In our renderer.** The host knows which frame it renders: it uploads the frame's parameters and knots as a small
+texture or uniform buffer each frame, and the table problem disappears. The same GLSL is wrapped with
+`pl_mpv_user_shader_parse` and its parameters set per frame, or called as a `pl_shader` of our own.
+
+### Opening a clip and changing a setting
+
+Measured 2026-11-07 on the M1 Pro (the app built from this branch, logs of its own runs, tools in the session's
+scratchpad: open/run.sh + report.py), clip 0126 (a project) and three clips without one:
+
+| | Before | Now |
+|---|---|---|
+| The app started on a clip, to its first frame | 1.1-1.9 s; 3.0 s with the project's video on the NAS | 0.81-0.96 s, stabilized from that frame |
+| Another clip in the same player: one seen before | the table again, 0.35-1 s, then mpv's own 0.4 s | 0.1 s for the warp, mpv's first frame at ~0.42 s |
+| ... one never opened | the same, and 4-7 s when its motion data came from the NAS | 0.4-1.2 s |
+| Edges, color fringes, Ctrl+p, the view | 0.46-0.5 s (each wrote the whole table again) | 0.08-0.12 s |
+| A new shader variant's first compile in mpv | 0.3-0.6 s | once per variant (mpv's shader cache keeps it across runs; clips alike share one) |
+
+What changed:
+
+- **The table server** (`gyroflow-gpu-table --serve`, one per player, started by main.lua): it keeps the clips it
+  loaded with every view (normal, wide, the levels) and their tables, by the settings that move the geometry
+  (`PLAYER_GEOMETRY_KEYS` and the project's file as it is). A change of the edges, the fringes, the denoise, the
+  interpolation or the view writes the shader alone: ~10 ms there, ~0.1 s in all with mpv taking the 4 MB file.
+- **Shaders kept on disk** (`~/Library/Caches/ActionFootagePlayer/gpu`, 400 MB, the least used first): by every
+  setting and the clip's files as they are; a clip opened again, in any session, gets its shader in ~15 ms.
+- **The clip opens while its table is written**: mpv's own opening (decoder, window, audio: ~0.4 s, at the app's
+  start ~0.8 s) no longer waits for it; the clip is paused on black (gpu_hold.glsl) until the warp is in place.
+- **Motion data and the probe's answer kept per file** (`motion/`, `probe/`): a project's video was read again at each
+  load to fill in its motion data, and an optical project's (DJI with EIS on, no motion data) was read by
+  gyroflow-core itself again too: 1-2 s from the NAS, 7 s cold. Now its metadata is taken as a full project has it.
+- **The shader's text is the same for clips alike** (the frame count is in the table, texel 9's w; a row holds as
+  many frames as fit, whatever the clip's length): mpv compiles a camera's shader once.
+- **The table built on every core**, only the knots' rows made quaternions: a clip with a rolling shutter (2160
+  matrices a frame) 0.75 s → 0.43 s.
+- **No pause after opening**: on the GPU path main.lua paused for a "set up for this display" that never came (the
+  VapourSynth path's playback-restart), up to 5 s after a clip opened.
+
+Left: gyroflow-core's zoom search (0.2 s of a project's load) and the rows' transforms (0.3 s of a no-project table),
+done once per clip and settings now; mpv's own 0.4-0.8 s.
+
+**Each change is a new shader file, and mpv has to let the old one go** (tools/mpv-patches/0015, 2026-11-08).
+vo_gpu_next parses a user shader once and keeps it by its path until the window closes, with every texture and
+buffer its `//!TEXTURE` and `//!BUFFER` blocks make on the GPU. main.lua writes each version of the warp to a new
+path (`mpv-gyroflow-<pid>-<n>.glsl`: the same path would get the old parse back), so before the patch every setting
+changed, and every clip opened, left a whole warp resident: its table, its grid and, with Ctrl+p, the denoise's ring
+of 11 frames (`GDN_FRAMES`, 7680×12960 rgb10a2, ~400 MB, and `GDN_QUART`, ~50 MB). On a 16 GB Mac a session slowed
+down and dropped frames after a dozen or two changes, until the player was restarted. The patch destroys the shaders
+no longer in `glsl-shaders` when the options change (libplacebo frees them once the GPU is done with them), and
+frees the file's text mpv read (~5 MB a change: libplacebo keeps its own copy). Measured on the M1 Pro (16 GB), clip
+0068 (4K60), a 1280×720 window, the edges and the view changed over IPC every 2.5 s, the process's footprint:
+
+| Changes | Ctrl+p on, before | Ctrl+p on, patched | Ctrl+p off, before | Ctrl+p off, patched |
+|---|---|---|---|---|
+| 0 | 986 MB | 991 MB | 1078 MB, 22 dropped / 6 s | 587 MB, 6 dropped |
+| 10 | 5680 MB | 975 MB | 1386 MB | 583 MB |
+| 20 | 10240 MB, swapping: plays at 0.2× | 1010 MB, 0 dropped | 1793 MB, 42 dropped | 686 MB |
+| 40 | (stopped at 9 GB) | 1020 MB, 0 dropped | 2500 MB, 45 dropped | 774 MB (before the text was freed) |
+
+The distribution's mpv on Linux and Windows' mpv (shinchiro's build) don't have the patch, so main.lua copes with an
+mpv that keeps them (`gpu_flush=auto`: any mpv without 0014's `--video-join`, which only the app's has):
+
+- **The same settings, the same file**: a shader is kept by the settings it was written with (the gyroflow-gpu-table
+  request, and the project's file as it is), 16 of them, and asked for again it's that file, not a new one: mpv gives
+  its parse back and holds nothing more (the denoise's ring started again by `gyroflow_dn_epoch`). Changing the edges
+  back and forth costs nothing after the first time, and no table is written (on the Mac too).
+- **The window made again**: what the shaders no longer used hold is counted (their text twice, the grid, the ring);
+  past 1.5 GB, mpv's `vo` is set to another list with the same output (its first entry twice, or once again) as the
+  next clip opens, and mpv makes a new window with no shader parsed but those in use; past 4 GB, at once.
+
+Measured as above with 0.10.0's mpv (no patch 0015; `gpu_flush=yes`, as it has `--video-join`), Ctrl+p on: 20 changes
+among 4 settings, then 20 that make new ones (the level, the view, the edges), then the next clip:
+
+| | 0 | 4 | 20 | 24 | 28 | 40 | next clip |
+|---|---|---|---|---|---|---|---|
+| Footprint, MB | 1005 | 2422 | 2905 (the same 4 files again) | 4763 | 1527 (made again at once) | 2893 | 1084 (made again as it opened) |
+
+No frame dropped in any sample. With the app's mpv the same run stays at 964-1018 MB, and nothing is made again.
+
+### Pipeline builds (mpv's shader cache)
+
+Every pass libplacebo runs is a Vulkan pipeline: its GLSL compiled to SPIR-V (glslang, "translating SPIR-V" in the
+log), then the pipeline made (MoltenVK turns the SPIR-V into Metal's language, Metal compiles that: "creating
+pipeline"). With the warp, the denoise and the edge fill a start has 41-58 of them. mpv keeps both on disk
+(`~/Library/Caches/io.mpv/shader_*`: the SPIR-V by the GLSL's text, MoltenVK's pipeline cache data by the SPIR-V), and
+macOS keeps Metal's compiled shaders by their source. **Text seen before costs nothing; new text costs seconds.**
+Measured 2026-11-24 on the M1 Pro (tools/pipebench: `pipebench.c` offscreen, `live_starts.py` the real player, each
+pass's source in its debug log):
+
+| The installed 0.14.0-dev.11, a start | SPIR-V compiled | Pipelines | Last build (≈ first stabilized frame) |
+|---|---|---|---|
+| GOPR0605 (1080p 29.97), first start of this build | 37 (813 ms) | 53 (679 ms) | 4.0 s |
+| GOPR0605 again, a new process | 0 | 47 (16 ms) | 1.45 s |
+| GX010009 (4K 25 fps), first | 37 (870 ms) | 58 (459 ms) | 4.6 s |
+| GX010009 again | 0 | 52 (17 ms) | 1.9 s |
+| Underwater colour on, first time for that clip | 37 (733-842 ms) | 44-45 (398-441 ms) | 1.8-3.4 s after the click |
+| Underwater colour on, seen before | 0 | 44-45 (13-15 ms) | 0.6-0.7 s after the click |
+
+Pipelines were cheap there (~10 ms each) because Metal had compiled the same code before. New Metal code (the first
+start of a build whose warp changed, as 0.14.0 at 08:19 that day) is ~3.4 s of pipelines on top: GX010903 with the
+new warp below, 46 SPIR-V (822 ms) + 51 pipelines (3437 ms), its first stabilized frame at 8.1 s, and the same again
+(3.4 s) when the underwater colour was first turned on.
+
+So the cache works, and what costs is text that changes. What changed it, besides a new build:
+
+- **The clip's frame rate** was a `#define FPS` in all 37 of the warp's passes: a 25 fps clip after a 29.97 fps one
+  built them all again (pipebench: 37 SPIR-V + 37 pipelines, 3.1 s). It's a parameter now (`gyroflow_fps`, DYNAMIC,
+  its value written by gyroflow-gpu-table as `gyroflow_time_offset`'s is, #219). Measured in the player: GX010009
+  (25 fps) right after GX010903 (29.97 fps), both 4K: **0 SPIR-V, 51 pipelines in 15 ms**, its first stabilized
+  frame at 1.5 s.
+- **The underwater colour** switches the video's tags (HLG/BT.2020 for the look, BT.709 without), and libplacebo put
+  `linearize`/`delinearize` helpers for the source's transfer into every user shader pass, used or not; their
+  specialization constants stay in the SPIR-V, so all the warp's passes were compiled and their pipelines built again.
+  tools/libplacebo-patches/0001 adds the helpers only to passes whose text names them (none of ours does).
+  pipebench, the warp + view360 + fringes + crop, the source HLG → BT.709 on a new cache: **52 SPIR-V + 40 pipelines,
+  3.9 s → 2 SPIR-V + 1 pipeline, 0.11 s**. In the player with both changes (three starts, one of them cold): the
+  underwater colour turned on compiled nothing, 5-7 pipelines in 2-6 ms, the last **0.22-0.26 s after the click**
+  (before: 1.8-5.8 s the first time, 0.6-0.77 s after).
+
+Not the cause (pipebench, a warm cache): the window's or target's size, the target's peak (the screen's EDR headroom),
+the order of passes in a frame. libplacebo numbers its identifiers per frame, so a shader added before others would
+rename theirs, but the underwater shader (MAIN, last) moved nothing.
+
+Left as it is:
+
+- **A new build is new text**: the first start of each kind of clip (camera mode, lens model, size, the settings
+  that add passes: Ctrl+p, Ctrl+j, the edges) pays 1.5-8 s once, and again for each underwater state. A trial build a
+  day makes most starts that day cold. Warming the cache after an install needs the same text as mpv makes (its
+  render options, the hwdec's planes, the target): not tried.
+- **A new process for each Library open** (55 of 57 in the journal, 19-24.11): the player quits when its window
+  closes, so nothing stays in memory; on a warm cache a start still costs mpv's own ~0.5-1 s and the plugins' cold
+  folder cache. Keeping the player running hidden is the user's call (not done).
+- The lens model's code (`@LENS@`), the source and output sizes are still in the text: one set of passes per camera
+  mode, once per build.
+
+### Save frame (crop mode and the photo) on the GPU path
+
+**Crop mode's camera** is the warp's own: `gyroflow_cam_x..w` and `gyroflow_cam_zoom` (DYNAMIC parameters, set through
+glsl-shader-opts by main.lua's gpu_camera as it turns). gyroflow-core's view_rotation multiplies each row's rotation
+on the right by the view's quaternion in its matrices' axes (y and z turned), and the output camera's in the world
+too; the zoom is the FOV's (`Camera::apply`). So the shader turns the output ray by it first, and the sphere trail and
+the denoise's motion prediction follow. Checked against gyroflow-core with the camera (gpu_table's tests: each row's
+rotation to 0.001°; the shader's coordinates within 0.004-0.04 px exact, 0.04-0.17 px through the 8 px grid, which
+bends more with the camera zoomed out). Turning it costs nothing: no table, no render of the paused frame again, no
+seek, no preview standing in (the VapourSynth path's crop_preview.glsl and its parity marks): the next refresh has it,
+paused or playing.
+
+**The photo** (Alt+s; Enter in crop mode) is the frame as the player renders it, where that's the photo: mpv's
+screenshot of the video at its size, through the warp, in the video's own colors (BT.2020 HLG: `screenshot-format=png`
+with `screenshot-tag-colorspace`; `screenshot-raw` converts to sRGB whatever it's asked), an uncompressed 16-bit PNG
+(0.36-0.44 s), and `gyroflow-export --photo --image` makes the SDR image from it and writes the HEIC with its gain map
+(or the Ultra HDR JPEG), its metadata and the Live Photo's motion as before. Measured on clip 0068 with a camera
+turned: **1.2 s from Enter to the photo saved** (gyroflow-export alone 0.63 s, against 1.69 s rendering the frame
+itself, and 4.5-5.2 s with the clean frame); a Live Photo 4.3 s, its 3 s of motion (2.9 s, rendered as before)
+taking the most. Against the photo rendered the old way at the same moment: the same picture, a mean difference of 2.4
+of 255 inside it; the edges are the warp's own fill, as on screen. Only for the looks whose frame is the HLG (hdr,
+tonemap, dv, dvsdr; maker and nbcu end in SDR) and with the clean frame off (it takes the frames around it at full
+size: gyroflow-export's own). The photo has the video's pixels across the view (a 0.8 frame of 4K: 3072x1728), where
+the old way renders the view bigger by the camera's zoom.
+
+### Where the warp sits in mpv's chain
+
+`MAINPRESUB`, as the 360 view does: after the conversion to RGB, before the looks, and at the size of the video's
+rectangle on screen (`//!WIDTH OUTPUT.w`). The looks (dlogm's, at `MAIN`) then run on the output-sized picture, which
+is cheaper than now (today they run at the stabilized size). No mpv scaling follows: the warp is the scaler.
+
+Interpolation in the warp is Gyroflow's, and which one is a quality/performance setting, not a rule by frame rate
+(see "Quality and speed"). Today main.lua's `interpolation` picks Lanczos up to 31 fps and bicubic above only
+because on an M1 Pro through VapourSynth 4K Lanczos kept up at ~38 fps and bicubic at ~54: what that machine managed,
+not something about the clip.
+
+Where the warp shrinks the source a lot (4K into a 1080p window: two to one), a plain bicubic aliases; the prototype
+widened its taps, Gyroflow's EWA is the exact answer but costs most. Their cost on the N100 and the M1 Pro is in
+[gpu-render-spike.md](../archive/gpu-render-spike.md): widened bicubic 24 ms on the N100, EWA 42, both too much there **(to try: a
+prefiltered half-size source, on detail like a reef)**.
+
+### Chromatic correction inside the warp, or not at all
+
+Before #144: the stabilized YUV went through VapourSynth with one (green) refraction, mpv converted it to RGB, and
+chromatic.glsl re-sampled red and blue around the lens axis it read from the stamp: a second resampling of an image
+already resampled once (chromatic.glsl is now only the export's pipes path). That patch at the end is not carried over: the correction is done inside the warp, or, where
+the machine can't afford that, not at all. It is a small effect on the picture, not worth a second resampling.
+
+In the warp each output pixel has its ray; under water the green ray is refracted by water's index for green (as
+now), and red and blue by theirs, and each channel is read from the source at its own coordinate: one resampling, from
+the original pixels, with the exact lens model rather than the stamp's approximation.
+
+**It doesn't need the source converted to RGB first.** The conversion from YCbCr to (non-linear) RGB is a linear
+matrix, so reading the Y and CbCr planes at the red channel's coordinate and converting gives exactly the red that a
+pre-converted RGB frame would give there, and likewise for green and blue. The warp that reads the planes itself
+(below, "Conversion before the warp") samples Y and CbCr at three coordinates, converts each, and keeps R from the
+first, G from the second, B from the third. The two ways cost the same in the warp (three times the taps); the
+plane-reading one saves the source-sized conversion pass and interpolates the chroma once, with the warp's kernel,
+instead of twice (mpv's `cscale` to the source's size, then the warp).
+
+**It costs only under water.** Out of water, or with the correction off, the three coordinates are the same and the
+warp samples once: a branch per frame (the indices are per frame), not per pixel. Under water: three times the warp's
+taps, or the main kernel for green and bilinear for red and blue, which the eye shouldn't tell from it (built
+inside the warp, #144). The export gets the same
+correction for free.
+
+### The edge fill on the GPU
+
+The VapourSynth-era fill (removed), step by step, and its GPU form:
+
+1. **Which pixels are uncovered**: the warp pass knows, per pixel, whether its ray fell outside the source (with the
+   feathered margin Gyroflow uses for the mask). No separate mask render.
+2. **The sphere**: today a CPU cube map (6 × n², n up to 512) of what the camera saw, fading with a 5 s half-life,
+   written from a separate wide-view render. On the GPU: a storage texture (a cube map or an equirect, rgba16f) that
+   a compute pass writes from the covered pixels of the frame each frame, by world direction; the fade, the scene
+   cut reset and the erosion of stale content are per-texel arithmetic. The temporal denoise prototype showed that
+   storage textures persist across frames in mpv's user shaders, and how to skip redraws (compare against the last
+   frame's luma).
+3. **The fill**: pull-push and blur as a mip chain over a coarse output-sized texture, the mute (desaturate, darken
+   with distance) per texel.
+4. **The composite**: in the warp pass, the fill where the ray left the frame, blended by the mask.
+
+This is a redesign, not a port: the GPU version should look the same, but will not be bit-identical to the CPU one.
+
+**Built (2026-11-08)**, the smooth fill as the VapourSynth path made it (gpu_table's `fill` chain, warp.glsl's
+`fill_*` passes): fragment passes at the warp's hook (MAIN; LUMA and CHROMA each in the planes layout), ahead of the
+pass that draws. `fill_lo` puts the warped frame on a grid 135 cells high (3x3 rays a cell, the frame's edge repeated
+past it) with how much of each cell the frame covers, its feather counted; `fill_pull` and `fill_push` are smooth.rs's
+pull-push, one pass a level (saved textures halving down to 1x1, then back up, each level keeping what it knows); two
+`fill_blur` passes are the Gaussian of `edges_blur`. The warp's pass reads the grid through the sampler's filter, mutes
+it with the distance from the frame (the source's, not smooth.rs's chamfer distance on the grid), and blends the
+picture into it over edges.rs's feather (3 % of the height, 0.2 % in), past the lens's field too. Against the
+VapourSynth path with crop mode's camera zoomed out (clip 0126): the same soft edge and blur; the old GPU fill (the
+nearest edge's colors, 25 taps) streaked outward from the frame and met it in a line.
+
+Writing the sphere every frame becomes cheap, so `fill_rate` goes. **(to try: sphere and fill passes at 1080p on the
+N100.)**
+
+**The sphere, 2026-11-18** (warp.glsl's "pass sphere", `sphere_fill`; gpu_table's `sphere_passes`). Before: one
+compute pass after the warp wrote every other output pixel the frame covered into an equirect (2048 x 1024 rgba32f,
+0.18° a texel: color and time seen) by world direction, last writer wins; the warp read it back past the frame as 3 x 3
+texels two apart, each the nearest texel (`imageLoad`: a storage image isn't filtered), weighted by age (half-life 2.5 s,
+gone after 10), and blended it over the smooth fill by how fresh it was. The texels showed as blocks (a texel is ~3.5
+px of a 1080p window, ~10 at full screen on the XDR), stale content (a scene cut, the boat turning under the camera)
+showed until it aged out, and the sphere was written after the read, a frame late.
+
+Now three compute passes at MAIN **before** the warp samples the frame (HOOKED is the decoded frame), so what they
+write shows in the same frame:
+1. `sphere edges` (every 4th output pixel): along the frame's edge, in 32 sectors of the perimeter (about a tenth of a
+   16:9 frame's width each), in a band 3 % of the height inside the edge, the frame now and the sphere's memory of the
+   same directions (a second texture, the slow layer: rgba16f, what was seen there averaged with a half-life of 0.5 s),
+   where the sphere has a memory there (v2 also counted how fresh the sphere was past the edge; v3 fills empty texels
+   directly). Summed per sector with atomics into a storage buffer.
+2. `sphere sectors` (one workgroup): per sector the distance between the frame and the memory, in Y'CbCr of the signal
+   as decoded (log or gamma: near enough to even steps for the eye), chroma counted twice; nothing fresh past the edge
+   counts as different (writing there only stamps the fill the read shows anyway), no memory inside as no evidence.
+   Smoothed in time (half-life 0.15 s rising, 0.3 s falling; a seek or a redraw of the same frame starts over or
+   changes nothing), then the strength: smoothstep from 0.04 (nothing written) to 0.10 (all of it).
+   **First version (v1) compared the frame inside the edge with the sphere past it**: different parts of the world, so
+   the change of colour across the edge (deck and hull, sea and sky) read as stale content, and on a shaking boat, where
+   the sphere's traces are right, it wiped them (Anton, live, 2026-11-18). The memory of the same directions changes
+   only when the world does (a cut, surfacing).
+3. `sphere` (every other output pixel): each texel these pixels reach gets exactly one writer, the pixel nearest the
+   texel's middle in steps of the pixels (the pixel lattice mapped onto the sphere by its local derivatives, from the
+   neighbours in the workgroup's shared memory; up to 6 texels across near the poles). The texel's middle decides:
+   inside the frame, the frame's color there (a 2 x 2 box over the texel's footprint), seen now; past it, with the
+   strength interpolated between the two nearest sectors' middles along the edge, times a falloff (whole up to 8 % of
+   the height past the edge, easing to none at 30 %), times a share a frame (half of the way in 0.08 s, so a moment's
+   difference barely touches the traces), the continuation (the smooth fill's color there) mixed over what the texel
+   held as a share of its weight, so an empty texel takes it at that weight and the read eases into the smooth fill
+   under it. Where the sectors don't differ, nothing is written and what was seen there earlier stays. Once the slow
+   layer has taken the new world in, the difference is gone and the writing stops. Seen texels also update the slow
+   layer. `SPHERE_DEBUG 1` writes the continuation red (over traces) or green (where there were none); the marks stay
+   in the sphere, so it overstates.
+
+The read (`sphere_fill`, in the warp's pass) is a cubic B-spline over 4 x 4 texels (all weights positive, so empty
+texels drop out; no ringing). Measured offscreen (tools/edgefill): see the PR's table. Gotchas met: with the smooth read,
+columns of texels the stride-2 writer missed (a pixel step about a texel) showed as stripes, hence one writer per texel;
+Gyroflow's world has its y axis anywhere (on the speedboat clip the sphere's pole sat on the horizon), so near a pole a
+step spans many texels across.
+
+**v3, the same evening: Anton's model.** v2 live: the traces went a dark gray no part of the picture had, things
+flickered in the background, and a ring showed around the frame. The causes: (1) a trace faded with time (half-life
+2.5 s, gone after 10) and what showed through was the smooth fill, muted on purpose (35 % less color, 12 % darker) and
+far from the frame the whole frame's average: gray; (2) where a trace had faded, the background was the live smooth fill,
+recomputed every frame from what was at the frame's edge just then: flicker; (3) the frame was written into the sphere
+up to its edge and not past it, a hard border, and the output frame's edge is curved (the lens), so its footprint shows
+as a ring; besides, past the lens's field every ray lands on the same circle (`boundary_uv`), so the distance from the
+frame stopped growing there and the continuation's falloff drew that circle. Now (Anton's words, in substance): the
+sphere holds the frame's trace where the frame has been and the edge's continuation where it hasn't; nothing fades; a
+texel keeps what was written until the frame or a new continuation is written over it; the output past the frame is
+always the sphere.
+- An empty texel (the first frame, after a seek, a turn to where the camera hasn't looked) gets the continuation
+  wholly, at once; from then on it's a trace like any other, compared by the sectors like any other (the slow layer
+  takes the continuation too), so a continuation is rewritten only where the frame shows it to be wrong, instead of
+  following the frame.
+- The frame is written with a soft edge: its share eases from 0 at 0.5 % of the height in (some cameras' outermost rows
+  are off in color, and the interpolation reaches past the edge) to whole at 10 %, over what the texel held. Each texel
+  keeps the share it has had (the slow layer's alpha), and only the share it hasn't had yet is added: written again
+  every frame while the camera holds still, the soft edge would add up to the whole frame and leave a hard border once
+  the camera moves.
+- The continuation isn't muted under the sphere (the plain smooth fill still is).
+- A seek (or the first frame) starts the sphere over: `ge_epoch`, the time of the jump; texels written before it count
+  as empty.
+- Past the lens's field, the distance from the frame keeps growing (`boundary_excess`: how far past the field a ray is,
+  times the focal length).
+What's left on the jump clip (0004): where the first frame's edge was, its trace meets the continuation in a faint
+line, darker where the lens vignettes the frame's edge. That is the model: the trace stays until something is
+written over it.
+
+**v4, 2026-11-19: the rule checked on a synthetic bench first** (tools/edgefill/synth: an analytic world, 18 camera
+paths with turns, shifts, rolls and their mixes, a cut and an exposure change; the real shader through afpchain against
+a plain Python model of the rule on the same frames). v3's shader matched the model everywhere (the fill within
+0.001-0.002 on average), so what Anton saw were faults of the rule, found and fixed in the model, then ported:
+- **The memory kept apart for what the camera saw.** In v3 the slow layer followed every write, continuations too.
+  A frame shaking in a still world keeps writing the continuation past its edge, the memory there moves towards it, the
+  edge comes back, "differs from memory", and the continuation wipes real traces (the sectors fired at 0.3 on average,
+  up to 1, with nothing changed). Now a texel the camera has seen keeps what it saw in the slow layer (its alpha: 0 for
+  a texel holding only a continuation, 1 + the frame's share for a seen one), and the sectors are measured apart: the
+  seen memory's difference (the world changed: rewrites traces and continuations) and the continuations' (only
+  continuations are rewritten). With nothing changed the first stays at 0.
+- **The frame written hard, the sphere coarse.** v3's soft edge (10 % of the height) wrote what only the frame's outer
+  part saw at a fraction, so posts seen only there barely stayed, and a shaking frame that came to rest left a frozen
+  half-transparent band with old details under it. Now the frame is written wholly from 1.2 % of the height in (0.4 %:
+  none), and the sphere is 512 x 256 (0.7° a texel, was 2048: 0.18°), read back as before with the B-spline, which is
+  what makes a trace's border soft (Anton's idea). The frame is averaged over the texel when written (4 x 4 taps, a
+  Gaussian of half a texel), so a coarse texel doesn't alias. The writer goes over every 4th output pixel (was every
+  2nd).
+- **A changed sector's continuation goes all the way round** (Anton: a trace is worth something only while it joins the
+  frame). In v3 it reached 30 % of the height past the edge and what lay further stayed forever after a cut. Now it is
+  written over the sector's whole wedge of the sphere (around the frame's axis, out to the point behind the camera): in
+  the output by `sphere`, the rest by a fourth pass, `sphere beyond` (every texel of the sphere the output didn't
+  reach this frame; 131 072 of them, most only test the wedge's strength). Its color is the continuation where that
+  angle leaves the output (`sphere edges` sums the output's border per 64 angles around the frame's axis,
+  `sphere sectors` fills the angles the border doesn't reach from their neighbours).
+- **The sectors measured per texel.** With the coarse sphere, `sphere edges` comparing a band pixel's own color with
+  its texel's memory read a thin bright post against a 0.7° average as a change, and a shaking frame wiped a post at
+  its edge (the bench: shader and model 0.008-0.012 apart there). Now `sphere` sums each texel in the band as it
+  writes it (the frame averaged over the texel, the memory as it was), for the next frame's `sphere sectors`; the
+  strengths are a frame late, against a 0.15 s smoothing. `sphere edges` only sums the output's border for the wedges.
+  Shader and model are now 0.0012-0.003 apart on every scenario.
+- Tried in the model and dropped: a band around the frame always given the frame's continuation when the frame is
+  written (it turned everything a moving frame leaves behind into continuation, 0.065 -> 0.082 of error on a pan), and
+  the same band as wide as the sector's difference (harmless, but no better).
+On the bench against the world (mean error in the fill, model): a cut 0.074 -> 0.059 (0.034 from 0.3 s after it), the
+light 40 % darker 0.077 -> 0.069, a turn of 50°, a cut there and back over the old world's traces 0.085 -> 0.052; scenes
+where nothing changed as before (to 0.0002), with the posts the frame's outer part saw kept after a shake.
+
+### Temporal denoise (Ctrl+p) on the GPU path: 5 or 3 frames on each side
+
+A recursive temporal denoise as a shader already worked (shaders/tdenoise.glsl on the `temporal-denoise` branch:
+−62 % noise on water at 4K60 on an M1 Pro), but Anton froze it for playback (the eye averages at 60 fps), and a plain
+recursive filter is no good under water: it has to follow what moves. The GPU path's Ctrl+p is the paused frame's way
+(vs-gyroflow's still.rs, its radius of 5) in warp.glsl's `dn_` passes, after the warp at MAIN:
+
+- **The window:** each frame is the average of itself and its pixels in the 5 frames before and the 5 after, each
+  weighted by how much a 3x3 patch (every other pixel) differs beyond the noise (still.rs's weight; the noise measured
+  by brightness from the shown frame against the one before). The frames after it are frames already decoded: the
+  shader keeps the last 11 warped frames in a ring (`GDN_FRAMES`, rgb10a2, slots up to 4K two across: 400 MB) and
+  **shows the one 5 frames back**. main.lua delays the audio as much (`audio-delay` + 5/fps, taken off again when it
+  goes); after a seek the first frame stays until the frames after it are there.
+- **The motion is searched once per frame:** between the new frame and the one before it, per 32 px block (the gyro's
+  prediction from both frames' cameras, a search within 8 px on a quarter-size luma, then within 2 px at full size with
+  a sub-pixel fit). The prediction maps the rays back to the output the way `output_ray` maps pixels to rays: with a
+  lens correction below 100 % the source lens's share too (until 0.14.0 it took the rectilinear map alone, tens of
+  pixels off at 0 %, so the search never found the motion: no denoise on texture, and rectangles of other places'
+  water averaged into open water). Those steps stay in the ring with their frames (`GDN_VEC`). The motion from the shown frame to each
+  of its 10 neighbours is the steps chained (backwards as they are, forwards each one inverted by a fixed-point
+  iteration), then checked within a pixel at full size (`GDN_NV`, read by the blend through the sampler's filter).
+- **Crop mode** shows no frames after (`gyroflow_dn_after` 0): its camera turns the newest frame as it's dragged, and
+  the frames before it are matched with the cameras they were rendered with. Where the window changes (crop mode on or
+  off, Ctrl+p, a new shader, a new window size) the ring starts again (`gyroflow_dn_epoch`); paused, main.lua seeks to
+  the frame on screen exactly, so the picture stays. Save frame takes the time of the frame on screen
+  (`user-data/gyroflow/gpu_delay`).
+
+**Its settings:** on or off is Ctrl+p (the panel's Transform, gyroflow.conf's `still`); how much of it this computer
+does is Performance & Quality's **Temporal denoise** (gyroflow.conf's `temporal_denoise`): **Full**, 5 frames on each
+side (the picture 5 frames behind), **Light**, 3 (3 behind; about a quarter cheaper), **Off**, none whatever Ctrl+p
+says: the shader is written without the `dn_` passes (no ring, no delay), the paused frame isn't cleaned either, Ctrl+p
+says it's off on this computer, and its switch is kept for when it's on again. The frames on each side are a DYNAMIC
+parameter (`gyroflow_dn_radius`): Full to Light writes nothing again, only the ring starts again (the delay changes).
+The grain kept is gyroflow.conf's `still_grain` (0.25; `gyroflow_dn_keep`). From 2026-11-08 to 11-09 (#148) the frames, the grain and a motion tolerance were sliders in
+Transform, kept with a clip's transform; they did little to the picture (the noise measure below was the matter), and
+a clip's `denoise_` keys from then are left out.
+
+Measured 2026-11-07 on the M1 Pro, clip 0126 (4K60 D-Log M, under water), a 1080p window:
+
+| | the old one (4 frames before, a search per frame) | 5 + 5, the motion chained |
+|---|---|---|
+| GPU time a frame (warp + denoise) | 8.7 ms | 8.0 ms (chained motion 1.7, blend 4.3) |
+| grain taken out of open water (10-bit codes; 8.0 without) | 3.1 | 4.0 |
+| low-pass change against the frame without denoise | 1.53 | 1.34 |
+
+**Lighter, 2026-11-08** (Anton: "it doesn't always keep up"; the built-in XDR full screen, 3024x1898, dropped 105
+frames in 8 s with it, none without): the patch is the pixel and the quarter-size luma around it (4x4 pixels at one
+read; its noise taken as 1/1.8 of a pixel's, measured: the warp's interpolation ties neighbours together) instead of
+5 or 9 pixels; the pixel itself is the nearest of the four the bilinear sample reads; the per-frame search's full-size
+step is 3x3 (the sub-pixel fit where the best is in the middle); the chain's check reads 16 pixels of a block, and
+not at all for the frame just before (its own step as searched). On the XDR full screen: the denoise 9.3 -> 6.0 ms,
+2 frames dropped in 8 s. On clip 0126 it takes out 3.7 codes of grain in open water against 3.9 at a calm moment, 5.8
+against 7.0 in a fast turn (Transform's Loose motion takes out more), and changes the picture's structure a little
+less (1.19 against 1.27).
+
+**The noise measured right, 2026-11-09** (Anton: "on the Thistlegorm clips it only now and then catches the noise",
+a dark noisy dive). Measured offline on copies with the player's own shader (libplacebo on MoltenVK, no window: each
+frame with and without the denoise, the noise as the high-pass spread in the flattest quarter of 32 px blocks, 1080p,
+none of the grain kept). The motion was right: all 10 neighbours were found for every frame, and averaging all of them
+took out 73 % of the noise on 0087 (ghosting what moves). The noise measure was wrong: `dn_state` took it as the lower
+quartile of the differences against the frame before, over 0.4506, as still.rs does. Under water HEVC copies many
+blocks from the frame before, whose difference is about none, and codes the rest with fresh noise; the lower quartile
+of that mix read 3.3 codes in open water where the spread is 7-8, and swung 2-10 codes from frame to frame (its
+correlation with the real noise 0.38). With the measure that low, plain noise was taken for motion: at 2 codes 4-7 % of
+it went. Now:
+
+- **The upper quartile** of the differences, over 1.6268, against the frame before's nearest pixel (between pixels the
+  bilinear mix halved the noise), **smoothed over the frames** (a tenth of each new one).
+- **The pixel's reference kept within the noise of its four neighbours' mean**: with the measure right, a spike of the
+  noise turned every other frame away and stayed, dark specks on clean water.
+- **A color check**: the color (B-Y, R-Y) of the pixel and its neighbours against the other frame's, by the color's
+  own noise (measured the same way, `gdn_sigma[16-31]`): a pink fin over water of its brightness ghosted without it.
+- The tolerance is fixed (1.5, as the default was).
+
+Noise taken out, luma (color in brackets), 30 s of each clip; the noise without, in 10-bit codes:
+
+| clip | noise | until now (#151) | before #151 | Full (5+5) | Light (3+3) |
+|---|---|---|---|---|---|
+| 0087, Thistlegorm | 8.5 | 31 % (48) | 34 % (38) | 61 % (70) | 55 % (62) |
+| 0090, Thistlegorm, strong stabilization | 11.1 | 36 % (55) | 44 % (51) | 60 % (69) | 53 % (61) |
+| 0093, Thistlegorm | 13.2 | 37 % (56) | 42 % (50) | 62 % (70) | 55 % (62) |
+| 0004, Thistlegorm | 4.1 | 29 % (45) | 32 % (39) | 50 % (59) | 44 % (51) |
+| 0126, reef (the reference) | 5.0 | 25 % (44) | 23 % (34) | 58 % (65) | 50 % (56) |
+
+The stabilization: on 0090 (strong) the one before took out 39 % where the correction turns slowly and 27 % in its
+fastest third (the frames' different blur passing the too-low threshold as motion); now 61 % and 57 %. On the other
+clips it made no difference either way. The pre-#151 passes (5x5 search, 32-pixel chain check) with the same fix took
+out no more, at about 1.6 times the cost, so they stay out. Cost (offline, the whole denoise, so above what the player
+measures): as #151 at 1080p (3.7 ms), +5 % at the XDR's size and 4K; Light about 25 % less. No ghosts on 0126's
+bubbles and diver or 0087's fish; paused-frame crops and the rig in the review's notes.
+
+**The noise measured only where the frames match, 2026-11-18** (Anton, on GoPro HERO4 clip GOPR1030, indoors, 4K30
+8-bit H.264, handheld with fast moves: "bands on smooth gradients", an elbow at 2.74 s with lines across the skin).
+They weren't the 8-bit steps: they were other frames' edges and shading averaged in. The upper quartile of the
+differences against the frame before took every pixel, and on this clip over a quarter of them missed (motion blur,
+an arm moving its own way): the quartile went past the histogram's end (16 codes), so the noise read 9.7 8-bit codes in
+every bin for about 1.2 on a white wall, and the weights took in anything within three times that. Now a pixel is
+sampled for the noise only where its 4x4 (the quarter-size luma, the weight's own patch term) matched the frame before
+within 2.5 times the noise measured so far (never under half an 8-bit code). It starts low and only takes what fits,
+so it doesn't feed itself: a looser gate (4 times) or one by the median of the patch differences (more than half of
+this clip's pixels miss) let the ghosts back. Measured with `gyroflow-export --gpu on --prores` (the player's shader,
+4K), against the frame without the denoise; noise left on the flattest blocks (fine scale) and the most it changes the
+picture at large scale (a Gaussian of 6 px, 99.9th percentile, 8-bit codes):
+
+| clip | noise read (8-bit codes) | noise left, until now / now | changed at large scale, until now / now |
+|---|---|---|---|
+| GOPR1030, wall (61-64 s) | 9.7 / 1.2-1.5 | 49-78 % / 75-90 % | 6.0-6.5 / 1.2-2.3 |
+| GOPR1030, 0-20 s | 9.7 / 1-5 by brightness | 45-64 % / 64-86 % | 5.6-6.7 / 1.0-2.3 |
+| 0087, Thistlegorm | as it was | 45-48 % / 48-50 % | 1.0-1.3 / 1.0-1.2 |
+| 0126, reef | 5-25 % lower in some bins | 58 % / 65-67 % | 3.7-4.2 / 3.3-3.7 |
+
+On GOPR1030 the lines on the elbow, the steps on the wall and the ragged dark halo along the ceiling's edge are gone;
+less grain goes than before because before the frames were smeared together, not denoised. On 0126 the open water keeps
+a little more grain and the reef and fish are sharper (before, the bright bins read at the histogram's end there too).
+
+**What the frames can't take out, and Stronger, 2026-11-09** (Anton, on 0087 at 37 s, open water with the wreck faint
+through it: "fairly strong noise" left; the dark dots are noise, particles in the water are white). Measured on the
+player's shader, 1080p, a 480x360 crop of that water, noise in 10-bit codes by scale (fine: the picture minus a
+Gaussian of 1 px; mid: 1 to 3 px; coarse: 3 to 10 px):
+
+| | luma fine / mid / coarse | color (B-Y) | dark specks a crop |
+|---|---|---|---|
+| without | 10.6 / 9.9 / 5.2 | 11.4 | 323 |
+| Full until now (#153) | 5.9 / 6.1 / 4.0 | 5.2 | 850 |
+| Full now | 5.4 / 4.9 / 3.7 | 0.4 | 213 |
+| Stronger | 1.7 / 1.8 / 2.3 | 0.2 | (none to see) |
+
+What was left after the frames: the coarse blotches (~10 px) go least, 25-30 %, and part of them stays from frame to
+frame (HEVC carries it over), so more frames wouldn't take them; the color's noise was the part that showed; and dark
+cyan specks, 1-7 px, mostly red (-36 codes), new each frame: the shown frame's own spike stayed in its average. So
+`dn_clean` after the average (both modes): the **dark specks** (a pixel darker than its ring of 16 pixels two away by
+more than the noise, the ring with no dark pixels opposite each other, takes the ring's color; bright dots stay) and
+the **color's guided filter** (B-Y, R-Y, each its own guide over ~20 px, eps 0.8 of the color's noise: a pink fin over
+water of its brightness keeps its edge, which a luma-guided filter would spread). **Stronger** (the transform's
+`denoise_strong`, the panel's Transform, for a very noisy clip: `gyroflow_dn_strong`) also keeps no grain, takes in
+frames that differ up to twice as much (tolerance 3), gives the shown pixel a tenth of the weight where it differs from
+what the other frames agree on by 2-4 times the noise, and runs the guided filter on the luma too (~12 px, eps 0.4 of
+the noise). Fine texture softens with it (0090's wreck); the moving fins (0087, 0090) and 0126's bubbles and diver show
+no ghosts or bleeding, and 0126 in Full looks as before. The guided filter is He's "fast" one: its statistics at a
+quarter of the size (5 small passes), the filter at full size.
+
+Cost (offline wall-clock, about 1.8 times the player's): at 1080p the specks 0.6 ms, the guided filter 0.7 ms; at the
+XDR's 3024x1701, 3.1 ms the two. The first version of the specks (16 colors in arrays, Metal spilling them) cost 3.0 ms
+at 1080p; now most pixels are done at 4 reads.
+
+The first try, with a ±2 px search at full size per neighbour and all the window's state worked out per pixel, cost
+18 ms a frame and dropped frames at 60 fps. Not done: the paused frame after a change of a setting is cleaned only once
+it plays on (its ring starts again from it; stepping 5 frames on would fill half of it); frame-back-step while paused
+lands on the frame before time-pos, 4 frames after the one shown; with Ctrl+p on, Save frame stays gyroflow-export's
+own (a screenshot at the video's size renders at another size, which would start the ring again); the last 5 frames
+of a clip are never shown.
+
+## Hosts and platforms
+
+| Host | mpv | Status of `PTS` | Notes |
+|---|---|---|---|
+| Mac app | our build, pinned at mpv fba6342 with patches | has it | The DV looks present through AVSampleBufferDisplayLayer (patch 0002), which renders through libplacebo like the swapchain, user shaders included: the warp runs under them (checked 2026-11-07) |
+| Windows app | shinchiro's build today; our own build with our patches, as on the Mac (decided 2026-11-06) | has it (the build we ship, 20261018 at mpv 01e2533, is after the change) | the generic patches (0001, 0003, 0011) and the 360 tracks patch can then apply there too |
+| Linux | the distribution's | mpv 0.42.0, released 2026-11-05; distros will follow | **VapourSynth is no longer needed for playback**: Debian, Ubuntu and Arch's mpv lack it today; the plugin needs only gpu-next and its own binaries |
+| Streaming server | none: our renderer | n/a | below |
+
+The motion side, without VapourSynth, runs in a helper binary next to the plugin (gyroflow-probe and
+gyroflow-project already are such binaries): it loads the clip like `Engine::load` and writes the table shader; for
+motion streaming it keeps running and rewrites it.
+
+## The streaming server
+
+Anton's idea, new 2026-11-06: the NAS plays a clip stabilized, with its log curve converted, and sends it as a
+stream (1080p HDR, Dolby Vision if possible). Its render:
+
+- **Decode**: VAAPI (FFmpeg's hwaccel), frames stay in GPU memory.
+- **Import** each plane into Vulkan through dmabuf, as mpv does (one image per plane). FFmpeg's own route (`hwmap` to
+  Vulkan, then `libplacebo`) fails on this NAS: Mesa's ANV can't import a two-plane P010 surface with modifiers, can't
+  render to Vulkan P010 frames, and has no Vulkan Video decode for this GPU yet.
+- **Render** with libplacebo: the warp, the look, at 1080p, into images exported back as a VAAPI P010 surface (two
+  plane images, the way the Mac app renders into IOSurface planes for the sample-buffer layer).
+- **Encode**: `hevc_vaapi` in VDEnc mode (`low_power`), Main10, tagged HLG or PQ. Dolby Vision profile 8.4 (HLG with
+  an RPU) is metadata in the bitstream: vs-gyroflow already writes RPUs for exports (dovi.rs, dv_mux.rs); the live L1
+  per frame needs the frame's min/average/max, which libplacebo's peak detection measures on the GPU.
+- **Serve**: HLS with fMP4 segments, played by Safari / Apple TV and Jellyfin (tools/stream/README.md).
+
+The same renderer, writing a file instead of a stream, is the export.
+
+## 360° cameras: the sphere on the GPU
+
+Not part of the first steps, and not for Linux or the NAS (no need there for now), but the same port is what 360
+playback on the Mac needs for 8K60.
+
+**Before #144** ([360-cameras.md](360-cameras.md)): sphere360.rs rendered each lens with gyroflow-core into an
+equirectangular sphere (5760 wide by default) in the camera's axes, with the rolling shutter taken out, blended the
+lenses on the CPU along feather spans, and stamped the camera's orientation and the headings under it; view360.glsl
+turns the view at the screen's rate. Through VapourSynth that was 5.7K30 with room, 8K30 just, 8K60 not: four or more
+full-frame copies of 90–100 MB frames, and VapourSynth's cache ([360-throughput-spike.md](../archive/360-throughput-spike.md)).
+
+**On the GPU**, the per-lens part is the kernel this design ports: the lens model (insta360's is the most iterative,
+so the lens table of "Quality and speed" matters most here), the rig's pose per lens, the rolling shutter per lens,
+and the blend along the feather spans. Two shapes:
+
+- **The sphere kept, made on the GPU**: a pass at the video's rate renders both lenses into a sphere texture, and
+  view360.glsl reads it as now. It keeps the decided architecture as it is (the sphere close to the source, the view
+  in a shader at the screen's rate, turning the head never waits for the video); only where the sphere is made moves.
+  The sphere costs its own size once per video frame.
+- **No sphere**: the view pass goes from the screen's ray straight to a lens and its pixel. Only the window's pixels,
+  but at the screen's rate (120 Hz on the XDR) and with the lens solve in every refresh.
+
+The first is the one to build; the second only if the sphere's size per frame turns out to be the cost **(to try)**.
+The stamp under the sphere becomes the per-frame table, as for flat clips.
+
+**Built (2026-11-07), the sphere on the GPU** (`gyroflow-gpu-table --sphere360`, gpu_table::sphere_shader, warp.glsl's
+sphere360 pass; main.lua's add_sphere): from sphere360::prepare, what Sphere360 renders with (the rig, each lens's
+gyroflow-core parameters: the equirect output, RigLens, no smoothing), the table has per frame each lens's block (its
+parameters and knots: RigLens is in them already, its turn in the rows' rotations, its offset in translation3d, its
+validity the field limit) and the stamp's 34 codes. The pass maps each sphere pixel through each lens's kernel (the
+fork's equirect projection, ported) and blends them by their shares (rig.rs's weights, with the masks, baked into a
+texture a tenth of the sphere's size); under the sphere the stamp's two rows, as gray. A shader's saved textures are
+its own (libplacebo keeps them per file), so view360.glsl reads the stamp from the picture: a second stamp pass at MAIN
+when `gyroflow_stamp360` is 1, its luma pass otherwise. On the X5 sample against Sphere360 at the same frame: the
+sphere differs by 1.05 of 255 on average (bilinear here, Sphere360's bicubic; blended in RGB, not per plane), the view
+by 2.97; its table in 0.6-0.85 s; 25 fps with no frame dropped in 15 s (19 dropped through VapourSynth).
+
+**The tracks on the GPU** (tools/mpv-patches/0014, `--video-join`; same day): upstream mpv now pairs a second video
+track with the first for Dolby Vision's enhancement layer (f_enhancement_pair: a dependent track the demuxer reads
+along, decoded with the same hardware decoding, each frame attached to the first track's of the same time, and mapped
+by vo_gpu_next). The patch makes a file's first two video tracks of the same size and codec such a pair, and
+vo_gpu_next maps both VideoToolbox surfaces and draws them side by side into planes of the frame's own (the mapped
+textures can be sampled, not blitted): the frame the sphere shader reads, as hstack's was, without the copy to memory
+and back. The joined frame keeps the aspect view360 sets (--video-aspect-override, which each decoder applies to its own
+picture), and main.lua keeps the window's size for it (auto-window-resize no: resized to the aspect it would change
+the area view360 sets it from, and again). On the X5 sample (two 3840x3840 HEVC tracks, 25 fps): ~29 % of a core
+against ~50 % joined in memory and 350-430 % through VapourSynth, no frame dropped; not held to the clock ~48 frames
+a second with the view (~50 with no shader at all: the decoding and the join are the ceiling). An X5 records 8K at 30
+at most and 5.7K60 is half the pixels: both fit. Not tried: three or more tracks, other cameras' files.
+
+**What it needs: both lens tracks on the GPU.** Under `lavfi-complex` mpv gives no hardware decoding device to the
+tracks' decoders, so they are decoded with a copy to memory and joined there. Built as patch 0014 (`--video-join`,
+above); without it (Windows, Linux) the tracks are still joined in memory by lavfi-complex.
+
+Only the Mac app builds its own mpv today (`tools/build_mpv.sh`, in CI); the Windows app ships shinchiro's prebuilt
+mpv, and on Linux the plugins go into the distribution's mpv. **Decided 2026-11-06: the Windows app builds its own
+mpv too** (shinchiro's mpv-winbuild-cmake with our patches, cross-compiled in CI, x86-64 and arm64, pinned and kept up
+with mpv as the Mac build is). It changes nothing for users: the app ships an mpv either way. Linux stays as it is
+for now (shipping our own mpv there would change how the Linux version is delivered).
+
+The patch's GPU side is per decoder: VideoToolbox on the Mac, D3D11VA on Windows (VAAPI and NVDEC if Linux ever
+needs it). Written generally (through mpv's hwdec interop) it can also go to mpv upstream, where the limit ("decoders
+not linked to vo_chain must not use the hwdec context") is a known one; taken, the distributions' mpv gets it too.
+Linux and Windows join the tracks in memory (lavfi-complex hstack, copy decoding) and make the sphere with the same
+GPU shader; our own renderer decodes the tracks itself and needs no patch,
+if 360 is ever wanted there.
+
+## Quality and speed
+
+The same clip will run on an N100 at 6 W, a laptop that halves its GPU after half a minute at boost, an M-series Mac,
+a desktop card, and a NAS serving two streams at once. So nearly everything that costs GPU time is a setting with a
+default chosen per machine, not a constant. What exists now (quality.lua: when more than a tenth of the frames drop
+for 2 s, playback pauses and offers lighter settings, the pick kept in gyroflow.conf as this computer's) stays the
+mechanism; on the GPU it gets more knobs, a different order, and measurements instead of only dropped frames.
+
+### What each knob costs
+
+What a pass costs scales with one of three things, and that decides which knob helps where:
+
+- **source pixels** (a 4K source: 8.3 M a frame, whatever the window): decoding, the conversion to RGB with chroma
+  upsampling, any prefilter of the source;
+- **output pixels** (the window's or the stream's size): the warp and its taps, chromatic, the edge composite, the look;
+- **per frame**, fixed: the table lookup, the sphere's update, peak detection.
+
+| Knob | Choices, best first | Costs | Note |
+|---|---|---|---|
+| Interpolation | EWA (Robidoux) · Lanczos4 · bicubic · bilinear | output px × taps: EWA up to hundreds, Lanczos 64, bicubic 16 (or 4 fetches as a B-spline, softer), bilinear 1 | The biggest single knob at a given size |
+| Shrinking a large source | EWA · a prefiltered half-size source (one pass over the source) · widened taps · none (aliasing) | the prefilter: source px; widened taps: output px × 4 | Whenever the window is much smaller than the video (4K in a 1080p window, 8K 360). mpv's default downscaler cost the N100 half its frames (35 vs 75 fps) |
+| Render size | the video's · display · 1080p · 720p, then mpv scales up | output px | Exists (`resolution`, `gyroflow_render_scale` on the GPU path); on a 4K or 5K screen a factor of 4 or more. `auto`: the display's, at most 1080p while the temporal denoise is on (measured below) |
+| Frame rate | every frame · ≤ 30 · ≤ 15 | everything per frame | `fps_limit` was the VapourSynth path's; read and ignored since #304 (no frame-rate knob now); the most visible (judder), so last |
+| Lens model | exact (per pixel, with the model's Newton loops) · a table made per clip | gopro, sony, insta360 and the GoPro digital lenses: 8–60 iterations per pixel; opencv_fisheye: none | The lens part depends only on the ray's direction in the camera, so a 2D table over directions, made once per clip (again if the lens changes per frame), replaces the loops with one fetch. The same for a lens correction below 100 % (a 6-step root solve per pixel today) |
+| Rolling shutter | knots per frame (65 · 33 · 17); the two-step row lookup on or off | small | Mostly quality; off by itself when the clip has no readout time |
+| Chromatic under water | inside the warp, every channel with the main kernel · red and blue bilinear · off | under water only: output px × 3 × taps, or × (taps + 2) | Exists as `chromatic_skip`. Never as a pass at the end (above); out of water it costs nothing |
+| Edge fill | sphere · smooth · off; the sphere's resolution; written every frame or every n-th | the composite: output px; the sphere: per frame (its texels) | Exists (`edges`); `edge_fill_rate` is read and ignored since #304; on the GPU the sphere may be cheap enough that the rate goes **(to try)** |
+| Conversion before the warp | the warp reads the Y and CbCr planes and converts only what it samples · mpv converts the whole source to RGB and the warp reads that | the first: only the warp's taps; the second: source px with chroma upsampling | A design choice more than a setting, and the biggest saving on weak GPUs, which spend most of a frame on source-sized passes. Both allow the chromatic correction. In mpv it works as LUMA and CHROMA passes at the output size (libplacebo then converts at 1080p); it pays only with the geometry computed once for both ([gpu-render-spike.md](../archive/gpu-render-spike.md)) |
+| HDR on an SDR screen | peak detection on · off | per frame, a compute pass | mpv's `hdr-compute-peak` |
+| The stream (server) | 2160p · 1080p · 720p; how many streams | output px | The encoder (VDEnc) is fixed-function hardware and doesn't use the shader cores; streams share the shader cores |
+
+Paused, none of this has to keep up: the paused frame is rendered again at the best settings (EWA, the exact lens,
+full chromatic, the video's size).
+
+### Measured on the M1 Pro's XDR
+
+The GPU path renders the warp, the edge fill, the denoise and the looks after them at `gyroflow_render_scale` times
+the video's rectangle on screen (warp.glsl's `RT`; the passes' sizes are `OUTPUT.w gyroflow_render_scale *`), and mpv
+scales the result to the screen. A 3840x2160 59.94 fps D-Log M clip into HLG, color fringes taken out, the sphere
+edge fill, full screen on the built-in XDR (the video 3024x1701), 720 frames after 12 s of warming up; the GPU's time
+is the sum of `vo-passes`' fresh averages:
+
+| Rendered at | GPU, no denoise | dropped | GPU, denoise 5 + 5 | dropped |
+|---|---|---|---|---|
+| the video's (3840x2160) | 9.9 ms | 0 | 20.7 ms | 48 % |
+| the screen's (3024x1701) | 7.3 ms | 0 | 15.8 ms | 31 % |
+| at most 1440p | 5.3 ms | 0 | 13.3 ms | 27 % |
+| at most 1080p | 4.3 ms | 0 | 8.4 ms | 4 % |
+| at most 720p | 3.7 ms | 0 | 4.8 ms | 0 |
+
+- About 3.5 ms doesn't shrink with the size: the color decoding, mpv's scaler, the OSD and the output's encoding.
+- The denoise's frames at the screen's size: 5 → 31 %, 3 → 22 %, 2 → 18 %, 1 → 11 % dropped; at 1080p 3 frames drop
+  none. Its composite is the pass that grows with the pixels (6.4 ms at the screen's size, 2.5 at 1080p).
+- Bilinear instead of bicubic in the warp: 0.24 ms less at the screen's size, not worth its softness.
+- Frames drop from about 8 ms of passes, half of the frame's 16.7 ms. Not mpv's 120 Hz vsync: with
+  `--override-display-fps=60` or `--swapchain-depth=2` as many drop.
+
+With #153's lighter denoise (the same screen, the panel hidden): at the screen's size Full drops 23 % (14.2 ms) and
+Light 14 % (11.8 ms); at 1080p neither drops (6.9 and 6.0 ms). With the panel open (the video ~2340x1320) Light held
+at the screen's size, but full screen it doesn't, so Auto caps both.
+
+So `resolution=auto` (the default) renders at the screen's size, and at most 1080p while the denoise is in the shader;
+paused too, since a new size starts the denoise's ring of frames again and the paused frame would have none around it.
+When it still drops frames with the screen's size picked by hand, quality.lua offers Auto first, then the lighter
+denoise.
+
+### Choosing them
+
+- **Presets, not twelve switches.** The menu's Quality keeps one list from Best to Lightest; each step is a set of the
+  knobs above. What goes first, least visible first (the order to confirm on the N100 and a laptop **(to try)**): the
+  sphere's rate → chromatic to bilinear → the lens to its table → the shrinking to widened taps → interpolation one
+  step down (Lanczos → bicubic → bilinear) → render size → frame rate. Each knob can still be set in gyroflow.conf;
+  one set by hand is left alone by the presets.
+- **Measured, not guessed.** mpv reports each GPU pass's time for fresh frames (`vo-passes/fresh`: last, average and
+  peak, per pass by its `//!DESC`). The plugin reads them while the clip plays, so it knows a frame's GPU time against
+  the frame's interval, not only whether frames dropped, and what each of our passes costs on this machine. A
+  machine's default is the best preset whose measured time leaves a margin (say 25 %) at the clip's rate and the
+  window's size, measured again when either changes a lot (a 4K60 clip after 1080p30, the window moved to a 5K
+  screen).
+- **Down quickly, up slowly, never in the middle of a shot.** A small step down (a knob nobody will see change) is
+  taken without pausing; before the frame rate or the size goes, it asks, as now. Back up only after some seconds with
+  room to spare, and at a seek, a new clip or a pause, so the picture doesn't change sharpness while you watch. A
+  laptop that slows after its boost settles on the step it can hold.
+- **The server** picks per stream when the stream starts, from the measured cost and the streams already running, and
+  lowers the render (not the encode, which is separate hardware) when another stream joins.
+
+## Checking it
+
+- **Against Gyroflow**: render chosen frames of clips with each lens model we play (DJI opencv_fisheye, GoPro with
+  and without SuperView/HyperView, Insta360, Sony if there is one) through `cpu_undistort.rs` and through the shader,
+  and compare (largest difference, PSNR), as view360.glsl is checked against its WGSL copy.
+- **Frame identity**: a clip with fast motion, played with seeks, pauses, frame steps and drops; any frame warped with
+  its neighbour's motion shows as a jump **(to try: an automatic check comparing the shader's PTS against the decoded
+  frame's)**.
+- **Throughput**: the NAS (N100) and the M1 MacBook, 4K60 → 1080p and to the window's size.
+
+## Steps
+
+1. **Spike** (done 2026-11-06, [gpu-render-spike.md](../archive/gpu-render-spike.md)): the opencv_fisheye path of the kernel as an mpv hook with `PTS` and an embedded table
+   written by a small CLI on vs-gyroflow; clip 0126 frame-exact against VapourSynth; knots vs rows; the table's load
+   time; cost on the N100 and the M1, knob by knob (interpolations, shrinking, the plane-reading warp). Needs mpv 0.42 on the NAS (built in the container).
+2. **The player** (parts 1 and 2 done 2026-11-07, [gpu-render-spike.md](../archive/gpu-render-spike.md): the geometry on a
+   coarse grid, the plane passes, bicubic in 9 fetches, Gyroflow's lens models and digital lenses as GLSL): all lens models and digital lenses our cameras use, the interpolations, chromatic inside the warp,
+   edges `off`; the fallback is playing as recorded with a card (#304).
+3. **The edge fill** on the GPU (sphere and smooth). Built (#144; the sphere's v4 in #255).
+4. **The renderer and streaming** on the NAS: VAAPI → libplacebo → VDEnc, HLS, Dolby Vision 8.4. Built (#144,
+   tools/stream); Dolby Vision 8.4 not.
+5. **The export** through the renderer; then the still frame, and maybe a denoise for stills and exports. Built (#245,
+   v0.14.0).
+6. **360 on the Mac and Windows** (both with our own mpv): an mpv patch for both lens tracks as textures, the sphere made on the GPU; 8K60.
+   Built (#144, patch 0014); 8K60 untried, Windows joins through lavfi-complex.
+
+## Open questions
+
+- The DV looks on the Mac: warp before the sample-buffer layer (patch 0002), or keep VapourSynth for them? Answered:
+  the sample-buffer layer runs user shaders; the warp runs under the DV looks.
+- Motion streaming with a table in a shader file: rewrite the file a few times, or patch mpv to update a texture
+  (Mac only)? Answered: rewritten (#193, #272).
+- The edge fill: same look on the GPU, or rethought now that it can be done every frame at full rate? Answered:
+  rethought (sphere v4, #255).
+- Gyroflow upstream: a full GLSL kernel is something Gyroflow itself could use (its Qt preview is a simplified one).
+  Offer it once it works?
+- Streaming: clients (TV, phone, browser), protocol, and whether a clip is streamed as it plays or rendered ahead.

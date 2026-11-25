@@ -1,6 +1,6 @@
 # edgefill: the sphere edge fill offscreen, before and after
 
-What the sphere's rework (docs/gpu-render.md, "The sphere, 2026-11-18") was checked with. No window: a clip's frames go
+What the sphere's rework (docs/design/gpu-render.md, "The sphere, 2026-11-18") was checked with. No window: a clip's frames go
 through libplacebo with the shader gyroflow-export's GPU path writes for it (the player's warp, edge fill and look), at
 a window's size.
 

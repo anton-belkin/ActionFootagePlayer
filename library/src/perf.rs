@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Where the time goes when something is changed in the Library (docs/library-responsiveness.md): a project of
+// Where the time goes when something is changed in the Library (docs/design/library-responsiveness.md): a project of
 // thousands of clips made on this computer's disk, its catalog read as the Library's thread reads it, and each
 // changing command timed with what the page asks for after it, once as the disk is and once with a share's slowness
 // stood in for (afp_catalog::store::nas: each stat, read and write waits as long as one to a NAS takes).

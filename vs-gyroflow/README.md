@@ -77,7 +77,7 @@ or nothing, with the reason.
 `afp-cut <video> --from <t> [--to <t>]` keeps a part of a camera's MP4 without re-encoding it: every sample as it is,
 DJI's clip data (only in the first sample of its metadata track) put back in front of the new first one, the timecode
 and creation times moved on, and the key `ch.actionfootageplayer.cut`; the cut is then read back as the player reads
-the original and removed when it doesn't read the same ([docs/lossless-cut.md](../docs/lossless-cut.md)).
+the original and removed when it doesn't read the same ([docs/design/lossless-cut.md](../docs/design/lossless-cut.md)).
 
 `install` writes a new file. Copying over an existing binary with `cp` keeps the old inode, and macOS then
 kills it when it runs (exit 137): the kernel has the old code signature cached for that file.

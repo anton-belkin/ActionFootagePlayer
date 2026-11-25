@@ -1,4 +1,4 @@
-//! The responsiveness journal, the Library's part (docs/responsiveness-journal.md): one JSON-lines file a run in this
+//! The responsiveness journal, the Library's part (docs/design/responsiveness-journal.md): one JSON-lines file a run in this
 //! computer's log folder (`~/Library/Logs/ActionFootagePlayer/journal/library-<when>-<pid>.jsonl`), with the page's
 //! records (ui/journal.js sends them every 2 s: `journal_write`) and the app's own steps (`step`, `span`). Written by a
 //! thread of its own: a record costs the caller a `serde_json` line and a channel send, never a disk write. Nothing is

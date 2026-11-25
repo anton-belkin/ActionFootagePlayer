@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Check and Find moved files (docs/library-management.md, "Find moved files", "The same clip twice"), on what's
+// Check and Find moved files (docs/design/library-management.md, "Find moved files", "The same clip twice"), on what's
 // selected: a whole big project would take long (fingerprints are 2 MiB read per clip, off a NAS).
 //
 // What Check finds:
 //   own2      a clip with two own files (in two locations): the first location's is the main one, the others are
-//             read, never written (docs/library-management.md §8)
+//             read, never written (docs/design/library-management.md §8)
 //   orphan    a clip's own file with no clip beside it (the clip moved without it)
 //   twice     the same clip (size and fingerprint) at two places in the tree
 //   missing   a moment's, clip preview's or export's original not found where its link says
@@ -122,7 +122,7 @@ impl Clip {
     fn name(&self) -> &str { self.tree.rsplit('/').next().unwrap_or(&self.tree) }
 }
 
-/// The clip a link names ({ clip, size, created, hash }), by what it is (docs/library-management.md §8), among the
+/// The clip a link names ({ clip, size, created, hash }), by what it is (docs/design/library-management.md §8), among the
 /// project's clips: only those of its size (sources never change), the steps in Anton's order, each taken while it
 /// leaves one: name, size and creation time; size and creation time; name and size; size alone. With the link's
 /// fingerprint, each step's clips are compared by it (its name's first), so nothing is a guess. `ask`: the last

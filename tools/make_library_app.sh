@@ -34,7 +34,7 @@ swiftc -O -target arm64-apple-macos12 macos/thumbs.swift -o "$app/Contents/MacOS
 # Its Quick Look (the system's panel: qlmanage -p crashes on videos on macOS 27)
 swiftc -O -target arm64-apple-macos12 macos/quicklook.swift -o "$app/Contents/MacOS/afp-quicklook"
 # What it reads of Apple Photos (times and places, to suggest clips' locations) and Apple's place names: macOS asks
-# about Photos for this app, as NSPhotoLibraryUsageDescription says why (docs/geolocation.md)
+# about Photos for this app, as NSPhotoLibraryUsageDescription says why (docs/design/geolocation.md)
 swiftc -O -target arm64-apple-macos12 macos/photos.swift -o "$app/Contents/MacOS/afp-photos"
 install -m 644 library/icons/icon.icns "$app/Contents/Resources/AppIcon.icns"
 # Tauri's own version is the crate's: the app shows the player's, which ships with it

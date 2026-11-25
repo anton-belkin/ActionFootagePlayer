@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// What a 360 camera records besides its motion that the heading modes use (heading.rs; docs/360-cameras.md, "The
+// What a 360 camera records besides its motion that the heading modes use (heading.rs; docs/design/360-cameras.md, "The
 // heading modes"): GPS fixes, and a compass where the camera has one. As telemetry-parser reads them.
 //
 // Insta360 (X3, X4, X5): GPS comes from a GPS remote or the phone app while recording, into the file's trailer (record

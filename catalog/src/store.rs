@@ -89,7 +89,7 @@ pub fn temp_name(p: &Path) -> PathBuf {
 /// A file's time as every computer keeps it: whole 100 ns. That's what SMB carries and what a Mac sees of a share's
 /// file; the NAS sees the same file in nanoseconds (…540523 where the Mac has …540500). Times in records, and the
 /// times compared with them, are all cut to this, so that every computer finds a file as the others noted it (two
-/// precisions made each re-read and re-note the other's files at every look: docs/catalog-safeguards.md, 1). Times
+/// precisions made each re-read and re-note the other's files at every look: docs/design/catalog-safeguards.md, 1). Times
 /// before 1970 and the records' "not known" (-1) are left as they are
 pub fn canon(ns: i64) -> i64 { if ns > 0 { ns - ns % 100 } else { ns } }
 

@@ -1,8 +1,8 @@
--- Which project a clip belongs to, and where that project's files for it are (docs/moments-and-workspaces.md).
+-- Which project a clip belongs to, and where that project's files for it are (docs/design/moments-and-workspaces.md).
 -- Plain Lua with no mpv in it, so that luajit tests it (tests/workspace_test.lua) over the same cases as its Rust
 -- twin in gyroflow-export (vs-gyroflow/src/workspace.rs): keep the two in step.
 --
--- A project is a folder with `Project.afproject` in it. Its footage is in its locations (docs/library-management.md):
+-- A project is a folder with `Project.afproject` in it. Its footage is in its locations (docs/design/library-management.md):
 -- folders, each placed at a point of the project's tree, in an order, the first that has a clip winning. Without
 -- locations, the project's own folder is its one location, at the top of the tree: the trip folder, the footage under
 -- it. What belongs to a clip (its Gyroflow project, its own file: marks, input, its view) lives beside the clip, one
@@ -231,7 +231,7 @@ function M.new(fs)
 
     -- The clip's copies over the locations (files_at's), in the order that decides its own file, the same on every
     -- computer: the library's locations in their order, then the copies-only ones (a working folder) and this
-    -- computer's own (docs/library-management.md §8)
+    -- computer's own (docs/design/library-management.md §8)
     local function ordered_copies(copies)
         local out = {}
         for i, c in ipairs(copies) do out[i] = { c = c, i = i, late = (c.location.copies or c.location.here) and 1 or 0 } end

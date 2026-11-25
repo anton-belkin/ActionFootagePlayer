@@ -1,7 +1,7 @@
 -- Frame steps and the paused frame with the GPU denoise (mpv/scripts/gyroflow/dnstep.lua), against a model of the
 -- shader's ring (warp.glsl's dn_window and dn_state, gyroflow_dn_show included) and of mpv (time-pos, seeks,
 -- frame-step N): after each step, the frame the shader shows is the one dnstep says is on screen (what the seek bar
--- shows), one frame from the last, with its neighbours. docs/seek-and-scrub.md. From the repository's folder:
+-- shows), one frame from the last, with its neighbours. docs/design/seek-and-scrub.md. From the repository's folder:
 -- luajit tests/dnstep_test.lua
 
 package.path = "mpv/scripts/gyroflow/?.lua;" .. package.path

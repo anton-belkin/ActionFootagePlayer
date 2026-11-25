@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The 360 view's orientation and headings (docs/360-cameras.md, "The heading modes"), for the stamp (stamp.rs): the
+// The 360 view's orientation and headings (docs/design/360-cameras.md, "The heading modes"), for the stamp (stamp.rs): the
 // camera in a world with gravity down, and per heading mode the yaw the view's "straight ahead" points along.
 //
 // - The world: video-types' axes (+x right, +y down, +z forward), +y along gravity. gyroflow-core integrates the gyro
@@ -187,7 +187,7 @@ pub fn smooth(yaws: &[(f64, f64)], sigma: f64) -> Vec<f64> {
 
 
 // ---------------------------------------------------------------------------------------------------
-// Along the way you move, and north (step 5 of docs/360-implementation-plan.md)
+// Along the way you move, and north (step 5 of docs/archive/360-implementation-plan.md)
 //
 // The world's yaw is the gyro's own, arbitrary. GPS gives where the camera moves as azimuths (clockwise from true north),
 // so the two are tied by one angle: the azimuth θ of the world's +z (a world yaw a is the azimuth θ + a: both turn

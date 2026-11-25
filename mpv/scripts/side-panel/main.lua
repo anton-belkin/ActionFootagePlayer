@@ -10,7 +10,7 @@
 --   TAB    toggle   the panel and its rail shown or hidden
 -- Clicking the chosen icon again, or the arrow in the panel's header, leaves only the rail.
 --
--- The navigation bar at the bottom of the video is this plugin's too (bar.lua, docs/navigation-bar.md), in place of mpv's
+-- The navigation bar at the bottom of the video is this plugin's too (bar.lua, docs/design/navigation-bar.md), in place of mpv's
 -- own on-screen controller (osc=no in the app; elsewhere it's hidden): over the video, shown by the mouse, while the
 -- panel is closed; below the video, always there, while it's open.
 --   F8     playlist   the Playlist part (mpv's own F8 shows the playlist as text)
@@ -27,7 +27,7 @@
 --                                   dialog (notify.lua) over it (for checking its look without a window)
 
 local mp = require 'mp'
--- The responsiveness journal (workspace/journal.lua, docs/responsiveness-journal.md): this plugin's keys, subprocesses,
+-- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
 -- file reads and what it draws, timed by default; J.step / J.label for what's its own. A stand-in that does nothing
 -- where the workspace plugin isn't beside this one
 local J = (function()
@@ -225,7 +225,7 @@ end
 
 -- The parts: { name, title, hidden (not on the rail for now) }. Support is at the rail's bottom
 -- Source, Transform, Output: how it's read (the source's input), how it's shown (its transform), where (this screen,
--- a file) (docs/moments-and-workspaces.md, "Source and transform")
+-- a file) (docs/design/moments-and-workspaces.md, "Source and transform")
 local TABS = {
     { "project", "Project" }, { "playlist", "Playlist" }, { "source", "Source" }, { "transform", "Transform" }, { "output", "Output" },
     { "water", "Underwater colour" }, { "crop", "Save frame" },
@@ -294,7 +294,7 @@ local function choices(list, cmd)
     return rows
 end
 
--- The source: what it is, and its input (docs/moments-and-workspaces.md, "Source and transform"): the log curve, the
+-- The source: what it is, and its input (docs/design/moments-and-workspaces.md, "Source and transform"): the log curve, the
 -- turn it was recorded with, the lens under water. Saved into the source's own file at once, for all its moments and
 -- clip previews; what a Gyroflow project has is the project's
 local TURNS = { { 0, "As is" }, { 90, "90° ↻" }, { 180, "180°" }, { 270, "90° ↺" } }
@@ -734,7 +734,7 @@ local function project_part(u, x, w, y)
             .. (keys["script-binding workspace/moment"] or "k"), { color = C.text })
     end
 
-    -- Keep it? Accept / Reject, stars, tags (the original's or the moment's: tagchips.lua, docs/tags-and-culling.md)
+    -- Keep it? Accept / Reject, stars, tags (the original's or the moment's: tagchips.lua, docs/design/tags-and-culling.md)
     if ws.tags then
         y = tagchips.draw(u, ui, x, w, y + 4 * s, ws.tags, { accept = keys["script-binding workspace/accept"], reject = keys["script-binding workspace/reject"],
                           tags = keys["script-binding workspace/tags"] }, function(...) mp.commandv("script-message-to", "workspace", ...) end) + 4 * s
@@ -784,7 +784,7 @@ local function project_part(u, x, w, y)
     end
 
     -- Only for a clip that is in an album (its link there: Action Footage Library makes them). No key: X is Reject
-    -- (docs/tags-and-culling.md)
+    -- (docs/design/tags-and-culling.md)
     if ws.project and not mo and ws.clip_preview == "made" then
         local label = "Take this clip out of its album"
         y = u:button(x, w, y + 6 * s, "not-interesting", label, "script-binding workspace/not-interesting", { disabled = ws.clips ~= nil })
@@ -1021,7 +1021,7 @@ local function output_part(u, x, w, y)
         if g.exporting then
             y = u:button(x, w, y, "export", "Cancel export", "script-message-to gyroflow cancel-export")
         else
-            -- One button, its kind picked in its list (docs/360-reframe.md, "One Export button in the Output tab"),
+            -- One button, its kind picked in its list (docs/design/360-reframe.md, "One Export button in the Output tab"),
             -- remembered for the session per kind of clip
             local v = state("view360")
             local rows = exportkind.rows(d, v)
@@ -1574,7 +1574,7 @@ local clear_asked = nil
 -- The panel drawn again (update, set once it's defined below)
 local redraw_flat = nil
 
--- The 360° tab's Flat video (docs/360-reframe.md, step 1): Record / Stop, what's recorded, playing it, the frame and
+-- The 360° tab's Flat video (docs/design/360-reframe.md, step 1): Record / Stop, what's recorded, playing it, the frame and
 -- the size, the exports, undo and clear. v: user-data/view360; r: its recording
 local function flat_video_part(u, x, w, y, v, r)
     local s = u.s

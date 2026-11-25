@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// afp-photos: what Action Footage Library reads of Apple Photos and of Apple's maps, on a Mac (docs/geolocation.md).
+// afp-photos: what Action Footage Library reads of Apple Photos and of Apple's maps, on a Mac (docs/design/geolocation.md).
 // It only reads: nothing here asks Photos for a change (no PHAssetChangeRequest, no performChanges), so the library is
 // never touched. macOS has no read-only level for apps: the prompt it shows is its "Photos" one (readWrite is the only
 // level that can read), attributed to the app that started this tool (Action Footage Library, whose Info.plist says why).

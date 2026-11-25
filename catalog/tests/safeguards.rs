@@ -1,4 +1,4 @@
-// The catalog against the files, scenario by scenario (docs/catalog-safeguards.md): what's changed in the project's
+// The catalog against the files, scenario by scenario (docs/design/catalog-safeguards.md): what's changed in the project's
 // files, by our programs or by anything else (Finder, a script), is in the catalog within the time the report
 // promises — at once where something watches, within a day where nothing does, now on demand — and the catalog
 // writes nothing where nothing changed. Two computers on one simulated share: a Mac with the Library, and the NAS.

@@ -1,4 +1,4 @@
-// afp-scrub: the pictures over the player's seek bar (docs/seek-and-scrub.md, "Preview on hover"). A long-lived helper
+// afp-scrub: the pictures over the player's seek bar (docs/design/seek-and-scrub.md, "Preview on hover"). A long-lived helper
 // on the libav libraries mpv ships: it keeps the files it was asked about and their decoders open, so a picture takes
 // ~2-50 ms where an ffmpeg process per picture takes 160-180 ms.
 //

@@ -14,7 +14,7 @@ Writes nobody reads are printed as warnings, not failures (the agent's snapshot 
 From the repository's folder: python3 tests/user_data_test.py"""
 import re
 
-from twins import Checks, code_lines, files, read
+from twins import Checks, code_lines, dynamic_keys, files
 
 c = Checks("user-data")
 
@@ -25,61 +25,6 @@ EXTERNAL = {
 
 LITERAL_WRITE = re.compile(r'(?:set_property(?:_native|_number|_bool)?)\(\s*"user-data/([^"]+)"\s*(\.\.)?')
 ANY = re.compile(r'"user-data/([A-Za-z0-9_./-]*)\\?"\s*(\.\.)?')
-
-
-def table_keys(text):
-    """The keys of a Lua table constructor's top level ({ a = 1, b = { c = 2 } }: a, b)"""
-    keys, depth, i, quote = [], 0, 0, None
-    while i < len(text):
-        ch = text[i]
-        if quote:
-            if ch == "\\":
-                i += 1
-            elif ch == quote:
-                quote = None
-        elif text.startswith("--", i):
-            i = text.find("\n", i)
-            if i < 0:
-                break
-        elif ch in "\"'":
-            quote = ch
-        elif ch in "{[(":
-            depth += 1
-        elif ch in "}])":
-            depth -= 1
-            if depth == 0:
-                return keys, i
-        elif depth == 1:
-            m = re.match(r"([A-Za-z_]\w*)\s*=(?!=)", text[i:])
-            if m and not re.match(r"[\w.]", text[i - 1]):
-                keys.append(m.group(1))
-                i += m.end()
-                continue
-        i += 1
-    return keys, i
-
-
-def dynamic_keys(f, n, line):
-    """The keys a dynamic write at line n of f publishes: its loop's table's, or its helper's calls'"""
-    text = read(f)
-    lines = text.splitlines()
-    loop = re.search(r"for \w+(?:, \w+)? in pairs\((\w+)\) do mp\.set_property_native\(", line)
-    if loop:
-        table = loop.group(1)
-        # The table's constructor nearest above
-        for j in range(n - 1, 0, -1):
-            if re.match(rf"\s*(?:local\s+)?{table}\s*=\s*{{", lines[j - 1]):
-                start = sum(len(x) + 1 for x in lines[:j - 1])
-                body = text[start:]
-                keys, _ = table_keys(body[body.index("{"):])
-                # and fields set on it afterwards, before the loop
-                keys += re.findall(rf"\b{table}\.(\w+)\s*=(?!=)", "\n".join(lines[j:n - 1]))
-                return keys
-        return None
-    helper = re.search(r"local function (\w+)\((\w+), \w+\) mp\.set_property_native\(\"user-data/[^\"]*\" \.\. \2", line)
-    if helper:
-        return re.findall(rf"\b{helper.group(1)}\(\"(\w+)\"", text)
-    return None
 
 
 writes, reads = {}, {}   # key -> [where]

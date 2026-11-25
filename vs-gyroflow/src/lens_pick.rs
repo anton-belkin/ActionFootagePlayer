@@ -605,7 +605,7 @@ fn load_profile(p: &Profile, dir: Option<&std::path::Path>, w: usize, h: usize) 
 }
 
 /// The profile for a video as the player takes it; None: the lens in the file, or no ready lens. `id` is Gyroflow's
-/// camera identifier, `in_file` whether the file has its own lens. In this order (docs/optical-without-gyroflow.md §5.2):
+/// camera identifier, `in_file` whether the file has its own lens. In this order (docs/design/optical-without-gyroflow.md §5.2):
 /// 1. the lens type the clip was given by hand (source.lens_type), where the curated list has a profile for it;
 /// 2. the lens in the file (the camera's own), unless the curated list's type for the mode recorded has a profile and
 ///    isn't `file_first`;

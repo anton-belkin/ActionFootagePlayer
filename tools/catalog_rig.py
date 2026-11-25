@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# The catalog's rig on the NAS's side (docs/library-management.md §9): makes a test project fast (on the NAS's own
+# The catalog's rig on the NAS's side (docs/design/library-management.md §9): makes a test project fast (on the NAS's own
 # disk), changes it as Finder on another computer would, and appends journal lines as another computer.
 #   make <base> <days> <per>          <base>/proj (Project.afproject, Generated/... moments) and <base>/footage
 #   finder <base> <seed> <n>          n random changes: files added, removed, renamed, folders moved and copied

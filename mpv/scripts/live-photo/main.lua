@@ -1,4 +1,4 @@
--- live-photo: photos shown as a phone shows them (docs/live-photos.md).
+-- live-photo: photos shown as a phone shows them (docs/design/live-photos.md).
 --
 -- A photo (HEIC, JPEG, PNG…) opens as the picture, on the whole window, and stays (no slideshow). A live one (a Live
 -- Photo: the photo and its .mov; a Motion Photo: the video inside the JPEG) has the Live icon in its top-left corner:

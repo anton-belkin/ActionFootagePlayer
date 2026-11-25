@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // afp-cut: keeps a part of a camera's MP4 without re-encoding it, checked to read as the original does
-// (vs-gyroflow/src/cut.rs, docs/lossless-cut.md). For the player's cutting of a clip spoiled in part.
+// (vs-gyroflow/src/cut.rs, docs/design/lossless-cut.md). For the player's cutting of a clip spoiled in part.
 
 use std::path::{ Path, PathBuf };
 use std::process::ExitCode;

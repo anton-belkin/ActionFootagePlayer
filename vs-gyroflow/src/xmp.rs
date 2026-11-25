@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A photo's own metadata, the player's part of it (docs/library-management.md §8, "Photos carry what they need"): its
+// A photo's own metadata, the player's part of it (docs/design/library-management.md §8, "Photos carry what they need"): its
 // link to its clip (`afp:link`, the player's namespace, as photo.rs writes it in a JPEG and afp-photo in a HEIC) and
 // its tags (`dc:subject`, which Photos and Lightroom read as keywords), in the file's XMP packet. Read from any photo;
 // written into a JPEG here (its XMP segment replaced, the image data as it is: a Motion Photo's video after it keeps

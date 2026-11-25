@@ -2,7 +2,7 @@
 //
 // Optical stabilization of clips the player can't stabilize with their own motion data: their motion measured from the
 // picture (Gyroflow's own analysis, run here: measure.rs) and kept in each clip's <stem>.afp-motion (afp_motion.rs),
-// which the player plays with as it plays gyro, without a Gyroflow project (docs/optical-without-gyroflow.md). Action
+// which the player plays with as it plays gyro, without a Gyroflow project (docs/design/optical-without-gyroflow.md). Action
 // Footage Library's "Stabilize optically" runs it on the selected clips, one after another (bin/gyroflow-optical.rs).
 //
 // Which clips (`verdict`):

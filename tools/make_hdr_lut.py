@@ -4,7 +4,7 @@
     make_hdr_lut.py <curve> <out.cube> [--size N]
     make_hdr_lut.py --from-dwgi <in.cube> <out.cube> [--size N] [--note <line>]...
 
-Curves, each from its maker's own publication (docs/luts.md has the sources):
+Curves, each from its maker's own publication (docs/design/luts.md has the sources):
   dlog    DJI D-Log / D-Gamut: DJI's ACES input transform, Dlog_DGamut_to_ACES_AP0_cat02_v1, in DJI's "ACES Workflow
           Guide" (2023-12). Mavic 3 family, Mavic 4 Pro, Osmo Pocket 4/4P in D-Log.
   gplog2  GoPro GP-Log2: log base 600, Rec.2020 primaries, GoPro's default +1.8 EV, from GoPro Labs' GP-Log2 LUT

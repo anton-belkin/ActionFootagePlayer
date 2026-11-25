@@ -1,5 +1,5 @@
 -- workspace: which project the clip that plays belongs to, where that project's files for it are, and its moments
--- (docs/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
+-- (docs/design/moments-and-workspaces.md). An mpv plugin: this folder goes into ~~/scripts/.
 --
 -- A project is a trip folder with `Project.afproject` in it (or, before 0.9, `_ActionFootagePlayer/`, which moves
 -- into it: projectfile.lua): the nearest such folder above the clip, up to the
@@ -19,19 +19,19 @@
 --   _Moments/ (a folder) its moments one after another, each its part of the original, in the order they happened
 -- The clip's moments are chapters on the seek bar ("Turtle", "Turtle end") and in the menu.
 --
--- Tags and culling (tags.lua, docs/tags-and-culling.md): P accept, X reject, U neither, 1-5 stars, 0 none, K a custom
+-- Tags and culling (tags.lua, docs/design/tags-and-culling.md): P accept, X reject, U neither, 1-5 stars, 0 none, K a custom
 -- tag, on the original or the moment playing; kept in the original's own file or the link, synced with the library's
 -- stores (Finder's tags), section "Tags and culling" below.
 --
 -- Clip previews: <the clip's path>.afplink.mp4 in a run's Generated/<date> <time> Clip previews/ (moved anywhere in
 -- the project's folder from there), a flipbook of the clip in color (its marks, else a dozen frames), made by Action
 -- Footage Library (the batch mode at the end of this file), one at a time in the background, for the clips without
--- one. Nothing remembers a deleted one (docs/library-management.md §8): asked again, it's made again.
+-- one. Nothing remembers a deleted one (docs/design/library-management.md §8): asked again, it's made again.
 --   (menu, the panel)   this clip out of its album: its link to the Trash (the clip stays). X was it: now Reject
---                       (docs/tags-and-culling.md)
+--                       (docs/design/tags-and-culling.md)
 -- A clip preview's file plays its original, all of it.
 --
--- A clip spoiled in part (docs/lossless-cut.md): Ctrl+x cuts the A-B part out, the menu also all before or after
+-- A clip spoiled in part (docs/design/lossless-cut.md): Ctrl+x cuts the A-B part out, the menu also all before or after
 -- where it plays. Asked first; afp-cut writes what's kept without re-encoding and reads it back as the original,
 -- then the original goes to the Trash (with its LRF, Gyroflow project, clip preview, marks file), the first part
 -- takes its name and a second one its own recording time (DJI's names), and the marks and moments follow.
@@ -98,7 +98,7 @@
 
 local mp = require 'mp'
 
--- The time of the frame on screen (docs/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
+-- The time of the frame on screen (docs/design/seek-and-scrub.md): with the GPU path's temporal denoise the picture is up to
 -- its delay behind time-pos (the newest frame decoded), or the frame asked for while paused (gyroflow's
 -- user-data/gyroflow/gpu_delay: { delay, restart, show }); otherwise time-pos. As side-panel timeline.lua's shown_time
 local function shown_time()
@@ -121,7 +121,7 @@ local utils = require 'mp.utils'
 -- Windows: paths past 260 characters (a clip deep in a trip's folders) for the file calls here and in the modules
 local longpath = require 'longpath'
 longpath.install(utils)
--- The responsiveness journal (journal.lua, docs/responsiveness-journal.md): every plugin's keys and steps by default;
+-- The responsiveness journal (journal.lua, docs/design/responsiveness-journal.md): every plugin's keys and steps by default;
 -- this one also keeps the player's own (its start, files opened, seeks, the first frame). No local: 200 is the limit.
 -- Protected, as in the other plugins: the journal never stops this one
 do
@@ -329,7 +329,7 @@ local function own_path(clip)
     if not root then return nil end
     return ws.own_file(clip, locations_of(root))
 end
--- The project's catalog (afp-catalog, docs/library-management.md §9): a clip's moments without looking through the
+-- The project's catalog (afp-catalog, docs/design/library-management.md §9): a clip's moments without looking through the
 -- project's folder (asked in the background: playing never waits for it), and what the player writes noted, for the
 -- Library and the other computers. The player never looks through folders for it nor folds it: the Library does
 local catalog = {}
@@ -491,7 +491,7 @@ local clips_layout, fingerprint, write_empty, plugin_tool
 fs.fingerprint = function(file) return fingerprint and fingerprint(file) or nil end
 -- A moment's ends from its project's trim changed in Gyroflow (further down)
 local adopt_gyroflow_trim
--- Input and transform (transform.lua, docs/moments-and-workspaces.md "Source and transform"): the source's input is
+-- Input and transform (transform.lua, docs/design/moments-and-workspaces.md "Source and transform"): the source's input is
 -- read from its own file; the transform bundle that plays is a moment's or clip preview's own (with settings of its
 -- own), else the source's, else none (nil: the session's, the gyroflow plugin's)
 local transform = require 'transform'
@@ -557,7 +557,7 @@ fs.found_set = function(project, key, tree)
 end
 
 -- A link's clip (moments.lua's original); found away from the path the link names, the path is written into the
--- link (docs/library-management.md §8), so that the next look finds it at once, from any computer. Not for a clip
+-- link (docs/design/library-management.md §8), so that the next look finds it at once, from any computer. Not for a clip
 -- found in this computer's own copy, nor where the file can't be written (it's remembered here then)
 -- A moment's (clip preview's, export's) original: where its link says. Originals move only when the library is
 -- mended after (the Library's Restore, which finds them by what they are and rewrites the links: docs §9)
@@ -701,7 +701,7 @@ local function refresh()
         publish()
     end
     last_asked = mp.get_time()
-    -- The project's catalog first (docs/library-management.md §9): this clip's moments only, by its path, in the
+    -- The project's catalog first (docs/design/library-management.md §9): this clip's moments only, by its path, in the
     -- background; then a look at the project's own folders (what Finder changed), and again when it found something
     catalog.derived(project, nil, state.relative, function(list)
         if state.clip ~= clip or state.project ~= project then return end
@@ -1043,7 +1043,7 @@ local function project_doc() return state.project and pf.read(state.project) or 
 local function project_update(fn) return state.project ~= nil and pf.update(state.project, fn) end
 
 -- The names of the project's moments, the newest last (by their files' times): what the name dialog suggests from
--- and ↑ goes through. Read from the moments themselves (docs/library-management.md §8), not kept in the project's file
+-- and ↑ goes through. Read from the moments themselves (docs/design/library-management.md §8), not kept in the project's file
 local function moment_names()
     local list = {}
     -- From the catalog: the project's moments' names as it listed them (the clip's own after them, the newest)
@@ -1191,7 +1191,7 @@ local function save(name, update, typed, quiet, opts)
     if update then
         file, final = update.file, update.name
     else
-        -- Into Generated/<date> Moments/, a folder a day (docs/library-management.md §8)
+        -- Into Generated/<date> Moments/, a folder a day (docs/design/library-management.md §8)
         local dir = ws.join(root, native(moments_lib.generated_rel("Moments", os.time(), true, generated_runs(root))))
         mkdir(dir)
         file, final = moments.unique_file(dir, safe)
@@ -1946,7 +1946,7 @@ local function start_clips(root, queue, what)
     if not mp.get_property_native("user-data/gyroflow/exporter") then
         return mp.osd_message("Clip previews need the gyroflow plugin (its gyroflow-export makes them)", 4)
     end
-    -- A folder of this run's own, from where they're moved anywhere (docs/library-management.md §8)
+    -- A folder of this run's own, from where they're moved anywhere (docs/design/library-management.md §8)
     local dir = ws.join(root, native(moments_lib.generated_rel("Clip previews", os.time(), false, generated_runs(root))))
     mkdir(dir)
     clips_job = { project = root, dir = dir, queue = queue, done = 0, total = #queue, made = 0, failed = 0, failures = {},
@@ -2012,7 +2012,7 @@ local function place_previews(root, all, queue)
 end
 
 -- The project's clips without a preview (anywhere in the project's folder). Nothing remembers the ones made and
--- deleted: made again when asked (docs/library-management.md §8). `root`: the project's folder, in batch mode
+-- deleted: made again when asked (docs/design/library-management.md §8). `root`: the project's folder, in batch mode
 -- (no clip plays)
 -- The project's draft clip previews made real (the batch "clips-finish"): every draft, wherever it is now
 local function finish_drafts(root)
@@ -2072,7 +2072,7 @@ end)
 
 -- This clip out of its album, its link to the Trash (the clip itself stays): the menu's and the panel's. Links are
 -- made in Action Footage Library (a selection in Originals, Add to an album…); on a clip in no album it only says so.
--- X was its key before culling: now Reject (docs/tags-and-culling.md)
+-- X was its key before culling: now Reject (docs/design/tags-and-culling.md)
 mp.add_key_binding(nil, "not-interesting", function()
     if not state.clip or state.clip:find("://", 1, true) or state.export then return end
     if not need_project("Taking a clip out of its album") then return end
@@ -2205,7 +2205,7 @@ mp.register_script_message("init-project", function(dir)
 end)
 
 
--- Cutting a spoiled part out of the clip (docs/lossless-cut.md): Ctrl+x cuts the A-B part out (the menu: also all
+-- Cutting a spoiled part out of the clip (docs/design/lossless-cut.md): Ctrl+x cuts the A-B part out (the menu: also all
 -- before or after where it is). afp-cut (the gyroflow plugin's) writes the parts kept, hidden, each read back as
 -- the original; only then does the original go to the Trash (with its LRF, Gyroflow project, clip preview and marks
 -- file), the first part taking its name and a later one its own recording time, and its marks and moments follow.
@@ -2806,7 +2806,7 @@ end
 -- The project's marks, all at once (the Project tab's): a moment for each mark in no moment yet, 2 s on each side,
 -- those that overlap joined into one (the clip's marks: its own file's, else the camera's); or a photo of each mark,
 -- except those that have one somewhere in the project's folder (its link: the clip and the time). A run's go into a
--- folder of its own, Generated/<date> <time> Moments or Photos (docs/library-management.md §8). One at a time in the background, each with its clip's saved view (else the defaults); a
+-- folder of its own, Generated/<date> <time> Moments or Photos (docs/design/library-management.md §8). One at a time in the background, each with its clip's saved view (else the defaults); a
 -- moment with settings of its own, as one saved with k: a copy of the clip's Gyroflow project when it has one. While it
 -- runs: user-data/workspace/marks_job { kind (moments, photos), done, total, failed }
 local MOMENT_AROUND = 2
@@ -2995,7 +2995,7 @@ local function start_marks_job(kind, root)
         if batch then return batch.finished({ made = 0, failed = 0, nothing = why }) end
         return mp.notify({ id = "marks-job", kind = "done", title = why, seconds = 4 })
     end
-    -- This run's folder (docs/library-management.md §8)
+    -- This run's folder (docs/design/library-management.md §8)
     local dir = ws.join(root, native(moments_lib.generated_rel(kind == "moments" and "Moments" or "Photos", os.time(), false, generated_runs(root))))
     marks_job = { kind = kind, queue = queue, done = 0, failed = 0, failures = {}, id = 0, root = root, dir = dir,
                   alone = (batch and batch.alone ~= nil) and batch.alone or cache.moments_alone == true }
@@ -3027,7 +3027,7 @@ end)
 -- same part of the same clip) and the export_<name> moments exports leave are skipped
 local export_job = nil
 
--- Renders (docs/library-management.md, "Renders"): a moment rendered once, _Renders/<its path in _Moments>.<profile>.mov
+-- Renders (docs/design/library-management.md, "Renders"): a moment rendered once, _Renders/<its path in _Moments>.<profile>.mov
 -- (HDR: as Shift+E exports HDR; SDR: as it exports SDR), its link (kind render) carrying its recipe: everything that
 -- decides its pixels. Current while the recipe is the moment's now; an export copies a current one instead of
 -- rendering again. Deleting renders breaks nothing
@@ -3230,7 +3230,7 @@ local function export_moments(root, sdr)
         end
         return
     end
-    -- This run's folder (docs/library-management.md §8)
+    -- This run's folder (docs/design/library-management.md §8)
     local dir = ws.join(root, native(moments_lib.generated_rel("Exports", os.time(), false, generated_runs(root))))
     mkdir(dir)
     local tmp = os.getenv(windows and "TEMP" or "TMPDIR") or "/tmp"
@@ -3269,7 +3269,7 @@ local function render_moments(root, profiles, items)
                 project = own and fs.is_file(own) and own or nil, alone = l.snap and (l.alone == true) or nil,
                 sdr = it.sdr == true, render_out = it.out, render_link = it.link,
                 photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
-                -- The Library's export settings (docs/export-settings.md): size, encoder, quality preset
+                -- The Library's export settings (docs/design/export-settings.md): size, encoder, quality preset
                 export = type(it.export) == "table" and it.export or nil,
             }
             -- The settings the Library's recipe has (renders.rs `settings`): rendered with them, so the render is what
@@ -3360,7 +3360,7 @@ local function lens_type_of(clip)
     local doc = clip and sidecar.read(clip)
     return type(doc) == "table" and type(doc.source) == "table" and doc.source.lens_type or nil
 end
--- ---------- Tags and culling (tags.lua, docs/tags-and-culling.md) ----------
+-- ---------- Tags and culling (tags.lua, docs/design/tags-and-culling.md) ----------
 -- What plays is tagged: the original (also while its clip preview plays), or the moment playing. An export has
 -- nothing to tag. Published as user-data/workspace/tags: { kind (original, moment), pick, rating, list (custom tags),
 -- recent (the tags used last on this computer, the Library's too), stores (the library's enabled stores this computer
@@ -3673,7 +3673,7 @@ if not os.getenv("AFP_BATCH") or os.getenv("AFP_BATCH") == "" then
     end
 end
 
--- A photo link (the gyroflow plugin's Alt+s, crop mode's Enter: docs/albums-photos-share-concept.md, "Photos as
+-- A photo link (the gyroflow plugin's Alt+s, crop mode's Enter: docs/design/albums-photos-share-concept.md, "Photos as
 -- objects"): { t (the clip's time), crop, camera (Save frame's), picture (the frame as it showed, a JPEG at the video's
 -- size) }. Written as <clip>_<t>s.afplink.jpg in the project's _Stills/Generated/ (as the Library's photo links are
 -- named): the picture cropped and at most 1280 px, its afp:link (kind photo, the clip by its path in the project, its

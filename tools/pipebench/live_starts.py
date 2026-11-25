@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pipeline builds in the real player, start by start (docs/gpu-render.md, "Pipeline builds"). Opens a window.
+"""Pipeline builds in the real player, start by start (docs/design/gpu-render.md, "Pipeline builds"). Opens a window.
 
   tools/pipebench/live_starts.py <ActionFootagePlayer.app> <out dir> <clip> [<clip> ...]
 

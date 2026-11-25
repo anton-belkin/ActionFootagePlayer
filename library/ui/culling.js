@@ -1,5 +1,5 @@
 "use strict";
-// Culling and tags in the Library's window (docs/tags-and-culling.md; the app's side is src/tags.rs): the Tags part of
+// Culling and tags in the Library's window (docs/design/tags-and-culling.md; the app's side is src/tags.rs): the Tags part of
 // the side panel, the keys, Hide rejected and Most stars first. Loaded before app.js, which calls in from a few places
 // (tagsBody, matches, filtering, renderMain, renderTop, its keydown); what's here uses app.js's own (S, DATA, ctx,
 // invoke, renderAll…) only when called, after both are loaded.

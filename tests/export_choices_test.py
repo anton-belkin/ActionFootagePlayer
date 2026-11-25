@@ -1,4 +1,4 @@
-"""An export's settings are the same choices everywhere they're offered or kept (docs/export-settings.md):
+"""An export's settings are the same choices everywhere they're offered or kept (docs/design/export-settings.md):
   * the player's: mpv/scripts/gyroflow/exportsettings.lua CHOICES (value, label, note), DEFAULT, KEYS
   * the Library's Share dialog: library/ui/share.js EXPORT_CHOICES (the same three), EXPORT_KEYS; its default is each
     setting's first choice

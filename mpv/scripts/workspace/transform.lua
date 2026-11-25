@@ -1,4 +1,4 @@
--- What a clip is read as and shown with (docs/moments-and-workspaces.md, "Source and transform"), with no mpv in it
+-- What a clip is read as and shown with (docs/design/moments-and-workspaces.md, "Source and transform"), with no mpv in it
 -- (tests/transform_test.lua).
 --
 -- Input: how to read the source right, set once, kept only beside the source (its .afp.json's `source`): the log

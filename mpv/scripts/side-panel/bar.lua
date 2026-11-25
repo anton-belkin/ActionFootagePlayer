@@ -1,4 +1,4 @@
--- The navigation bar at the bottom of the video (docs/navigation-bar.md), in place of mpv's own on-screen controller:
+-- The navigation bar at the bottom of the video (docs/design/navigation-bar.md), in place of mpv's own on-screen controller:
 -- the track with the time, the camera's highlights and your marks, the moments and the A–B part on it; the buttons
 -- below it. Drawn with the side panel's ui.lua; its reckoning is timeline.lua. main.lua shows it, docks it below the
 -- video while the panel is open, and hands it the mouse.

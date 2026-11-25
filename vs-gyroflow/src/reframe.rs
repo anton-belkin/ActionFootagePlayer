@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// A 360° clip's view recorded as you look around (docs/360-reframe.md), as the export reads it: the recording the player
+// A 360° clip's view recorded as you look around (docs/design/360-reframe.md), as the export reads it: the recording the player
 // keeps in the clip's own file, `<clip>.afp.json`, under `view360.recording`, and the head at any time of the clip.
 // The player's side is mpv/scripts/view360/recording.lua; the two hold and interpolate the same way:
 // - in a part, a straight line between two samples (the FOV in its log), held across a change of projection, which
 //   is a cut at the later sample;
 // - before the first part its first sample, between two parts the end of the one before, after the last its end.
 //
-// The tidying (docs/360-reframe.md, "Tidying") is here too, so the player's preview (`gyroflow-probe --reframe`) and
+// The tidying (docs/design/360-reframe.md, "Tidying") is here too, so the player's preview (`gyroflow-probe --reframe`) and
 // the export are the same code:
 // - level: the head's roll set to 0 (every heading frame is level already, so the picture is);
 // - smooth the turns: a Gaussian over time on the head's rotation (SO(3), as quaternions) and on the FOV's log,
@@ -347,7 +347,7 @@ impl Recording {
 
 // The picture hold ---------------------------------------------------------------------------------------------------
 //
-// "Hold on what's in the middle" (docs/360-reframe.md): the view rendered small along the angle-tidied path, what's in
+// "Hold on what's in the middle" (docs/design/360-reframe.md): the view rendered small along the angle-tidied path, what's in
 // its middle matched frame to frame, and the head moved with it. The measuring renders (gyroflow-export
 // --measure-hold), so it's kept in the app's cache, keyed by the clip and the path it was measured along; the tidying
 // applies it when it's there.

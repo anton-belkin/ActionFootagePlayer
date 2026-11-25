@@ -483,7 +483,7 @@ pub fn gopro_color(path: &str) -> Option<(String, Option<String>, Option<f64>)> 
 /// What a stitched 360° video says it is, from its first video track: Spherical Video V2 (`sv3d` and `st3d` in the
 /// sample entry: the projection, its pose and, for an equirect, the bounds it covers) or V1 (the XMP in the track's
 /// `uuid` box: Spherical, the projection, the stereo mode and the initial view). None for any other video. The view360
-/// mpv script shows it as a sphere to look around in (docs/360-cameras.md, "Stitched clips")
+/// mpv script shows it as a sphere to look around in (docs/design/360-cameras.md, "Stitched clips")
 pub fn spherical(path: &str) -> Option<serde_json::Value> {
     let mut file = std::fs::File::open(path).ok()?;
     let size = file.metadata().ok()?.len();

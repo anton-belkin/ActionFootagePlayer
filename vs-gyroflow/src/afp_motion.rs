@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // A clip's motion measured from its picture, kept beside it in a file of its own: `<stem>.afp-motion`
-// (docs/optical-without-gyroflow.md). A clip without usable motion data of its own (an old GoPro, a DJI with EIS on, a
+// (docs/design/optical-without-gyroflow.md). A clip without usable motion data of its own (an old GoPro, a DJI with EIS on, a
 // GoPro whose HyperSmooth already stabilized the picture) plays stabilized with it like a clip with gyro: in the
 // player's levels, without a Gyroflow project.
 //
@@ -51,7 +51,7 @@ pub struct ClipId {
 }
 
 impl ClipId {
-    /// The clip on the disk: its size and its MP4's own time, as links tell clips apart (docs/library-management.md §8)
+    /// The clip on the disk: its size and its MP4's own time, as links tell clips apart (docs/design/library-management.md §8)
     pub fn of(video: &Path) -> Result<ClipId, String> {
         let size = std::fs::metadata(video).map_err(|e| format!("{}: {e}", video.display()))?.len();
         let path = video.to_string_lossy();

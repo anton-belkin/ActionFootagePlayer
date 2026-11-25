@@ -1,4 +1,4 @@
--- Cutting a spoiled part out of a clip (docs/lossless-cut.md): what's kept, what the parts are named, and what
+-- Cutting a spoiled part out of a clip (docs/design/lossless-cut.md): what's kept, what the parts are named, and what
 -- follows the clip (its marks file, its moments). Plain Lua with no mpv in it (tests/cut_test.lua); main.lua runs
 -- afp-cut, moves the original to the Trash and writes what this works out.
 

@@ -1,4 +1,4 @@
-// Share (docs/albums-photos-share-concept.md, "Share replaces export"): what's selected, to a destination. Each item's
+// Share (docs/design/albums-photos-share-concept.md, "Share replaces export"): what's selected, to a destination. Each item's
 // render comes from the cache (renders.rs); what the cache lacks the player makes first (its batch `share`), then the
 // file is handed to the destination. For now one destination, a folder: the render copied there under a readable
 // name. Originals are never touched: only renders and files the project made are read, and only the chosen folder is
@@ -73,7 +73,7 @@ fn failed(name: &str, kind: &str, why: String) -> Item {
 /// What sharing `items` takes: each one's file when the cache (or the item itself) has it, else what the player is to
 /// render, as its batch's `items`. `items`: { kind: moment | photo | clip | file, path, name }, a moment's or photo
 /// link's path in the project's folder, a clip's in the project's tree, a file's on disk. `look`: HDR or SDR, for videos.
-/// `settings`: the export's (docs/export-settings.md), { video: { size, encode, quality }, photo: { size, quality } };
+/// `settings`: the export's (docs/design/export-settings.md), { video: { size, encode, quality }, photo: { size, quality } };
 /// null: the defaults. A render made with other settings is another render (renders::export_settings in its recipe)
 pub fn plan(root: &Path, items: &[Value], look: &str, settings: &Value) -> (Vec<Item>, Vec<Value>) {
     let ctx = renders::Ctx::new(root, true);

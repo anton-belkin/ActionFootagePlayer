@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The project's catalog in the Library (docs/library-management.md §9): what's in its folder and locations as last
+// The project's catalog in the Library (docs/design/library-management.md §9): what's in its folder and locations as last
 // seen, shared with every computer through .afp/catalog/. The views read it instead of the disks (a file's size,
 // time, link, sidecar: no question to the NAS for each); a thread keeps it up to date:
 //
@@ -383,7 +383,7 @@ pub fn start(root: &Path, changes: Arc<AtomicU64>, last: Arc<Mutex<Instant>>, mo
 }
 
 /// What note_now couldn't write or read (a share away): looked at again by the project's thread, soon and then less
-/// often. The files themselves are read again then, never what was seen of them before (docs/catalog-safeguards.md)
+/// often. The files themselves are read again then, never what was seen of them before (docs/design/catalog-safeguards.md)
 static RETRY: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
 
 /// Clips' own files that aren't what they should be (not JSON: written wrong by a script): their records kept as they

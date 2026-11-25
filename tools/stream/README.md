@@ -3,7 +3,7 @@
 A small service for the NAS (an Intel N100 here): each clip of the library as an HLS stream, stabilized on the GPU with
 Gyroflow's warp (shaders/gyroflow/warp.glsl) and, for DJI's D-Log M, given the player's hdr look: HEVC Main10, HLG
 (BT.2020), fMP4 segments of 2 s, the audio copied. Nothing leaves the GPU: VAAPI decodes, libplacebo renders into the
-encoder's own surfaces, VDEnc encodes (docs/gpu-render.md, "The streaming server").
+encoder's own surfaces, VDEnc encodes (docs/design/gpu-render.md, "The streaming server").
 
 It ships as part of the **NAS Helper** (tools/nas-helper/README.md: one container with collaboration and the
 links for Jellyfin, its settings described there); what follows is how it works, and how it ran on its own before.

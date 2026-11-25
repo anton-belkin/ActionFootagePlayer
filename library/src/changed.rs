@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Pinpoint update (docs/library-responsiveness.md): what a changing command gives the page back, so that the page
+// Pinpoint update (docs/design/library-responsiveness.md): what a changing command gives the page back, so that the page
 // corrects only the items it changed and reads no view again. The items are index.rs's own (scan_only: each exactly
 // as the whole view would have it), read after the write from what the catalog was just told, so they are what the
 // disk has: the page takes them as they are, whatever it had shown.
@@ -406,7 +406,7 @@ mod tests {
         index::scan(root, "footage", false)["links"].as_array().unwrap().iter().find(|l| l["path"] == path).cloned()
     }
 
-    // The comment (docs/tags-and-culling.md, "The comment"): on an original (one without its own file, one with), a
+    // The comment (docs/design/tags-and-culling.md, "The comment"): on an original (one without its own file, one with), a
     // moment, a photo, not an export; what the command says is what a reading shows; other writes keep it; taken out
     #[test]
     fn a_comment_is_kept_with_each_and_read_back() {
@@ -464,7 +464,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    // The album commands (docs/library-responsiveness.md): what each says it made is what a reading of the views shows
+    // The album commands (docs/design/library-responsiveness.md): what each says it made is what a reading of the views shows
     // after it, its links as the Footage scan lists them; a link moved is said gone from where it was
     #[test]
     fn album_commands_say_what_a_reading_shows() {

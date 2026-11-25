@@ -1,4 +1,4 @@
--- The GPU path's table kept ahead of where a clip plays (docs/gpu-table-ahead.md). A clip without a project opens with
+-- The GPU path's table kept ahead of where a clip plays (docs/design/gpu-table-ahead.md). A clip without a project opens with
 -- its table for a stretch of its motion data (the seconds it starts at: gyroflow-gpu-table's "partial" reply, which says
 -- what it "covers" and up to where it's "settled"); then, while it plays, the stretch is extended ahead of where it
 -- plays, a step at a time, each table taking the place of the one before as it comes in (the frames both have stay as

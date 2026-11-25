@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The 360 view on the GPU for exports (docs/360-cameras.md, "Exports"; step 7 of docs/360-implementation-plan.md): a
+// The 360 view on the GPU for exports (docs/design/360-cameras.md, "Exports"; step 7 of docs/archive/360-implementation-plan.md): a
 // sphere from the plugin's 360 mode (sphere360.rs) and its stamp, drawn as the player's view shader draws it
 // (view360.wgsl, the same math as mpv/scripts/view360/view360.glsl), or as the whole sphere turned into the world and the
 // chosen heading (projection 4, a stabilized 360 video). One plane at a time (luma, then each chroma plane at its own
