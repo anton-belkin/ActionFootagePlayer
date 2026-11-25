@@ -32,7 +32,8 @@ local export_job = nil
 -- decides its pixels. Current while the recipe is the moment's now; an export copies a current one instead of
 -- rendering again. Deleting renders breaks nothing
 local RENDERS = "_Renders"
-local RENDER_VERSION = 1
+-- 2: the clip's lens and its measured motion (#318; the Library's renders.rs VERSION 5)
+local RENDER_VERSION = 2
 local RENDER_PROFILES = { HDR = false, SDR = true }
 
 -- A value as JSON keeps it: nils and empty tables left out, for comparing recipes
@@ -54,15 +55,35 @@ local function same_value(a, b)
     for k in pairs(b) do if a[k] == nil then return false end end
     return true
 end
+-- What a render takes of the clip's lens (gyroflow-probe --lens-id: {from, print}, what the Library's index::lens_id
+-- reads of the probe's lens_info), once per clip in a run (`render_moments`, `export_moments` start it again); false
+-- where the probe can't say
+local lens_ids = {}
+local function lens_id(original)
+    if lens_ids[original] == nil then
+        local exe = plugin_tool("gyroflow-probe")
+        local r = exe and mp.command_native({ name = "subprocess", playback_only = false, capture_stdout = true, args = { exe, "--lens-id", original } })
+        local line = r and r.status == 0 and type(r.stdout) == "string" and r.stdout:match("([^\r\n]+)%s*$")
+        local v = line and utils.parse_json(line)
+        lens_ids[original] = type(v) == "table" and type(v.from) == "string" and { from = v.from, print = v.print or "" } or false
+    end
+    return lens_ids[original] or nil
+end
+-- The motion measured from the picture beside the clip (<stem>.afp-motion), by its fingerprint
+local function motion_print(original)
+    local motion = (original:gsub("%.[^./\\]+$", "")) .. ".afp-motion"
+    return fs.is_file(motion) and fingerprint(motion) or nil
+end
 -- What a moment's render in `profile` is made from: its part of its original, its own transform and Gyroflow project,
--- the source's input, the profile, the renderer's version
+-- the source's input, the clip's lens and measured motion, the profile, the renderer's version
 local function render_recipe(m, original, profile)
     local l = m.link
     local doc = original and sidecar.read(original)
     local own = own_project(m.file)
     return trimmed({ v = RENDER_VERSION, clip = { hash = l.hash, size = l.size }, ["in"] = l["in"], out = l.out,
                      stab = l.stab, alone = l.alone, input = type(doc) == "table" and doc.source or nil,
-                     gyroflow = fs.is_file(own) and fingerprint(own) or nil, profile = profile })
+                     gyroflow = fs.is_file(own) and fingerprint(own) or nil, lens = original and lens_id(original) or nil,
+                     motion = original and motion_print(original) or nil, profile = profile })
 end
 -- A moment's path for its renders: in _Moments its path there (as before 0.11), else its path in the project's folder
 -- (Library's index.rs renders_of does the same)
@@ -195,6 +216,7 @@ end
 
 local function export_moments(root, sdr)
     if export_job then return end
+    lens_ids = {}
     if batch then batch.looking() end
     local done = exported_parts(root)
     local queue, failures = {}, {}
@@ -250,6 +272,7 @@ end
 -- current is the Library's to know
 local function render_moments(root, profiles, items)
     if export_job then return end
+    lens_ids = {}
     if batch then batch.looking() end
     local queue, failures, share_used = {}, {}, {}
     for _, it in ipairs(items or {}) do

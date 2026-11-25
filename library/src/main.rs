@@ -240,6 +240,8 @@ fn main() {
     }
     let probes: index::SharedProbes = Arc::new(Mutex::new(index::Probes::default()));
     probes.lock().unwrap().tool = index::probe_tool(player().ok().as_deref());
+    // A render's recipe takes the clip's lens from them, wherever the render cache is looked at (renders::Ctx)
+    index::set_shared_probes(&probes);
     let probe_worker = probes.clone();
     // What's known of the clips is kept between runs: the app's cache folder, found once Tauri is up (setup below)
     let keep_probes: Arc<Mutex<Option<PathBuf>>> = Arc::new(Mutex::new(None));

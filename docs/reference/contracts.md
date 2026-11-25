@@ -314,7 +314,7 @@ JSON line.
 - `--library <video>` (the Library's index, `library/src/index.rs`, one clip at a time in the background): all of the
   plain answer, plus `camera`, `movie {duration, created, width, height, turn}`, `marks {camera, times}`,
   `clock {utc, basis, zone_min, why}`, `gps {lat, lon, alt, t}`, and `geotag` (its version). The Library keeps answers
-  per file by size and time; an answer with `geotag` below `index.rs` `GEOTAG` (now 9) is asked again. Change both
+  per file by size and time; an answer with `geotag` below `index.rs` `GEOTAG` (now 10) is asked again. Change both
   together: the test `geotag_goes_with_what_the_probe_answers` checks it. `AFL_PROBE` overrides where the tool is.
 
 ## gyroflow-optical (from the Library)

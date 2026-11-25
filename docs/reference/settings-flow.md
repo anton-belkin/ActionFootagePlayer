@@ -88,8 +88,8 @@ Read and ignored: `still_radius`, `still_tolerance`, and the VapourSynth path's 
 | Lens under water | `source.underwater` (auto, yes, no) | `underwater` → `req.underwater` (`water.rs`) | `--underwater` | same | the original's | Source settings `SRC_WATER`; `settings.underwater` | `user_data.underwater` |
 | Lens type | `source.lens_type` | read by `lens_pick.rs` wherever vs-gyroflow loads the clip | same (gyroflow-export reads the file) | same | same | Source settings "Lens type"; in `settings` (the whole `source` is copied) | read if the NAS sees the `.afp.json` |
 | Lens for one clip | `source.lens` (a profile) | `lens_pick.rs` | same | same | same | in `settings` (copied with `source`) | as above |
-| Lens for a camera mode | `curated_lenses.json` in the app's data folder (`lens_pick.rs` `user_file`) | `lens_pick.rs` | same | same | same | **gap**: not in the recipe, so a changed mode lens doesn't make a new render | **gap**: the NAS has its own data folder |
-| Optical motion | `<clip>.afp-motion` beside the clip | gyroflow-probe "measured" | gyroflow-export reads it | same | same | **gap**: not in the recipe | read if beside the clip; not a dep of the cached answer |
+| Lens for a camera mode | `curated_lenses.json` and the player's own lens database (`lenses/`) in the app's data folder (`lens_pick.rs` `user_file`, `lens_db.rs`) | `lens_pick.rs` | same | same | same | recipe `lens` {`from`, `print`}: the probe's `lens_info` (`print`: the loaded profile's fingerprint, `probe.rs` `lens_print`), where the clip has no Gyroflow project; left out while the probe hasn't answered (`renders.rs` `Ctx::lens`). The player's v2 recipe asks `gyroflow-probe --lens-id` (#318) | **gap**: the NAS has its own data folder |
+| Optical motion | `<clip>.afp-motion` beside the clip | gyroflow-probe "measured" | gyroflow-export reads it | same | same | recipe `motion`: its fingerprint (from the catalog where it can say), where the clip has no Gyroflow project; in the player's v2 recipe too (#318) | read if beside the clip; not a dep of the cached answer |
 
 ### Underwater colour (input too)
 
@@ -155,7 +155,7 @@ The same logic in more than one language, from CLAUDE.md, with the test that fai
 | Render settings | `transform.lua` `render_settings`, `renders.rs` `settings` | [render_settings.json](../../tests/render_settings.json): [render_settings_test.lua](../../tests/render_settings_test.lua) and `renders.rs` `settings_are_worked_out_as_the_player_does` |
 | Bundle keys and valid values | `transform.lua` `KEYS`, `UW_KEYS`, `INPUT_KEYS`, `VALID`; `renders.rs` `BUNDLE_KEYS`, `UW_KEYS`, `valid` | [render_keys_test.py](../../tests/render_keys_test.py) (allow-list `PLAYER_ONLY`) |
 | gyroflow.conf defaults | `gyroflow/bundle.lua` `defaults_bundle`, `renders.rs` `defaults_of` | [gyroflow_conf_cases.json](../../tests/gyroflow_conf_cases.json): [gyroflow_conf_test.lua](../../tests/gyroflow_conf_test.lua) and `renders.rs` `defaults_are_read_as_the_player_does` |
-| Render recipe version | workspace `RENDER_VERSION` (1) and `index.rs` `RENDER_VERSION` (1): the old per-moment recipe; `renders.rs` `VERSION` (4): the hashed one | **none**. CLAUDE.md pairs workspace `RENDER_VERSION` with `renders.rs` `VERSION`, but its real twin is `index.rs` `RENDER_VERSION` (`render_recipe_of`) |
+| Render recipe version | workspace `RENDER_VERSION` (2) and `index.rs` `RENDER_VERSION` (2): the per-moment recipe of the renders the player makes at a moment's path (the Library's Render); `renders.rs` `VERSION` (5): the hashed one | `index.rs` `render_recipe_twin` (the same version and fields in both); `renders.rs` `the_recipe_goes_with_its_version_and_keeps_its_hash` (the hashed one's shape and hashes) |
 | Curves | `dlogm/main.lua` `CURVES`, `gyroflow-export/options.rs` `--curve`, `make_hdr_lut.py`, `source.js` `SRC_CURVES`, `tags.rs`, `albums.js` `ALBUM_CURVES` | [curves_twin_test.lua](../../tests/curves_twin_test.lua) |
 | Export choices | `exportsettings.lua` `CHOICES`, `share.js` `EXPORT_CHOICES`, `renders.rs` `EXPORT_CHOICES`, gyroflow-export `--resolution`/`--encode`, `still.rs` `MAX_RADIUS` | [export_choices_test.py](../../tests/export_choices_test.py) |
 | Underwater colour rule | `dlogm/uw_estimate.lua`, `vs-gyroflow/src/uwcolor.rs` (not in CLAUDE.md's list) | [uwcolor_cases.json](../../tests/uwcolor_cases.json), written by [uwcolor_test.lua](../../tests/uwcolor_test.lua), read by `uwcolor.rs` tests |
@@ -203,7 +203,9 @@ Then go through each step. Mark each one in the PR as *done*, *n/a because…*, 
 5. **Moment.** A bundle key travels in the link's `stab` by itself. Anything else: decide whether a moment keeps it.
    Check the preview (a saved view's settings) and the Save frame view.
 6. **Library.** The recipe must change when the pixels change. A bundle or input key is in `settings` already. A
-   computer's option goes in `opts`. Keep the default out of the recipe (as `uw` and the export choices are), or
+   computer's option goes in `opts`. Something decided outside the clip's own file (its lens, its `.afp-motion`) needs
+   its own field, worked out without asking the share where the catalog or the probe's cache knows it (`renders.rs`
+   `Ctx::lens`, `ClipFacts::motion`). Keep the default out of the recipe (as `uw` and the export choices are), or
    every render's hash changes. Show or set it in Source settings or Share if the user needs it there. Add it to
    `render_keys_test.py` checks, or to its `PLAYER_ONLY` with why.
 7. **NAS stream.** `render_args` passes `user_data` through, and `settings` beside it. Check `afp_stream.py`'s pops
@@ -216,8 +218,8 @@ Then go through each step. Mark each one in the PR as *done*, *n/a because…*, 
 
 - **`renders.rs` `VERSION`**: the renderer gives other pixels for the same recipe. Every cached render becomes
   another one.
-- **Workspace `RENDER_VERSION` and `index.rs` `RENDER_VERSION`**: the old per-moment recipe (`render_recipe`)
-  changes. Raise both together.
+- **Workspace `RENDER_VERSION` and `index.rs` `RENDER_VERSION`**: the per-moment recipe (`render_recipe`,
+  `render_recipe_of`) changes. Raise both together.
 - **`afp_catalog::project::VERSION` and `projectfile.lua` `M.VERSION`**: what the catalog or project keeps changes.
   Older programs then refuse the project instead of wiping it.
 - **`index.rs` `GEOTAG`**: what `gyroflow-probe --library` answers changes (for example a new field Source settings

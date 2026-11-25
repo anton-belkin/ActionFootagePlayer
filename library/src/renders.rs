@@ -5,8 +5,9 @@
 // changed recipe is another file. The player makes them (its batch `share`, workspace/renders.lua): the Library works the
 // recipe and the file out and hands both over, so only this file hashes.
 //
-// Renders made before (0.11: _Renders/<the moment's path>.<profile>.mov, a v1 recipe in the link) are still found, by
-// that path, and count as current while their v1 recipe is the moment's.
+// Renders the player makes at a moment's path (as before 0.11, and the Library's Render: _Renders/<the moment's
+// path>.<profile>.mov, its per-moment recipe in the link: index.rs RENDER_VERSION) are found by that path too, and
+// count as current while that recipe is the moment's.
 
 use crate::index::{ self, same, trimmed };
 use serde_json::{ json, Value };
@@ -15,9 +16,10 @@ use std::collections::{ HashMap, HashSet };
 use std::path::{ Path, PathBuf };
 
 pub const DIR: &str = "_Renders";
-/// Raised when the renderer's pixels change for the same recipe: every render is then another one. 4: gyroflow-export
-/// renders on the GPU path where it can, the player's own shaders (docs/design/export-gpu-path.md), not Gyroflow's engine
-pub const VERSION: u64 = 4;
+/// Raised when the renderer's pixels change for the same recipe, or what a recipe holds does: every render is then
+/// another one. 4: gyroflow-export renders on the GPU path where it can, the player's own shaders
+/// (docs/design/export-gpu-path.md), not Gyroflow's engine. 5: the clip's lens and measured motion (lens, motion: #318)
+pub const VERSION: u64 = 5;
 
 pub struct Profile {
     pub name: &'static str,
@@ -63,7 +65,7 @@ impl Item {
 
 // What a clip's own files say that decides a render of it
 #[derive(Clone, Default)]
-struct ClipFacts { doc: Value, gyroflow: Value, size: Value, file: Option<PathBuf> }
+struct ClipFacts { doc: Value, gyroflow: Value, size: Value, file: Option<PathBuf>, motion: Value }
 
 /// A look at the cache: the project, the player's defaults, and what's in _Renders (listed once for a scan of many
 /// items; `fresh` asks the disk for each one instead, when something is about to be made or copied)
@@ -77,6 +79,11 @@ pub struct Ctx {
     locs: Vec<crate::locations::Location>,
     names: Option<HashSet<String>>,
     clips: RefCell<HashMap<String, ClipFacts>>,
+    /// The Library's probes, which say each clip's lens (index::shared_probes; none: not known, in tests unless given)
+    probes: Option<crate::index::SharedProbes>,
+    /// The lens list's stamp (index::lens_list_stamp) once per look, and each clip's lens (lens_id) as found
+    lenses: RefCell<Option<String>>,
+    lens_of: RefCell<HashMap<PathBuf, Value>>,
     ranges: RefCell<HashMap<String, Option<afp_catalog::range::Range>>>,
 }
 
@@ -91,7 +98,28 @@ impl Ctx {
         }).into_iter().collect());
         let preset = defaults["preset"].as_str().map(Path::new).filter(|p| p.is_file()).and_then(crate::checks::fingerprint_kept).map(Value::from).unwrap_or(Value::Null);
         Ctx { root: root.to_path_buf(), defaults, preset, locs: crate::locations::locations(root, &crate::locations::mounts()),
-              names, clips: RefCell::new(HashMap::new()), ranges: RefCell::new(HashMap::new()) }
+              names, clips: RefCell::new(HashMap::new()), ranges: RefCell::new(HashMap::new()), probes: crate::index::shared_probes(),
+              lenses: RefCell::new(None), lens_of: RefCell::new(HashMap::new()) }
+    }
+
+    /// With these probes for the clips' lenses (tests; None: not known)
+    pub fn with_probes(mut self, probes: Option<crate::index::SharedProbes>) -> Ctx { self.probes = probes; self }
+
+    /// What a render takes of the clip's lens (`clip`: its file): {from, print} (index::lens_id), from the probe's answer
+    /// when it's current (an answer of before the lens list, the clip's own file or its measured motion changed is not).
+    /// Where there's none, a view's look (the page's) leaves the lens out: such a recipe matches no render made with a
+    /// known lens, so the render shows as none until the probe answers and the view is looked at again, never as
+    /// current with another lens (and never flip-flops between two lenses). A look before something is made or copied
+    /// (fresh: Share, deleting) asks the probe now, so Share never renders again what's there. Null: not known
+    fn lens(&self, clip: &Path) -> Value {
+        if let Some(v) = self.lens_of.borrow().get(clip) { return v.clone(); }
+        let Some(probes) = &self.probes else { return Value::Null };
+        let lenses = self.lenses.borrow_mut().get_or_insert_with(crate::index::lens_list_stamp).clone();
+        let path = clip.to_string_lossy();
+        let answer = if self.names.is_some() { probes.lock().unwrap().current(&path, &lenses) } else { crate::index::answer_now(probes, &path, &lenses) };
+        let v = answer.map(|a| crate::index::lens_id(&a)).unwrap_or(Value::Null);
+        self.lens_of.borrow_mut().insert(clip.to_path_buf(), v.clone());
+        v
     }
 
     fn has(&self, name: &str) -> bool {
@@ -116,6 +144,10 @@ impl Ctx {
             let name = clip.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             facts.gyroflow = [clip.with_extension("gyroflow"), clip.with_file_name(format!("{name}.gyroflow"))].iter()
                 .find(|g| { afp_catalog::store::nas::stat(); g.is_file() }).and_then(|g| crate::checks::fingerprint_kept(g)).map(Value::from).unwrap_or(Value::Null);
+            // Its motion measured from the picture, beside it (<stem>.afp-motion: vs-gyroflow's afp_motion.rs)
+            let motion = clip.with_extension("afp-motion");
+            afp_catalog::store::nas::stat();
+            facts.motion = if motion.is_file() { crate::checks::fingerprint_kept(&motion).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
             afp_catalog::store::nas::stat();
             facts.size = std::fs::metadata(&clip).map(|m| json!(m.len())).unwrap_or(Value::Null);
             facts.file = Some(clip);
@@ -158,6 +190,8 @@ impl Ctx {
                 break;
             }
         }
+        let motion = clip.with_extension("afp-motion");
+        if let Some(x) = seen(&motion)? { facts.motion = crate::checks::fingerprint_seen(&motion, x.size, x.mtime).map(Value::from).unwrap_or(Value::Null); }
         facts.size = json!(file.size);
         facts.file = Some(clip.clone());
         Some(facts)
@@ -371,7 +405,10 @@ pub fn settings(doc: &Value, own: &Value, defaults: &Value) -> Value {
 /// rendered with: `settings` from the clip's own file, a moment's own bundle and the player's defaults: the player
 /// renders with exactly these, sent in its request), opts (the player's edge fill and temporal denoise), gyroflow (the
 /// fingerprint of the Gyroflow project used: a moment's own, else the clip's), preset (the player's preset's, where
-/// there is no project), profile { name, look }
+/// there is no project), and where there is none, lens (the lens the clip's mode plays with: Ctx::lens, {from, print};
+/// left out where the probe hasn't said) and motion (the fingerprint of its .afp-motion, its motion measured from the
+/// picture), profile { name, look }. A project decides the lens and the motion itself (vs-gyroflow's load_manager
+/// takes neither the mode's lens nor the .afp-motion with one)
 pub fn recipe(ctx: &Ctx, item: &Item, profile: &Profile) -> Value { recipe_with(ctx, item, profile, &Value::Null) }
 
 /// The export's settings an item is rendered with (Share's dialog: docs/design/export-settings.md), the values that aren't
@@ -421,19 +458,24 @@ pub fn recipe_with(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) ->
         Kind::Photo => { for k in ["t", "crop", "camera"] { r[k] = l[k].clone(); } }
         Kind::Clip => {}
     }
-    if r["gyroflow"].is_null() { r["preset"] = ctx.preset.clone(); }
+    if r["gyroflow"].is_null() {
+        r["preset"] = ctx.preset.clone();
+        r["lens"] = facts.file.as_deref().map(|f| ctx.lens(f)).unwrap_or(Value::Null);
+        r["motion"] = facts.motion.clone();
+    }
     // A render made with other settings is another render
     if export.as_object().is_some_and(|o| !o.is_empty()) { r["export"] = export.clone(); }
     trimmed(&r).unwrap_or(Value::Null)
 }
 
-/// index::render_recipe (a moment's render made the old way) from what the look already has: the clip's facts, the
-/// moment's own Gyroflow project (from the catalog, for a view)
-fn old_recipe(ctx: &Ctx, item: &Item, file: &Path, profile: &str) -> Value {
-    if ctx.names.is_none() { return index::render_recipe(&ctx.root, file, &item.link, profile); }
-    let input = item.tree().map(|t| ctx.clip(t).doc["source"].clone()).unwrap_or(Value::Null);
+/// index::render_recipe_of (a moment's render made the old way, the player's v2 recipe) from what the look has: the
+/// clip's facts (its own file's source, its lens, its measured motion), the moment's own Gyroflow project (from the
+/// catalog, for a view)
+fn old_recipe(ctx: &Ctx, item: &Item, profile: &str) -> Value {
+    let facts = item.tree().map(|t| ctx.clip(t)).unwrap_or_default();
     let gyroflow = own_project(item).and_then(|o| ctx.gyroflow_print(&o)).map(Value::from).unwrap_or(Value::Null);
-    index::render_recipe_of(&item.link, input, gyroflow, profile)
+    let lens = facts.file.as_deref().map(|f| ctx.lens(f)).unwrap_or(Value::Null);
+    index::render_recipe_of(&item.link, facts.doc["source"].clone(), gyroflow, lens, facts.motion, profile)
 }
 
 /// A moment's own Gyroflow project: <name>.gyroflow beside its link
@@ -577,11 +619,11 @@ fn find_as(ctx: &Ctx, item: &Item, profile: &Profile, export: &Value) -> Found {
     }
     // Made the old way: _Renders/<the moment's path>.<profile>.mov, current while its v1 recipe is the moment's
     let default = !export.as_object().is_some_and(|o| !o.is_empty());
-    if let (Kind::Moment, false, Some(file), true) = (item.kind, profile.photo, &item.file, default) {
+    if let (Kind::Moment, false, Some(_), true) = (item.kind, profile.photo, &item.file, default) {
         let old = index::render_path(&ctx.root, &item.rel, profile.name);
         if crate::seen::is_file(&old) || (ctx.names.is_none() && old.is_file()) {
             let ok = index::link(&old).filter(|l| l["kind"] == "render").and_then(|l| trimmed(&l["recipe"]))
-                .is_some_and(|r| same(&r, &old_recipe(ctx, item, file, profile.name)));
+                .is_some_and(|r| same(&r, &old_recipe(ctx, item, profile.name)));
             if ok { found.file = Some(old); } else { found.stale = Some(old); }
         }
     }
@@ -856,14 +898,18 @@ mod tests {
         }
         let shape = |v: &Value| { let mut out = Vec::new(); paths(v, "", &mut out); out.sort(); out.join(" ") };
         let (root, moment, photo, clip) = project("recipe-version");
-        let ctx = look(&root, true);
+        std::fs::write(root.join("Day 1/A.afp-motion"), b"motion").unwrap();
+        let file = look(&root, true).original(&clip).unwrap();
+        let ctx = look(&root, true).with_probes(Some(probes_saying(&file, "own", "1a2b3c4d5e6f7a8b", index::GEOTAG)));
         let (hdr, ph) = (profile("HDR").unwrap(), profile("Photo").unwrap());
         let (m, p, c) = (recipe(&ctx, &moment, hdr), recipe(&ctx, &photo, ph), recipe(&ctx, &clip, hdr));
         let kept = format!("moment: {} / photo: {} / clip: {}", shape(&m), shape(&p), shape(&c));
-        assert_eq!((VERSION, kept.as_str()), (4, concat!("moment: clip.hash clip.size in kind out profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.orient",
-                               "ation settings.projection settings.view v / photo: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_",
-                               "strong settings.lens settings.level settings.orientation settings.projection settings.view t v / clip: clip.path clip.size kind profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.level settings.orientation settings.projection settings.view v")), "what a recipe holds changed, or VERSION did: they change together");
-        assert_eq!([hash(&m), hash(&p), hash(&c)], ["c3d1323d60720559a14f227f", "2f58eb104de1ceca73053fe0", "5dd5a11539e16cd587d8f210"], "the same recipes hash otherwise: every render made before is stale");
+        assert_eq!((VERSION, kept.as_str()), (5, concat!("moment: clip.hash clip.size in kind lens.from lens.print motion out profile.look profile.name settings.aspect settings.curve ",
+                               "settings.denoise_strong settings.lens settings.orientation settings.projection settings.view v / photo: clip.path clip.size kind lens.from lens.print ",
+                               "motion profile.look profile.name settings.aspect settings.curve settings.denoise_strong settings.lens settings.level settings.orientation settings.projection ",
+                               "settings.view t v / clip: clip.path clip.size kind lens.from lens.print motion profile.look profile.name settings.aspect settings.curve settings.denoise_strong ",
+                               "settings.lens settings.level settings.orientation settings.projection settings.view v")), "what a recipe holds changed, or VERSION did: they change together");
+        assert_eq!([hash(&m), hash(&p), hash(&c)], ["03119c703fa89bd84a417e51", "09f38ecb95db591db93b7002", "faa6c58f62aced546ee3bc40"], "the same recipes hash otherwise: every render made before is stale");
         let full = json!({ "v": 4, "kind": "moment", "clip": { "hash": "5f2c", "size": 1234567890 }, "in": 12.5, "out": 20.033333333,
                            "settings": { "view": "wide", "level": "medium", "horizon_lock": "yes", "fov": 1.25 },
                            "opts": { "edges": "fill", "temporal_denoise": "light" }, "gyroflow": "ab12", "profile": { "name": "HDR", "look": "hdr" },
@@ -1025,15 +1071,14 @@ mod tests {
         assert_eq!(old, root.join("_Renders/Reef/Turtle.HDR.mov"));
         std::fs::create_dir_all(old.parent().unwrap()).unwrap();
         std::fs::create_dir_all(root.join("_Moments/Reef")).unwrap();
-        let file = moment.file.clone().unwrap();
         let write = |recipe: &Value| std::fs::write(&old, index::tests::tests_mp4_with_link(&json!({ "v": 1, "kind": "render", "recipe": recipe }).to_string())).unwrap();
         // Its v1 recipe is the moment's: current, and it's the file Share copies
-        write(&index::render_recipe(&root, &file, &moment.link, "HDR"));
+        write(&old_recipe(&look(&root, true), &moment, "HDR"));
         let f = find(&look(&root, true), &moment, hdr);
         assert_eq!((f.file.as_deref(), f.stale.as_deref()), (Some(old.as_path()), None));
         assert_eq!(states(&look(&root, false), &moment), json!({ "HDR": "current" }));
         // The moment changed since: stale
-        let mut changed = index::render_recipe(&root, &file, &moment.link, "HDR");
+        let mut changed = old_recipe(&look(&root, true), &moment, "HDR");
         // (and the file's size with it: links read are kept by the file's size and time)
         changed["out"] = json!(9.125);
         write(&changed);
@@ -1044,6 +1089,85 @@ mod tests {
         let new = cache_path(&root, &f.hash, hdr, "mov");
         std::fs::write(&new, b"pixels").unwrap();
         assert_eq!(find(&look(&root, true), &moment, hdr).file, Some(new));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    // The Library's probes with an answer for the clip saying its lens (index::lens_id's fields), of this probe or an
+    // older one
+    fn probes_saying(clip: &Path, from: &str, print: &str, geotag: u64) -> index::SharedProbes {
+        let p: index::SharedProbes = Default::default();
+        p.lock().unwrap().put(&clip.to_string_lossy(), json!({ "geotag": geotag, "lens_info": { "from": from, "print": print, "lens": "a label", "mode_key": "a mode" } }));
+        p
+    }
+
+    /// #318: a render is another one when the lens the clip's mode plays with changes (another lens picked for the
+    /// mode, a lens type given, a lens found or estimated again: the probe's lens_info print and from) or its motion
+    /// measured from the picture (.afp-motion) does; the same when neither did. Where the probe hasn't said, the lens
+    /// is left out (no render made with a known lens matches): never another known lens
+    #[test]
+    fn the_clip_s_lens_and_measured_motion_are_part_of_a_render() {
+        let (root, moment, photo, clip) = project("lens-motion");
+        let (hdr, ph) = (profile("HDR").unwrap(), profile("Photo").unwrap());
+        let file = look(&root, true).original(&clip).unwrap();
+        let with = |p: &index::SharedProbes, fresh: bool| look(&root, fresh).with_probes(Some(p.clone()));
+        let hashes = |ctx: &Ctx| [hash(&recipe(ctx, &moment, hdr)), hash(&recipe(ctx, &photo, ph)), hash(&recipe(ctx, &clip, hdr))];
+        let own = probes_saying(&file, "own", "1a2b3c4d5e6f7a8b", index::GEOTAG);
+        let base = hashes(&with(&own, true));
+        assert!(recipe(&with(&own, true), &moment, hdr)["lens"] == json!({ "from": "own", "print": "1a2b3c4d5e6f7a8b" }));
+        // Nothing changed: the same, by another look, a view's too, and by other probes saying the same
+        assert_eq!(hashes(&with(&own, true)), base);
+        assert_eq!(hashes(&with(&own, false)), base);
+        assert_eq!(hashes(&with(&probes_saying(&file, "own", "1a2b3c4d5e6f7a8b", index::GEOTAG), true)), base);
+        // Another lens for the mode (estimated again: another print), or the same profile from elsewhere
+        let mut seen: HashSet<[String; 3]> = HashSet::from([base.clone()]);
+        let mut differs = |what: &str, h: [String; 3]| { for (i, x) in h.iter().enumerate() { assert_ne!(x, &base[i], "{what} didn't change item {i}'s hash"); } assert!(seen.insert(h), "{what}: a hash of before"); };
+        differs("another lens", hashes(&with(&probes_saying(&file, "own", "ffffffffffffffff", index::GEOTAG), true)));
+        differs("the lens from the curated list", hashes(&with(&probes_saying(&file, "list", "1a2b3c4d5e6f7a8b", index::GEOTAG), true)));
+        differs("no ready lens", hashes(&with(&probes_saying(&file, "", "", index::GEOTAG), true)));
+        // Not known (no probes, no answer, an older probe's answer): left out, the same each time, none of the known
+        let unknown = hashes(&look(&root, true));
+        assert!(recipe(&look(&root, true), &moment, hdr).get("lens").is_none());
+        assert_eq!(hashes(&with(&Default::default(), true)), unknown);
+        assert_eq!(hashes(&with(&Default::default(), false)), unknown);
+        assert_eq!(hashes(&with(&probes_saying(&file, "own", "1a2b3c4d5e6f7a8b", index::GEOTAG - 1), false)), unknown);
+        differs("a lens not known", unknown);
+        // Its motion measured from the picture: there, the same file again, another
+        std::fs::write(root.join("Day 1/A.afp-motion"), b"motion, measured once").unwrap();
+        let measured = hashes(&with(&own, true));
+        differs("its measured motion", measured.clone());
+        assert_eq!(hashes(&with(&own, true)), measured);
+        std::fs::write(root.join("Day 1/A.afp-motion"), b"motion, measured again").unwrap();
+        differs("its motion measured again", hashes(&with(&own, true)));
+        std::fs::remove_file(root.join("Day 1/A.afp-motion")).unwrap();
+        assert_eq!(hashes(&with(&own, true)), base);
+        // With a Gyroflow project the project decides both (the player takes neither the mode's lens nor the .afp-motion)
+        std::fs::write(root.join("Day 1/A.gyroflow"), b"{}").unwrap();
+        let project = hash(&recipe(&with(&own, true), &clip, hdr));
+        assert_eq!(hash(&recipe(&with(&probes_saying(&file, "own", "ffffffffffffffff", index::GEOTAG), true), &clip, hdr)), project);
+        std::fs::write(root.join("Day 1/A.afp-motion"), b"motion").unwrap();
+        assert_eq!(hash(&recipe(&with(&own, true), &clip, hdr)), project);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The player's renders at a moment's path (its v2 recipe, index::render_recipe_of) go stale the same way
+    #[test]
+    fn a_render_made_the_old_way_goes_stale_with_the_lens_and_the_motion() {
+        let (root, moment, _, _) = project("old-lens");
+        let hdr = profile("HDR").unwrap();
+        let file = look(&root, true).original(&moment).unwrap();
+        let own = probes_saying(&file, "own", "1a2b3c4d5e6f7a8b", index::GEOTAG);
+        let ctx = |p: &index::SharedProbes| look(&root, true).with_probes(Some(p.clone()));
+        let old = index::render_path(&root, &moment.rel, "HDR");
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(root.join("_Moments/Reef")).unwrap();
+        let recipe = old_recipe(&ctx(&own), &moment, "HDR");
+        assert_eq!((recipe["v"].as_u64(), recipe["lens"]["print"].as_str()), (Some(2), Some("1a2b3c4d5e6f7a8b")));
+        std::fs::write(&old, index::tests::tests_mp4_with_link(&json!({ "v": 1, "kind": "render", "recipe": recipe }).to_string())).unwrap();
+        assert!(find(&ctx(&own), &moment, hdr).file.is_some());
+        let other = probes_saying(&file, "own", "ffffffffffffffff", index::GEOTAG);
+        assert_eq!(find(&ctx(&other), &moment, hdr).stale.as_deref(), Some(old.as_path()), "another lens");
+        std::fs::write(root.join("Day 1/A.afp-motion"), b"motion").unwrap();
+        assert_eq!(find(&ctx(&own), &moment, hdr).stale.as_deref(), Some(old.as_path()), "measured motion");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

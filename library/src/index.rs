@@ -657,7 +657,8 @@ fn walk_names(root: &Path, entries: &[(String, u64, i64)]) -> HashSet<String> {
 // ---------- renders (the player's render batch; docs/design/library-management.md, "Renders") ----------
 
 pub const RENDER_PROFILES: [&str; 2] = ["HDR", "SDR"];
-const RENDER_VERSION: u64 = 1;
+/// 2: the clip's lens and measured motion (lens, motion: #318), as renders.rs's VERSION 5
+const RENDER_VERSION: u64 = 2;
 
 /// A value as the player's JSON keeps it: nulls and empty objects or arrays left out, for comparing recipes
 pub fn trimmed(v: &Value) -> Option<Value> {
@@ -684,21 +685,14 @@ pub(crate) fn same(a: &Value, b: &Value) -> bool {
     }
 }
 
-/// The recipe of a moment's render in `profile` as renders were made before the cache by hash (v1, the player's
-/// render_recipe of then): what a render at the moment's path is compared with (renders.rs)
-pub fn render_recipe(root: &Path, moment: &Path, link: &Value, profile: &str) -> Value {
-    let input = link["clip"].as_str().and_then(|c| crate::tags::clip_own(root, c).ok()).and_then(|(own, _)| read_json(&own)).map(|d| d["source"].clone()).unwrap_or(Value::Null);
-    let name = moment.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let own = moment.with_file_name(format!("{}.gyroflow", name.trim_end_matches(LINK_EXT)));
-    afp_catalog::store::nas::stat();
-    let gyroflow = if own.is_file() { crate::checks::fingerprint(&own).map(Value::from).unwrap_or(Value::Null) } else { Value::Null };
-    render_recipe_of(link, input, gyroflow, profile)
-}
-
-/// The same from its parts: the clip's own file's `source`, the moment's own Gyroflow project's fingerprint
-pub fn render_recipe_of(link: &Value, input: Value, gyroflow: Value, profile: &str) -> Value {
+/// The recipe of a moment's render in `profile` as the player makes renders at the moment's path (the Library's Render,
+/// the player's render_recipe), what such a render is compared with (renders.rs `old_recipe` works its parts out): the
+/// clip's own file's `source`, the moment's own Gyroflow project's fingerprint, the clip's lens ({from, print}:
+/// index::lens_id, gyroflow-probe --lens-id; null where it isn't known) and its .afp-motion's fingerprint
+pub fn render_recipe_of(link: &Value, input: Value, gyroflow: Value, lens: Value, motion: Value, profile: &str) -> Value {
     trimmed(&json!({ "v": RENDER_VERSION, "clip": { "hash": link["hash"], "size": link["size"] }, "in": link["in"], "out": link["out"],
-                     "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "profile": profile })).unwrap_or(Value::Null)
+                     "stab": link["stab"], "alone": link["alone"], "input": input, "gyroflow": gyroflow, "lens": lens, "motion": motion,
+                     "profile": profile })).unwrap_or(Value::Null)
 }
 
 /// Where a moment's render in a profile is: _Renders/<its path without .afplink.mp4>.<profile>.mov, its path being the
@@ -723,7 +717,7 @@ fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 9;
+pub const GEOTAG: u64 = 10;
 
 #[derive(Default)]
 pub struct Probes {
@@ -757,6 +751,35 @@ pub fn beside_stamp(clip: &str) -> Option<String> {
 }
 
 pub type SharedProbes = Arc<Mutex<Probes>>;
+
+/// The Library's probes (main.rs sets them as it starts): what a render's recipe takes the clip's lens from, wherever
+/// a look at the render cache is made (renders::Ctx). Not set in tests: a recipe's lens is then not known
+static PROBES: std::sync::OnceLock<SharedProbes> = std::sync::OnceLock::new();
+pub fn set_shared_probes(p: &SharedProbes) { let _ = PROBES.set(p.clone()); }
+pub fn shared_probes() -> Option<SharedProbes> { PROBES.get().cloned() }
+
+/// A clip's answer as it would be worked out now: the one known when it's current (Probes::current), else the tool
+/// asked now (a render about to be made or copied: Share's look, renders::Ctx fresh). None: no tool, or no answer
+pub fn answer_now(probes: &SharedProbes, path: &str, lenses: &str) -> Option<Value> {
+    if let Some(v) = probes.lock().unwrap().current(path, lenses) { return Some(v); }
+    let tool = probes.lock().unwrap().tool.clone()?;
+    let mut cmd = Command::new(tool);
+    cmd.arg("--library").arg(path).stdin(Stdio::null()).stderr(Stdio::null());
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    let v: Value = String::from_utf8_lossy(&cmd.output().ok()?.stdout).lines().last().and_then(|l| serde_json::from_str(l).ok())?;
+    probes.lock().unwrap().put(path, v.clone());
+    Some(v)
+}
+
+/// What a render's recipe takes of a clip's lens from its probe answer: {from, print} (gyroflow-probe's lens_id: the
+/// player's v2 recipe asks for the same), null where the answer is of an older probe or says nothing of the lens
+pub fn lens_id(answer: &Value) -> Value {
+    if answer["geotag"].as_u64().unwrap_or(0) < GEOTAG { return Value::Null; }
+    let l = &answer["lens_info"];
+    if !l.is_object() { return Value::Null; }
+    json!({ "from": l["from"].as_str().unwrap_or(""), "print": l["print"].as_str().unwrap_or("") })
+}
 
 /// The user's own lens list (vs-gyroflow's lens_pick::user_file, the same place): what tells its versions apart, ""
 /// when there's none. The probe's answer about a clip's lens is worked out with it, so it's kept only while that stays
@@ -846,11 +869,20 @@ impl Probes {
     pub fn want(&mut self, paths: &[String]) {
         let lenses = lens_list_stamp();
         for p in paths {
-            let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, l, _)), Some((s2, m2))) => *s == s2 && *m == m2 && *l == lenses, _ => false };
-            // An answer kept from before this was noted has none: taken as it is until it's worked out again
-            let fresh = fresh && match (self.beside.get(p), beside_stamp(p)) { (Some(b), Some(now)) => *b == now, _ => true };
-            if !fresh && self.queued.insert(p.clone()) { self.queue.push_back(p.clone()); }
+            if !self.fresh(p, &lenses) && self.queued.insert(p.clone()) { self.queue.push_back(p.clone()); }
         }
+    }
+    /// Whether a clip's answer is as it would be worked out now (`lenses`: lens_list_stamp): known, its file, the lens
+    /// list and its own file and measured motion as they were then
+    fn fresh(&self, p: &str, lenses: &str) -> bool {
+        let fresh = match (self.known.get(p), stamp(p)) { (Some((s, m, l, _)), Some((s2, m2))) => *s == s2 && *m == m2 && l == lenses, _ => false };
+        // An answer kept from before this was noted has none: taken as it is until it's worked out again
+        fresh && match (self.beside.get(p), beside_stamp(p)) { (Some(b), Some(now)) => *b == now, _ => true }
+    }
+    /// One clip's answer, only when it's as it would be worked out now (`fresh`; an older probe's is worked out again):
+    /// what a render's recipe takes the lens from (renders.rs)
+    pub fn current(&self, path: &str, lenses: &str) -> Option<Value> {
+        self.fresh(path, lenses).then(|| self.known.get(path).map(|e| e.3.clone())).flatten()
     }
     /// These clips' answers to be worked out again (a lens type chosen for them): kept until then, and queued
     pub fn forget(&mut self, paths: &[String]) {
@@ -1610,7 +1642,7 @@ mod probe_version {
                            fields(&source("markers.rs"), "Movie"), fields(&source("geotag.rs"), "Clock"), fields(&source("geotag.rs"), "Fix"),
                            fields(&probe, "LensInfo"), fields(&source("lens_pick.rs"), "LensType"));
         assert_eq!((GEOTAG, kept.as_str()),
-                   (9, "answer: at brand camera clock color error fps frames geotag gps height how in_water lens lens_info lenses marks measured measured_aside measured_error measured_frames mode model motion movie readout_left_out readout_ms reason rig360 rotation spherical stabilized_in_camera times tracks water width / movie: duration created width height turn / clock: utc basis zone_min why / gps: lat lon alt t / lens_info: camera lens types type recorded default mode curated_file curated_error project from mode_key candidates / lens type: id label profile sizes note file_first"),
+                   (10, "answer: at brand camera clock color error fps frames geotag gps height how in_water lens lens_info lenses marks measured measured_aside measured_error measured_frames mode model motion movie readout_left_out readout_ms reason rig360 rotation spherical stabilized_in_camera times tracks water width / movie: duration created width height turn / clock: utc basis zone_min why / gps: lat lon alt t / lens_info: camera lens types type recorded default mode curated_file curated_error project from mode_key print candidates / lens type: id label profile sizes note file_first"),
                    "what gyroflow-probe --library answers changed, or GEOTAG did: they change together (see this test's comment)");
     }
 
@@ -1673,7 +1705,7 @@ mod render_recipe_twin {
                 if x.is_object() && k == "clip" { paths(x, &p, out) } else { out.push(p) }
             }
         }
-        paths(&render_recipe_of(&link, json!({ "curve": "dlogm" }), json!("fp"), "HDR"), "", &mut rust_fields);
+        paths(&render_recipe_of(&link, json!({ "curve": "dlogm" }), json!("fp"), json!({ "from": "own", "print": "p" }), json!("mp"), "HDR"), "", &mut rust_fields);
         rust_fields.sort();
         assert_eq!(lua_fields, rust_fields, "the player's render_recipe and render_recipe_of hold other fields");
         assert_eq!(lua_keys("{ v = 1, clip = { hash = l.hash, size = l.size }, [\"in\"] = l[\"in\"], x = a == b }"), ["clip.hash", "clip.size", "in", "v", "x"]);

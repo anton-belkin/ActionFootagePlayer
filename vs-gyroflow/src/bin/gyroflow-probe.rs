@@ -56,6 +56,10 @@
 // own database keeps lenses) and "candidates": the lenses of its camera to choose from, nearest first ({"id", "label",
 // "local", "exact", "readout"}, lens_pick::candidates).
 //
+// --lens and --library's "lens_info" also have "print": the lens profile loaded, by what it says (probe::lens_print),
+// "" for none or the lens in the file. `gyroflow-probe --lens-id <video>`: only {"from", "print"}, what a render's
+// recipe takes of the clip's lens (the player's render recipe, workspace/renders.lua; the Library's from lens_info).
+//
 // `gyroflow-probe --assign-lens <video> <id>`: one of those kept as the lens of the clip's whole mode in the player's
 // own database (lens_db.rs): {"file", "mode", "lens"}, or {"error"} (exit 1). `gyroflow-probe --forget-lens <video>`:
 // the lens assigned to the clip's mode taken away: {"removed", "mode"}.
@@ -106,6 +110,9 @@ fn main() {
     if assign { args.remove(0); }
     let forget = args.first().is_some_and(|a| a == "--forget-lens");
     if forget { args.remove(0); }
+    // --lens-id: what a render's recipe takes of the clip's lens (probe::lens_id)
+    let lens_id = args.first().is_some_and(|a| a == "--lens-id");
+    if lens_id { args.remove(0); }
     // --library: everything Action Footage Library's index keeps about a clip
     let library = args.first().is_some_and(|a| a == "--library");
     if library { args.remove(0); }
@@ -114,7 +121,7 @@ fn main() {
     if reframe { args.remove(0); }
     let id = args.get(1).cloned();
     let Some(path) = args.into_iter().next() else {
-        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --save-lens | --library | --reframe | --forget-lens] <video>\n       gyroflow-probe --assign-lens <video> <id>");
+        eprintln!("usage: gyroflow-probe [--rig | --headings | --lens | --lens-id | --save-lens | --library | --reframe | --forget-lens] <video>\n       gyroflow-probe --assign-lens <video> <id>");
         std::process::exit(2);
     };
     if reframe {
@@ -136,6 +143,11 @@ fn main() {
         // Gyroflow's readers take paths as URLs: a relative one reads nothing
         let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
         println!("{}", serde_json::to_value(vs_gyroflow::probe::lens_info_with_candidates(&path, 16).unwrap_or_default()).unwrap_or_default());
+        return;
+    }
+    if lens_id {
+        let path = vs_gyroflow::canonicalize(&path).map(|p| p.to_string_lossy().to_string()).unwrap_or(path);
+        println!("{}", vs_gyroflow::probe::lens_id(&path));
         return;
     }
     if assign || forget {
@@ -204,9 +216,9 @@ fn main() {
         // GoPro (HERO3) named by its firmware, 5 = a lens only when one is made for exactly the clip's mode (lens_pick.rs),
         // 6 = the lens as the player takes it ("lens_info", below), 7 = GoPro HERO12+ with HyperSmooth on stabilized (in_camera.rs),
         // 8 = the clip's own motion data over its .afp-motion ("measured_aside"), 9 = "builtin" lenses and
-        // measured.readout_left_out
+        // measured.readout_left_out, 10 = lens_info.print (a render's recipe takes the lens: renders.rs)
         // (the Library asks again for older answers: raise it with what's new here)
-        out["geotag"] = 9.into();
+        out["geotag"] = 10.into();
         // The lens as the player takes it (probe::lens_info: the profile and where it comes from, the mode a lens is kept
         // for, the camera's lens types, the Gyroflow project's lens), for the Library's Source Settings and its filters
         // without reading the clip again; the lenses to choose from (candidates) are the mode's, asked when chosen

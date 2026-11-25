@@ -56,7 +56,7 @@ function views(aside, variant) {
       lens_info: { camera: "GoPro HERO12 Black", lens: "in the file", from: "file", types: [], mode_key: "GoPro HERO12 Black · linear · hsautoboost · 3840x2160 · 29.97 fps" } };
     else p = { camera: "GoPro HERO7 Black", color: "normal", mode: null, lens: "GoPro HERO7 Black 4k Wide HS EIS", water: false, stabilized_in_camera: "HyperSmooth (HS EIS)", width: 3840, height: 2160, fps: 29.97,
       lens_info: { camera: "GoPro HERO7 Black", lens: "GoPro HERO7 Black 4k 16:9 Wide HS EIS 3840x2160 29.97fps", from: "database", types: [], mode_key: h7Key } };
-    probes[it.path] = Object.assign(p, { geotag: 9, movie: { duration: it.name.startsWith("DJI") ? 62 : 48, created: 1730000000 }, marks: { times: [] } });
+    probes[it.path] = Object.assign(p, { geotag: 10, movie: { duration: it.name.startsWith("DJI") ? 62 : 48, created: 1730000000 }, marks: { times: [] } });
   }
   const footage = { root: ROOT, view: "footage", dirs: ["Day 1"], clips_dirs: ["_Clips", "_Clips/Day 1"],
     locations: [{ name: "Archive", at: "", path: "../F", dir: "/F", copies: false, local: false, dirs: ["Day 1"], offline: false, connect: false, names: [] }],
