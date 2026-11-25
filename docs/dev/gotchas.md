@@ -73,11 +73,21 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 
 ## mpv and its Lua plugins
 
-- **Lua's 200 top-level locals.** `workspace/main.lua` is at the limit; `gyroflow/main.lua` is near it.
+- **Lua's 200 top-level locals.** `gyroflow/main.lua` is near the limit. `workspace/main.lua` is its plugin's wiring
+  only (see the next point).
   - You see: "main function has more than 200 local variables" and the plugin doesn't load.
   - Do: put new code in a module of its own (`transform.lua`, `sidecar.lua`, `ahead.lua`, `measure.lua`), required
     without a new local where needed (`require('measure').setup(...)` in `gyroflow/main.lua`). Add the module to the
     packagers; `tests/packaging_test.py` checks it.
+- **The workspace plugin's parts share `W`** (`workspace/main.lua` makes it; each part is a module with
+  `install(W)`).
+  - A part calls another's function through `W` as it runs (`local function refresh(...) return W.refresh(...) end`
+    at its top), so parts install in any order; a value it keeps from `W` at install (`fs`, `catalog`, `cache`,
+    `markers`, `batch`) must have been put there by a part installed before it (the order in `main.lua`).
+  - `W.state` is one table for the plugin's life (published as `user-data/workspace`): a new file refills it
+    (`W.replace_state`), never `state = …`. "Another file by now" is `W.generation`, not a table compared.
+  - Every event, key and script message is registered in `main.lua`, in the order they were when it was one file:
+    a `file-loaded` handler's place there is the order it runs in.
 - **Script messages and key bindings share one namespace.**
   - You see: a message does nothing (the Lens drop-down, #225).
   - Why: `mp.add_key_binding` registers its name as a script message too, and takes over a message of that name

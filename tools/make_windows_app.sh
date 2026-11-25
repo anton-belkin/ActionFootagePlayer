@@ -187,6 +187,7 @@ cp mpv/scripts/agent/main.lua "$agent/"
 cp mpv/scripts/any-layout/main.lua "$anylayout/"
 cp mpv/scripts/live-photo/main.lua mpv/scripts/live-photo/live.lua "$livephoto/"
 cp mpv/scripts/workspace/main.lua mpv/scripts/workspace/workspace.lua mpv/scripts/workspace/link.lua mpv/scripts/workspace/moments.lua mpv/scripts/workspace/cut.lua mpv/scripts/workspace/sidecar.lua mpv/scripts/workspace/transform.lua mpv/scripts/workspace/projectfile.lua mpv/scripts/workspace/projectcache.lua mpv/scripts/workspace/longpath.lua mpv/scripts/workspace/tags.lua mpv/scripts/workspace/librarylist.lua mpv/scripts/workspace/journal.lua mpv/scripts/workspace/registry.lua mpv/scripts/workspace/registry.json "$workspace/"
+cp mpv/scripts/workspace/places.lua mpv/scripts/workspace/catalogtool.lua mpv/scripts/workspace/common.lua mpv/scripts/workspace/trash.lua mpv/scripts/workspace/momentlist.lua mpv/scripts/workspace/opening.lua mpv/scripts/workspace/momentsave.lua mpv/scripts/workspace/clippreviews.lua mpv/scripts/workspace/cutout.lua mpv/scripts/workspace/viewsave.lua mpv/scripts/workspace/marksjob.lua mpv/scripts/workspace/renders.lua mpv/scripts/workspace/tagging.lua mpv/scripts/workspace/inbox.lua mpv/scripts/workspace/batch.lua "$workspace/"
 cp mpv/scripts/view360/main.lua mpv/scripts/view360/view.lua mpv/scripts/view360/recording.lua mpv/scripts/view360/view360.glsl "$view360/"
 
 echo "== ffmpeg"
