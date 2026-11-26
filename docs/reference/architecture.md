@@ -288,8 +288,8 @@ the player's own plugins how each file plays (`--script-opts-append=gyroflow-ren
    (`gyroflow/framing.lua` `interpolation`). `gyroflow-gpu-table` assembles `warp.glsl`'s sections by mode: the player
    gets grid (RGB at `MAIN`, a table point every `--grid-step` px, 16 by default) when it needs RGB (fringes, the
    edge fill), else planes (`reply.mode`); `exact` is for checks. 33 rotation knots a frame (`--knots`) are at the
-   noise floor. The table is a 16384-wide `rgba32f` texture (`gpu_table::MAX_TEX`): per frame 16 parameter texels and
-   its knots.
+   noise floor. The table is a 16384-wide `rgba32f` texture (`gpu_table::MAX_TEX`): per frame 17 parameter texels (the last: under water, the
+   picture's turn inside the housing, `kernel_params.image_orientation`) and its knots.
 4. **Look.** dlogm's shader at `HOOK MAIN`, after the warp: a log curve's LUT to Rec.2100 HLG, the underwater colour,
    DJI's LUT, NBCU's HLG/PQ → SDR, or none. It tags the video with a `format` filter so mpv's color pipeline is an
    identity ([D-Log M](#d-log-m)).

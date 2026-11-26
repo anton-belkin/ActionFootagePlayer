@@ -714,6 +714,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_GPU_EXPORT` | — | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_FFMPEG` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_KEEP` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `tools/edgefill/chain.sh`, `tools/edgefill/synth/run.py` |
+| `AFP_GPU_OUTLIERS` | `vs-gyroflow/src/gpu_table.rs` | — |
 | `AFP_GPU_SDR_CLIPS` | — | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_SERVER_LOG` | `vs-gyroflow/src/bin/gyroflow-gpu-table.rs` | `tests/gpu_ahead_e2e.py` |
 | `AFP_GPU_STRICT` | `vs-gyroflow/src/gpu_table.rs` | — |
@@ -765,7 +766,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-76 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+77 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->

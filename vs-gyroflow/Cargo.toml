@@ -14,10 +14,12 @@ description = "Gyroflow stabilization for ActionFootagePlayer: the GPU warp's ta
 # gyroflow/gyroflow once they're merged. On top of them (branch afp-v1.7.0-optical-checksum, #130): a project's optical
 # correction matched up to the last bits another machine computes its checksums' values with (Fingerprint::matches)
 # And on top (branch afp-v1.7.0-lens-from-video): gyroflow/gyroflow#1296, the lens found from the video itself
-# (lens_from_video), which the player's Find lens and Estimate lens run (src/lens_find.rs)
+# (lens_from_video), which the player's Find lens and Estimate lens run (src/lens_find.rs). And on top (branch
+# afp-v1.7.0-iori-housing): gyroflow/gyroflow#1302, GoPro's image orientations (IORI) in the quaternions' axes, and
+# under water HyperSmooth's turn applied inside the housing (KernelParams::image_orientation; warp.glsl's twin)
 # No OpenCL: with frames in system memory, wgpu (Metal) is 40-60% faster on Apple Silicon. No cache-gyro-metadata: it
 # would hand back a clip's first seconds of motion data when it's parsed again with more (motion.rs keeps what's read)
-gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "2c15a9cc", default-features = false, features = ["bundle-lens-profiles"] }
+gyroflow-core = { git = "https://github.com/anton-belkin/gyroflow.git", rev = "20fca692", default-features = false, features = ["bundle-lens-profiles"] }
 # The metadata track's sample table, read ahead (src/prefetch.rs); the same mp4parse as telemetry-parser
 mp4parse = { package = "mp4parse-patched", version = "0.17.2", features = ["unstable-api"] }
 url = "2"

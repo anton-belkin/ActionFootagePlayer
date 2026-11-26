@@ -15,7 +15,7 @@ FOV = 1.4                           # the output's zoom out (table texel 7.x: th
 FPS = 59.940059940                  # the kept shader's FPS
 OUT_F = F / FOV
 PER_FRAME = 33                      # the kept shader's KNOTS
-PARAM_TEXELS = 16
+PARAM_TEXELS = 17
 BLOCK = PARAM_TEXELS + PER_FRAME
 COLS = 16384 // BLOCK
 
