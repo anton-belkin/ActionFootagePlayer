@@ -10,7 +10,9 @@
 //                                                       and later with HyperSmooth on: "stabilized_in_camera" says so,
 //                                                       in_camera.rs): stabilize it with the default preset
 //   {"mode":"default","motion":"optical","measured":{how, at, lens, in_water, readout_ms, frames, measured_frames,
-//    readout_left_out},...}  (readout_left_out: the lens's readout, ms, when it was measured without it: measure again)
+//    readout_left_out, in_camera_turn},...}  (readout_left_out: the lens's readout, ms, when it was measured without it:
+//                                                       measure again; in_camera_turn: a HERO7's HyperSmooth turn measured
+//                                                       on top of its gyro, in_camera_turn.rs, its horizon can be locked)
 //                                                       motion measured from the picture beside it (<stem>.afp-motion,
 //                                                       afp_motion.rs): stabilized with it, no horizon lock;
 //                                                       "measured_error" instead when that file is broken or of another clip;
@@ -218,7 +220,7 @@ fn main() {
         // 8 = the clip's own motion data over its .afp-motion ("measured_aside"), 9 = "builtin" lenses and
         // measured.readout_left_out, 10 = lens_info.print (a render's recipe takes the lens: renders.rs)
         // (the Library asks again for older answers: raise it with what's new here)
-        out["geotag"] = 10.into();
+        out["geotag"] = 11.into();
         // The lens as the player takes it (probe::lens_info: the profile and where it comes from, the mode a lens is kept
         // for, the camera's lens types, the Gyroflow project's lens), for the Library's Source Settings and its filters
         // without reading the clip again; the lenses to choose from (candidates) are the mode's, asked when chosen
@@ -264,7 +266,9 @@ fn plain(path: &str, build: &str) -> serde_json::Value {
             out["width"] = w.into(); out["height"] = hh.into(); out["fps"] = fps.into();
             out["measured"] = serde_json::json!({ "how": h.measured.how, "at": h.measured.at, "lens": h.lens_name, "in_water": h.in_water(),
                                                   "readout_ms": h.readout_ms, "frames": h.measured.frames, "measured_frames": h.measured.measured_frames,
-                                                  "readout_left_out": h.readout_left_out() });
+                                                  "readout_left_out": h.readout_left_out(),
+                                                  // A HERO7's HyperSmooth turn measured on top of its gyro (in_camera_turn.rs)
+                                                  "in_camera_turn": h.in_camera_turn.is_some() });
             if let Some(o) = out.as_object_mut() { o.remove("reason"); }
         }
         Some(Err(e)) => { out["measured_error"] = e.into(); }

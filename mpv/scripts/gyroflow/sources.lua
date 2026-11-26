@@ -140,7 +140,8 @@ local function find_source(path, done)
         end
         -- rotation: how the file says it's shown (its display matrix, clockwise), which the plugin turns it by.
         -- optical: its motion measured from the picture (<stem>.afp-motion beside it, gyroflow-probe's "measured"), with
-        -- no horizon in it to lock. in_camera: how the camera stabilized it itself (GoPro HERO12+ HyperSmooth), stabilized
+        -- no horizon in it to lock, unless it's a HERO7's HyperSmooth turn measured on top of its gyro (in_camera_turn:
+        -- the gyro has the gravity in it, vs-gyroflow's in_camera_turn.rs). in_camera: how the camera stabilized it itself (GoPro HERO12+ HyperSmooth), stabilized
         -- further on top of it
         done({ project = path, kind = info.mode, width = info.width, height = info.height, fps = info.fps, preset = preset, water = info.water,
                rotation = tonumber(info.rotation) or 0, optical = info.motion == "optical" and (type(info.measured) == "table" and info.measured or {}) or nil,

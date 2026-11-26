@@ -717,7 +717,7 @@ fn renders_of(ctx: &crate::renders::Ctx, kind: crate::renders::Kind, rel: &str, 
 // ---------- what each clip is: gyroflow-probe --library, in the background ----------
 
 /// The probe's answers this Library wants (gyroflow-probe --library's "geotag"): older ones are asked again
-pub const GEOTAG: u64 = 10;
+pub const GEOTAG: u64 = 11;
 
 #[derive(Default)]
 pub struct Probes {
@@ -1642,7 +1642,7 @@ mod probe_version {
                            fields(&source("markers.rs"), "Movie"), fields(&source("geotag.rs"), "Clock"), fields(&source("geotag.rs"), "Fix"),
                            fields(&probe, "LensInfo"), fields(&source("lens_pick.rs"), "LensType"));
         assert_eq!((GEOTAG, kept.as_str()),
-                   (10, "answer: at brand camera clock color error fps frames geotag gps height how in_water lens lens_info lenses marks measured measured_aside measured_error measured_frames mode model motion movie readout_left_out readout_ms reason rig360 rotation spherical stabilized_in_camera times tracks water width / movie: duration created width height turn / clock: utc basis zone_min why / gps: lat lon alt t / lens_info: camera lens types type recorded default mode curated_file curated_error project from mode_key print candidates / lens type: id label profile sizes note file_first"),
+                   (11, "answer: at brand camera clock color error fps frames geotag gps height how in_camera_turn in_water lens lens_info lenses marks measured measured_aside measured_error measured_frames mode model motion movie readout_left_out readout_ms reason rig360 rotation spherical stabilized_in_camera times tracks water width / movie: duration created width height turn / clock: utc basis zone_min why / gps: lat lon alt t / lens_info: camera lens types type recorded default mode curated_file curated_error project from mode_key print candidates / lens type: id label profile sizes note file_first"),
                    "what gyroflow-probe --library answers changed, or GEOTAG did: they change together (see this test's comment)");
     }
 

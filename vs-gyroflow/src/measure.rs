@@ -12,6 +12,8 @@
 // given to it, the lens in its file, Gyroflow's database), the rolling shutter's readout that comes with the lens, and
 // the lens under water as its own file says (source.underwater; else as the camera recorded, water.rs). Motion data of
 // the file's own is set aside: a clip measured here has none, or one the camera stabilized the picture with already.
+// Except on a HERO7 Black with HyperSmooth on (in_camera_turn.rs): its gyro is the camera body's, and what's measured
+// is the turn HyperSmooth gave the picture on top of it.
 
 use std::io::Read;
 use std::path::Path;
@@ -35,10 +37,13 @@ pub struct Settings {
     pub lens: Option<serde_json::Value>,
     pub readout_ms: Option<f64>,
     pub refraction: Option<f64>,
+    /// The camera's own stabilizer's turn measured on top of its gyro (in_camera_turn.rs): None as the clip is
+    /// (`in_camera_turn::stabilizer_of`), Some(true) whatever it is (a HERO12's, to check against its IORI)
+    pub in_camera_turn: Option<bool>,
 }
 
 impl Default for Settings {
-    fn default() -> Self { Settings { strength: 1.0, tracking: "klt".into(), lens: None, readout_ms: None, refraction: None } }
+    fn default() -> Self { Settings { strength: 1.0, tracking: "klt".into(), lens: None, readout_ms: None, refraction: None, in_camera_turn: None } }
 }
 
 /// Measures `video`'s motion from its picture. `progress`: the fraction done, now and then; `stop`: asked between
@@ -48,8 +53,15 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
     let path = video.to_string_lossy().into_owned();
     let url = filesystem::path_to_url(&path);
     let stab = crate::lens_pick::manager();
-    // The file as the plugin loads it: its metadata, the lens in it, the first seconds of any motion data it has
-    let (m, size) = crate::motion::Motion::open(&path, &url, 1.0).map_err(|e| format!("can't open it: {e}"))?;
+    // The camera's own stabilizer's turn measured on top of its gyro (in_camera_turn.rs), or the picture's motion alone
+    let turn = match settings.in_camera_turn {
+        None => crate::in_camera_turn::stabilizer_of(video),
+        Some(true) => Some(crate::probe::in_camera_of(&path).unwrap_or_default()),
+        Some(false) => None,
+    };
+    // The file as the plugin loads it: its metadata, the lens in it, the first seconds of any motion data it has; all of
+    // it when the turn is measured against it
+    let (m, size) = crate::motion::Motion::open(&path, &url, if turn.is_some() { 0.0 } else { 1.0 }).map_err(|e| format!("can't open it: {e}"))?;
     m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("can't read it: {e:?}"))?;
     let mut pick = crate::lens_pick::apply(&stab, &path).map(|p| p.name);
     if let Some(lens) = &settings.lens {
@@ -70,8 +82,16 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
         return Err("its lens isn't known: without a lens profile the picture's motion can't be turned into the camera's".into());
     }
     stab.set_light_refraction_coefficient(settings.refraction.or_else(|| crate::water::refraction_for(video)).unwrap_or(1.0));
-    // The file's own motion data, if any, is of the picture before the camera stabilized it: set aside
-    stab.set_ignore_file_motion(true);
+    if turn.is_some() {
+        // The gyro is the body's, integrated as it plays (in_camera_turn::INTEGRATION), not the file's own orientations
+        // if it has them; and the turn is the picture's, measured below
+        stab.set_ignore_file_motion(false);
+        if !stab.gyro.read().has_motion() { return Err("no gyro to measure the camera's own stabilizer's turn against".into()); }
+        stab.set_integration_method(crate::in_camera_turn::INTEGRATION);
+    } else {
+        // The file's own motion data, if any, is of the picture before the camera stabilized it: set aside
+        stab.set_ignore_file_motion(true);
+    }
     *stab.optical_settings.write() = OpticalCorrectionSettings { strength: settings.strength.clamp(0.0, 1.0), per_frame: false };
     let tracking = TrackingMethod::from_name(&settings.tracking).ok_or_else(|| format!("tracking {:?}: klt or dis", settings.tracking))?;
     *stab.optical_tracking.write() = tracking;
@@ -123,9 +143,18 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
     }
     let decoded = t0.elapsed();
     let measurements = analysis.finish()?;
-    stab.set_optical_measurements(measurements)?;
+    let (correction, turn, port_axis) = match &turn {
+        Some(stabilizer) => {
+            let (c, t, axis) = crate::in_camera_turn::fit(&stab, &measurements, stabilizer, &stop)?;
+            log::info!("{path}: {stabilizer}'s turn {:.2}° rms, {:.2}° from the picture, rounds {:?}; the port's axis from the bending in {:.0} % of the frames", t.rms_deg, t.from_picture_rms_deg, t.rounds_deg, t.tilt_share * 100.0);
+            (c, Some(t), axis)
+        }
+        None => {
+            stab.set_optical_measurements(measurements)?;
+            (stab.gyro.read().optical_correction.as_deref().cloned().ok_or("the analysis gave no correction")?, None, None)
+        }
+    };
     progress(1.0);
-    let correction = stab.gyro.read().optical_correction.as_deref().cloned().ok_or("the analysis gave no correction")?;
 
     let lens = stab.lens.read().get_json_value().unwrap_or_default();
     let p = stab.params.read();
@@ -141,7 +170,8 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
         refraction: p.light_refraction_coefficient,
         frame_offset: p.frame_offset as i64,
         offsets: stab.gyro.read().get_offsets().clone(),
-        ignore_file_motion: true,
+        ignore_file_motion: turn.is_none(),
+        in_camera_turn: turn,
         measured: Measured {
             how: "measured".into(),
             from: String::new(),
@@ -159,7 +189,7 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
     drop(p);
     log::info!("{path}: motion measured from the picture: {n} frames at {tw}x{th} decoded and tracked in {:.1} s, fitted in {:.1} s; {} of {} frames measured",
         decoded.as_secs_f64(), (t0.elapsed() - decoded).as_secs_f64(), correction.measured_frames, correction.frames);
-    MotionFile::new(header, correction)
+    MotionFile::new(header, correction)?.with_port_axis(port_axis)
 }
 
 /// `measure`, written to the clip's .afp-motion

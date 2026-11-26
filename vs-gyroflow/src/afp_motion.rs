@@ -13,8 +13,16 @@
 // the clip it was measured on (its size and the time its MP4 says it was made), so a file of another clip with the same
 // name isn't taken for it.
 //
+// A HERO7 Black's with HyperSmooth on is measured on top of its gyro (in_camera_turn.rs): the correction is the turn
+// HyperSmooth gave the picture, the gyro is kept (`ignore_file_motion` false), and `in_camera_turn` says so. It plays as
+// a HERO12's does. Under water the port's axis goes to gyroflow-core as the clip's image orientations, measured on its
+// own from how the picture bends (hs_tilt.rs, `PortAxis`): the turn's tilt as the picture's motion fits it is the best
+// for the picture's orientation, not for the refraction (docs/design/hero7-hypersmooth-iori.md). Such a file is version
+// 2, which a player before it refuses (it would play the turn without the refraction inside the housing and the crop
+// share).
+//
 // Two lines of text: the header (JSON, `Header`), readable with `head -1`; then the correction, base91 of zlib'd CBOR as
-// Gyroflow's projects have it. Read whole: ~60 bytes a frame, 2-4 MB for the longest clips, read cold from the NAS in
+// Gyroflow's projects have it; a third, the port's axis the same way, when it was measured. Read whole: ~60 bytes a frame, 2-4 MB for the longest clips, read cold from the NAS in
 // 11-38 ms (measured 2026-11-24): there's nothing to gain from reading it in parts.
 
 use std::path::{ Path, PathBuf };
@@ -25,7 +33,8 @@ use serde_json::Value;
 
 pub const EXT: &str = "afp-motion";
 pub const FORMAT: &str = "actionfootageplayer-motion";
-pub const VERSION: u32 = 1;
+/// The newest version read. Written: 2 with `in_camera_turn`, else 1 (what a player before it reads)
+pub const VERSION: u32 = 2;
 
 /// The clip's file of measured motion: `<stem>.afp-motion` beside it, as its `<stem>.afp.json`
 pub fn path_for(video: &Path) -> PathBuf {
@@ -118,6 +127,9 @@ pub struct Header {
     /// The file's own motion data set aside: it was of the picture before the camera stabilized it, or there's none
     pub ignore_file_motion: bool,
     pub measured: Measured,
+    /// The correction is the turn the camera's own stabilizer gave the picture, on top of its gyro (in_camera_turn.rs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_camera_turn: Option<crate::in_camera_turn::Turn>,
 }
 
 impl Header {
@@ -132,6 +144,14 @@ impl Header {
     }
 }
 
+/// The flat port's axis in each frame as the picture sees it (a HERO7's HyperSmooth tilts the picture inside the housing):
+/// its tilt φ (x, y; gyroflow-core's kernel axes, radians), per frame of the analysis, frame f at f / fps s of the video
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PortAxis {
+    pub fps: f64,
+    pub tilt: Vec<[f32; 2]>,
+}
+
 /// A file of measured motion: its header and the correction
 #[derive(Clone)]
 pub struct MotionFile {
@@ -139,6 +159,9 @@ pub struct MotionFile {
     pub correction: OpticalCorrection,
     /// The correction as stored (base91), written back as it was read
     stored: String,
+    /// The port's axis, and as stored
+    pub port_axis: Option<PortAxis>,
+    stored_axis: String,
 }
 
 impl std::fmt::Debug for MotionFile {
@@ -150,24 +173,37 @@ impl std::fmt::Debug for MotionFile {
 impl MotionFile {
     pub fn new(header: Header, correction: OpticalCorrection) -> Result<MotionFile, String> {
         let stored = util::compress_to_base91_cbor(&correction).ok_or("the correction couldn't be encoded")?;
-        Ok(MotionFile { header, correction, stored })
+        Ok(MotionFile { header, correction, stored, port_axis: None, stored_axis: String::new() })
+    }
+
+    /// With the port's axis measured: as it will be read (its values stored as 32-bit floats)
+    pub fn with_port_axis(mut self, axis: Option<PortAxis>) -> Result<MotionFile, String> {
+        self.stored_axis = match &axis { Some(a) => util::compress_to_base91_cbor(a).ok_or("the port's axis couldn't be encoded")?, None => String::new() };
+        self.port_axis = axis;
+        Ok(self)
     }
 
     /// The file's text: the header's line, then the correction's
     pub fn to_text(&self) -> String {
         let mut header = self.header.clone();
         header.format = FORMAT.into();
-        header.version = VERSION;
-        format!("{}\n{}\n", serde_json::to_string(&header).unwrap_or_default(), self.stored)
+        header.version = if header.in_camera_turn.is_some() { 2 } else { 1 };
+        let axis = if self.stored_axis.is_empty() { String::new() } else { format!("{}\n", self.stored_axis) };
+        format!("{}\n{}\n{axis}", serde_json::to_string(&header).unwrap_or_default(), self.stored)
     }
 
     pub fn parse(text: &str) -> Result<MotionFile, String> {
         let (first, rest) = text.split_once('\n').ok_or("not a motion file: one line")?;
         let header = read_header_line(first)?;
-        let stored = rest.trim().to_string();
+        let mut lines = rest.lines().map(str::trim).filter(|l| !l.is_empty());
+        let stored = lines.next().unwrap_or_default().to_string();
         let correction = util::decompress_from_base91_cbor::<OpticalCorrection>(&stored).map_err(|e| format!("its correction can't be read: {e:?}"))?;
         if correction.video_base.is_empty() && correction.coeffs.is_empty() { return Err("its correction is empty".into()); }
-        Ok(MotionFile { header, correction, stored })
+        let stored_axis = lines.next().unwrap_or_default().to_string();
+        let port_axis = if stored_axis.is_empty() { None } else {
+            Some(util::decompress_from_base91_cbor::<PortAxis>(&stored_axis).map_err(|e| format!("its port's axis can't be read: {e:?}"))?)
+        };
+        Ok(MotionFile { header, correction, stored, port_axis, stored_axis })
     }
 
     /// Written whole, through a file beside it renamed over it: a reader never sees half of one
@@ -271,6 +307,12 @@ pub fn apply(stab: &StabilizationManager, m: &MotionFile) -> Result<Applied, Str
     if !h.offsets.is_empty() {
         stab.gyro.write().set_offsets(h.offsets.clone());
     }
+    if let Some(turn) = &h.in_camera_turn {
+        // The gyro integrated as it was measured against, and the turn as the clip's image orientations, before the
+        // correction's context is taken
+        if stab.gyro.read().integration_method != turn.integration { stab.set_integration_method(turn.integration); }
+        crate::in_camera_turn::set_image_orientations(stab, &m.correction, m.port_axis.as_ref());
+    }
     stab.recompute_undistortion();
     let mut correction = m.correction.clone();
     correction.enabled = true;
@@ -306,7 +348,8 @@ pub fn from_project(project: &Value, project_path: &Path, video: &Path) -> Resul
     }
     let header = Header {
         format: FORMAT.into(),
-        version: VERSION,
+        version: 1,
+        in_camera_turn: None,
         clip,
         lens_name: lens.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
         lens,
@@ -329,7 +372,7 @@ pub fn from_project(project: &Value, project_path: &Path, video: &Path) -> Resul
             rms_deg: correction.rms_deg,
         },
     };
-    Ok(MotionFile { header, correction, stored: stored.to_string() })
+    Ok(MotionFile { header, correction, stored: stored.to_string(), port_axis: None, stored_axis: String::new() })
 }
 
 #[cfg(test)]
@@ -373,6 +416,22 @@ mod tests {
         assert_eq!(back.correction.coeffs.len(), 12);
         // Written back as it was read
         assert_eq!(back.to_text(), text);
+    }
+
+    #[test]
+    fn the_port_axis_is_a_third_line() {
+        let header = Header { in_camera_turn: Some(Default::default()), ..Default::default() };
+        let axis = PortAxis { fps: 29.97, tilt: (0..300).map(|i| [0.001 * i as f32, -0.0005 * i as f32]).collect() };
+        let m = MotionFile::new(header.clone(), correction()).unwrap().with_port_axis(Some(axis.clone())).unwrap();
+        let text = m.to_text();
+        assert_eq!(text.lines().count(), 3);
+        let back = MotionFile::parse(&text).unwrap();
+        assert_eq!(back.port_axis, Some(axis));
+        assert_eq!(back.to_text(), text);
+        // Without one: two lines, as before
+        let plain = MotionFile::new(header, correction()).unwrap();
+        assert_eq!(plain.to_text().lines().count(), 2);
+        assert_eq!(MotionFile::parse(&plain.to_text()).unwrap().port_axis, None);
     }
 
     #[test]
