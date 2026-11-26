@@ -9,6 +9,10 @@
 // play as recorded with HyperSmooth on), and only HERO12 Black clips were tried. The HERO5, 6 and 7 Black don't
 // record IORI at all: their gyro is the camera's, of a picture HyperSmooth already turned (probe.rs).
 //
+// Under water behind a flat port the turn is applied inside the housing (gyroflow/gyroflow#1302, in our fork; warp.glsl's
+// texel 16): the port refracts about the camera body's axis, and HyperSmooth turned the picture inside it. Not with
+// GoPro Labs' DIVE, whose camera took the water into account itself.
+//
 // What differs from a clip the camera didn't stabilize is the crop. HyperSmooth cropped the frame for its own margin
 // already (a HERO12's Linear 4K: 100.6° across the diagonal off, 95.5° on, 90° boosted), and what it leaves (a slow
 // sway it lets through, a little shake) needs less: the levels crop CROP_SHARE of their usual share (levels.rs).
@@ -16,7 +20,8 @@
 //
 // Tried and left out: under water, taking IORI's tilt and pan 1/1.33 of their way (HyperSmooth corrects as in air,
 // while the lens behind the flat glass sees a turn 1.33 times larger). On two clips under water it shook 2-3 times
-// more than CORI × IORI as recorded, which already shook less than the clip.
+// more than CORI × IORI as recorded, which already shook less than the clip. Those clips were Labs DIVE ones, and
+// gyroflow-core read IORI's axes wrong then (#1302): a scale can't stand for a turn inside the housing anyway.
 
 use gyroflow_core::StabilizationManager;
 

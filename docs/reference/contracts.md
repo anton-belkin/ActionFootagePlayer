@@ -714,6 +714,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_GPU_EXPORT` | — | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_FFMPEG` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_KEEP` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs` | `tools/edgefill/chain.sh`, `tools/edgefill/synth/run.py` |
+| `AFP_GPU_OUTLIERS` | `vs-gyroflow/src/gpu_table.rs` | — |
 | `AFP_GPU_SDR_CLIPS` | — | `vs-gyroflow/tests/export_gpu.rs` |
 | `AFP_GPU_SERVER_LOG` | `vs-gyroflow/src/bin/gyroflow-gpu-table.rs` | `tests/gpu_ahead_e2e.py` |
 | `AFP_GPU_STRICT` | `vs-gyroflow/src/gpu_table.rs` | — |

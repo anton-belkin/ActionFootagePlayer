@@ -143,14 +143,18 @@
 //   9: translation3d.x, .y, .z, the clip's frame count    10-13: the digital lens's parameters [0..16]
 //  14: input horizontal stretch, vertical stretch, red's and blue's refractive index over green's (1 out of the water)
 //  15: the output camera in the world (a quaternion: the sphere trail's directions)
+//  16: under water, the turn the camera's own stabilizer gave the picture (a quaternion, gyroflow-core's
+//      KernelParams::image_orientation; 0, 0, 0, 1 otherwise): the flat port refracts about the camera body's axis
 
 #define PI 3.14159265358979
-#define PARAM_TEXELS 16
+#define PARAM_TEXELS 17
 
 int table_frame;
 // 1 for green (Gyroflow's own coefficient); red's or blue's ratio to it while the chromatic coordinates are found
 float refr_scale = 1.0;
 vec4 fc, lens, t2, stretch;
+// The picture's turn inside the housing (texel 16)
+vec4 io_q;
 vec3 t3;
 
 // What Gyroflow's lens functions (shaders/gyroflow/lens, its src/core/stabilization/distortion_models/*.glsl) read,
@@ -257,15 +261,23 @@ bool rotate_and_distort(vec3 d, vec4 q, out vec2 uv)
     // Under water, the channel's own index (chromatic: red's and blue's over green's, refr_scale)
     float refr = lens.z * refr_scale;
     if (refr != 1.0 && refr > 0.0 && rxy > 1e-12) {
-        float sin_d = sin(theta) * refr;
-        if (sin_d >= 1.0 || p.z <= 0.0) {
+        // The flat port is fixed to the camera's body, whose axes the camera's own stabilizer turned the picture away
+        // from (HyperSmooth: io_q, gyroflow-core's KernelParams::image_orientation): refracted in the body's axes and
+        // turned back for the lens, as gyroflow-core's rotate_and_distort does (gyroflow/gyroflow#1302)
+        bool turned = io_q.xyz != vec3(0.0);
+        vec3 b = p;
+        float rb = rxy, thb = theta;
+        if (turned) { b = qrot(io_q, p); rb = length(b.xy); thb = atan(rb, b.z); }
+        float sin_d = sin(thb) * refr;
+        if (sin_d >= 1.0 || b.z <= 0.0) {
             if (!want_boundary) return false;
             fail = true;
-            boundary_excess += p.z <= 0.0 ? 1.0 : sin_d - 1.0;
+            boundary_excess += b.z <= 0.0 ? 1.0 : sin_d - 1.0;
             sin_d = 0.9999;
         }
         float theta_d = asin(sin_d);
-        p = vec3(p.xy * (sin(theta_d) / rxy), cos(theta_d));
+        if (rb > 1e-12) b = vec3(b.xy * (sin(theta_d) / rb), cos(theta_d));
+        p = turned ? qrot(vec4(-io_q.xyz, io_q.w), b) : b;
     }
     uv = distort_point(p.x, p.y, p.z) * fc.xy + fc.zw;
 #if HAS_DIGITAL
@@ -462,6 +474,7 @@ bool frame_setup()
     t3 = table(9).xyz;
     for (int i = 0; i < 4; i++) params.digital_lens_params[i] = table(10 + i);
     stretch = table(14);
+    io_q = table(16);
 #ifdef TRANS_BIND
     // The translation compensation's shift: where the output looks in Gyroflow's frame (output_ray's focal length).
     // A shift, not a turn: the hand's translation moves a subject's plane evenly across the frame, which a shift undoes;

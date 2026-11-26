@@ -11,7 +11,7 @@ use crate::Underwater;
 
 pub const TEMPLATE: &str = include_str!("../../shaders/gyroflow/warp.glsl");
 /// The frame's parameters before its knots, in texels (warp.glsl's table layout)
-pub const PARAM_TEXELS: usize = 16;
+pub const PARAM_TEXELS: usize = 17;
 
 /// Gyroflow's lens models and digital lenses as GLSL (shaders/gyroflow/lens, copies of gyroflow-core's
 /// distortion_models/*.glsl), by their ids. Sony's and the generic polynomial need mesh data the warp doesn't carry
@@ -422,6 +422,9 @@ impl Table {
                     let q = UnitQuaternion::from_rotation_matrix(&Rotation3::from_matrix_unchecked(r));
                     [q.i as f32, q.j as f32, q.k as f32, q.w as f32]
                 },
+                // Under water, the turn the camera's own stabilizer gave the picture: the flat port refracts about the
+                // body's axis (warp.glsl's rotate_and_distort; zeros where there's none)
+                kp.image_orientation,
             ];
             debug_assert_eq!(texels.len(), PARAM_TEXELS);
             let quats = if opts.knots == 0 { row_quats(&tr.matrices) } else { knot_quats(&tr.matrices, per_frame) };
@@ -1325,6 +1328,22 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         // (label, options, every frame or only the fastest)
         let cam = crate::Camera { yaw: 12.0, pitch: -7.0, roll: 4.0, zoom: 1.25 };
         let turned = Clip { params: cam.apply(&clip.params), size: clip.size, output_size: clip.output_size, fps: clip.fps, frame_count: clip.frame_count, frame_offset_us: clip.frame_offset_us };
+        // Under water behind a flat port: with the camera's own stabilizer's turn (a HyperSmooth clip's IORI) the
+        // refraction is about the body's axis (texel 16, gyroflow/gyroflow#1302)
+        let mut wet_params = clip.params.clone();
+        wet_params.light_refraction_coefficient = 1.33;
+        let wet = Clip { params: wet_params, size: clip.size, output_size: clip.output_size, fps: clip.fps, frame_count: clip.frame_count, frame_offset_us: clip.frame_offset_us };
+        // And as GoPro Labs' DIVE records it: the camera took the water into account, its turn is the picture's own
+        let dive = {
+            let mut g = clip.params.gyro.read().clone();
+            let mut md = g.file_metadata.read().clone();
+            if !md.additional_data.is_object() { md.additional_data = serde_json::json!({}); }
+            md.additional_data["in_camera_underwater"] = true.into();
+            g.file_metadata = md.into();
+            Clip { params: ComputeParams { gyro: std::sync::Arc::new(parking_lot::RwLock::new(g)), ..wet.params.clone() }, size: wet.size, output_size: wet.output_size, fps: wet.fps, frame_count: wet.frame_count, frame_offset_us: wet.frame_offset_us }
+        };
+        let io_deg = frames.iter().map(|&f| { let q = wet.transform(f, out).kernel_params.image_orientation; 2.0 * (q[0] * q[0] + q[1] * q[1] + q[2] * q[2]).sqrt().asin().to_degrees() }).fold(0f32, f32::max);
+        eprintln!("under water: the picture's turn inside the housing up to {io_deg:.2}°");
         let cases = [
             ("exact, 33 knots", base, true),
             ("exact, every row", Options { knots: 0, range: Some((fast, fast)), ..base }, false),
@@ -1334,11 +1353,15 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
         ];
         // Crop mode's camera, as shader parameters on the table without it, against Gyroflow with it
         let with_camera = [("exact, 33 knots, a camera", base), ("grid 8 bilinear, 33 knots, a camera", Options { mode: Mode::Grid, grid_step: 8, grid_linear: true, ..base })];
-        let cases = cases.into_iter().map(|(l, o, a)| (l, o, a, false)).chain(with_camera.into_iter().map(|(l, o)| (l, o, false, true)));
-        for (label, opts, all, camera) in cases {
+        let under_water = [("exact, 33 knots, under water", base), ("grid 16, 33 knots, under water", Options { mode: Mode::Grid, ..base })];
+        // 0: as it is, 1: crop mode's camera, 2: under water, 3: under water with Labs' DIVE
+        let cases = cases.into_iter().map(|(l, o, a)| (l, o, a, 0)).chain(with_camera.into_iter().map(|(l, o)| (l, o, false, 1)))
+            .chain(under_water.into_iter().map(|(l, o)| (l, o, true, 2))).chain([("exact, 33 knots, under water, DIVE", base, true, 3)]);
+        for (label, opts, all, kind) in cases {
+            let camera = kind == 1;
             // The full rows only for the frames compared: the whole clip would be 5 M texels
-            let table = Table::build(&clip, &opts).unwrap();
-            let reference = if camera { &turned } else { &clip };
+            let reference = match kind { 1 => &turned, 2 => &wet, 3 => &dive, _ => &clip };
+            let table = Table::build(if kind >= 2 { reference } else { &clip }, &opts).unwrap();
             let (grid, fs) = match opts.mode {
                 Mode::Exact => (None, glsl(&clip, &opts, &table, "exact", true)),
                 _ => (Some(glsl(&clip, &opts, &table, "grid", true)), glsl(&clip, &opts, &table, "sample", true)),
@@ -1353,7 +1376,7 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                 let out_c = Vector2::new(kp.output_width as f32 / 2.0, kp.output_height as f32 / 2.0);
                 let f = gyroflow_core::stabilization::projection::output_focal(kp);
                 let out_f = Vector2::new(f.0, f.1);
-                let (mut worst, mut sum, mut n, mut mismatched) = (0f32, 0f64, 0usize, 0usize);
+                let (mut worst, mut sum, mut n, mut mismatched, mut far) = (0f32, 0f64, 0usize, 0usize, 0usize);
                 for y in 0..out.1 {
                     for x in 0..out.0 {
                         let s = uv[y * out.0 + x];
@@ -1362,15 +1385,24 @@ layout(set = 0, binding = 9) uniform sampler fill_s;
                         if let Some(c) = c.filter(|c| inside(*c)) {
                             if s[0] < -1000.0 { mismatched += 1; continue; }
                             let e = (Vector2::new(s[0], s[1]) - c).norm();
+                            if e > 0.1 { far += 1; if std::env::var("AFP_GPU_OUTLIERS").is_ok() { eprintln!("  ({x}, {y}): shader ({:.1}, {:.1}) gyroflow ({:.1}, {:.1})", s[0], s[1], c.x, c.y); } }
                             worst = worst.max(e);
                             sum += e as f64;
                             n += 1;
                         }
                     }
                 }
-                eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {mismatched} the shader left out", sum / n.max(1) as f64);
+                eprintln!("frame {frame}, {label}: {n} pixels, worst {worst:.4} px, mean {:.5} px, {far} over 0.1 px, {mismatched} the shader left out", sum / n.max(1) as f64);
                 // Zoomed out (the camera's 1.25) on a lens left as recorded, less than half of the output is the frame
-                assert!(n > out.0 * out.1 / if camera && lens_blend(&clip) { 4 } else { 2 }, "frame {frame}: too few pixels compared");
+                assert!(n > out.0 * out.1 / if (camera && lens_blend(&clip)) || kind >= 2 { 4 } else { 2 }, "frame {frame}: too few pixels compared");
+                if kind >= 2 {
+                    // Under water a few hundred pixels at the edge of Snell's window, where the lens's model folds back,
+                    // land elsewhere in each (as many with Labs' DIVE, no turn: it isn't the turn's); the rest as in air.
+                    // Without the turn in the shader, its edges were pixels off over the whole frame
+                    assert!(far * 500 < n, "frame {frame}, {label}: {far} of {n} pixels over 0.1 px off Gyroflow");
+                    assert!(mismatched < out.0, "frame {frame}: {mismatched} pixels the shader left out");
+                    continue;
+                }
                 // The bilinear grid with a camera zoomed out (wider than the clip, more of the lens's curve): up to 0.2 px
                 // A lens correction below 100 % (the lens's own curve, LENS_BLEND) bends the map more between grid points: the
                 // 32 px grid (not the player's) up to 0.15 px there
