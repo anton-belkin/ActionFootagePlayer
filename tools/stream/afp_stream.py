@@ -174,6 +174,45 @@ _args = {}
 args_lock = threading.RLock()
 
 
+def _player_stamp():
+    """The player's plugins as this image has them (a digest of their files): an answer the player gave before an update
+    may be wrong now (a curve it didn't see, a setting it didn't send), with none of the clip's files changed"""
+    h = hashlib.sha1()
+    for part in ("workspace", "gyroflow", "dlogm"):
+        top = os.path.join(PLAYER, part)
+        for d, dirs, files in sorted(os.walk(top)):
+            dirs.sort()
+            for f in sorted(files):
+                if f.endswith((".lua", ".json", ".glsl")):
+                    path = os.path.join(d, f)
+                    h.update(os.path.relpath(path, PLAYER).encode())
+                    try:
+                        with open(path, "rb") as fh:
+                            h.update(fh.read())
+                    except OSError:
+                        pass
+    return h.hexdigest()[:16]
+
+
+PLAYER_STAMP = _player_stamp()
+_player_checked = set()
+
+
+def args_for_this_player(clip):
+    """A clip about to play: its answer asked again once when an older player gave it. Only here, as someone watches:
+    the warm-up and the catalog keep the answers they have (no re-asking the whole library after each update). Renders
+    stay where the new answer is the same (their fingerprint is the answer's)"""
+    clip = clip.get("base") or clip
+    if clip["id"] in _player_checked:
+        return
+    _player_checked.add(clip["id"])
+    a = player_args(clip)
+    if a is not None and a.get("player") != PLAYER_STAMP:
+        with args_lock:
+            log("asking the player again for", clip["name"], ": its answer is from an older player")
+            ask_player(clip)
+
+
 def player_args(clip):
     """How the player plays the file (render_args): clip (the original), offset and length (a moment's part), render
     (user_data, gyroflow-gpu-table's request; none: not stabilized), dlogm (the log curve). Kept in ARGS with the stamps
@@ -231,6 +270,7 @@ def ask_player(clip):
         if ud.get("project") and ud["project"] != a["clip"]:
             deps.append(ud["project"])
     a["deps"] = {p: stamp(p) for p in dict.fromkeys(deps)}
+    a["player"] = PLAYER_STAMP
     log("player args for", clip["name"], f"in {time.time() - t:.1f} s:", a.get("error") or (a.get("render") or {}).get("kind", "not stabilized"))
     with open(os.path.join(ARGS, clip["id"] + ".json"), "w") as f:
         json.dump(a, f)
@@ -735,6 +775,13 @@ def prerender_worker():
             j = start_render(clip, first, upto if upto < i["count"] else None, background=True)
         j["proc"].wait()
         current["name"] = None
+        # A render that failed before its first segment (out of the GPU's memory, a file it can't read) isn't started
+        # again and again: the clip leaves the queue, said in the log
+        if (j["proc"].returncode or 0) > 0 and not os.path.exists(segment_path(clip, first)):
+            with lock:
+                if queue and queue[0] is item:
+                    queue.pop(0)
+            log("pre-rendering", clip["name"], "failed (afp-render exit", j["proc"].returncode, "): left out, see its render.log")
 
 
 threading.Thread(target=prerender_worker, daemon=True).start()
@@ -1009,6 +1056,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "clip":
             cid, _, look = parts[1].partition("~")
             clip = next((c for c in clips() if c["id"] == cid), None)
+            if clip:
+                args_for_this_player(clip)
             if not clip or info(clip) is None or (look and not LOOK.match(look)):
                 return self.send(404, "no such clip", "text/plain")
             if not look and (wants_ts(self.headers, u.query) or jellyfin_ffmpeg(self.headers)):
