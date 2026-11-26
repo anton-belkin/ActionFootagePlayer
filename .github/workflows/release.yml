@@ -94,12 +94,16 @@ jobs:
 
       # A preview gyroflow-export makes, its link read back by the player's reader
       # On Anton's Mac: the apps just built in dist/ are taken out of Launch Services, so double-clicking an MP4 keeps
-      # opening the one in ~/Applications (every app bundle macOS sees is registered, and may be the one it picks)
+      # opening the one in ~/Applications (every app bundle macOS sees is registered, and may be the one it picks).
+      # Taken from Launch Services' own list, not from the folder: the packaging's temporary dist/app-dev-*/ copies
+      # are registered while they exist and already gone by now, and their records would stay
       - name: Built apps unregistered (Anton's Mac)
         if: always() && runner.environment == 'self-hosted'
         run: |
           lsregister=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
-          find dist -maxdepth 3 -name '*.app' -type d 2>/dev/null | while IFS= read -r app; do "$lsregister" -u "$app" || true; done
+          "$lsregister" -dump 2>/dev/null \
+            | sed -n 's/^path: *\(.*\.app\) (0x[0-9a-f]*)$/\1/p' | grep -F "$GITHUB_WORKSPACE/" | sort -u \
+            | while IFS= read -r app; do "$lsregister" -u "$app" || true; echo "unregistered $app"; done
 
       - name: Preview test
         run: GYROFLOW_EXPORT=vs-gyroflow/target/release/gyroflow-export luajit tests/link_test.lua
