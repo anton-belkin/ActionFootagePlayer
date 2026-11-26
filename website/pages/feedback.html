@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Feedback: how did Action Footage Player work for you?</title>
+<meta name="description" content="You tried Action Footage Player: tell its maker how it went. Three short questions, an email only if you want a reply.">
+<link rel="icon" href="favicon.ico" sizes="32x32">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="feedback.css">
+</head>
+<body>
+
+<main id="top">
+  <section class="hero band" id="intro">
+    <div class="wrap">
+      <div class="hero-text">
+        <p class="eyebrow">Feedback</p>
+        <h1>How did it go?</h1>
+        <p class="lede">You tried the player with your own clips. Tell me how it went: three short questions, a couple of minutes. I read every answer myself. &mdash; Anton</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section band tight-top fb" aria-label="The form">
+    <div class="wrap">
+      <form class="fb-form" id="fb-form" action="/api/feedback" method="post">
+        <div class="fb-tech" id="fb-tech" hidden>
+          <p class="fb-tech-h">Sent with your answers, from the player</p>
+          <dl id="fb-tech-list"></dl>
+          <p class="fb-note">Nothing about your clips&rsquo; names or where they are.</p>
+        </div>
+
+        <label class="fb-q" for="fb-shoot">
+          <span class="fb-n">1</span>
+          <span class="fb-label">Which camera, and how do you shoot?</span>
+          <span class="fb-hint">In a housing, with a red filter or lights, recreational or technical dives, snorkeling&hellip;</span>
+        </label>
+        <textarea id="fb-shoot" name="shoot" rows="3" maxlength="2000"></textarea>
+
+        <fieldset class="fb-q fb-compare">
+          <legend><span class="fb-n">2</span><span class="fb-label">Compared to how you watched your clips before, is it&hellip;</span></legend>
+          <div class="fb-choices">
+            <label><input type="radio" name="compare" value="better"> Better</label>
+            <label><input type="radio" name="compare" value="same"> The same</label>
+            <label><input type="radio" name="compare" value="worse"> Worse</label>
+          </div>
+        </fieldset>
+
+        <label class="fb-q" for="fb-stuck">
+          <span class="fb-n">3</span>
+          <span class="fb-label">Where did you get stuck? Or anything else.</span>
+          <span class="fb-hint">What you expected, what happened instead, what you&rsquo;d like it to do.</span>
+        </label>
+        <textarea id="fb-stuck" name="stuck" rows="5" maxlength="4000"></textarea>
+
+        <label class="fb-q fb-email" for="fb-email">
+          <span class="fb-label">Your email, if you&rsquo;d like a reply</span>
+          <span class="fb-hint">Optional. Used only to answer you.</span>
+        </label>
+        <input id="fb-email" name="email" type="email" autocomplete="email" maxlength="200">
+
+        <!-- Left empty by people; filled in by bots -->
+        <div class="fb-trap" aria-hidden="true">
+          <label for="fb-website">Website</label>
+          <input id="fb-website" name="website" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <input type="hidden" name="v"><input type="hidden" name="os"><input type="hidden" name="camera">
+        <input type="hidden" name="curve"><input type="hidden" name="motion">
+
+        <div class="fb-send">
+          <button class="btn primary" type="submit" id="fb-submit">Send</button>
+          <p class="fb-status" id="fb-status" role="status" aria-live="polite"></p>
+        </div>
+      </form>
+
+      <div class="fb-thanks" id="fb-thanks" hidden tabindex="-1">
+        <h2>Thank you.</h2>
+        <p class="lede">Your answers are on their way to me. If you left your email, I&rsquo;ll write back.</p>
+        <p><a href="index.html">Back to the player&rsquo;s page</a> · <a href="divers.html">Divers &amp; snorkelers</a></p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+  // The player opens this page with what helps read the answers: feedback?v=…&os=…&camera=…&curve=…&motion=…
+  // (footage-menu's afp-feedback). They're shown, and sent with the answers as they are
+  (function () {
+    var FIELDS = [["v", "Player"], ["os", "System"], ["camera", "Camera"], ["curve", "Log curve"], ["motion", "Motion data"]];
+    var form = document.getElementById("fb-form"), status = document.getElementById("fb-status");
+    var params = new URLSearchParams(location.search), list = document.getElementById("fb-tech-list"), any = false;
+    FIELDS.forEach(function (f) {
+      var v = (params.get(f[0]) || "").slice(0, 120);
+      if (!v) return;
+      any = true;
+      form.elements[f[0]].value = v;
+      var dt = document.createElement("dt"), dd = document.createElement("dd");
+      dt.textContent = f[1]; dd.textContent = v;
+      list.appendChild(dt); list.appendChild(dd);
+    });
+    document.getElementById("fb-tech").hidden = !any;
+
+    function thanks() {
+      form.hidden = true;
+      var t = document.getElementById("fb-thanks");
+      t.hidden = false;
+      window.scrollTo(0, 0);
+      t.focus({ preventScroll: true });
+    }
+    if (params.get("sent") === "1") return thanks();
+
+    form.addEventListener("submit", function (e) {
+      e.preventDefault();
+      var data = {};
+      new FormData(form).forEach(function (v, k) { data[k] = String(v); });
+      if (!data.shoot.trim() && !data.stuck.trim() && !data.compare) {
+        status.textContent = "Answer at least one question.";
+        return;
+      }
+      var button = document.getElementById("fb-submit");
+      button.disabled = true;
+      status.textContent = "Sending…";
+      fetch(form.action, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(data) })
+        .then(function (r) { return r.json().catch(function () { return {}; }).then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (r) {
+          if (r.ok) return thanks();
+          button.disabled = false;
+          status.textContent = r.j.error || "It didn't go through. Try again in a minute.";
+        })
+        .catch(function () {
+          button.disabled = false;
+          status.innerHTML = "It didn't go through. Try again, or write to <a href=\"mailto:hello@actionfootageplayer.ch\">hello@actionfootageplayer.ch</a>.";
+        });
+    });
+  })();
+</script>
+</body>
+</html>

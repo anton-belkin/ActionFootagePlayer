@@ -2,13 +2,16 @@
 # (actionfootageplayer.pages.dev, actionfootageplayer.ch) on every push that changes it, to the website branch or main,
 # and by the release workflow once it has published a release (with ref: website), for the download page's latest.json.
 #
-# Needs two repository secrets: CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN, a token with Pages Write only.
+# Needs two repository secrets: CLOUDFLARE_ACCOUNT_ID, and CLOUDFLARE_API_TOKEN, a token with Pages Write. The feedback
+# form's sender (website/worker, a Worker on actionfootageplayer.ch/api/feedback) is deployed by its own job: the token
+# also needs Workers Scripts Edit, Workers Routes Edit and Zone Read, and the secret FEEDBACK_TO is where it emails
+# (a verified Email Routing destination). website/README.md, "Feedback form".
 name: Website
 
 on:
   push:
     branches: [website, main]
-    paths: ['website/site/**', '.github/workflows/website.yml']
+    paths: ['website/site/**', 'website/worker/**', '.github/workflows/website.yml']
   workflow_dispatch:
   workflow_call:
     inputs:
@@ -50,7 +53,7 @@ jobs:
       - name: Version the shared stylesheet and scripts
         working-directory: website/site
         run: |
-          for f in styles.css b.css article.css view360.js top.js scene.js download.js moments.css features.css divers.css hub.css log.css stabilization.css organizing.css photos.css about.css v360.css; do
+          for f in styles.css b.css article.css view360.js top.js scene.js download.js moments.css features.css divers.css hub.css log.css stabilization.css organizing.css photos.css about.css v360.css feedback.css; do
             v=$(sha256sum "$f" | cut -c1-8)
             find . -name '*.html' -exec perl -pi -e "s{((?:href|src)=\"(?:\.\./)?\Q$f\E)\"}{\$1?v=$v\"}g" {} +
           done
@@ -65,3 +68,23 @@ jobs:
           npx --yes wrangler@4 pages deploy website/site
           --project-name actionfootageplayer --branch main
           --commit-hash "$(git rev-parse HEAD)" --commit-message "$(git log -1 --format=%s)"
+
+  # The feedback form's sender: a Worker with Email Routing's send_email binding (Pages Functions can't have it), on the
+  # route actionfootageplayer.ch/api/feedback. Its own job, so the site deploys even when this one can't
+  feedback-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Deploy the feedback Worker
+        working-directory: website/worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          FEEDBACK_TO: ${{ secrets.FEEDBACK_TO }}
+        run: |
+          test -n "$FEEDBACK_TO" || { echo "::error::The repository secret FEEDBACK_TO is missing (website/README.md, Feedback form)"; exit 1; }
+          npx --yes wrangler@4 deploy
+          printf '%s' "$FEEDBACK_TO" | npx --yes wrangler@4 secret put FEEDBACK_TO

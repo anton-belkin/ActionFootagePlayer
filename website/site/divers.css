@@ -66,3 +66,6 @@
 .dv-final .lede { color: var(--deep-muted); }
 .dv-final .btn:not(.primary) { background: transparent; color: var(--deep-fg); border-color: rgba(255, 255, 255, 0.28); }
 .dv-final .btn:not(.primary):hover { border-color: var(--deep-fg); }
+
+/* Send feedback, under the last downloads (feedback.html) */
+.dv-final .dv-fb { margin-top: 18px; color: var(--deep-muted); font-size: .9375rem; }
