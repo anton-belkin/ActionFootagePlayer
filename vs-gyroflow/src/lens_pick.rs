@@ -458,6 +458,14 @@ pub struct Clip {
 }
 
 impl Clip {
+    /// The camera stabilized the picture itself (GoPro's HyperSmooth, a DJI's EIS): it took out the rolling shutter
+    /// too, so the readout to correct is 0, and a profile without one has the right one (Anton, 2026-11-26: a HERO7 with
+    /// HyperSmooth is 0; Gyroflow's HERO7 HS EIS profiles have none or 0)
+    pub fn stabilized_in_camera(&self) -> bool {
+        if self.in_camera.as_deref().is_some_and(|s| !s.is_empty()) { return true; }
+        self.id.as_ref().is_some_and(|id| { let a = id.additional.to_ascii_lowercase(); a.contains("eis") && !a.contains("no") })
+    }
+
     pub fn from_id(path: &str, id: &CameraIdentifier) -> Clip {
         // Gyroflow's identifier says nothing of a DJI's EIS: as the camera's own metadata says it (read for it: a clip
         // loaded by the plugin has only its identifier here)
@@ -615,13 +623,21 @@ fn load_profile(p: &Profile, dir: Option<&std::path::Path>, w: usize, h: usize) 
 /// 5. Gyroflow's database, only where a profile is for exactly this clip (its identifier: camera, mode, size, frame
 ///    rate, in-camera stabilization), has the rolling shutter's readout, and isn't voted down (Anton, 2026-11-24: a
 ///    lens is reliable only when everything matches, the readout included; the nearest one is a start for finding the
-///    lens, not the lens). Else none: no ready lens
+///    lens, not the lens). A clip the camera stabilized itself has a readout of 0, which a profile without one gives
+///    (`Clip::stabilized_in_camera`). Else none: no ready lens
 pub fn for_video(path: &str, id: &CameraIdentifier, in_file: bool) -> Option<Pick> {
     for_clip(path, &Clip::from_id(path, id), in_file)
 }
 
-/// `for_video`, for a clip Gyroflow may not know the camera of
+/// `for_video`, for a clip Gyroflow may not know the camera of. A clip the camera stabilized itself gets a readout of 0,
+/// whatever lens it gets (`Clip::stabilized_in_camera`)
 pub fn for_clip(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
+    let mut p = for_clip_as_given(path, clip, in_file)?;
+    if clip.stabilized_in_camera() { p.profile.frame_readout_time = Some(0.0); }
+    Some(p)
+}
+
+fn for_clip_as_given(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
     // A lens given to this clip alone, to try it there before its mode's clips take it (source.lens in its own file):
     // it, whatever the mode has; not over the camera's own lens in the file
     if !in_file {
@@ -656,7 +672,8 @@ pub fn for_mode(path: &str, clip: &Clip, in_file: bool) -> Option<Pick> {
         let name = l.label().trim_end_matches(&format!(", {}", l.how)).to_string();
         return Some(Pick { profile: l.profile, name, official: false, votes: (0, 0), exact: true, curated: None, focal_only: false, local: Some(l.how) });
     }
-    pick(clip.id.as_ref()?).filter(|p| p.exact && p.profile.frame_readout_time.is_some_and(|r| r != 0.0) && !voted_down(p.votes))
+    let in_camera = clip.stabilized_in_camera();
+    pick(clip.id.as_ref()?).filter(|p| p.exact && (in_camera || p.profile.frame_readout_time.is_some_and(|r| r != 0.0)) && !voted_down(p.votes))
 }
 
 /// A lens a clip can be given by hand (`candidates`): its id for `assign` ("local:<file>", "db:<key>#<n>"), how it's
@@ -674,10 +691,12 @@ pub struct Candidate {
 /// same aspect; the ones made for exactly the clip's mode and those with a readout before the rest. At most `limit`
 pub fn candidates(path: &str, clip: &Clip, limit: usize) -> Vec<(Candidate, LensProfile)> {
     let key = crate::lens_db::ModeKey::of(path, clip);
+    // Stabilized in the camera: no readout is the right one
+    let in_camera = clip.stabilized_in_camera();
     let cam = |s: &str| s.to_lowercase().chars().filter(|c| c.is_alphanumeric()).collect::<String>();
     let mut out: Vec<(Candidate, LensProfile)> = crate::lens_db::all().iter().filter(|l| cam(&l.key.camera) == cam(&clip.camera)).map(|l| {
         (Candidate { id: format!("local:{}", l.name), label: l.label(), local: true,
-                     exact: l.key.fits(&key), readout: l.profile.frame_readout_time.is_some_and(|r| r != 0.0) }, l.profile.clone())
+                     exact: l.key.fits(&key), readout: in_camera || l.profile.frame_readout_time.is_some_and(|r| r != 0.0) }, l.profile.clone())
     }).collect();
     out.sort_by_key(|(c, _)| !c.exact);
     if clip.width == 0 || clip.height == 0 { out.truncate(limit); return out; }
@@ -704,7 +723,7 @@ pub fn candidates(path: &str, clip: &Clip, limit: usize) -> Vec<(Candidate, Lens
             if (pa / va - 1.0).abs() > 0.01 && (pa / vt - 1.0).abs() > 0.01 { continue; }
             let pid = normalized(&p.identifier);
             let exact = !pid.is_empty() && pid == wanted;
-            let readout = p.frame_readout_time.is_some_and(|r| r != 0.0);
+            let readout = in_camera || p.frame_readout_time.is_some_and(|r| r != 0.0);
             let same_mode = !prefix.is_empty() && profile_prefix(&p) == prefix;
             let stars = if good + bad == 0 { 25 } else { (50.0 * good as f64 / (good + bad) as f64).round() as i64 };
             let rank = (!voted_down((good, bad)), exact, same_mode, readout,
@@ -1267,6 +1286,14 @@ mod tests {
         // The lens in the file wins over the player's own
         let own = Clip::from_id(path, &camera("HERO7 Black", "Wide", 3840, 2160, 59940, "HS EIS"));
         assert!(for_clip(path, &own, true).is_none());
+        // HyperSmooth took out the rolling shutter: Gyroflow's exact profiles without a readout are taken, with 0
+        for (lens, w, h, fps) in [("Wide", 3840, 2160, 29970), ("Linear", 2704, 2028, 29970), ("Linear", 2704, 1520, 59940)] {
+            let p = for_clip(path, &Clip::from_id(path, &camera("HERO7 Black", lens, w, h, fps, "HS EIS")), false).unwrap_or_else(|| panic!("HERO7 {lens} {w}x{h}"));
+            assert!(p.exact && p.profile.frame_readout_time == Some(0.0), "{}", p.label());
+        }
+        // Without it a readout is still needed
+        let off = Clip::from_id(path, &camera("HERO7 Black", "Wide", 3840, 2160, 29970, ""));
+        assert!(!off.stabilized_in_camera());
     }
 
     // Against the database built into gyroflow-core and the votes in resources/: what the player picks for clips that

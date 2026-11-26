@@ -369,6 +369,12 @@ Cons:
 Anton's rule (2026-11-24): **a lens is reliable only when it matches the clip in every parameter, the rolling-shutter
 readout included.** In every other case the player says "no ready lens", and Find lens / Estimate lens are the way.
 
+Except for a clip the camera stabilized itself (2026-11-26, Anton: "for EIS modes don't require it, and leave 0"):
+HyperSmooth and a DJI's EIS take out the rolling shutter, so its readout is 0. Gyroflow's HERO7 HS EIS profiles have
+none or 0, which is right for them; such a clip takes an exact one without a readout, and every lens it gets plays
+with 0 (`lens_pick::Clip::stabilized_in_camera`). Find lens and Estimate lens still fit a readout on such a clip
+(gyroflow-core's lens_from_video): not changed yet.
+
 Taken without any command, in this order:
 
 1. **A hand choice:** `source.lens` (a profile, kept with its readout) or `source.lens_type`.
@@ -593,7 +599,8 @@ The exact list goes into the first PR.
 
 Answered 2026-11-24:
 - "Reliable" means an exact match in every parameter, readout included (§5.2). Everything else is a starting point for
-  Find lens, which measures the readout, or for Estimate lens.
+  Find lens, which measures the readout, or for Estimate lens. A clip stabilized in the camera: readout 0, not
+  required (2026-11-26).
 - The local database is seeded with the 11 profiles of lens_profiles#41 only.
 - Which cameras name their mode: the working hypothesis of §5.2.1, corrected when a "fitting" lens stabilizes badly.
 
