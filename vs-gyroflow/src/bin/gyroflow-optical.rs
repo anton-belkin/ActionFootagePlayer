@@ -4,7 +4,10 @@
 // vs_gyroflow::measure) and kept in each clip's <stem>.afp-motion, which the player plays with as it plays gyro, without
 // a Gyroflow project (vs_gyroflow::optical says which clips). No Gyroflow app is needed.
 //
-//   gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...   each in turn, how far on stderr
+//   gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] [--underwater yes|no] <video>...   each in turn, how
+//                                                                       far on stderr. --underwater: the lens under water
+//                                                                       or not, whatever the clip's own file or camera
+//                                                                       says (a HERO7 says nothing)
 //   gyroflow-optical --check [--redo] <video>...                        what would be done, one JSON line each:
 //                                                                       {"path", "stabilize": true, "lens", "replaces"}
 //                                                                       or {"path", "stabilize": false, "why"}
@@ -237,7 +240,7 @@ fn main() {
     let _ = simplelog::TermLogger::init(log::LevelFilter::Error, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
     let mut args: Vec<String> = std::env::args().skip(1).collect();
     let usage = || -> ! {
-        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...\n       gyroflow-optical --find-lens [--quick] <video>...\n       gyroflow-optical --lenses <video>\n       gyroflow-optical --try-lens <video> keep <n> | assign <id> | forget\n       gyroflow-optical --lens-for <video> keep <n> | assign <id>\n       gyroflow-optical --promote-lens <video>\n       gyroflow-optical --estimate-lens <video>\n       gyroflow-optical --keep-lens <video> <n>");
+        eprintln!("usage: gyroflow-optical [--redo] [--strength <%>] [--tracking klt|dis] [--underwater yes|no] <video>...\n       gyroflow-optical --check [--redo] <video>...\n       gyroflow-optical --lens-types <video>...\n       gyroflow-optical --batch <request.json>\n       gyroflow-optical --from-project [--force] <video>...\n       gyroflow-optical --show <video>...\n       gyroflow-optical --find-lens [--quick] <video>...\n       gyroflow-optical --lenses <video>\n       gyroflow-optical --try-lens <video> keep <n> | assign <id> | forget\n       gyroflow-optical --lens-for <video> keep <n> | assign <id>\n       gyroflow-optical --promote-lens <video>\n       gyroflow-optical --estimate-lens <video>\n       gyroflow-optical --keep-lens <video> <n>");
         std::process::exit(2);
     };
     if args.is_empty() { usage(); }
@@ -384,6 +387,8 @@ fn main() {
                 match flag.as_str() {
                     "--strength" => settings.strength = v.parse::<f64>().unwrap_or_else(|_| usage()) / 100.0,
                     "--tracking" if v == "klt" || v == "dis" => settings.tracking = v,
+                    "--underwater" if v == "yes" => settings.refraction = Some(vs_gyroflow::water::WATER_REFRACTION),
+                    "--underwater" if v == "no" => settings.refraction = Some(1.0),
                     _ => usage(),
                 }
             }
