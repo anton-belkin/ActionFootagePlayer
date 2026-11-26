@@ -744,6 +744,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_OPENING` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_OPTICAL_APPLIES` | `vs-gyroflow/src/optical.rs` | — |
 | `AFP_OPTICAL_PROJECT` | `vs-gyroflow/src/optical.rs` | — |
+| `AFP_PACKAGES` | `.github/workflows/release.yml` | `tools/make_release.sh` |
 | `AFP_PHOTO` | — | `tests/live_photo_ipc.py` |
 | `AFP_PHOTO_CLIPS` | — | `vs-gyroflow/tests/photo_dates.rs` |
 | `AFP_PHOTO_RENDITIONS` | `vs-gyroflow/src/bin/gyroflow-export/photo.rs` | `tests/uw_export_check.py` |
