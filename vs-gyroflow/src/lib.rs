@@ -143,9 +143,9 @@ pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<std::p
 // ---------------------------------------------------------------------------------------------------
 // Engine: a loaded project and a worker thread that owns the per-plane GPU stabilizers.
 //
-// mpv reloads the VapourSynth script on every seek, so loading the project and setting up the GPU
-// each time would stall every seek. Engines are cached for the life of the process instead, keyed by
-// everything that would make them render differently.
+// Made for mpv's VapourSynth filter (up to 2026-11), whose script mpv reloaded on every seek: loading the project
+// and setting up the GPU each time would have stalled every seek. Engines are cached for the life of the process,
+// keyed by everything that would make them render differently; gyroflow-export now loads them.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum SampleKind { U8, U16 }
@@ -1023,7 +1023,7 @@ struct PlaneStab {
     index: usize,
     /// The GPU device it's set up for, and the bytes of the input and output buffers it was set up with (stride times
     /// height): gyroflow-core's wgpu backend is made for one size and writes nothing for another, though it reports
-    /// the frame done (the chroma of a 3024-wide output, whose rows VapourSynth pads: a green picture). So another
+    /// the frame done (the chroma of a 3024-wide output with padded rows, as VapourSynth's were: a green picture). So another
     /// size sets it up again
     device: isize,
     buffers: (usize, usize),
@@ -1098,8 +1098,8 @@ fn worker(mgr: &StabilizationManager, views: &Views, mut view: u8, rx: &Mutex<mp
     if let Err(e) = edge_worker.warm_up(cfg) { log::error!("Edges warm-up: {e}"); }
 
     {
-        // Rows as VapourSynth lays out its frames' (32-byte aligned: mpv's 1512-pixel chroma rows of 16 bits come 3040
-        // bytes apart), so the GPU set up here fits the frames that come
+        // Rows 32-byte aligned (as VapourSynth laid out its frames, up to 2026-11: 1512-pixel chroma rows of 16 bits come
+        // 3040 bytes apart), so the GPU set up here fits the frames that come
         let bytes = if cfg.kind == SampleKind::U8 { 1 } else { 2 };
         let stride = |w: usize| (w * bytes).div_ceil(32) * 32;
         let mut buffers: Vec<(Vec<u8>, Vec<u8>)> = geometry.iter().map(|((w, h), (ow, oh))| (vec![0u8; stride(*w) * h], vec![0u8; stride(*ow) * oh])).collect();
@@ -1267,7 +1267,7 @@ mod plane_tests {
     }
 
     /// A luma and a chroma plane rendered as the plugin renders them, into rows `pad` bytes longer than the picture
-    /// (VapourSynth's frames have them); how far the chroma is from the luma at the same place, on average (of 65535)
+    /// (as VapourSynth's frames had them); how far the chroma is from the luma at the same place, on average (of 65535)
     fn chroma_vs_luma(planes: &mut [PlaneStab], out: (usize, usize), pad: usize) -> f64 {
         let geometry = [(SIZE, out), ((SIZE.0 / 2, SIZE.1 / 2), (out.0 / 2, out.1 / 2))];
         let mut outputs = Vec::new();
@@ -1360,7 +1360,7 @@ mod plane_tests {
 
     #[test]
     fn chroma_lands_with_the_luma_at_another_output_size_and_stride() {
-        // The output smaller than the input (the display's size), its chroma rows 3024 bytes: VapourSynth pads them
+        // The output smaller than the input (the display's size), its chroma rows 3024 bytes, padded (as VapourSynth's were)
         let out = (1512, 850);
         let mgr = manager(out);
         let cfg = WorkerConfig { kind: SampleKind::U16, max_value: 65535.0, is_yuv: true, interpolation: Interpolation::Bicubic };

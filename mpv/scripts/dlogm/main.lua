@@ -62,7 +62,7 @@
 --   Ctrl+l  curve  the source's log curve, by hand: D-Log M, D-Log, GP-Log, GP-Log2, I-Log (10-bit) in turn. Input:
 --                  written into the source's own file at once (the workspace plugin's), for all its moments and clips
 --
--- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; mpv/menu.conf):
+-- Script messages (`script-message-to dlogm <message>`, what the right-click menu runs; the footage-menu plugin):
 --   look <look>       this file's look: hdr, dv, dvsdr, tonemap, nbcu or maker, as Ctrl+s would
 --   curve <id>|auto   the source's log curve: dlogm, dlog, gplog, gplog2, ilog, or auto: the one its metadata says
 --   remember          the looks files start in on each kind of screen, as the default, in dlogm.conf
@@ -407,7 +407,7 @@ our_rpu = function(trc)
     return dv_user_rpu or plugin_file(DV_RPU)
 end
 
--- For the right-click menu (mpv/menu.conf)
+-- For the right-click menu (the footage-menu plugin)
 local function publish()
     local c = curve or CURVE.dlogm
     local sdr_look = ""

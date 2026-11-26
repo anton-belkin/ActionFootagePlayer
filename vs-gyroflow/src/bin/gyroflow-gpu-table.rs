@@ -43,7 +43,7 @@ use nalgebra::Vector2;
 use vs_gyroflow::gpu_table::{ self, Clip, Options, Table };
 
 /// The player's GPU path (mpv/scripts/gyroflow/gpupath.lua): `--player <json> <out.glsl> [--server <socket>]`, the JSON
-/// main.lua hands the VapourSynth filter plus input_width/height, interpolation, chromatic (on/off), edges and
+/// gpupath.lua's gpu_user_data: the clip's settings plus input_width/height, gpu_chromatic, gpu_denoise, edges and
 /// edges_blur. Writes the shader and prints one JSON line: { shader, output: [w, h], mode, chromatic, ms } or
 /// { unsupported: why } or { error }. With a server (--serve) listening, it answers: the clip is loaded there already
 /// for a change of the view, the edges, the color fringes, the denoise or the interpolation
@@ -444,7 +444,7 @@ fn main() {
               args[0], t.elapsed().as_secs_f64() * 1000.0, clip.size.0, clip.size.1, clip.output_size.0, clip.output_size.1, clip.frame_count, clip.fps,
               clip.frame_offset_us, p.distortion_model.id(), p.digital_lens.as_ref().map(|d| format!(" + digital {}", d.id())).unwrap_or_default(), p.frame_readout_time, p.lens_correction_amount, p.output_projection);
     if let Some(why) = gpu_table::unsupported(&clip) {
-        eprintln!("Warning: the GPU warp doesn't render this clip as Gyroflow does ({why}); the player keeps VapourSynth for it");
+        eprintln!("Warning: the GPU warp doesn't render this clip as Gyroflow does ({why}); the player plays it as recorded");
     }
 
     if let Some(out) = check_grid {

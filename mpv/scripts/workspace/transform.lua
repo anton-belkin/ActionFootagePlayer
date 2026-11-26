@@ -47,7 +47,7 @@ local M = {}
 local reg = require 'registry'
 M.KEYS = reg.keys("bundle")
 M.INPUT_KEYS = reg.keys("input")
--- The underwater colour (the dlogm plugin's uwcolor.lua): the source's, as its input (tools/migrate_uw_to_source.py
+-- The underwater colour (the dlogm plugin's uwcolor.lua): the source's, as its input (tools/one_off/uw_to_source.py
 -- moves an old bundle's there once). A bundle from before keeps them unread: not the bundle's any more
 M.UW_KEYS = reg.keys("uw")
 -- What a Gyroflow project owns of the bundle. The view isn't: a project that came out badly can be set Off (kept, not

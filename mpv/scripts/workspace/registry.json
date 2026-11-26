@@ -134,8 +134,7 @@
     { "key": "start", "kind": "number", "request": true, "table": true, "example": 0.0 },
     { "key": "until", "kind": "number", "request": true, "table": true, "example": 20.0 },
     { "key": "urgent", "kind": "bool", "request": true, "table": true, "example": true },
-    { "key": "full", "kind": "bool", "request": true, "table": true, "example": true },
-    { "key": "lookahead", "kind": "number", "request": true, "example": 4, "about": "Sent, not read any more" }
+    { "key": "full", "kind": "bool", "request": true, "table": true, "example": true }
   ],
 
   "own_folders_about": "The folders the player and the Library make in a project (and earlier versions made), lower case: left out of its footage wherever it's listed (#128). recycle_bins: the NAS's, never footage either (the walks skip # names anyway).",

@@ -352,7 +352,6 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a smaller resolution, a lighter denoise or edge fill; what's picked is kept here. `no`: it plays on as it can |
 | `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
-| `gyroflow.conf`: `lookahead=4` | a clip without a project plays once the first 4 + this many seconds of its motion data are read; the rest is read as it plays, from what mpv reads anyway (see Stabilization). `0`: all of it before it plays |
 | `gyroflow.conf`: `horizon_lock=project` | the default horizon: `yes`, level (Gyroflow's horizon lock at 100 %, in exports too); `no`: free; `project`: as the preset has it. A clip with a `.gyroflow` plays with the project's |
 | `gyroflow.conf`: `underwater=auto` | the lens of sources without a correction of their own: `yes` under water with a flat port, `no` above water (or a dome port), `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says). A clip with a `.gyroflow` plays with the project's. See Stabilization |
 | `gyroflow.conf`: `chromatic=yes` | the water's color fringes taken out where the lens is under water (`Ctrl+a`), or `no`: as recorded |
@@ -364,7 +363,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `resolution=auto` | the stabilized frame rendered as big as the window shows it (a 1080p display: a quarter of 4K's pixels to stabilize and shade), mpv scaling it to the screen; at most 1080p while the temporal denoise (`Ctrl+p`) is on: at a Retina screen's size it drops frames full screen. `display`: the display's size, denoise or not. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that. Right click > Quality, or the panel's Performance & Quality › Size, sets it |
 | `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
-| `gyroflow.conf`: `workers`, `max_fps`, `fps_limit`, `edge_fill_rate`, `paused_full_size`, `zoom_margin`, `sphere_max_fps`, `sphere_cache_mb`, `gpu` | the VapourSynth path's (taken out, 2026-11): read and ignored |
+| `gyroflow.conf`: `workers`, `lookahead`, `max_fps`, `fps_limit`, `edge_fill_rate`, `paused_full_size`, `zoom_margin`, `sphere_max_fps`, `sphere_cache_mb`, `gpu` | the VapourSynth path's (taken out, 2026-11): read and ignored |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |
 | `dji_telemetry.conf`: `fields=` | what to show, in that order; not set: what the clip has (see Telemetry) |
 | `dji_telemetry.conf`: `units=metric` | or `imperial`: feet, mph, °F |
@@ -586,7 +585,7 @@ project plays from its first seconds of motion data: from a NAS in about a secon
 5-10 s. The rest comes in as it plays: not read from the file in between the video's reads (on a NAS that breaks the
 read-ahead macOS does for the video: its reads slowed from under a millisecond to 34-45 ms), but taken from the file
 cache, where the video's own reads put it, the motion data of a moment sitting next to its video. What's played is as
-it would be with all of the motion data once 4 s more are known (`lookahead`; measured on clips from the NAS: p99
+it would be with all of the motion data once 4 s more are known (measured on clips from the NAS: p99
 0.02-0.9 px at the frame's center, the most in the first seconds, and the video's reads as fast as without it). After
 a seek past what's read, the seconds there are read from the file: the frames play uncorrected meanwhile (about 2 s from
 the NAS), and the correction comes in over half a second. While it's paused, the rest is read

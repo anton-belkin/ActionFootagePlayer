@@ -50,7 +50,7 @@
 --                     is, for Gyroflow to find the motion from the picture (optical flow): once the project is saved
 --                     next to it, it plays stabilized with it
 --
--- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; mpv/menu.conf):
+-- Script messages (`script-message-to gyroflow <message>`, what the right-click menu runs; the footage-menu plugin):
 --   view normal|wide|off    the stabilization on, on with the wider view, or off for this clip
 --   level weak|medium|strong  the level (Ctrl+k)
 --   horizon-lock yes|no|project|toggle   lock the horizon, or not, or leave it to the project
@@ -98,9 +98,7 @@
 --                resolution, edge fill or temporal denoise (quality.lua); no: it plays on as it can
 --   view=normal  the view clips without a project start in: normal, or wide (the wider view)
 --   level=medium  the level clips without a project start in: weak, medium or strong (Ctrl+k)
---   lookahead=4  a clip without a project plays once the first 4 + this many seconds of its motion data are read, and
---                the rest is read as it plays: what's this far behind the newest is as it'd be with all of it
---                (vs-gyroflow/src/motion.rs). From a NAS, ~1 s instead of 5-10. 0: all of it first, as a project's
+--   lookahead    the VapourSynth path's (read and ignored): the GPU table reads the motion data ahead on its own
 --   horizon_lock=project  clips without a project: yes, the horizon locked level (Gyroflow's horizon lock at 100 %),
 --                no: not locked, project: as the preset says. A clip with a project plays with the project's
 --   underwater=auto  clips without a project: the lens under water (Gyroflow's "Lens is underwater": the light bends
