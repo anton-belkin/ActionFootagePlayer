@@ -8,7 +8,7 @@
 # Pass: no shift and an edge correlation well above a control (the same link without its camera: ~0.05). How the two
 # were made (2026-11-19, the app's tools and the player headless with the app's plugins and this branch's Lua): a
 # link {t 8.0, camera 10,-5,3,1.25, crop 0.15,0.1,0.7,0.75} to a DJI clip (afp-meta <link.jpg> --link …), the
-# player opened on it (paused at the frame, the CPU filter), screenshot-to-file <out> video; gyroflow-export --photo
+# player opened on it (paused at the frame, the CPU filter: the VapourSynth path of then, since taken out), screenshot-to-file <out> video; gyroflow-export --photo
 # 8.0 --format jpeg --curve none --sdr-image nbcu --camera 10,-5,3,1.25 --crop 0.15,0.1,0.7,0.75 <clip>.
 # Measured: shift 0,0, edge correlation 0.78; without the camera 0.05, shifted ~700,300 px.
 

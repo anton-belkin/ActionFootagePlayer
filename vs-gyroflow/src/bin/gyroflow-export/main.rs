@@ -9,7 +9,7 @@
 // (DJI's ColorMode, GoPro's Protune color; --curve sets it). A log clip with
 // nothing to stabilize it with, or with --no-stabilize, is color-converted only (no Gyroflow in the pipeline); a
 // clip with neither is skipped, there being nothing to change. --wide and --edges give it the gyroflow plugin's wider
-// view and edge fill (edges.rs), as the plugin passes them to the VapourSynth filter.
+// view and edge fill (edges.rs), as the player plays them.
 //
 // Installed in the gyroflow plugin's folder (~~/scripts/gyroflow/), it takes the default preset from there and the
 // LUTs from the dlogm plugin's (~~/scripts/dlogm/luts/); $GYROFLOW_DATA and $DLOGM_DATA, when set, come first,

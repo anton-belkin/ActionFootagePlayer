@@ -29,4 +29,4 @@ The template: `AFP_GPU_KEEP=1 gyroflow-export --gpu on --edges sphere --wide --s
 <any clip>` (see ../README.md). Its SRC/OUT sizes stay (the frames are fed at 1280x720 and the shader scales).
 
 Results 2026-11-19 (v4): shader and model 0.0015-0.004 apart in the fill on all 18 scenarios. Not covered yet: lens
-distortion and the field limit, rolling shutter, seeks, the VapourSynth path.
+distortion and the field limit, rolling shutter, seeks.
