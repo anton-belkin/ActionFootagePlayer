@@ -208,7 +208,7 @@ reply below.
 The [settings](#the-settings)' keys the table reads, plus what only playback adds (`gyroflow/gpupath.lua`
 `gpu_user_data`, `gpu_table`): the video's size, `gpu_chromatic` (the settings' `chromatic` unless this screen skips
 it, `chromatic_skip`), `gpu_denoise` (`denoise` where `temporal_denoise` isn't off), `gpu_translation` (gyroflow.conf
-`translation`: the jerks in the shader where computed, on and off by its PARAM), `translation_rev`, `lookahead`, and
+`translation`: the jerks in the shader where computed, on and off by its PARAM), `translation_rev`, and
 the stretch asked for.
 
 | Key | Meaning | Geometry? |
@@ -236,7 +236,7 @@ the stretch asked for.
 | `start`, `until` | Stretch of motion data asked for (s into the clip); without `until`, 20 s | — |
 | `urgent` | Playback waits for it (a seek): read at full speed | — |
 | `full` | All the motion data at once | — |
-| `lookahead`, `translation_rev` | Sent; not read by the table (in its cache keys, as every key is) | — |
+| `translation_rev` | Sent; not read by the table (in its cache keys, as every key is) | — |
 
 The server keeps up to four loaded clips, keyed by `PLAYER_GEOMETRY_KEYS` plus the project's, preset's and motion
 file's stamps and the lens state. A request that changes only non-geometry keys rewrites the shader alone (~40 ms).
@@ -826,9 +826,8 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `until` | number | table (request: playback adds it) | — |  |
 | `urgent` | bool | table (request: playback adds it) | — |  |
 | `full` | bool | table (request: playback adds it) | — |  |
-| `lookahead` | number | — (request: playback adds it) | — | Sent, not read any more |
 
-54 keys, from `mpv/scripts/workspace/registry.json` `settings_json`.
+53 keys, from `mpv/scripts/workspace/registry.json` `settings_json`.
 <!-- END GENERATED: settings-json -->
 
 ### gyroflow-export flags

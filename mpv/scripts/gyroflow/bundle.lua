@@ -224,7 +224,7 @@ local function filtering()
 end
 -- Ctrl+e on a clip without motion data: the project Gyroflow will save for it is waited for
 
--- For the right-click menu (mpv/menu.conf)
+-- For the right-click menu (the footage-menu plugin)
 function publish()
     local state = {
         available = S.current_source ~= nil, kind = S.current_source and S.current_source.kind or "",

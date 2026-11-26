@@ -226,8 +226,8 @@ impl Edges {
         self.filled.load(Ordering::Relaxed)
     }
 
-    /// Playback (the VapourSynth filter): the sphere written on its own thread, as the GPU has room. Off, as in an
-    /// export, it's written with each frame
+    /// Playback through the VapourSynth filter (up to 2026-11; nothing sets it now): the sphere written on its own
+    /// thread, as the GPU has room. Off, as in an export, it's written with each frame
     pub fn set_realtime(&self, realtime: bool) {
         self.realtime.store(realtime, Ordering::Relaxed);
     }
