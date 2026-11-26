@@ -64,6 +64,16 @@ if [ $deps = 1 ]; then
 fi
 [ $build = 1 ] || exit 0
 
+# Not built again when nothing it's built from changed: the lock, this script, the patches, and what --print-deps
+# lists. Applying the patches again would give every file a new time, and ninja would build all of mpv again (CI on
+# Anton's Mac runs this on every push)
+stamp=$( { cat tools/mpv.lock "$0" tools/mpv-patches/*.patch tools/libplacebo-patches/*.patch 2>/dev/null; "$0" --print-deps; } \
+    | shasum -a 256 | cut -c1-16)
+if [ -x "$OUT/out/mpv" ] && [ "$(cat "$OUT/out/stamp" 2>/dev/null)" = "$stamp" ]; then
+    echo "== mpv: built already from the same sources ($stamp): $OUT/out/mpv"
+    exit 0
+fi
+
 echo "== mpv $MPV_COMMIT"
 mpv_src="$SRC/mpv"
 if [ ! -d "$mpv_src/.git" ]; then
@@ -194,4 +204,5 @@ for f in "$pl_src"/3rdparty/fast_float/LICENSE*; do
     [ -f "$f" ] && cp "$f" "$out/licenses/libplacebo/fast_float-$(basename "$f")"
 done
 "$out/mpv" --no-config --version | head -1
+echo "$stamp" > "$out/stamp"
 echo "Done: $out/mpv"
