@@ -40,7 +40,8 @@ COPY tools/stream/afp-render.c /src/
 RUN cc -O2 /src/afp-render.c -o /opt/afp-render $(PKG_CONFIG_PATH=/opt/pl/lib/pkgconfig pkg-config --cflags --libs libplacebo \
         libavformat libavcodec libavutil libva libva-drm) -lm
 
-# --- The Rust programs: the gyroflow plugin's binaries (the player asks them), gyroflow-gpu-table, afp-catalog
+# --- The Rust programs: the gyroflow plugin's binaries (the player asks them), gyroflow-gpu-table, afp-catalog, afp-uw
+# (the underwater colour's numbers for the stream's renders)
 FROM base AS rust
 RUN dnf -y install --setopt=install_weak_deps=False gcc gcc-c++ clang make cmake pkgconf perl git \
  && dnf clean all \
@@ -56,11 +57,12 @@ COPY shaders shaders
 COPY mpv mpv
 COPY vs-gyroflow vs-gyroflow
 RUN cd vs-gyroflow && cargo build --release --locked \
- && mkdir -p /out && for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical; do \
+ && mkdir -p /out && for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical afp-uw; do \
         install -m 755 target/release/$f /out/$f && strip --strip-unneeded /out/$f; done
 
 # --- The player's plugins (the repository's Lua with the binaries above) and the shaders the stream renders with: every
-# log curve's look to HLG (registry.json's curves, tools/stream/make_looks.py) where the dlogm plugin has it
+# log curve's look to HLG and the underwater colour's (registry.json's curves, tools/stream/make_looks.py) where the
+# dlogm plugin has it
 FROM base AS files
 COPY tools/cube_to_glsl.py tools/make_hdr_lut.py /src/tools/
 COPY tools/stream/make_looks.py /src/tools/stream/
@@ -77,7 +79,8 @@ RUN cd /src && mkdir -p /opt/afp/bin /opt/afp/player/dlogm/shaders \
  && python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/3-NBCU_HLG2SDR_DL_v1.2.cube /opt/afp/player/dlogm/shaders/nbcu_hlg2sdr.glsl \
  && python3 -I tools/cube_to_glsl.py shaders/nbcu_sdr.glsl.in luts/5-NBCU_PQ2SDR_DL_v1.2.cube /opt/afp/player/dlogm/shaders/nbcu_pq2sdr.glsl \
  && ln -s ../player/gyroflow/gyroflow-gpu-table /opt/afp/bin/gyroflow-gpu-table \
- && ln -s ../player/gyroflow/afp-catalog /opt/afp/bin/afp-catalog
+ && ln -s ../player/gyroflow/afp-catalog /opt/afp/bin/afp-catalog \
+ && ln -s ../player/gyroflow/afp-uw /opt/afp/bin/afp-uw
 
 # --- The helper
 FROM base
@@ -93,7 +96,7 @@ ENV PATH=/opt/mpv/bin:$PATH LD_LIBRARY_PATH=/opt/pl/lib AFP_BIN=/opt/afp/bin AFP
 # No machine id of its own: the NAS's name in the journals (kept in /data/catalog) stays the same from one image to the next
 RUN echo "$VERSION" > /opt/afp/helper/VERSION && : > /etc/machine-id \
  && ! (cd /opt/afp/player/gyroflow && ldd /opt/mpv/bin/mpv /opt/afp/bin/afp-render gyroflow-probe gyroflow-project \
-        gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical | grep "not found") \
+        gyroflow-gpu-table gyroflow-export afp-cut afp-meta afp-catalog gyroflow-optical afp-uw | grep "not found") \
  && mpv --version | head -1 && /opt/afp/bin/afp-catalog 2>&1 | head -1 && python3 /opt/afp/helper/helper.py --help > /dev/null
 LABEL org.opencontainers.image.title="Action Footage NAS Helper" \
       org.opencontainers.image.source="https://github.com/anton-belkin/ActionFootagePlayer" \

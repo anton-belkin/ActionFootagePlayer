@@ -4,12 +4,14 @@
 curves with `log`), written where the dlogm plugin has it (the curve's `hdr`, under the plugin's folder), as the
 packagers (install.sh, tools/make_app.sh) bake them: the curve's LUT (luts/<lut>, else made from its maker's formulas
 by tools/make_hdr_lut.py) into its template (shaders/<id>_hlg.glsl.in where the curve has its own, else
-shaders/log_hlg.glsl.in) by tools/cube_to_glsl.py. The NAS Helper's image runs it (tools/nas-helper/Dockerfile).
+shaders/log_hlg.glsl.in) by tools/cube_to_glsl.py. And the underwater colour's (the curve uw, not log: its shader as it is, shaders/
+underwater_hlg.glsl, its numbers set per frame by the stream). The NAS Helper's image runs it (tools/nas-helper/Dockerfile).
 
     make_looks.py <dlogm plugin folder>      (from anywhere: the repository's files are found from here)
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -22,8 +24,18 @@ def log_curves():
         return [c for c in json.load(f)["curves"] if c.get("log")]
 
 
+def uw_curve():
+    with open(os.path.join(TOP, "mpv", "scripts", "workspace", "registry.json")) as f:
+        return next(c for c in json.load(f)["curves"] if c["id"] == "uw")
+
+
 def make(plugin):
     made = []
+    # The underwater colour's shader, where the dlogm plugin has it (install.sh puts it there the same way)
+    uw = uw_curve()["hdr"]
+    os.makedirs(os.path.dirname(os.path.join(plugin, uw)), exist_ok=True)
+    shutil.copyfile(os.path.join(TOP, "shaders", os.path.basename(uw)), os.path.join(plugin, uw))
+    made.append(os.path.join(plugin, uw))
     with tempfile.TemporaryDirectory() as tmp:
         for c in log_curves():
             lut = os.path.join(TOP, "luts", c["lut"]) if c.get("lut") else None

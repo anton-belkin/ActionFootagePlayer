@@ -5,7 +5,8 @@
 # Runs on the NAS (tools/stream/README.md): for each clip in the library folders, an HLS stream (HEVC Main10, HLG,
 # fMP4 segments) rendered on the GPU by afp-render as it's asked for, with the Gyroflow warp gyroflow-gpu-table writes
 # for it as the player plays it (below), the look to HLG for a log clip (every log curve the player plays: registry.json's
-# curves) and, with AFP_DENOISE=player, the clip's temporal denoise.
+# curves), the underwater colour for a clip that has it on (its numbers per frame from afp-uw) and, with
+# AFP_DENOISE=player, the clip's temporal denoise.
 #
 #   GET /                      the clips, each with its stream (Safari plays HLS by itself)
 #   GET /playlist.m3u          every clip as a channel: Jellyfin's Live TV takes it as an M3U tuner
@@ -92,6 +93,9 @@ RECYCLE_BINS = set(REGISTRY["recycle_bins"])
 # The log curves the player plays, each with its look to HLG (its `hdr`: the dlogm plugin's shader, which the NAS
 # Helper's image bakes for every one of them, tools/stream/make_looks.py)
 LOG_CURVES = {c["id"]: c for c in REGISTRY["curves"] if c.get("log")}
+# The underwater colour (the dlogm plugin's curve uw, not log): its shader made HLG like a log curve's look, with its
+# numbers per frame from afp-uw (measured and eased as gyroflow-export does: vs-gyroflow's uwcolor.rs)
+UW = next(c for c in REGISTRY["curves"] if c["id"] == "uw")
 
 jobs = {}  # key -> {proc, dir, started}
 # When a player last asked for each clip's segments: a render nobody asks for any more (the player went to another
@@ -170,6 +174,45 @@ _args = {}
 args_lock = threading.RLock()
 
 
+def _player_stamp():
+    """The player's plugins as this image has them (a digest of their files): an answer the player gave before an update
+    may be wrong now (a curve it didn't see, a setting it didn't send), with none of the clip's files changed"""
+    h = hashlib.sha1()
+    for part in ("workspace", "gyroflow", "dlogm"):
+        top = os.path.join(PLAYER, part)
+        for d, dirs, files in sorted(os.walk(top)):
+            dirs.sort()
+            for f in sorted(files):
+                if f.endswith((".lua", ".json", ".glsl")):
+                    path = os.path.join(d, f)
+                    h.update(os.path.relpath(path, PLAYER).encode())
+                    try:
+                        with open(path, "rb") as fh:
+                            h.update(fh.read())
+                    except OSError:
+                        pass
+    return h.hexdigest()[:16]
+
+
+PLAYER_STAMP = _player_stamp()
+_player_checked = set()
+
+
+def args_for_this_player(clip):
+    """A clip about to play: its answer asked again once when an older player gave it. Only here, as someone watches:
+    the warm-up and the catalog keep the answers they have (no re-asking the whole library after each update). Renders
+    stay where the new answer is the same (their fingerprint is the answer's)"""
+    clip = clip.get("base") or clip
+    if clip["id"] in _player_checked:
+        return
+    _player_checked.add(clip["id"])
+    a = player_args(clip)
+    if a is not None and a.get("player") != PLAYER_STAMP:
+        with args_lock:
+            log("asking the player again for", clip["name"], ": its answer is from an older player")
+            ask_player(clip)
+
+
 def player_args(clip):
     """How the player plays the file (render_args): clip (the original), offset and length (a moment's part), render
     (user_data, gyroflow-gpu-table's request; none: not stabilized), dlogm (the log curve). Kept in ARGS with the stamps
@@ -184,7 +227,9 @@ def player_args(clip):
                 a = json.load(f)
         except (OSError, ValueError):
             a = None
-    if a is not None and all(stamp(p) == s for p, s in a.get("deps", {}).items()):
+    # (an answer from before the stream took the underwater colour lacks its strength and highlights: asked again)
+    dl = (a or {}).get("dlogm") or {}
+    if a is not None and all(stamp(p) == s for p, s in a.get("deps", {}).items()) and not (dl.get("curve") == "uw" and "uw_strength" not in dl):
         _args[clip["id"]] = a
         return a if a.get("clip") else None
     with args_lock:
@@ -217,7 +262,7 @@ def ask_player(clip):
         a = {"error": (err or "no reply")[-300:]}
     if a.get("moment", {}) and a["moment"].get("missing"):
         a = {"error": "the original isn't there"}
-    deps = [clip["path"], os.path.join(PLAYER_CONFIG, "script-opts", "gyroflow.conf"), os.path.join(PLAYER_CONFIG, "script-opts", "dlogm.conf")]
+    deps = [clip["path"]] + [os.path.join(PLAYER_CONFIG, "script-opts", f) for f in ("gyroflow.conf", "dlogm.conf", "uwcolor.conf")]
     deps += sidecars(clip["path"])
     if a.get("clip"):
         deps += [a["clip"]] + sidecars(a["clip"])
@@ -225,6 +270,7 @@ def ask_player(clip):
         if ud.get("project") and ud["project"] != a["clip"]:
             deps.append(ud["project"])
     a["deps"] = {p: stamp(p) for p in dict.fromkeys(deps)}
+    a["player"] = PLAYER_STAMP
     log("player args for", clip["name"], f"in {time.time() - t:.1f} s:", a.get("error") or (a.get("render") or {}).get("kind", "not stabilized"))
     with open(os.path.join(ARGS, clip["id"] + ".json"), "w") as f:
         json.dump(a, f)
@@ -475,13 +521,26 @@ def shader_for(clip, out, i):
 
 
 def curve_shader(curve):
-    """A log curve's look to HLG (the dlogm plugin's shader for it, registry.json's `hdr`), None: not a log curve the
-    player plays, or its shader isn't there"""
-    c = LOG_CURVES.get(curve)
+    """A curve's look to HLG (the dlogm plugin's shader for it, registry.json's `hdr`): a log curve's, or the underwater
+    colour's (uw, its numbers per frame: uw_track). None: not a curve the player plays so, or its shader isn't there"""
+    c = LOG_CURVES.get(curve) or (UW if curve == "uw" else None)
     if not c or not c.get("hdr"):
         return None
     path = os.path.join(PLAYER, "dlogm", c["hdr"])
     return path if os.path.exists(path) else None
+
+
+def uw_track(i, start, end):
+    """afp-uw's command for the underwater colour's numbers of a render from `start` to `end` (seconds in the file), as
+    gyroflow-export has them for an export of that part: the clip's strength and highlights as the player has them
+    (render_args' dlogm.uw_strength, uw_highlights: the source's, else uwcolor.conf's), decoded on the GPU here"""
+    dl = i["args"].get("dlogm") or {}
+    strength = dl.get("uw_strength")
+    cmd = [os.path.join(BIN, "afp-uw"), i["source"], f"{start:.6f}", f"{end:.6f}",
+           "--strength", f"{1.0 if strength is None else float(strength):g}", "--highlights", "yes" if dl.get("uw_highlights") else "no"]
+    if os.path.exists("/dev/dri/renderD128"):
+        cmd += ["--hwaccel", "vaapi"]
+    return cmd
 
 
 def denoise_of(args):
@@ -575,13 +634,15 @@ def start_render(clip, n, upto=None, background=False):
     elif denoise_of(i["args"]) and DENOISE != "player":
         log("the clip's temporal denoise left out of", clip["name"], "(AFP_DENOISE=off)")
     # The log curve, as the player's dlogm plugin takes it (by the camera's metadata or set by hand for the source): its
-    # look to HLG, as the player's hdr look. A curve without one (the underwater colour, the player's per frame): as
-    # recorded, said in the log
+    # look to HLG, as the player's hdr look. The underwater colour (uw: a plain clip's, the source's setting) the same
+    # way, its shader's numbers per frame from afp-uw (below). A curve without one: as recorded, said in the log
     curve = (i["args"].get("dlogm") or {}).get("curve") or ""
     look = curve_shader(curve)
     if look:
         shaders.append(look)
         args.append("--hlg")
+        if curve == "uw":
+            args += ["-uw", "-"]
         # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10; highlights expanded
         m = LOOK.match(clip.get("look") or "hlg")
         if m and m.group(2):
@@ -611,8 +672,22 @@ def start_render(clip, n, upto=None, background=False):
             args += ["-every", str(every)]
     args += [i["source"], out] + shaders
     logf = open(os.path.join(out, "render.log"), "a")
-    proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),
-                            preexec_fn=(lambda: os.nice(10)) if background else None)
+    nice = (lambda: os.nice(10)) if background else None
+    # The underwater colour's numbers, from the render's first frame to its last (in the file), piped in as afp-uw
+    # measures them: it decodes the clip a second time (on the GPU), a step ahead of the render, which waits for it.
+    # It ends with the render (its pipe closed)
+    uw = None
+    if look and curve == "uw":
+        start = off + n * i["seg"]
+        uw = subprocess.Popen(uw_track(i, start, off + (min(end, i["duration"]) if end is not None else i["duration"])),
+                              stdout=subprocess.PIPE, stderr=logf, preexec_fn=nice)
+    proc = subprocess.Popen(args, stdin=uw.stdout if uw else None, stdout=logf, stderr=subprocess.STDOUT,
+                            env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"), preexec_fn=nice)
+    if uw:
+        uw.stdout.close()
+        threading.Thread(target=uw.wait, daemon=True).start()
+    # (the renders write it themselves)
+    logf.close()
     log("rendering", clip["name"], "from segment", n, "to", upto if upto is not None else "the end", ":", reply.get("mode", "no warp"),
         "(in the background)" if background else "")
     j = {"proc": proc, "dir": out, "started": time.time(), "from": n, "background": background, "clip": clip["id"]}
@@ -700,6 +775,13 @@ def prerender_worker():
             j = start_render(clip, first, upto if upto < i["count"] else None, background=True)
         j["proc"].wait()
         current["name"] = None
+        # A render that failed before its first segment (out of the GPU's memory, a file it can't read) isn't started
+        # again and again: the clip leaves the queue, said in the log
+        if (j["proc"].returncode or 0) > 0 and not os.path.exists(segment_path(clip, first)):
+            with lock:
+                if queue and queue[0] is item:
+                    queue.pop(0)
+            log("pre-rendering", clip["name"], "failed (afp-render exit", j["proc"].returncode, "): left out, see its render.log")
 
 
 threading.Thread(target=prerender_worker, daemon=True).start()
@@ -974,6 +1056,8 @@ class Handler(BaseHTTPRequestHandler):
         if len(parts) == 3 and parts[0] == "clip":
             cid, _, look = parts[1].partition("~")
             clip = next((c for c in clips() if c["id"] == cid), None)
+            if clip:
+                args_for_this_player(clip)
             if not clip or info(clip) is None or (look and not LOOK.match(look)):
                 return self.send(404, "no such clip", "text/plain")
             if not look and (wants_ts(self.headers, u.query) or jellyfin_ffmpeg(self.headers)):

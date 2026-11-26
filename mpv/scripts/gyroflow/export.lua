@@ -294,9 +294,7 @@ local function as_it_looks(st, how)
     -- The underwater colour (curve uw, the dlogm plugin's uwcolor.lua): its strength and highlights; for a photo (and
     -- its motion) the numbers its shader has now, the frame as it shows, else gyroflow-export measures them as it plays
     if curve == "uw" and look ~= "off" then
-        local u = mp.get_property_native("user-data/uwcolor") or {}
-        st.uw_strength = math.floor((tonumber(u.uw_strength) or 1) * 100 + 0.5) / 100
-        st.uw_highlights = u.uw_highlights == true
+        S.uw_of(st, mp.get_property_native("user-data/uwcolor"))
         local o = how.photo and mp.get_property_native("glsl-shader-opts") or {}
         local n = { tonumber(o.uw_dr), tonumber(o.uw_db), tonumber(o.uw_k), tonumber(o.uw_ev) }
         if #n == 4 then st.uw_params = n end

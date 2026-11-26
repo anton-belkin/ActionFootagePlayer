@@ -77,6 +77,7 @@ The binaries in `vs-gyroflow/src/bin/`:
 | `afp-meta` | workspace plugin (photo links); the Library | A file's link and tags read and written |
 | `afp-catalog` | workspace plugin; NAS Helper (`watch`) | The project's catalog from the command line |
 | `afp-rpu` | dlogm plugin (dv trims); `tools/make_dv_rpu.sh` | Dolby Vision RPUs for a look |
+| `afp-uw` | afp-stream (piped into `afp-render -uw`) | The underwater colour's numbers per frame for a stream's render, measured and eased as an export has them (`uwcolor.rs`) |
 
 `catalog/src/bin/afp-catalog.rs` builds the same tool from the catalog crate alone, for the NAS image.
 
@@ -272,7 +273,8 @@ All through mpv's `subprocess` command, asynchronously.
 The Library and the player never talk to the NAS Helper directly. They meet in the project's files and its catalog on
 the share. `afp-catalog watch` keeps the catalog current from the NAS's side. `afp_stream.py` asks a headless mpv with
 the player's own plugins how each file plays (`--script-opts-append=gyroflow-render_args=<file>`), gets the warp from
-`gyroflow-gpu-table --player` with the same request, and renders HLS with `afp-render` (VAAPI → libplacebo → hevc_vaapi).
+`gyroflow-gpu-table --player` with the same request, and renders HLS with `afp-render` (VAAPI → libplacebo → hevc_vaapi);
+a clip with the underwater colour gets its numbers per frame from `afp-uw`, piped in.
 `jellyfin.py` reads the stream's `/catalog.json` and writes `.strm` and `.nfo` files for a Jellyfin library.
 
 ## How a frame is drawn
@@ -484,7 +486,7 @@ luts/                          dlogm_hlg.cube, gplog_hlg.cube, NBCU's HLG→SDR 
 vs-gyroflow/
   src/lib.rs, src/*.rs         the engine and its modules (above)
   src/bin/                     gyroflow-gpu-table, gyroflow-export, gyroflow-probe, gyroflow-optical,
-                               gyroflow-project, afp-cut, afp-meta, afp-catalog, afp-rpu
+                               gyroflow-project, afp-cut, afp-meta, afp-catalog, afp-rpu, afp-uw
   resources/                   curated_lenses.json, lens_ratings.txt, lenses/ (the player's lens profiles)
   tests/                       integration tests (export_gpu, photo_dates, table_ahead)
 catalog/

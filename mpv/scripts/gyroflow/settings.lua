@@ -81,6 +81,15 @@ function M.of_view(v, here)
 end
 
 -- The flags that gyroflow-export's settings stand for (registry's cli), for tests/settings_json_test.py
+-- The underwater colour's strength and highlights as they play (the dlogm plugin's user-data/uwcolor: the source's,
+-- else uwcolor.conf's) into the settings `s`: what export.lua hands gyroflow-export, and render_args the NAS stream
+function M.uw_of(s, u)
+    u = type(u) == "table" and u or {}
+    s.uw_strength = math.floor((tonumber(u.uw_strength) or 1) * 100 + 0.5) / 100
+    s.uw_highlights = u.uw_highlights == true
+    return s
+end
+
 function M.flags()
     local out = {}
     for _, k in ipairs(reg.settings_json or {}) do

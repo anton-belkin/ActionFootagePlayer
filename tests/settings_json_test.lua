@@ -58,6 +58,12 @@ local r = settings.request({ project = "/a.gyroflow", level = "weak", lens = "st
                              chromatic = true, sphere_width = 4096 })
 expect("request", show(r), show({ project = "/a.gyroflow", level = "weak", lens = "stabilized", edges = "sphere", gpu_denoise = true }))
 
+-- The underwater colour as it plays (user-data/uwcolor), for the export and the NAS stream's render_args alike: the
+-- strength in hundredths, the highlights on only when they are
+expect("uw as it plays", show(settings.uw_of({ curve = "uw" }, { uw = true, uw_strength = 0.666, uw_highlights = true })),
+       show({ curve = "uw", uw_strength = 0.67, uw_highlights = true }))
+expect("uw without its state", show(settings.uw_of({}, nil)), show({ uw_strength = 1, uw_highlights = false }))
+
 -- Every setting the export takes has a flag it stood for (tests/settings_json_test.py looks for them)
 local flags = settings.flags()
 expect("--with-translation stands for translation", flags["--with-translation"], "translation")

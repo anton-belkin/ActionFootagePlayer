@@ -96,9 +96,9 @@ Read and ignored: `still_radius`, `still_tolerance`, and the VapourSynth path's 
 
 | Setting | Stored | Player | Export | Photo | Moment | Library | NAS stream |
 |---|---|---|---|---|---|---|---|
-| On | `source.uw`; default `uwcolor.conf:on` | `uwcolor.lua`; dlogm curve becomes `uw` (`underwater_hlg.glsl`) | the clip playing: `set.curve` uw; a saved view: `set.uw` | same | the original's | Source settings `SRC_UW`; `settings.uw` only when on; HDR kept (`resolve`) | **gap**: curve `uw` has no look ("no look for the curve") |
-| Brighter highlights | `source.uw_highlights`; `uwcolor.conf:highlights` | shader `uw_*` opts | `--uw-highlights` | same | the original's | `SRC_UW` "bright"; `settings.uw_highlights` | **gap** |
-| Strength | `source.uw_strength` (0–1); `uwcolor.conf:strength` | eases the shader's numbers | `--uw-strength` | same, plus `--uw-params` (the numbers on screen) | the original's | Source settings "Strength"; `settings.uw_strength` | **gap** |
+| On | `source.uw`; default `uwcolor.conf:on` | `uwcolor.lua`; dlogm curve becomes `uw` (`underwater_hlg.glsl`) | the clip playing: `set.curve` uw; a saved view: `set.uw` | same | the original's | Source settings `SRC_UW`; `settings.uw` only when on; HDR kept (`resolve`) | `dlogm.curve` uw: `underwater_hlg.glsl` with `afp-render -uw`, numbers from `afp-uw` (#335) |
+| Brighter highlights | `source.uw_highlights`; `uwcolor.conf:highlights` | shader `uw_*` opts | `--uw-highlights` | same | the original's | `SRC_UW` "bright"; `settings.uw_highlights` | `dlogm.uw_highlights` → `afp-uw --highlights` |
+| Strength | `source.uw_strength` (0–1); `uwcolor.conf:strength` | eases the shader's numbers | `--uw-strength` | same, plus `--uw-params` (the numbers on screen) | the original's | Source settings "Strength"; `settings.uw_strength` | `dlogm.uw_strength` → `afp-uw --strength`, measured and eased as the export |
 
 The defaults reach the Library through `render-defaults.json` (`publish` merges `user-data/uwcolor/defaults`).
 **Gap**: `defaults_of`, the fallback when that file is missing, reads only `gyroflow.conf`, so `uwcolor.conf` is

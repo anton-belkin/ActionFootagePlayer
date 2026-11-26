@@ -379,31 +379,12 @@ impl Schedule {
     /// The numbers at each of `times` (ascending, seconds in the clip): the first measurement taken at once, then each
     /// one the target from when it comes back (LATENCY after it started), eased towards at 20 Hz as uwcolor.lua does
     pub fn at(&self, times: &[f64]) -> Vec<Estimate> {
-        let key = |e: &Estimate| [e.dr, e.db, e.k, e.ev];
         let Some(first) = self.measured.first() else { return vec![Estimate::default(); times.len()] };
-        let mut cur = key(first);
-        let mut f = first.f;
-        let mut target = cur;
-        let mut next = 1;
-        let mut clock = self.from;
+        let mut e = Easing::new(self.from, first);
         let mut out = Vec::with_capacity(times.len());
         for &t in times {
-            while clock + TICK <= t + 1e-9 {
-                clock += TICK;
-                // A measurement back by now: the new target
-                while next < self.measured.len() && self.from + next as f64 * MIN_GAP + LATENCY <= clock + 1e-9 {
-                    target = key(&self.measured[next]);
-                    f = self.measured[next].f;
-                    next += 1;
-                }
-                let far = (0..4).any(|i| (target[i] - cur[i]).abs() > FAR[i]);
-                let a = 1.0 - (-TICK / if far { TAU_FAST } else { TAU_SLOW }).exp();
-                for i in 0..4 {
-                    let d = target[i] - cur[i];
-                    if d.abs() > 0.002 { cur[i] += d * a; }
-                }
-            }
-            out.push(Estimate { dr: cur[0], db: cur[1], k: cur[2], ev: cur[3], f });
+            while e.clock + TICK <= t + 1e-9 { e.tick(&self.measured); }
+            out.push(e.now());
         }
         out
     }
@@ -413,6 +394,93 @@ impl Schedule {
         let m = |g: fn(&Estimate) -> f64| median(&self.measured.iter().map(g).collect::<Vec<_>>());
         Estimate { dr: m(|e| e.dr), db: m(|e| e.db), k: m(|e| e.k), ev: m(|e| e.ev), f: m(|e| e.f) }
     }
+}
+
+/// Playback's easing, tick by tick (TICK): Schedule::at, and a stream's numbers while its measurements come in (track)
+pub struct Easing { from: f64, clock: f64, cur: [f64; 4], target: [f64; 4], f: f64, next: usize }
+
+impl Easing {
+    /// Started at `from`, the first measurement taken at once
+    pub fn new(from: f64, first: &Estimate) -> Easing {
+        let k = [first.dr, first.db, first.k, first.ev];
+        Easing { from, clock: from, cur: k, target: k, f: first.f, next: 1 }
+    }
+
+    /// The clock: the numbers (now) are a frame's from here until the next tick
+    pub fn clock(&self) -> f64 { self.clock }
+
+    /// The numbers now
+    pub fn now(&self) -> Estimate { Estimate { dr: self.cur[0], db: self.cur[1], k: self.cur[2], ev: self.cur[3], f: self.f } }
+
+    /// How many measurements (the first one counted) the next tick takes in where there are that many: the ones back
+    /// by then
+    pub fn wants(&self) -> usize {
+        let clock = self.clock + TICK;
+        let mut n = self.next;
+        while self.from + n as f64 * MIN_GAP + LATENCY <= clock + 1e-9 { n += 1; }
+        n
+    }
+
+    /// One tick on: a measurement of `measured` back by then is the new target, and the numbers move towards it,
+    /// quickly while far
+    pub fn tick(&mut self, measured: &[Estimate]) {
+        self.clock += TICK;
+        while self.next < measured.len() && self.from + self.next as f64 * MIN_GAP + LATENCY <= self.clock + 1e-9 {
+            let m = &measured[self.next];
+            self.target = [m.dr, m.db, m.k, m.ev];
+            self.f = m.f;
+            self.next += 1;
+        }
+        let far = (0..4).any(|i| (self.target[i] - self.cur[i]).abs() > FAR[i]);
+        let a = 1.0 - (-TICK / if far { TAU_FAST } else { TAU_SLOW }).exp();
+        for i in 0..4 {
+            let d = self.target[i] - self.cur[i];
+            if d.abs() > 0.002 { self.cur[i] += d * a; }
+        }
+    }
+}
+
+/// The numbers a stream renders with (afp-uw, for the NAS stream's afp-render), as an export from `from` has them
+/// (Schedule::at), while the measurements come in: `measure` gives the next one (of the frames at measure_times(from,
+/// to)), None when there are no more. From `from` until the clock passes `to`, each tick's clock and the shader's
+/// numbers go to `out` (false: stop). A frame at time t takes the last of them whose clock is at most t (+1e-9): what
+/// Schedule::at gives it. Nothing when there's no measurement at all
+pub fn track(from: f64, to: f64, settings: &Settings, mut measure: impl FnMut() -> Option<Estimate>, mut out: impl FnMut(f64, Params) -> bool) {
+    let Some(first) = measure() else { return };
+    let mut measured = vec![first];
+    let mut ended = false;
+    let mut e = Easing::new(from, &first);
+    loop {
+        if !out(e.clock(), Params::new(&e.now(), settings).clamped()) || e.clock() > to { return; }
+        let want = e.wants();
+        while !ended && measured.len() < want {
+            match measure() { Some(m) => measured.push(m), None => ended = true }
+        }
+        e.tick(&measured);
+    }
+}
+
+/// The bytes of a frame measure_args has ffmpeg give: 960x540 bgr0
+pub const FRAME_BYTES: usize = GRID.0 * 3 * GRID.1 * 3 * 4;
+
+/// ffmpeg's arguments for frames to measure (uwcolor.lua's grab): `count` frames from `at` (seconds in the file),
+/// MIN_GAP apart when `regular` (a video's, from one decoder) else the one there, each 960x540 by area, bgr0 on stdout
+/// (FRAME_BYTES each). `hwaccel`: videotoolbox (macOS, the player's decoder), vaapi (the NAS: decoded on its GPU, only
+/// the frames measured downloaded), none: ffmpeg's own decoder
+pub fn measure_args(cmd: &mut std::process::Command, path: &std::path::Path, at: f64, count: usize, regular: bool, hwaccel: Option<&str>) {
+    cmd.args(["-v", "error", "-nostdin"]);
+    let mut vf = if regular { format!("fps=fps={:.6},", 1.0 / MIN_GAP) } else { String::new() };
+    match hwaccel {
+        Some("vaapi") => {
+            cmd.args(["-hwaccel", "vaapi", "-hwaccel_output_format", "vaapi"]);
+            vf += "hwdownload,format=nv12|p010le,";
+        }
+        Some(h) => { cmd.args(["-hwaccel", h]); }
+        None => {}
+    }
+    vf += &format!("scale={}:{}:flags=area", GRID.0 * 3, GRID.1 * 3);
+    cmd.args(["-ss", &format!("{:.3}", at.max(0.0)), "-i"]).arg(path)
+        .args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "bgr0", "-"]);
 }
 
 #[cfg(test)]
@@ -465,6 +533,64 @@ mod tests {
             n += 1;
         }
         assert!(n >= 5);
+    }
+
+    // A stream's numbers, line by line as its measurements come in, are an export's from the same point (Schedule::at)
+    #[test]
+    fn uw_track_as_the_schedule() {
+        let a = Estimate { dr: 0.2, db: 0.3, k: 0.1, ev: 0.5, f: 1.0 };
+        let b = Estimate { dr: 0.6, db: 0.8, k: 0.3, ev: 1.0, f: 0.8 };
+        let s = Settings { strength: 0.85, highlights: true };
+        for (from, to, fps) in [(10.0, 16.0, 30.0), (3.003, 4.0, 59.94), (0.0, 0.3, 25.0)] {
+            let times = measure_times(from, to);
+            let measured: Vec<Estimate> = times.iter().map(|&t| if t < from + 1.7 { a } else { b }).collect();
+            let frames: Vec<f64> = (0..).map(|i| from + i as f64 / fps).take_while(|&t| t <= to).collect();
+            let want: Vec<Params> = Schedule::new(from, measured.clone()).at(&frames).iter().map(|e| Params::new(e, &s).clamped()).collect();
+            let mut given = measured.clone().into_iter();
+            let mut asked = 0;
+            let mut lines: Vec<(f64, Params)> = Vec::new();
+            track(from, to, &s, || { asked += 1; given.next() }, |c, p| { lines.push((c, p)); true });
+            assert!(lines.last().unwrap().0 > to);
+            assert!(asked <= measured.len() + 1);
+            for (t, w) in frames.iter().zip(&want) {
+                let got = lines.iter().take_while(|(c, _)| *c <= t + 1e-9).last().unwrap().1;
+                assert_eq!(got, *w, "frame at {t} from {from}");
+            }
+        }
+    }
+
+    // Measurements that stop early (the clip's end): the last one's numbers kept, as the export pads them; and a
+    // reader that stops it
+    #[test]
+    fn uw_track_past_the_end() {
+        let a = Estimate { dr: 0.2, db: 0.3, k: 0.1, ev: 0.5, f: 1.0 };
+        let mut n = 0;
+        let mut last = None;
+        track(5.0, 9.0, &Settings::default(), || { n += 1; (n <= 3).then_some(a) }, |c, p| { last = Some((c, p)); true });
+        let (c, p) = last.unwrap();
+        assert!(c > 9.0);
+        assert_eq!(p, Params::new(&a, &Settings::default()).clamped());
+        let mut lines = 0;
+        track(0.0, 100.0, &Settings::default(), || Some(a), |_, _| { lines += 1; lines < 5 });
+        assert_eq!(lines, 5);
+    }
+
+    // The NAS's measurement: decoded on its GPU, only the frames measured downloaded, then scaled as everywhere else
+    #[test]
+    fn uw_measure_args() {
+        let args = |hw| {
+            let mut c = std::process::Command::new("ffmpeg");
+            measure_args(&mut c, std::path::Path::new("/c/G.MP4"), 1.25, 7, true, hw);
+            c.get_args().map(|a| a.to_string_lossy().into_owned()).collect::<Vec<_>>()
+        };
+        let v = args(Some("vaapi"));
+        let vf = &v[v.iter().position(|a| a == "-vf").unwrap() + 1];
+        assert_eq!(vf, "fps=fps=2.500000,hwdownload,format=nv12|p010le,scale=960:540:flags=area");
+        assert!(v.windows(2).any(|w| w == ["-hwaccel_output_format", "vaapi"]));
+        assert!(v.windows(2).any(|w| w == ["-ss", "1.250"]) && v.windows(2).any(|w| w == ["-frames:v", "7"]));
+        let v = args(None);
+        assert!(!v.iter().any(|a| a == "-hwaccel"));
+        assert_eq!(v[v.iter().position(|a| a == "-vf").unwrap() + 1], "fps=fps=2.500000,scale=960:540:flags=area");
     }
 
     // Playback's easing: taken at once at the start, then glides to a new scene's numbers within a second or two

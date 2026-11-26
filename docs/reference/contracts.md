@@ -677,7 +677,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `library-list` | `mpv/scripts/workspace/librarylist.lua` | `mpv/scripts/side-panel/main.lua` |
 | `osc/visibility` | — | `mpv/scripts/agent/main.lua` |
 | `side_panel/loaded` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/notify_client.lua` |
-| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/journal.lua`, `mpv/scripts/workspace/main.lua` and 1 more |
+| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/journal.lua` and 2 more |
 | `uwcolor/defaults` | — | `mpv/scripts/gyroflow/bundle.lua`, `mpv/scripts/workspace/transform.lua` |
 | `view360` | `mpv/scripts/view360/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/side-panel/scrub.lua` |
 | `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 13 more |

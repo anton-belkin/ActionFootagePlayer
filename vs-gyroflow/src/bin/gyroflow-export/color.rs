@@ -78,17 +78,12 @@ impl Uw {
 // frame decoded (VideoToolbox on macOS), 960x540 by area, bgr0 (uwcolor::estimate_bgr0). Times MIN_GAP apart from
 // one decoder (a video's), others each by its own
 pub(crate) fn uw_measure(path: &Path, times: &[f64]) -> Result<Vec<vs_gyroflow::uwcolor::Estimate>, String> {
-    use vs_gyroflow::uwcolor::{ self as uw, GRID, MIN_GAP };
-    let frame_bytes = GRID.0 * 3 * GRID.1 * 3 * 4;
+    use vs_gyroflow::uwcolor::{ self as uw, FRAME_BYTES, MIN_GAP };
+    let frame_bytes = FRAME_BYTES;
     let run = |at: f64, count: usize, regular: bool| -> Result<Vec<uw::Estimate>, String> {
         let mut cmd = ffmpeg_command("ffmpeg");
-        cmd.args(["-v", "error", "-nostdin"]);
-        if cfg!(target_os = "macos") { cmd.args(["-hwaccel", "videotoolbox"]); }
-        let scale = format!("scale={}:{}:flags=area", GRID.0 * 3, GRID.1 * 3);
-        let vf = if regular { format!("fps=fps={:.6},{scale}", 1.0 / MIN_GAP) } else { scale };
-        cmd.args(["-ss", &format!("{:.3}", at.max(0.0)), "-i"]).arg(path)
-            .args(["-map", "0:v:0", "-frames:v", &count.to_string(), "-vf", &vf, "-f", "rawvideo", "-pix_fmt", "bgr0", "-"])
-            .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        uw::measure_args(&mut cmd, path, at, count, regular, cfg!(target_os = "macos").then_some("videotoolbox"));
+        cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
         let mut child = cmd.spawn().map_err(|e| format!("ffmpeg: {e}"))?;
         let mut out = child.stdout.take().unwrap();
         let mut got = Vec::with_capacity(count);

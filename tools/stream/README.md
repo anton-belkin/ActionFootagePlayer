@@ -77,8 +77,17 @@ its own interpolation and color fringes (`AFP_INTERP`, `AFP_CHROMATIC`), the hdr
 look the player starts in, and the temporal denoise only with `AFP_DENOISE=player`.
 
 - **The looks:** the log curve is the dlogm plugin's (`dlogm.curve` in the answer), and its look is the plugin's own
-  shader for it (registry.json's curves, `hdr`), baked for every log curve into the image by `make_looks.py`. The
-  underwater colour (`uw`) isn't a log curve and needs the player's per-frame estimate: such a clip streams as recorded.
+  shader for it (registry.json's curves, `hdr`), baked for every log curve into the image by `make_looks.py`.
+- **The underwater colour** (#335, the curve `uw`: a plain clip's, set for its source): the player's
+  `underwater_hlg.glsl` (copied into the image by `make_looks.py`) makes it HLG like a log curve's look, so the TV
+  looks follow. Its numbers change frame by frame: `afp-uw` (vs-gyroflow, `src/uwcolor.rs`, the twin of the player's
+  rule) measures and eases them as gyroflow-export does for an export from the render's start, with the clip's
+  strength and highlights from the answer (`dlogm.uw_strength`, `uw_highlights`). It decodes the clip a second time
+  (VA-API, only the frames measured, 2.5 a second, leave the GPU), and pipes a line per 50 ms tick into `afp-render
+  -uw -`, which waits for the line a frame needs: the measuring runs a step ahead (the frame half a second ahead, as
+  the player measures it), never behind. A render's first segment comes ~0.3-0.5 s later (the first measurement).
+  Each render starts its easing from its own start, as an export of that part and the player after a seek do, so a
+  seek's renders meet with at most a small step in colour at the segment where they meet.
 - **The temporal denoise** (`AFP_DENOISE=player`): where the player has it on for the clip (`render.settings`:
   `denoise`, `temporal_denoise` from `/config/player`'s gyroflow.conf, `denoise_strong`, `denoise_grain`), the warp
   is asked with its denoise passes and `afp-render -behind <n>` renders it as gyroflow-export's GPU path does: the
