@@ -182,6 +182,7 @@ local function export_next()
     mp.commandv("script-message-to", "gyroflow", "export-batch", utils.format_json({
         id = tostring(j.id), clip = m.original, view = m.rendered, project = m.project, alone = m.alone,
         from = m.link["in"], to = m.link.out, output = output, link = utils.format_json(l), sdr = sdr, export = m.export,
+        dv = not sdr and m.dv or nil,
         progress = j.progress, reply = mp.get_script_name(), done = "export-batch-done",
     }))
 end
@@ -267,9 +268,10 @@ end
 -- for whose render isn't current, made (again) in _Renders/. The ones current are left as they are
 -- `items` (Action Footage Library's Share, its batch `share`): the renders the Library's cache lacks, each
 -- { of (moment, photo or clip), name, file (a moment's link file), clip (the original), t / crop / camera (a photo),
--- sdr, out (its file in the cache, _Renders/<hash>.<profile>.mov; a photo's without its extension), link (what the
--- render carries: its recipe and hash, worked out by the Library, renders.rs) }. Made as they are asked for: what's
--- current is the Library's to know
+-- sdr, dv (HDR with the player's Dolby Vision RPU for this transfer: hlg, pq, uw; renders.rs dolby_vision), out (its
+-- file in the cache, _Renders/<hash>.<profile>.mov; a photo's without its extension), link (what the render carries:
+-- its recipe and hash, worked out by the Library, renders.rs) }. Made as they are asked for: what's current is the
+-- Library's to know
 local function render_moments(root, profiles, items)
     if export_job then return end
     lens_ids = {}
@@ -294,6 +296,8 @@ local function render_moments(root, profiles, items)
                 photo = it.of == "photo" and { t = it.t, crop = it.crop, camera = it.camera } or nil,
                 -- The Library's export settings (docs/design/export-settings.md): size, encoder, quality preset
                 export = type(it.export) == "table" and it.export or nil,
+                -- An HDR render's Dolby Vision, for its transfer (renders.rs dolby_vision: hlg, pq, uw)
+                dv = type(it.dv) == "string" and it.dv or nil,
             }
             -- The settings the Library's recipe has (renders.rs `settings`): rendered with them, so the render is what
             -- its hash says; what this player would have taken by itself is told back, for the Library to compare

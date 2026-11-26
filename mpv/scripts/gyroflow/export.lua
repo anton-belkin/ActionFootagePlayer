@@ -316,11 +316,24 @@ local function as_it_looks(st, how)
     end
 end
 
+-- A saved view in HDR with Dolby Vision (the Library's HDR renders: export-batch's `dv`, renders.rs dolby_vision: the
+-- render's transfer, hlg, pq, or uw with the underwater colour): the RPU file the dlogm plugin's dv look attaches for
+-- it, with each frame's own L1 where the player measures it, as Shift+E exports in the dv look. None where the player
+-- has no dv look (dlogm's dv_rpu empty: not the app's mpv on macOS)
+local function with_dv(st, dv)
+    local rpus = mp.get_property_native("user-data/dlogm/dv_rpu")
+    local rpu = type(rpus) == "table" and rpus[dv]
+    if type(rpu) ~= "string" or rpu == "" then return end
+    st.dv_rpu = rpu
+    if mp.get_property_native("user-data/dlogm/dv_live") == true then st.dv_live_l1 = true end
+end
+
 -- The one function every route makes its settings with: `view` nil, the clip as it plays (the gyroflow plugin's own
 -- settings, user-data/gyroflow/settings: what the warp plays with, the clean-up, Ctrl+j; with the look and colour as
 -- they play); else a saved view (another clip's, a moment's, a Library recipe's: settings.lua of_view, this computer's
--- for what it doesn't say). how: { sdr (a saved view: NBCU's SDR), photo, live, kind (video, photo), export (the
--- export's settings: exportsettings apply), youtube (HDR, without the SDR and Dolby Vision choices) }
+-- for what it doesn't say). how: { sdr (a saved view: NBCU's SDR), dv (a saved view: HDR with Dolby Vision, with_dv),
+-- photo, live, kind (video, photo), export (the export's settings: exportsettings apply), youtube (HDR, without the
+-- SDR and Dolby Vision choices) }
 local function export_settings(view, how)
     how = how or {}
     local st = {}
@@ -330,7 +343,7 @@ local function export_settings(view, how)
         as_it_looks(st, how)
     else
         st = S.of_view(view, here())
-        if how.sdr then st.sdr = "nbcu" end
+        if how.sdr then st.sdr = "nbcu" elseif how.dv then with_dv(st, how.dv) end
     end
     if how.youtube then st.sdr, st.dv_rpu, st.dv_live_l1 = nil, nil, nil end
     if how.export then es.apply(st, how.export, how.kind or "video") end
@@ -609,7 +622,8 @@ end)
 
 -- An export for the workspace plugin's batch mode (Action Footage Library's Export all moments): a clip's part with
 -- a saved view, nothing playing. { id, clip, view, project (a moment's own Gyroflow project), alone, from, to, output,
--- link, sdr, progress (gyroflow-export's progress file), reply, done }. The answer: <done> <id> { ok, error, out }.
+-- link, sdr, dv (HDR with Dolby Vision for this transfer: hlg, pq, uw; with_dv), progress (gyroflow-export's progress
+-- file), reply, done }. The answer: <done> <id> { ok, error, out }.
 -- export-batch-stop <id>: cancelled, as Shift+E twice cancels (the unfinished file removed)
 local batch_jobs = {}
 mp.register_script_message("export-batch", function(json)
@@ -625,8 +639,9 @@ mp.register_script_message("export-batch", function(json)
     local args = { EXPORT, "--force" }
     if req.progress then table.insert(args, "--progress"); table.insert(args, req.progress) end
     if control then table.insert(args, "--control"); table.insert(args, control) end
-    -- The Library's export settings (Share's dialog), else the defaults
-    local st = export_settings(type(req.view) == "table" and req.view or {}, { sdr = req.sdr == true, export = es.normalize(req.export, "video"), kind = "video" })
+    -- The Library's export settings (Share's dialog), else the defaults; its HDR renders with Dolby Vision (`dv`)
+    local dv = req.sdr ~= true and (req.dv == "hlg" or req.dv == "pq" or req.dv == "uw") and req.dv or nil
+    local st = export_settings(type(req.view) == "table" and req.view or {}, { sdr = req.sdr == true, dv = dv, export = es.normalize(req.export, "video"), kind = "video" })
     if type(req.project) == "string" then st.project = req.project end
     with_settings(args, st)
     if req.alone == true then table.insert(args, "--alone") elseif req.alone == false and type(req.project) == "string" then table.insert(args, "--whole") end
