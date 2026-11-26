@@ -306,7 +306,7 @@ local function quality_menu(g)
     end
     local dn = {}
     for _, r in ipairs(DENOISE_LEVELS) do
-        table.insert(dn, item(r[2], "script-message-to gyroflow quality temporal_denoise " .. r[1], { checked = (g.temporal_denoise or "full") == r[1] }))
+        table.insert(dn, item(r[2], "script-message-to gyroflow quality temporal_denoise " .. r[1], { checked = (g.temporal_denoise or "light") == r[1] }))
     end
     table.insert(items, submenu("Temporal denoise", dn))
     table.insert(items, SEPARATOR)

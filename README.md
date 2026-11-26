@@ -68,7 +68,8 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
    onto Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
-4. **Copy the clips off the card and double-click one.**
+4. **Copy the clips off the card and double-click one.** Opened with no video, the player shows how to begin, with
+   a sample dive to try when the app has one.
 
 `l` twice marks a part, `Shift+E` exports it, `Ctrl+s` goes through HDR and the SDR looks, `Ctrl+g` goes
 through the stabilization, a wider view of it, and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
@@ -175,7 +176,8 @@ oldest macOS those builds are made for.
 Open the disk image, drag ActionFootagePlayer onto Applications and open it from there (from the zip: unzip it and
 move it to Applications). It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
-it opens, it offers its setup:
+it opens from Applications, it asks whether to open your camera's videos with it (opened from the disk image, it says
+to move it to Applications first, and asks from there). Set Up does this:
 
 - it becomes the default app for MP4 videos (what DJI cameras record): double-clicking one plays it with all
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
@@ -351,7 +353,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `dlogm.conf`: `denoise=no` | `yes`: the noise reduction while it plays (no key or menu item any more: at playback rates the eye evens the noise out, and `Ctrl+p` cleans the paused frame). How strong it is: `glsl-shader-opts=denoise_strength=2` in `mpv.conf` |
 | `gyroflow.conf`: `hwdec=yes` | decode the clips it stabilizes on the GPU (`hwdec=auto`) whatever mpv's `hwdec` is (software decoding doesn't keep up with 4K); `no` leaves it to `hwdec` |
 | `gyroflow.conf`: `ask_when_slow=yes` | when the stabilization keeps dropping frames (more than 2 s), playback pauses and offers a smaller resolution, a lighter denoise or edge fill; what's picked is kept here. `no`: it plays on as it can |
-| `gyroflow.conf`: `view=normal` | what clips without a project start in: `normal`, or `wide` (the wider view) |
+| `gyroflow.conf`: `view=wide` | what clips without a project start in: `wide` (the wider view), or `normal` |
 | `gyroflow.conf`: `level=medium` | the level clips without a project start in: `weak`, `medium` or `strong` (`Ctrl+k`) |
 | `gyroflow.conf`: `horizon_lock=project` | the default horizon: `yes`, level (Gyroflow's horizon lock at 100 %, in exports too); `no`: free; `project`: as the preset has it. A clip with a `.gyroflow` plays with the project's |
 | `gyroflow.conf`: `underwater=auto` | the lens of sources without a correction of their own: `yes` under water with a flat port, `no` above water (or a dome port), `auto` as the camera says (its *In water* / *Out of water*; for cameras that don't record it, as the preset says). A clip with a `.gyroflow` plays with the project's. See Stabilization |
@@ -362,7 +364,7 @@ commas: `--script-opts-append=dji_telemetry-fields=depth,pressure`). The menu's 
 | `gyroflow.conf`: `edges=sphere` | what fills the edges the stabilized frame doesn't cover: `sphere` (what was seen in that direction of the world; where nothing was yet, the colors around spread in), `smooth` (only the frame's own colors spread out from its edge), or `off` (the project's background color) |
 | `gyroflow.conf`: `edges_blur=2` | blur of the edge fill (% of the frame height) |
 | `gyroflow.conf`: `resolution=auto` | the stabilized frame rendered as big as the window shows it (a 1080p display: a quarter of 4K's pixels to stabilize and shade), mpv scaling it to the screen; at most 1080p while the temporal denoise (`Ctrl+p`) is on: at a Retina screen's size it drops frames full screen. `display`: the display's size, denoise or not. `video`: at the video's own size (up to 4K). `1080` or `720`: no bigger than the display, and its short side no longer than that. Right click > Quality, or the panel's Performance & Quality › Size, sets it |
-| `gyroflow.conf`: `still=yes`, `temporal_denoise=full`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
+| `gyroflow.conf`: `still=yes`, `temporal_denoise=light`, `denoise_strong=no`, `still_delay=0.4`, `still_grain=0.25` | the temporal denoise (`Ctrl+p`): on or off by default (a clip's transform has its own; the panel's Use as default sets this), how much of it this computer does (`off` leaves it out whatever a clip's says) (`full`: 5 frames on each side, `light`: 3, `off`: none; Performance & Quality), Stronger by default (a clip's transform has its own: no grain kept, open water smoothed), how long after pausing the paused frame is cleaned (s), and how much of the grain stays (0: none, 1: all) |
 | `gyroflow.conf`: `live_photo=yes` | photos with the motion around them: `live` (Live Photo, macOS), `motion` (Motion Photo), `no` (the still alone); `yes`: Live Photos on macOS, Motion Photos elsewhere. The Save frame panel sets it |
 | `gyroflow.conf`: `workers`, `lookahead`, `max_fps`, `fps_limit`, `edge_fill_rate`, `paused_full_size`, `zoom_margin`, `sphere_max_fps`, `sphere_cache_mb`, `gpu` | the VapourSynth path's (taken out, 2026-11): read and ignored |
 | `gyroflow.conf`: `gyroflow_app=` | Linux, Windows: the Gyroflow executable `Ctrl+e` opens projects with |

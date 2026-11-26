@@ -45,7 +45,7 @@ local LEVEL_LABELS = { weak = "weak (10 % crop, smoothness 50 %)", medium = "med
 local function defaults_bundle()
     local horizon_default = (o.horizon_lock == "yes" or o.horizon_lock == "no") and o.horizon_lock or preset_horizon()
     return {
-        view = o.view == "wide" and "wide" or "normal",
+        view = o.view == "normal" and "normal" or "wide",
         level = LEVEL_LABELS[o.level] and o.level or "medium",
         horizon_lock = horizon_default,
         chromatic = o.chromatic == true,

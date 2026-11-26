@@ -274,7 +274,7 @@ local S = require 'settings'
 local function here()
     local g = function(k) return mp.get_property_native("user-data/gyroflow/" .. k) end
     local live = type(g("settings")) == "table" and g("settings") or {}
-    return { edges = g("edges"), edges_blur = g("edges_blur"), temporal_denoise = g("temporal_denoise") or "full",
+    return { edges = g("edges"), edges_blur = g("edges_blur"), temporal_denoise = g("temporal_denoise") or "light",
              denoise_grain = live.denoise_grain, session = g("session") or {}, defaults = g("defaults") or {} }
 end
 

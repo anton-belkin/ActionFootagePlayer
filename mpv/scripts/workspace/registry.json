@@ -34,7 +34,7 @@
 
   "settings_about": "What a clip is read as and shown with (transform.lua, renders.rs), key by key, in order within each group. group: bundle (the transform, kept whole), uw (the underwater colour: the source's, in a render's settings only when on), input (the source's own correction), opts (the computer's, gyroflow.conf's, in a render's recipe as opts). kind: enum (one of values), bool, number (min-max), ratio (one of values, or any W:H landscape-wise). neutral: what a bundle from before the key existed plays as. project: a Gyroflow project owns it. conf / conf_default: gyroflow.conf's option and the plugin's default for it; not_in_conf: values the option can't take (the default instead). recipe: in the Library's render recipe. exported: gyroflow-export takes it, as cli says (player_only otherwise, with why). gpu: its field in the warp's request to gyroflow-gpu-table (gyroflow/bundle.lua player_args), where it has one.",
   "settings": [
-    { "key": "view", "group": "bundle", "kind": "enum", "values": ["normal", "wide", "off"], "conf": "view", "conf_default": "normal", "not_in_conf": ["off"],
+    { "key": "view", "group": "bundle", "kind": "enum", "values": ["normal", "wide", "off"], "conf": "view", "conf_default": "wide", "not_in_conf": ["off"],
       "recipe": true, "exported": true, "cli": ["--wide", "--no-stabilize", "--lens-only"], "gpu": "wide" },
     { "key": "level", "group": "bundle", "kind": "enum", "values": ["weak", "medium", "strong"], "project": true, "conf": "level", "conf_default": "medium",
       "recipe": true, "exported": true, "cli": ["--level"], "gpu": "level" },
@@ -69,7 +69,7 @@
       "recipe": true, "exported": true, "cli": ["--edges"], "gpu": "edges" },
     { "key": "edges_blur", "group": "opts", "kind": "number", "conf": "edges_blur", "conf_default": 2,
       "recipe": true, "exported": true, "cli": ["--edges-blur"], "gpu": "edges_blur" },
-    { "key": "temporal_denoise", "group": "opts", "kind": "enum", "values": ["full", "light", "off"], "conf": "temporal_denoise", "conf_default": "full",
+    { "key": "temporal_denoise", "group": "opts", "kind": "enum", "values": ["full", "light", "off"], "conf": "temporal_denoise", "conf_default": "light",
       "recipe": true, "exported": true, "cli": ["--denoise"] }
   ],
 

@@ -560,7 +560,7 @@ pub(crate) fn apply_settings(opts: &mut Options, j: &serde_json::Value) -> Resul
     // The temporal denoise: on for the clip, and how much (none, light: 3 frames each side, full: 5)
     if denoise_on.is_some() || amount.is_some() {
         let on = denoise_on.unwrap_or(true);
-        opts.denoise = match amount.as_deref().unwrap_or("full") {
+        opts.denoise = match amount.as_deref().unwrap_or("light") {
             _ if !on => 0,
             "off" => 0, "light" => 3, "full" => 5,
             a => return Err(format!("temporal_denoise {a}")),

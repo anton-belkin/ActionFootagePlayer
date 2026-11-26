@@ -23,8 +23,10 @@
 -- Script messages (`script-message-to side_panel <message>`):
 --   tab <name>                      open the panel on that part
 --   popover [<id>]                  open a list over the panel (export: the Output tab's Export kinds), or close it
---   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file, the cards and the
---                                   dialog (notify.lua) over it (for checking its look without a window)
+--   dump <path> <w> <h> [<scale>]   write what it draws at that window size as an .ass file, the welcome card
+--                                   (welcome.lua), the cards and the dialog (notify.lua) over it (for checking its
+--                                   look without a window)
+--   welcome [show|hide]             the welcome card shown or hidden now (welcome.lua)
 
 local mp = require 'mp'
 -- The responsiveness journal (workspace/journal.lua, docs/design/responsiveness-journal.md): this plugin's keys, subprocesses,
@@ -44,6 +46,8 @@ local exportkind = require 'exportkind'
 local tagchips = require 'tagchips'
 -- What the player is doing: the cards at the top of the video and the name dialog (notify.lua), for all the plugins
 local notify = require 'notify'
+-- What the window shows with no video: how to begin (welcome.lua); found again as package.loaded.welcome
+require 'welcome'
 -- The lens dialog (Source › Lens for the mode › Choose…), one of the panel's popovers
 local lensdlg = require 'lensdialog'
 -- The usage trace's part here (docs/design/usage-trace.md): the tab shown, and "Something's wrong here" (Alt+b, the flag)
@@ -1312,7 +1316,7 @@ local function quality_part(u, x, w, y)
                                                                 { "video", "Video" } }, q("resolution")), tostring(g.resolution))
     y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
     y = u:select_row(x, w, y + 4 * s, "denoise", "Temporal denoise", choices({ { "off", "Off" }, { "light", "Light" }, { "full", "Full" } }, q("temporal_denoise")),
-                     tostring(g.temporal_denoise or "full"), { field = math.floor(w * 0.42) })
+                     tostring(g.temporal_denoise or "light"), { field = math.floor(w * 0.42) })
     y = u:caption(x, w, y, "Full: 5 frames on each side. Light: 3, a quarter lighter on the GPU and a little less clean. Off: none on this computer, whatever Transform's switch says")
     y = u:select_row(x, w, y + 4 * s, "edges", "Edges", choices({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" },
                                                                   { "off", "Background color" } }, "script-message-to gyroflow edges"), g.edges,
@@ -2356,6 +2360,10 @@ mp.register_script_message("dump", function(path, w, h, s, mx, my, hovered, prev
     -- The cards and the dialog over them (notify.lua), as they are now
     local t0 = (platform == "darwin" and not mp.get_property_native("fullscreen") and mp.get_property_native("border") ~= false) and TITLE_BAR * s or 0
     local area = { x0 = 0, y0 = t0, x1 = w - width(s), y1 = h - (docked() and bar.HEIGHT * s or 0), s = s }
+    -- The welcome card under them, when it shows (welcome.lua)
+    if package.loaded.welcome.shown() then
+        for _, e in ipairs(package.loaded.welcome.draw(w, h, area).events) do u.events[#u.events + 1] = e end
+    end
     for _, e in ipairs(notify.draw(w, h, area).events) do u.events[#u.events + 1] = e end
     local f = io.open(path, "w")
     if not f then return mp.msg.error("can't write " .. path) end

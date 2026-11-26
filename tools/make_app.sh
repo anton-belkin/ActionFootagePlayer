@@ -111,7 +111,7 @@ for f in gyroflow-probe gyroflow-project gyroflow-gpu-table gyroflow-export afp-
 done
 install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
-install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/navkeys.lua mpv/scripts/side-panel/welcome.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
 install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua mpv/scripts/side-panel/trace.lua "$panel/"
 install -m 644 mpv/scripts/side-panel/scrub.lua "$panel/"

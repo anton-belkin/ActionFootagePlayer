@@ -96,7 +96,7 @@
 --                app's own (it frees them itself); yes: always; no: never
 --   ask_when_slow=yes  when the stabilization keeps dropping frames, playback pauses and offers a lighter
 --                resolution, edge fill or temporal denoise (quality.lua); no: it plays on as it can
---   view=normal  the view clips without a project start in: normal, or wide (the wider view)
+--   view=wide    the view clips without a project start in: wide (the wider view, the default since 2026-11-26), or normal
 --   level=medium  the level clips without a project start in: weak, medium or strong (Ctrl+k)
 --   lookahead    the VapourSynth path's (read and ignored): the GPU table reads the motion data ahead on its own
 --   horizon_lock=project  clips without a project: yes, the horizon locked level (Gyroflow's horizon lock at 100 %),
@@ -127,9 +127,9 @@
 --                clip playing (gyroflow-export --translation, ~half the clip's length; Osmo Action 6, which records its
 --                accelerometer), then switches them off and on. Kept in the cache (vs-gyroflow's translation.rs).
 --                The side panel's Transform has it too
---   temporal_denoise=full  how much of it this computer does (Performance & Quality): full, 5 frames on each side
---                (the picture 5 frames behind, the sound delayed as much); light, 3 (about a quarter
---                cheaper, a little less clean); off, none, whatever Ctrl+p says (Ctrl+p's switch kept for when it's
+--   temporal_denoise=light  how much of it this computer does (Performance & Quality): light, 3 frames on each side
+--                (the default since 2026-11-26: about a quarter cheaper than full, a little less clean, what Anton
+--                plays with); full, 5 (the picture 5 frames behind, the sound delayed as much); off, none, whatever Ctrl+p says (Ctrl+p's switch kept for when it's
 --                on again). still_radius and still_tolerance, from before it, are read and ignored
 --   denoise_strong=no  the transform's Stronger by default (the panel's Transform, for a very noisy clip, kept with
 --                its transform): no grain kept, more frames taken in, the frame's own pixel judged too, and the luma
@@ -189,13 +189,13 @@ do
     if ok then longpath.install(utils) end
 end
 
-local o = { hwdec = true, ask_when_slow = true, view = "normal", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, resolution = "auto", still = true, translation = true, temporal_denoise = "full", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, gpu_flush = "auto", render_args = "", lens_quick = true,
+local o = { hwdec = true, ask_when_slow = true, view = "wide", level = "medium", lookahead = 4, horizon_lock = "project", underwater = "auto", chromatic = true, chromatic_skip = false, aspect = "original", orientation = "as-is", projection = "linear", lens = "corrected", edges = "sphere", edges_blur = 2, resolution = "auto", still = true, translation = true, temporal_denoise = "light", denoise_strong = false, still_radius = 5, still_delay = 0.4, still_grain = 0.25, still_tolerance = 1.5, live_photo = "yes", export_size = "original", export_encode = "fast", export_quality = "displayed", photo_size = "original", photo_quality = "displayed", gyroflow_app = "", sphere_width = 0, stitching_distance = 0, gpu_flush = "auto", render_args = "", lens_quick = true,
             -- The VapourSynth path's, from before (a gyroflow.conf may have them): read and ignored
             gpu = "", workers = "", max_fps = "", fps_limit = "", edge_fill_rate = "", paused_full_size = "", zoom_margin = "", sphere_max_fps = "", sphere_cache_mb = "" }
 options.read_options(o, "gyroflow")
 -- The temporal denoise's frames on each side, by how much of it this computer does (still.lua's, the shader's)
 local DENOISE_FRAMES = { full = 5, light = 3 }
-if o.temporal_denoise ~= "light" and o.temporal_denoise ~= "off" then o.temporal_denoise = "full" end
+if o.temporal_denoise ~= "full" and o.temporal_denoise ~= "off" then o.temporal_denoise = "light" end
 if not ({ auto = true, display = true, video = true })[o.resolution] and not tonumber(o.resolution) then o.resolution = "auto" end
 o.still_radius = DENOISE_FRAMES[o.temporal_denoise] or 5
 o.still_grain = math.max(0, math.min(1, tonumber(o.still_grain) or 0.25))

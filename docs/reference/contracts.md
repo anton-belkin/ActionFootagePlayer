@@ -508,6 +508,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | side_panel | `popover` | `mpv/scripts/side-panel/main.lua` | `tests/lens_dialog_ipc.py` |
 | side_panel | `scrub` | `mpv/scripts/side-panel/main.lua` | — |
 | side_panel | `tab` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/workspace/common.lua`, `tests/afp_motion_ipc.py`, `tests/lens_dialog_ipc.py` |
+| side_panel | `welcome` | `mpv/scripts/side-panel/welcome.lua` | — |
 | view360 | `gesture` | `mpv/scripts/gyroflow/gestures.lua` | — |
 | view360 | `notify-answer` | `mpv/scripts/side-panel/notify_client.lua` | — |
 | view360 | `view360` | `mpv/scripts/view360/main.lua` | — |
@@ -560,7 +561,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | workspace | `view-revert` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `view-save` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 
-140 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
+141 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
 <!-- END GENERATED: script-messages -->
 ### user-data keys
 <!-- BEGIN GENERATED: user-data -->
@@ -760,6 +761,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_RAW_OUT` | — | `tools/edgefill/afpchain.c`, `tools/edgefill/clip.sh`, `tools/edgefill/synth/run.py` |
 | `AFP_READ_MBPS` | `vs-gyroflow/src/prefetch.rs` | `tests/gpu_ahead_e2e.py` |
 | `AFP_SEGMENT` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
+| `AFP_SETUP_MOVE` | `macos/player.sh`, `macos/setup-offer.lua` | — |
 | `AFP_SHARES` | `mpv/scripts/workspace/places.lua`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_STREAM` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_TEST_CLIP` | — | `vs-gyroflow/tests/table_ahead.rs` |
@@ -770,7 +772,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-79 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+80 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->
