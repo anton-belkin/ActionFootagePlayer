@@ -143,15 +143,15 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
     }
     let decoded = t0.elapsed();
     let measurements = analysis.finish()?;
-    let (correction, turn) = match &turn {
+    let (correction, turn, port_axis) = match &turn {
         Some(stabilizer) => {
-            let (c, t) = crate::in_camera_turn::fit(&stab, &measurements, stabilizer, &stop)?;
-            log::info!("{path}: {stabilizer}'s turn {:.2}° rms, {:.2}° from the picture, rounds {:?}", t.rms_deg, t.from_picture_rms_deg, t.rounds_deg);
-            (c, Some(t))
+            let (c, t, axis) = crate::in_camera_turn::fit(&stab, &measurements, stabilizer, &stop)?;
+            log::info!("{path}: {stabilizer}'s turn {:.2}° rms, {:.2}° from the picture, rounds {:?}; the port's axis from the bending in {:.0} % of the frames", t.rms_deg, t.from_picture_rms_deg, t.rounds_deg, t.tilt_share * 100.0);
+            (c, Some(t), axis)
         }
         None => {
             stab.set_optical_measurements(measurements)?;
-            (stab.gyro.read().optical_correction.as_deref().cloned().ok_or("the analysis gave no correction")?, None)
+            (stab.gyro.read().optical_correction.as_deref().cloned().ok_or("the analysis gave no correction")?, None, None)
         }
     };
     progress(1.0);
@@ -189,7 +189,7 @@ pub fn measure(video: &Path, settings: &Settings, mut progress: impl FnMut(f64),
     drop(p);
     log::info!("{path}: motion measured from the picture: {n} frames at {tw}x{th} decoded and tracked in {:.1} s, fitted in {:.1} s; {} of {} frames measured",
         decoded.as_secs_f64(), (t0.elapsed() - decoded).as_secs_f64(), correction.measured_frames, correction.frames);
-    MotionFile::new(header, correction)
+    MotionFile::new(header, correction)?.with_port_axis(port_axis)
 }
 
 /// `measure`, written to the clip's .afp-motion

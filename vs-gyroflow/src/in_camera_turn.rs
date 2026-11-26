@@ -17,14 +17,22 @@
 //   pulls δ to zero where the picture doesn't pin it down (frames nothing was tracked in: open water, a fish filling the
 //   frame); there the model stands in, and the clip plays about as recorded, instead of getting HyperSmooth's
 //   correction back the other way.
-// - Under water it's measured with the turn inside the housing (gyroflow/gyroflow#1302): the flat port refracts about
-//   the body's axis, not the picture's. Which turn that is depends on what's measured, so it's measured again with the
-//   turn found, in `ROUNDS` rounds.
+// - Under water the flat port refracts about the body's axis, not the picture's (gyroflow/gyroflow#1302): HyperSmooth
+//   turned the picture inside the housing. That axis is measured on its own, from how the picture bends (hs_tilt.rs:
+//   the research's bundle adjustment, taken where two halves of the tracks agree on it, the model's tilt elsewhere),
+//   and the turn is measured again with it, in `ROUNDS` rounds.
+//
+// Why two measures of one turn: the rounds fit the turn to the picture's motion from frame to frame, and put into it
+// whatever a small turn explains best (the gyro's timing, the rolling shutter, the lens, parallax, the tracking's noise).
+// Good for the picture's orientation; as the port's axis it bends the picture back out of shape: the tracks the fit
+// didn't see miss as much at the edges as with no tilt at all (GX010564 2.2-2.8 px, the bending's axis 1.16, the
+// centre 1.25; hs_tilt::rigidity, docs/design/hero7-hypersmooth-iori.md).
 //
 // The result is an ordinary optical correction of the gyro's quaternions, kept in the clip's .afp-motion with the gyro
-// kept (afp_motion.rs, `Header::in_camera_turn`). Played, it composes onto the gyro as any correction does, and the
-// same turn goes to gyroflow-core as the clip's image orientations (`set_image_orientations`): what a HERO12 has from its
-// file. From there the clip is a HERO12's: its crop share (in_camera.rs), the refraction inside the housing.
+// kept (afp_motion.rs, `Header::in_camera_turn`), with the port's axis beside it (`PortAxis`). Played, the correction
+// composes onto the gyro as any correction does, and the axis goes to gyroflow-core as the clip's image orientations
+// (`set_image_orientations`; the turn itself in air): what a HERO12 has from its file, IORI. From there the clip is a
+// HERO12's: its crop share (in_camera.rs), the refraction inside the housing.
 
 use std::sync::Arc;
 use gyroflow_core::StabilizationManager;
@@ -39,6 +47,10 @@ pub const MODEL_DELAY_S: f64 = 0.2;
 /// Measured again with the turn found, under water. Each round takes it part of the way (GX010564, the world's jitter at
 /// the edges: 1 round 4.7 px, 3 rounds 3.5, 6 rounds 3.2, 10 rounds 3.1); a round is a fraction of a second
 pub const ROUNDS: usize = 10;
+/// The port's axis from the bending: what it says less the model's tilt, smoothed over this, s. None: its frame-to-frame
+/// part is real (GX010010: 0.3° from the IORI recorded above 0.5 Hz, correlation 0.96), and smoothed over 0.1 s the
+/// held-out tracks miss more at the edges (GX010564 1.50 against 1.24 px)
+pub const AXIS_SMOOTH_S: f64 = 0.0;
 /// What `FileMetadata::additional_data` says of a clip whose image orientations are the turn measured here
 pub const MARK: &str = "afp_in_camera_turn";
 /// The gyro integrated as Gyroflow does by default (VQF), not a file's own orientations: the body's, whatever the camera
@@ -80,6 +92,9 @@ pub struct Turn {
     pub rounds_deg: Vec<f64>,
     /// The share of frames the picture measured (the rest: the model)
     pub measured_share: f64,
+    /// Under water, the share of frames whose port axis the bending measured, two halves of the tracks agreeing
+    /// (hs_tilt.rs; the rest: the model's tilt)
+    pub tilt_share: f64,
 }
 
 /// HyperSmooth's turn as its model has it, at each of the quaternions' times: `q(t)⁻¹ · S(t − delay)`, S the path
@@ -119,7 +134,11 @@ fn quat_at(quats: &TimeQuat, t: i64) -> Quat64 {
     let before = quats.range(..=t).next_back();
     let after = quats.range(t..).next();
     match (before, after) {
-        (Some((&a, qa)), Some((&b, qb))) if b > a => qa.nlerp(qb, (t - a) as f64 / (b - a) as f64),
+        (Some((&a, qa)), Some((&b, qb))) if b > a => {
+            // The same hemisphere: q and -q are the same turn, their average isn't
+            let qb = if qa.as_ref().coords.dot(&qb.as_ref().coords) < 0.0 { Quat64::new_unchecked(-qb.into_inner()) } else { *qb };
+            qa.nlerp(&qb, (t - a) as f64 / (b - a) as f64)
+        }
         (Some((_, q)), _) | (None, Some((_, q))) => *q,
         (None, None) => Quat64::identity(),
     }
@@ -142,12 +161,28 @@ pub fn set_turn(gyro: &mut GyroSource, turn: TimeQuat) {
     gyro.file_metadata = md.into();
 }
 
-/// A clip playing with a correction measured here: its image orientations are the correction's turn. Before the
-/// correction is set (StabilizationManager::set_optical_correction), whose context is taken with them
-pub fn set_image_orientations(stab: &StabilizationManager, correction: &OpticalCorrection) {
+/// A clip playing with a correction measured here: its image orientations are the port's axis where it was measured
+/// (under water), else the correction's turn. Before the correction is set (StabilizationManager::set_optical_correction),
+/// whose context is taken with them
+pub fn set_image_orientations(stab: &StabilizationManager, correction: &OpticalCorrection, axis: Option<&crate::afp_motion::PortAxis>) {
     let mut gyro = stab.gyro.write();
-    let turn = turn_of(correction, &gyro.quaternions);
+    let turn = match axis { Some(a) => axis_turns(&gyro, a), None => turn_of(correction, &gyro.quaternions) };
     set_turn(&mut gyro, turn);
+}
+
+/// The port's axis as image orientations: at each of the quaternions' times, the frame's tilt there (by the video's time
+/// the motion data's maps to, between frames linearly)
+pub fn axis_turns(gyro: &GyroSource, axis: &crate::afp_motion::PortAxis) -> TimeQuat {
+    let nf = axis.tilt.len();
+    if nf == 0 || axis.fps <= 0.0 { return TimeQuat::new(); }
+    let at = |i: usize| nalgebra::Vector2::new(axis.tilt[i][0] as f64, axis.tilt[i][1] as f64);
+    gyro.quaternions.keys().map(|&t| {
+        let gyro_ms = t as f64 / 1000.0;
+        let u = ((gyro_ms + gyro.offset_at_gyro_timestamp(gyro_ms)) * axis.fps / 1000.0).clamp(0.0, (nf - 1) as f64);
+        let i = (u.floor() as usize).min(nf - 1);
+        let j = (i + 1).min(nf - 1);
+        (t, crate::hs_tilt::axis_turn(&(at(i) * (1.0 - (u - i as f64)) + at(j) * (u - i as f64))))
+    }).collect()
 }
 
 /// Whether the clip's image orientations are a turn measured here (`set_turn`)
@@ -158,7 +193,8 @@ pub fn measured_here(stab: &StabilizationManager) -> bool {
 /// Fits HyperSmooth's turn to the tracks `m0` (measured against the gyro the manager has, its quaternions as they
 /// are), and returns it as an optical correction of those quaternions, its context taken as the player will play it.
 /// The manager is left with the turn as its image orientations
-pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &str, cancelled: impl Fn() -> bool) -> Result<(OpticalCorrection, Turn), String> {
+/// Under water, also the port's axis from the bending (hs_tilt.rs), which the turn's image orientations are then
+pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &str, cancelled: impl Fn() -> bool) -> Result<(OpticalCorrection, Turn, Option<crate::afp_motion::PortAxis>), String> {
     let gyro0 = stab.gyro.read().clone();
     if gyro0.quaternions.len() < 2 { return Err("no motion data to measure the turn against".into()); }
     if gyro0.segment_ranges().is_some_and(|s| !s.whole) { return Err("a video cut from recordings: not measured".into()); }
@@ -170,6 +206,26 @@ pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &s
     params.robust_passes = 2;
 
     let model = model(&quats, MODEL_SIGMA_S, MODEL_DELAY_S);
+    // Under water, the port's axis from the bending (hs_tilt.rs), where two halves of the tracks agree on it; elsewhere
+    // the model's tilt. The refraction is about it; the turn the rounds fit is the picture's orientation alone
+    let (n, fps) = { let p = stab.params.read(); (p.light_refraction_coefficient, p.fps) };
+    let nf = m0.frames;
+    let axis_from = |keep: &(dyn Fn(u32) -> bool + Sync)| -> Result<(Vec<nalgebra::Vector2<f64>>, crate::hs_tilt::Tilts), String> {
+        let t0 = std::time::Instant::now();
+        let t = crate::hs_tilt::measure_agreed(stab, m0, &gyro0, &model, n, &cancelled, keep)?;
+        let counted = t.windows.iter().filter(|w| w.counted).count();
+        log::info!("the port's axis from the bending: {counted} of {} windows fitted, two halves agree in {:.0} % of the frames, in {:.1} s", t.windows.len(), t.measured_share() * 100.0, t0.elapsed().as_secs_f64());
+        for w in &t.windows { log::debug!("  {w:?}"); }
+        let base: Vec<nalgebra::Vector2<f64>> = crate::hs_tilt::model_tilts(&gyro0, &model, nf, fps).iter().map(|v| v.xy()).collect();
+        Ok((crate::hs_tilt::port_axis(&base, &t.frames, fps, AXIS_SMOOTH_S), t))
+    };
+    let axis = if water && std::env::var("AFP_TURN_BENDING").as_deref() != Ok("0") { Some(axis_from(&|_| true)?) } else { None };
+    // As it will be read back
+    let port_axis = match axis.as_ref().map(|(a, _)| crate::afp_motion::PortAxis { fps, tilt: a.iter().map(|p| [p.x as f32, p.y as f32]).collect() }) {
+        Some(a) => Some(gyroflow_core::util::decompress_from_base91_cbor::<crate::afp_motion::PortAxis>(&gyroflow_core::util::compress_to_base91_cbor(&a).ok_or("the port's axis couldn't be encoded")?).map_err(|e| format!("{e:?}"))?),
+        None => None,
+    };
+    let axis_io = port_axis.as_ref().map(|a| axis_turns(&gyro0, a));
     let mut turn = model.clone();
     let mut rounds_deg = Vec::new();
     let mut measured = (0, 0);
@@ -177,7 +233,7 @@ pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &s
     for _ in 0..if water { ROUNDS } else { 1 } {
         let mut g = gyro0.clone();
         g.quaternions = Arc::new(quats.iter().map(|(t, q)| (*t, q * turn[t])).collect());
-        set_turn(&mut g, turn.clone());
+        set_turn(&mut g, axis_io.clone().unwrap_or_else(|| turn.clone()));
         let m = m0.remeasure_against(g, false, &cancelled)?;
         measured = (m.measured_frames, m.frames);
         let c = optical_motion::solve_with(&m, &settings, &params)?;
@@ -190,6 +246,35 @@ pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &s
         rounds_deg.push(change.to_degrees());
     }
 
+    // The check the port's axis was chosen by (hs_tilt::rigidity): how rigid the picture stays with each tilt, on tracks
+    // the fits didn't see, logged (AFP_RIGID=1; with AFP_RIGID_TRUTH=<iori.csv> also a HERO12's own turn, the research's
+    // rows of gyro⁻¹·(CORI·IORI), inverted to the turn's sense here). Measures the clip again several times over
+    if water && std::env::var("AFP_RIGID").is_ok() {
+        let even = |id: u32| id % 2 == 0;
+        let bending = |keep: &dyn Fn(u32) -> bool| -> Result<Vec<Option<nalgebra::Vector2<f64>>>, String> {
+            Ok(crate::hs_tilt::measure(stab, m0, &gyro0, &model, n, &cancelled, keep)?.frames.iter().map(|f| f.map(|p| nalgebra::Vector2::new(p.x, p.y))).collect())
+        };
+        let mut variants: Vec<(&str, Vec<Option<nalgebra::Vector2<f64>>>)> = vec![
+            ("the port's axis as the picture's (no tilt)", vec![Some(nalgebra::Vector2::zeros()); nf]),
+            ("the model's tilt", vec![None; nf]),
+            ("the bending's, from the fit's half", bending(&even)?),
+            ("the port's axis as stored, from the fit's half", axis_from(&even)?.0.into_iter().map(Some).collect()),
+            ("the turn after the rounds", crate::hs_tilt::model_tilts(&gyro0, &turn, nf, fps).iter().map(|v| Some(nalgebra::Vector2::new(v.x, v.y))).collect()),
+        ];
+        if let Ok(path) = std::env::var("AFP_RIGID_TRUTH") {
+            let rows: Vec<Vector3<f64>> = std::fs::read_to_string(&path).map_err(|e| e.to_string())?.lines()
+                .filter_map(|l| { let v: Vec<f64> = l.split(',').filter_map(|x| x.trim().parse().ok()).collect(); (v.len() == 5).then(|| -Vector3::new(v[2], v[3], v[4])) })
+                .collect();
+            variants.push(("the turn the camera recorded", crate::hs_tilt::tilts_of_turns(&rows)));
+        }
+        for (label, tilts) in &variants {
+            let t0 = std::time::Instant::now();
+            let r = crate::hs_tilt::rigidity(stab, m0, &gyro0, &model, n, tilts, &even, &cancelled)?;
+            log::info!("rigid: {label}: missed by, median px centre {:.2} / middle {:.2} / edges {:.2}; p75 {:.2} / {:.2} / {:.2}; observations {:?}; fit rms {:.2} px; {:.0} s",
+                r.median_px[0], r.median_px[1], r.median_px[2], r.p75_px[0], r.p75_px[1], r.p75_px[2], r.observations, r.fit_rms_px, t0.elapsed().as_secs_f64());
+            log::info!("rigid windows, edges: {}", r.windows.iter().map(|(f, e)| format!("{f}:{e:.2}")).collect::<Vec<_>>().join(" "));
+        }
+    }
     // The turn as a correction of the gyro's own quaternions: control points on the solver's spacing, from the turn
     // there (a cubic B-spline at a knot is (c[j-1] + 4 c[j] + c[j+1]) / 6 of its points: undone to first order)
     let (first, last) = (*quats.keys().next().unwrap(), *quats.keys().next_back().unwrap());
@@ -222,7 +307,7 @@ pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &s
     correction = gyroflow_core::util::decompress_from_base91_cbor(&stored).map_err(|e| format!("the correction can't be read back: {e:?}"))?;
 
     // The context the player will play it in: with its turn as the image orientations
-    set_image_orientations(stab, &correction);
+    set_image_orientations(stab, &correction, port_axis.as_ref());
     let measurement = optical_motion::measurement_params(stab);
     correction.context_checksum = optical_motion::context_checksum(&measurement);
 
@@ -242,8 +327,9 @@ pub fn fit(stab: &StabilizationManager, m0: &OpticalMeasurements, stabilizer: &s
         from_picture_rms_deg: from_picture,
         rounds_deg,
         measured_share: measured.0 as f64 / measured.1.max(1) as f64,
+        tilt_share: axis.as_ref().map_or(0.0, |(_, t)| t.measured_share()),
     };
-    Ok((correction, info))
+    Ok((correction, info, port_axis))
 }
 
 #[cfg(test)]
@@ -306,6 +392,12 @@ mod tests {
             let m = crate::measure::measure(std::path::Path::new(clip), &settings, |_| (), || false).unwrap();
             let turn = m.header.in_camera_turn.clone().unwrap();
             eprintln!("{clip}: measured in {:.0} s: {turn:?}", t0.elapsed().as_secs_f64());
+            if let Ok(dump) = std::env::var("AFP_TURN_DUMP") {
+                // The turn at each frame's time, radians (x y z), for the research's scripts
+                let fps = m.header.clip.fps;
+                let rows: String = (0..m.header.clip.frames).map(|f| { let d = m.correction.at(f as f64 * 1e6 / fps); format!("{} {} {}\n", d.x, d.y, d.z) }).collect();
+                std::fs::write(dump, rows).unwrap();
+            }
             // Every 10 ms of the recorded turn, the measured one at the same time, as rotation vectors (degrees)
             let times: Vec<i64> = truth.keys().copied().collect::<Vec<_>>().chunks(10).map(|c| c[0]).collect();
             let rec: Vec<Vector3<f64>> = times.iter().map(|t| truth[t].scaled_axis().map(f64::to_degrees)).collect();
@@ -332,6 +424,21 @@ mod tests {
         }
     }
 
+    /// A clip's .afp-motion written as Stabilize optically would, with the turn measured (yes) or the picture alone (no),
+    /// for renders to compare: AFP_TURN_WRITE=<clip>|<yes|no> cargo test --release --lib writes_the_motion -- --ignored
+    #[test]
+    #[ignore]
+    fn writes_the_motion_file() {
+        let Ok(spec) = std::env::var("AFP_TURN_WRITE") else { return };
+        let (clip, turn) = spec.split_once('|').expect("<clip>|<yes|no>");
+        let _ = simplelog::TermLogger::init(log::LevelFilter::Info, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
+        let video = std::path::Path::new(clip);
+        let settings = crate::measure::Settings { refraction: Some(1.33), in_camera_turn: Some(turn == "yes"), ..Default::default() };
+        let m = crate::measure::measure(video, &settings, |_| (), || false).unwrap();
+        m.write(&crate::afp_motion::path_for(video)).unwrap();
+        eprintln!("written: {} (port's axis {})", crate::afp_motion::path_for(video).display(), m.port_axis.is_some());
+    }
+
     /// How steady the world stays in each way of playing a clip that recorded its turn (a HERO12), the measure gyroflow#1302
     /// was judged by: KLT tracks' world rays (the clip's orientation times each point's ray, refraction and all), their
     /// second difference over 4 frames, median px at the centre, the middle and the edges. As the HERO12 plays (its own
@@ -344,6 +451,7 @@ mod tests {
         use gyroflow_core::stabilization::{ ComputeParams, FrameTransform, undistort_points_for_optical_motion };
         let Ok(spec) = std::env::var("AFP_TURN_STEADY") else { return };
         let (clip, tracks) = spec.split_once('|').expect("<clip>|<tracks.f32>");
+        let _ = simplelog::TermLogger::init(log::LevelFilter::Info, simplelog::Config::default(), simplelog::TerminalMode::Stderr, simplelog::ColorChoice::Never);
         let n = 1.33;
         let raw = std::fs::read(tracks).unwrap();
         let v: Vec<f32> = raw.chunks_exact(4).map(|b| f32::from_le_bytes(b.try_into().unwrap())).collect();
@@ -352,7 +460,7 @@ mod tests {
         let video = std::path::Path::new(clip);
         let settings = |turn: bool| crate::measure::Settings { refraction: Some(n), in_camera_turn: Some(turn), ..Default::default() };
         let estimate = crate::measure::measure(video, &settings(true), |_| (), || false).unwrap();
-        let picture_alone = crate::measure::measure(video, &settings(false), |_| (), || false).unwrap();
+        let picture_alone = (std::env::var("AFP_TURN_SKIP_PICTURE").is_err()).then(|| crate::measure::measure(video, &settings(false), |_| (), || false).unwrap());
         if let Ok(dump) = std::env::var("AFP_TURN_DUMP") {
             // The turn at each frame's time, radians (x y z), for the research's scripts
             let fps = estimate.header.clip.fps;
@@ -371,7 +479,11 @@ mod tests {
             stab
         };
         let flip = |r: (f32, f32, f32)| Vector3::new(r.0 as f64, -(r.1 as f64), -(r.2 as f64));
-        for (label, stab) in [("as the clip's own motion data plays", manager(None)), ("as a HERO7 (turn measured)", manager(Some(&estimate))), ("the picture alone", manager(Some(&picture_alone)))] {
+        let mut ways = vec![("as the clip's own motion data plays", manager(None)), ("as a HERO7 (turn measured)", manager(Some(&estimate)))];
+        if let Some(p) = &picture_alone { ways.push(("the picture alone", manager(Some(p)))); }
+        // Steps in frames: 4 by default; longer ones show the slow breathing the turn's slow part makes (AFP_TURN_STEPS=4,15,30)
+        let steps: Vec<usize> = std::env::var("AFP_TURN_STEPS").ok().map(|v| v.split(',').filter_map(|x| x.parse().ok()).collect()).unwrap_or(vec![4]);
+        for (label, stab) in ways {
             let p = ComputeParams::from_manager(&stab);
             let (w, h) = (p.width as u32, p.height as u32);
             let fps = stab.params.read().fps;
@@ -388,7 +500,7 @@ mod tests {
                     per_track.entry(pt.0).or_default().push((fr, rr, q * flip(r).normalize()));
                 }
             }
-            let k = 4usize;
+            for &k in &steps {
             let mut z: [Vec<f64>; 3] = Default::default();
             for obs in per_track.values() {
                 for i in k..obs.len().saturating_sub(k) {
@@ -401,6 +513,7 @@ mod tests {
             let med = |v: &mut Vec<f64>| { if v.is_empty() { return f64::NAN; } v.sort_by(|a, b| a.total_cmp(b)); v[v.len() / 2] };
             let [mut c, mut m, mut e] = z;
             eprintln!("{label}: the world's second difference over {k} frames, median px: centre {:.2} / middle {:.2} / edges {:.2}", med(&mut c), med(&mut m), med(&mut e));
+            }
         }
     }
 }

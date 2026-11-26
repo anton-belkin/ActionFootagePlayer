@@ -1,9 +1,9 @@
 # HERO7 HyperSmooth clips stabilized on top: the camera's turn measured from the picture
 
 **Status:** 2026-11-26. Step 1 built (the PR "Under water, HyperSmooth's turn inside the housing"). Steps 2–4 built as a
-draft ("HERO7 Black clips stabilized on top of HyperSmooth"): the file, the loading and the player work end to end, but
-the estimator isn't better than Stabilize optically yet (see "How it measured"), so step 5 (the run over Anton's clips)
-waits. The research behind it is in
+draft ("HERO7 Black clips stabilized on top of HyperSmooth"). Under water the port's axis is now measured on its own
+from the picture's bending, and on the two clips measured the result beats Stabilize optically both ways it was
+judged (see "How it measured"). Anton's look at the renders comes before step 5 (the run over his clips). The research behind it is in
 `research_notes/dynamic_lens/` (untracked in the shared checkout; README parts 1–5).
 
 ## Goal (Anton, 2026-11-25)
@@ -63,6 +63,7 @@ HyperSmooth's turn is what Gyroflow's optical correction measures when the motio
 `δ(t)` that takes the gyro's orientation to the picture's, `q' = q · exp(δ)`. So it's kept as one, in the clip's own
 `<stem>.afp-motion` (afp_motion.rs), not a format of its own:
 - the gyro is kept (`ignore_file_motion: false`), integrated as it was measured against (VQF);
+- under water, the port's axis in each frame on a line of its own (step 4);
 - `in_camera_turn` in the header says the correction is the camera's own stabilizer's turn, with how it was measured
   and how sure it is (`in_camera_turn::Turn`: the model, the turn's size, how far the picture took it from the model,
   each round's change, the share of frames measured);
@@ -75,10 +76,12 @@ the render recipe's fingerprint (#318), the probe, the player's Ctrl+m.
 ### 3. Loading: a HERO7 clip becomes a HERO12-like clip
 
 - **`load_manager`:** with such a file all of the gyro is read before the clip plays (the correction is of the whole
-  clip's orientations). `afp_motion::apply` sets the integration, then the turn as the clip's image orientations
-  (`in_camera_turn::set_image_orientations`, before the correction's context is taken), then the correction.
+  clip's orientations). `afp_motion::apply` sets the integration, then the clip's image orientations: the port's axis
+  under water, the turn in air (`in_camera_turn::set_image_orientations`, before the correction's context is taken),
+  then the correction.
 - **gyroflow-core** then composes the turn onto the gyro (the picture's orientation, as CORI·IORI) and refracts inside the
-  housing with the same turn (`kernel_image_orientation`).
+  housing about the port's axis (`kernel_image_orientation`). For a HERO12 the two are one, IORI; for a HERO7 each is
+  measured the way that measures it best (step 4).
 - **`in_camera::stabilized`** answers yes (`in_camera_turn::measured_here`): HyperSmooth's crop share applies.
 - **The horizon** can be locked: the gyro has the gravity in it (unlike motion measured from the picture alone).
 - **The probe** says `measured.in_camera_turn` (`GEOTAG` 11); the Library's Motion data line and the side panel say
@@ -94,10 +97,19 @@ on this way (`in_camera_turn::stabilizer_of`); every other clip as before.
   nothing to track then plays about as recorded, instead of getting HyperSmooth's correction back the other way.
 - **The fit:** gyroflow-core's own (`optical_motion::solve_with`), all of it taken (strength 1), with two robust passes
   (a fish crossing the frame).
-- **Under water:** measured with the turn inside the housing, which depends on what's measured: measured again with the
-  turn found, three rounds.
+- **Under water, the port's axis on its own** (`hs_tilt.rs`, the research's `hs_ba.py` ported): HyperSmooth's tilt in each
+  frame from how the picture bends behind the flat port. A bundle adjustment in 3 s windows (1 s overlap): each
+  frame's pose and tilt, each point's place, the lens fixed, Cauchy loss for what moves on its own; a window whose tilt
+  is more than HyperSmooth turns or whose points don't fit is left out. Measured three times: from all the tracks, and
+  from two halves of them apart; a frame's tilt is taken where the halves agree (their difference averaged over 0.5 s
+  under 2.5°: a fish across the frame, the open water make them differ by 2–5°), the model's elsewhere. Frame by frame,
+  not smoothed: its frame-to-frame part is real (0.3° from a HERO12's IORI above 0.5 Hz).
+- **The rounds:** the turn measured again with the axis as the refraction's, ten rounds. They fit the picture's
+  orientation, and only that: the turn they fit has in it whatever a small turn explains best (the gyro's timing, the
+  rolling shutter, the lens, parallax, the tracking's noise), good for the orientation, wrong as the port's axis.
 - **The result** as an optical correction of the gyro's quaternions: control points on the solver's spacing, quantized as
-  they're stored, its context taken with its own turn as the image orientations, exactly as it will play.
+  they're stored, its context taken with the image orientations it will play with. The port's axis is the file's third
+  line (`afp_motion::PortAxis`), and the clip's image orientations when it plays (`in_camera_turn::axis_turns`).
 - **Validation with ground truth:** `the_turn_measured_is_the_one_a_hero12_recorded` (`AFP_TURN_CLIP`) measures a HERO12
   clip as if it had no IORI and compares the turn with the IORI it recorded.
 
@@ -112,34 +124,82 @@ on this way (`in_camera_turn::stabilizer_of`); every other clip as before.
 
 ## How it measured (2026-11-26)
 
-The measure gyroflow#1302 was judged by: KLT tracks' world rays (the clip's orientation times each point's ray, the
-refraction and all), their second difference over 4 frames, median px at the centre / middle / edges
-(`in_camera_turn.rs` `how_still_the_world_stays`, `AFP_TURN_STEADY`).
+### What "floating" is, and the check for it
 
-| clip | its own motion data as it plays | the turn measured here (10 rounds) | the picture alone (Stabilize optically) |
+What Anton sees when the refraction is wrong isn't shake: the picture changes shape, the edges stretch and shrink
+against the middle, and it looks unreal. So the check (`hs_tilt::rigidity`, the research's held-out check) asks whether
+a rigid world explains the picture:
+- the tracks split in two by their number;
+- each 3 s window fitted again with one half, the port's axis held at the one being checked, the camera's turn and
+  drift free;
+- each track of the other half placed in that world by the fitted poses alone, and how far it misses where it was
+  seen, px of the clip, median at the centre, the middle and the edges (p75 at the edges in brackets).
+
+The camera's orientation and the stabilization play no part in it. What moves on its own misses in every variant alike.
+Run as `AFP_RIGID=1` (and `AFP_RIGID_TRUTH=<iori.csv>` for a HERO12's own turn) with any of the measuring tests.
+
+| HERO12 GX010010 (stock firmware, flat port) | centre / middle / edges |
+|---|---|
+| no tilt (the port's axis as the picture's) | 1.02 / 0.81 / 1.21 (2.47) |
+| the model's tilt (gyro smoothed 0.5 s, 0.2 s late) | 0.75 / 0.64 / 0.66 (1.18) |
+| the turn the rounds fit | 0.80 / 0.66 / 0.75 (1.35) |
+| **the port's axis as stored** (from the bending; measured from the fit's half only) | 0.73 / 0.61 / 0.59 (1.05) |
+| the IORI the camera recorded | 0.69 / 0.58 / 0.52 (0.90) |
+
+The IORI recorded misses least: the check can be trusted. The bending gets 90 % of the way there at the edges. Measured
+from all the tracks or from half, it misses the same (0.59): it isn't fitted to what checks it.
+
+| HERO7 GX010564 (4K Wide 30p) | centre / middle / edges |
+|---|---|
+| no tilt | 1.61 / 1.50 / 2.67 (6.77) |
+| the model's tilt | 1.45 / 1.32 / 2.03 (4.64) |
+| the turn the rounds fit | 1.52 / 1.36 / 2.22 (4.93) |
+| the bending, not checked by halves | 1.30 / 1.18 / 1.18 (3.15) |
+| **the port's axis as stored** | 1.25 / 1.13 / 1.16 (2.98) |
+
+The edges as rigid as the centre, as in the research's prototype. Taken where the halves agree, the stretch the bending
+can't pin down (frames 780–870: a window missing 4.7 px at the edges against the model's 1.4) goes to the model.
+
+Before this, the turn the rounds fit was the port's axis as well, and the bending's tilt went in at the start of the
+rounds: they wrote over it. As it played, the edges of GX010564 missed as with no tilt at all (2.8 px).
+
+### Shake
+
+KLT tracks' world rays (the clip's orientation times each point's ray, the refraction and all), their second difference
+over 4 frames, median px at the centre / middle / edges (`how_still_the_world_stays`, `AFP_TURN_STEADY`; `AFP_TURN_STEPS`
+for longer steps, where the diver's own motion is most of it). It mixes the orientation's errors with parallax, fish
+and the tracking's noise, and the picture-fitted ways are fitted to the same tracks, so it's a check of the orientation,
+not of the floating.
+
+| clip | its own motion data as it plays | the turn measured here | the picture alone (Stabilize optically) |
 |---|---|---|---|
-| HERO12 GX010010, stock firmware, flat port | 5.57 / 6.15 / 6.53 (CORI·IORI) | 1.99 / 2.45 / 3.06 (3 rounds) | 2.54 / 3.04 / 3.75 |
-| HERO7 GX010564, 4K Wide | 12.55 / 12.86 / 13.11 (the body's gyro: HyperSmooth undone) | 1.59 / 1.94 / 3.11 | 1.46 / 2.03 / 2.93 |
+| HERO12 GX010010 | 5.57 / 6.15 / 6.53 (CORI·IORI) | 1.39 / 1.72 / 2.02 | 2.54 / 3.04 / 3.75 |
+| HERO7 GX010564 | 12.55 / 12.86 / 13.11 (the body's gyro: HyperSmooth undone) | 1.29 / 1.79 / 2.31 | 1.46 / 2.03 / 2.93 |
 
-The picture-based two are fitted to the same scene the measure looks at, which flatters them; between them, on the
-HERO7, the turn measured here is no better.
+With the turn as the port's axis the HERO7 measured 1.59 / 1.94 / 3.11, no better than the picture alone.
 
-What it can't see: **gyroflow-core's optical correction measures only the fast part of a turn.** Each track's residuals
-are high-passed (a local quadratic over at most 61 frames, never longer than the track) to take out the parallax of
-the camera's translation, so below about 1 Hz the picture says nothing, and the turn there is the model's. On the HERO12
-the model is 3–4° from the turn the camera recorded between 0.2 and 1 Hz (`the_turn_measured_is_the_one_a_hero12_recorded`,
-`AFP_TURN_CLIP`), whatever its σ and delay; the picture's residual can't choose between them. Under water a turn that's
-off there bends the edges the wrong way, which is what the turn inside the housing was for. The picture's own rotation
-chained from frame to frame (gyroflow-core's `video_base`, with translation) was further off still (5–8°).
+### Renders
 
-**Next, if it's worth it:** the research's per-frame tilt from the picture's bending (`hs_ba.py`: the lens and port
-fixed, a pose and two tilt unknowns per frame) measures the turn's absolute tilt at every frequency, under water, and
-matched a HERO12's IORI with correlation 0.99. Ported to Rust, it would give the turn's slow part where the model gives
-it now.
+`research_notes/dynamic_lens/out/hero7_0564_axis_vs_*.mp4`, GX010564 9–21 s, weak level: the port's axis from the
+bending (left) against the rounds' turn as the axis, and against Stabilize optically; overview and the bottom-left
+corner at 1:1.
+
+### What gyroflow-core's optical correction sees
+
+Each track's residuals are high-passed (a local quadratic over at most 61 frames, never longer than the track) to take
+out the parallax of the camera's translation, so below about 1 Hz the picture says nothing to it, and the turn there is
+the model's. That's no longer a problem for the refraction (the bending gives the axis at every frequency); for the
+orientation the model's slow part stays, as Stabilize optically's does.
+
+### Cost
+
+The bending's three measures take about as long as the clip under water on an M1 Pro (GX010564, 34 s: 34–38 s; GX010010,
+48 s: 11–17 s), on top of the tracking and the rounds.
 
 ## Open questions
 
 1. **Long stretches with nothing to track** play on the model (about as recorded). A fade to "as recorded" isn't built.
+   The port's axis there is the model's tilt.
 2. **Superview and 4:3 modes:** their lenses and HyperSmooth crop need checking. The sample covers them.
 3. **HERO8–11** record IORI, but the player leaves them as recorded by Anton's call on #201. With #1302 in our fork they
    could be stabilized on top like the HERO12. That is a separate decision.

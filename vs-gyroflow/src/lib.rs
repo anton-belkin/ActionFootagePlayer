@@ -31,6 +31,7 @@ pub mod lists;
 pub mod levels;
 pub mod in_camera;
 pub mod in_camera_turn;
+pub mod hs_tilt;
 pub mod smoothing;
 pub mod motion;
 pub mod dovi;

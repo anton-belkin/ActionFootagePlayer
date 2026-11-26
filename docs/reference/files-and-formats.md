@@ -374,12 +374,15 @@ _renders _cache moments clips exports stabilized _actionfootageplayer generated`
 data. With it the clip plays stabilized without a Gyroflow project ([optical-without-gyroflow.md](../design/optical-without-gyroflow.md)).
 A HERO7 Black's with HyperSmooth on is HyperSmooth's turn measured on top of its gyro instead (`ignore_file_motion`
 false, `in_camera_turn` in the header; [hero7-hypersmooth-iori.md](../design/hero7-hypersmooth-iori.md)): played, the
-same turn goes to gyroflow-core as the clip's image orientations, as a HERO12's IORI.
+port's axis measured under water (line 3), or in air the same turn, goes to gyroflow-core as the clip's image
+orientations, as a HERO12's IORI.
 
 **Path:** `<clip stem>.afp-motion` beside the clip (`afp_motion.rs` `path_for`).
 
-**Structure:** two lines. Line 1, the header (JSON, readable with `head -1`); line 2, the correction as base91 of
-zlib'd CBOR, as Gyroflow's projects keep it.
+**Structure:** two lines, or three. Line 1, the header (JSON, readable with `head -1`); line 2, the correction as base91
+of zlib'd CBOR, as Gyroflow's projects keep it; line 3, only in a HERO7's measured under water, the flat port's axis
+the same way (`afp_motion.rs` `PortAxis`: `fps` and `tilt`, per frame of the analysis its tilt x, y in gyroflow-core's
+kernel axes, radians).
 
 ```json
 { "format": "actionfootageplayer-motion", "version": 1,
@@ -391,10 +394,11 @@ zlib'd CBOR, as Gyroflow's projects keep it.
                 "per_frame": true, "frames": 3656, "measured_frames": 3600, "rms_deg": 0.2 },
   "in_camera_turn": { "stabilizer": "HyperSmooth (HS EIS)", "integration": 2, "model_sigma_s": 0.5, "model_delay_s": 0.2,
                       "rms_deg": 1.1, "p95_deg": 2.3, "from_picture_rms_deg": 0.6, "rounds_deg": [2.1, 0.08, 0.01],
-                      "measured_share": 0.97 } }
+                      "measured_share": 0.97, "tilt_share": 0.83 } }
 ```
 
-`in_camera_turn` only in a HERO7's (`in_camera_turn.rs` `Turn`), which is then version 2.
+`in_camera_turn` only in a HERO7's (`in_camera_turn.rs` `Turn`), which is then version 2. `tilt_share`: under water, the
+share of frames whose port axis the picture's bending measured (the rest: the model's tilt).
 
 **Version rule:** `version` above 2 is refused ("update the player"); a player before 2026-11-26 refuses 2 as well.
 Written: 2 with `in_camera_turn`, else 1. A file whose `clip.size` (and `created`, when
