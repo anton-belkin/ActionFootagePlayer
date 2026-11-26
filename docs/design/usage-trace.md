@@ -1,6 +1,6 @@
 # The usage trace, and filing a bug from it
 
-**Status:** built in this PR (untagged): the player, its side panel and the Library page and app; the Library's markers
+**Status:** built in #366 (untagged): the player, its side panel and the Library page and app; the Library's markers
 have no picture; mpv's own keys other than those journaled already (volume, frame-step…) are not recorded.
 
 Anton, 2026-11-26: his own testing by hand is the bottleneck. After clicking around he has to remember and retell what
