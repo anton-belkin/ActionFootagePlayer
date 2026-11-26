@@ -15,8 +15,9 @@
 # and vo=gpu-next.
 #
 # The first time it starts, it offers the setup (Contents/Resources/setup.sh, through setup-offer.lua): the default
-# app for MP4 videos, the Finder Quick Actions and DJI's LUT. Once asked, or once set up (setup.sh, install.sh
-# --apps), it doesn't again.
+# app for MP4 videos, the Finder Quick Actions and DJI's LUT. Once answered, or once set up (setup.sh, install.sh
+# --apps), it doesn't again. Started from the disk image, it says to move the app to Applications first, and asks
+# when it's started from there.
 
 app=$(cd "$(dirname "$0")/../.." && pwd)
 res="$app/Contents/Resources"
@@ -61,7 +62,9 @@ fi
 if [ -n "${AFP_BATCH:-}" ]; then
     :
 elif [ ! -e "$data/setup-offered" ]; then
-    mkdir -p "$data" && : > "$data/setup-offered"
+    # Asked once answered (setup-offer.lua, setup.sh write the mark). Opened from the disk image (or a copy macOS runs
+    # read-only, AppTranslocation), the setup can't be done: it says to move the app first, and asks again from there
+    case "$app" in */AppTranslocation/*|/Volumes/ActionFootagePlayer*) export AFP_SETUP_MOVE=1 ;; esac
     set -- "--script=$res/setup-offer.lua" "$@"
 elif [ ! -f "$DLOGM_DATA/shaders/dlogm_lut3d.glsl" ]; then
     "$res/setup.sh" lut >/dev/null 2>&1 &

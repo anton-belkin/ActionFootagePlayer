@@ -482,7 +482,7 @@ Read/written by `workspace/batch.lua` (and `renders.lua` `render_moments`) and `
   lens under water for a source that doesn't say, yes, no or auto). The Library reads it for a render's
   recipe (`renders.rs` `player_defaults`; `AFL_PLAYER_DEFAULTS` overrides), else works the defaults out of
   `gyroflow.conf` as the player would (`defaults_of`; shared cases `tests/gyroflow_conf_cases.json`).
-- **`setup-offered`:** an empty marker in `<player data>/` once the setup was offered (`macos/player.sh`).
+- **`setup-offered`:** an empty marker in `<player data>/` once the setup offer was answered (`macos/setup-offer.lua`) or the setup ran (`macos/setup.sh`); not written while the app runs from its disk image (`macos/player.sh`, `AFP_SETUP_MOVE`).
 
 ## LUTs and looks
 

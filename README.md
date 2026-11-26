@@ -68,7 +68,8 @@ the camera's metadata, not the file name. Prefer your own mpv? The plugins work 
    onto Applications. It carries its own mpv and ffmpeg: nothing else to install (macOS 15 or later).
 3. **Open it once.** The first time, macOS blocks it, because it isn't signed with a paid Apple developer account:
    System Settings → Privacy & Security → **Open Anyway**. Accept its setup: it becomes the player for MP4 videos.
-4. **Copy the clips off the card and double-click one.**
+4. **Copy the clips off the card and double-click one.** Opened with no video, the player shows how to begin, with
+   a sample dive to try when the app has one.
 
 `l` twice marks a part, `Shift+E` exports it, `Ctrl+s` goes through HDR and the SDR looks, `Ctrl+g` goes
 through the stabilization, a wider view of it, and off. [All keys](#keys) · [Install in detail](#installing-in-detail)
@@ -175,7 +176,8 @@ oldest macOS those builds are made for.
 Open the disk image, drag ActionFootagePlayer onto Applications and open it from there (from the zip: unzip it and
 move it to Applications). It's signed ad hoc, not by an Apple developer
 account, so the first time macOS won't open it: System Settings → Privacy & Security → Open Anyway. The first time
-it opens, it offers its setup:
+it opens from Applications, it asks whether to open your camera's videos with it (opened from the disk image, it says
+to move it to Applications first, and asks from there). Set Up does this:
 
 - it becomes the default app for MP4 videos (what DJI cameras record): double-clicking one plays it with all
   of this, and any other video simply plays in mpv. macOS asks you to confirm the change in a dialog of its own;
