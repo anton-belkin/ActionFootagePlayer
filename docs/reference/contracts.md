@@ -415,8 +415,9 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 
 `script-message-to footage_menu afp-feedback` (the right-click menu, the side panel's Support part, the first-run
 card) opens `https://actionfootageplayer.ch/feedback?…` in the browser. The page (`website/site/feedback.html` on the
-`website` branch) shows these fields read-only and sends them with the answers to its Pages Function
-(`website/site/functions/api/feedback.js`), which emails them to `hello@actionfootageplayer.ch`.
+`website` branch) shows these fields read-only and sends them with the answers to `/api/feedback`: a Worker on that
+route (`website/worker/feedback.js`), which emails them to Anton through Email Routing (`website/README.md`, "Feedback
+form").
 
 | Key | Value | When |
 |---|---|---|
