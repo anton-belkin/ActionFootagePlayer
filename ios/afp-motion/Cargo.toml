@@ -1,0 +1,20 @@
+[package]
+name = "afp-motion"
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+description = "The iPhone app's motion side: vs-gyroflow's GPU table and warp pass, translated to Metal (naga)"
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+vs-gyroflow = { path = "../../vs-gyroflow" }
+# The same naga as wgpu 30's: GLSL in, Metal out
+naga = { version = "30", features = ["glsl-in", "msl-out"] }
+serde_json = "1"
+
+[profile.release]
+debug = 0
+opt-level = 3
+codegen-units = 4
