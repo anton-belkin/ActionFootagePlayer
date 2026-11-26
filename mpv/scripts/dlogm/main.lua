@@ -48,8 +48,9 @@
 -- in dlogm.conf; the paused frame's clean-up (the gyroflow plugin's Ctrl+p) is what does the job.
 --
 -- What a file starts in depends on the screen the window is on, HDR or SDR (macOS's EDR headroom, read once with
--- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in HDR, on an SDR screen in the
--- SDR look last chosen (at first Dolby Vision as macOS shows it with the app's mpv, mpv's tone mapping without it).
+-- osascript; elsewhere, or when it can't tell, it counts as HDR): on an HDR screen in the HDR look last chosen (at
+-- first Dolby Vision in HDR with the app's mpv, the hdr look without it), on an SDR screen in the SDR look last chosen
+-- (at first Dolby Vision as macOS shows it with the app's mpv, mpv's tone mapping without it).
 -- Choosing a look (Ctrl+s, Ctrl+h, the menu) makes it what files start in on that kind of screen, for the rest of the
 -- session; an SDR look chosen on either becomes the SDR screen's. `remember` keeps both in dlogm.conf. A file keeps
 -- its look when its window goes to a screen of the other kind.
@@ -215,11 +216,13 @@ local HDR_NAMES = { hlg = "HLG", pq = "PQ" }
 local function choice(v, default)
     return CHOICES[v] and v or default
 end
--- What log files start in on each kind of screen: dlogm.conf's, then the session's choices
+-- What log files start in on each kind of screen: dlogm.conf's, then the session's choices. On an HDR screen at first:
+-- Dolby Vision in HDR where mpv can present through macOS (the app's mpv; since 2026-11-26, what Anton plays with),
+-- else the hdr look
 local old = o.mode == "sdr" and "maker" or nil
 -- On an SDR screen at first: Dolby Vision as macOS shows it where mpv can present through macOS (the app's mpv), else
 -- mpv's tone mapping (Homebrew's mpv; on Windows the hdr look is that too, the screen's kind unknown there)
-local chosen = { hdr = choice(o.hdr_screen, old or "hdr"), sdr = choice(o.sdr_screen, old or (DV_OK and "dv" or "tonemap")) }
+local chosen = { hdr = choice(o.hdr_screen, old or (DV_OK and "dv" or "hdr")), sdr = choice(o.sdr_screen, old or (DV_OK and "dv" or "tonemap")) }
 local denoise = o.denoise
 local platform = mp.get_property("platform") or ""
 -- The screens' HDR headroom by name (macOS's EDR: above 1 where it shows HDR; false: one it didn't know), and the

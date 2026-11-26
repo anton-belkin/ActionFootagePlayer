@@ -1312,7 +1312,7 @@ local function quality_part(u, x, w, y)
                                                                 { "video", "Video" } }, q("resolution")), tostring(g.resolution))
     y = u:caption(x, w, y, "The size it's rendered at. Auto: the screen's, at most 1080p while the temporal denoise is on. Video: the video's own")
     y = u:select_row(x, w, y + 4 * s, "denoise", "Temporal denoise", choices({ { "off", "Off" }, { "light", "Light" }, { "full", "Full" } }, q("temporal_denoise")),
-                     tostring(g.temporal_denoise or "full"), { field = math.floor(w * 0.42) })
+                     tostring(g.temporal_denoise or "light"), { field = math.floor(w * 0.42) })
     y = u:caption(x, w, y, "Full: 5 frames on each side. Light: 3, a quarter lighter on the GPU and a little less clean. Off: none on this computer, whatever Transform's switch says")
     y = u:select_row(x, w, y + 4 * s, "edges", "Edges", choices({ { "sphere", "Trail by direction" }, { "smooth", "Frame's edge spread out" },
                                                                   { "off", "Background color" } }, "script-message-to gyroflow edges"), g.edges,

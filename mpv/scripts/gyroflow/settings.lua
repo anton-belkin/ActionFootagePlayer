@@ -75,7 +75,7 @@ function M.of_view(v, here)
     if type(v.chromatic) == "boolean" then s.chromatic = v.chromatic
     elseif type(session.chromatic) == "boolean" then s.chromatic = session.chromatic
     else s.chromatic = defaults.chromatic ~= false end
-    s.temporal_denoise = v.temporal_denoise or here.temporal_denoise or "full"
+    s.temporal_denoise = v.temporal_denoise or here.temporal_denoise or "light"
     s.denoise_grain = tonumber(v.denoise_grain) or tonumber(here.denoise_grain)
     return s
 end
