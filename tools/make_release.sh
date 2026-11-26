@@ -1,12 +1,16 @@
 #!/bin/bash
 # tools/make_release.sh <version>: into dist/
-#   ActionFootagePlayer-<version>-macos-arm64.dmg             ActionFootagePlayer.app with the plugins in it (tools/make_app.sh),
+#   ActionFootagePlayer-<version>-macos-arm64.dmg       ActionFootagePlayer.app with the plugins in it (tools/make_app.sh),
 #                                                       next to a link to Applications to drag it onto; its setup
 #                                                       downloads DJI's LUT. With BUNDLE_RUNTIME, with mpv and ffmpeg
 #                                                       in it too: MPV_BIN's mpv (default build/mpv-afp/out/mpv, by
-#                                                       tools/build_mpv.sh, when it's there), else Homebrew's
-#                                                       ActionFootageLibrary.app beside it (tools/make_library_app.sh)
-#   ActionFootagePlayer-<version>-macos-arm64.zip             the same two apps, zipped: unzipped into Applications
+#                                                       tools/build_mpv.sh, when it's there), else Homebrew's. With the
+#                                                       sample dive clip when the sample-clips release has it
+#                                                       (tools/sample_clip.sh). The player only: the download the
+#                                                       site offers
+#   ActionFootagePlayer-<version>-macos-arm64.zip       the same app, zipped: unzipped into Applications
+#   ActionFootageLibrary-<version>-macos-arm64.dmg      ActionFootageLibrary.app (tools/make_library_app.sh) next to a
+#                                                       link to Applications: it goes beside the player, which it runs
 #   mpv-dlogm-<version>.zip                             the dlogm plugin alone, for any mpv on any system: unzipped
 #                                                       into ~~/scripts/. HDR only: DJI's Rec.709 LUT isn't
 #                                                       redistributed (install.sh downloads it from DJI). With the
@@ -60,8 +64,9 @@ for f in "dist/$name/bin/"*; do
     codesign --force -s - "$f"
 done
 
-# AFP_PACKAGES=zip (a pull request's check, .github/workflows/release.yml): the zip alone, the app Anton tries;
-# the tarball and the disk image only for main and releases (each ~100 MB, written and compressed: ~1 min)
+# AFP_PACKAGES=zip (a pull request's check, .github/workflows/release.yml): the player's zip and the Library's small
+# disk image, the apps Anton tries; the tarball and the player's disk image only for main and releases (each ~100 MB,
+# written and compressed: ~1 min)
 packages=${AFP_PACKAGES:-all}
 [ "$packages" = zip ] || tar -C dist -czf "dist/$name.tar.gz" "$name"
 
@@ -69,24 +74,34 @@ packages=${AFP_PACKAGES:-all}
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "dist/dlogm_hlg.glsl"
 # The zip and the disk image have the tarball's name: the app is built in a folder of its own, not in dist/$name
 app="ActionFootagePlayer-$version-macos-arm64"
+library="ActionFootageLibrary-$version-macos-arm64"
 stage="dist/app-$version"
-rm -rf "$stage" "dist/$app.zip" "dist/$app.dmg"
-mkdir -p "$stage"
-tools/make_app.sh "$stage/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
-LIBRARY_BIN="dist/$name/bin/ActionFootageLibrary" tools/make_library_app.sh "$stage/ActionFootageLibrary.app" "$version"
-# Both apps at the zip's top: unzipped into Applications, side by side
-(cd "$stage" && zip -qry "$OLDPWD/dist/$app.zip" ActionFootagePlayer.app ActionFootageLibrary.app)
-# The disk image: the app and a link to Applications, compressed with LZFSE. hdiutil sometimes finds its device
-# still busy on GitHub's runners: tried again then
-if [ "$packages" != zip ]; then
-    ln -s /Applications "$stage/Applications"
+library_stage="dist/library-$version"
+rm -rf "$stage" "$library_stage" "dist/$app.zip" "dist/$app.dmg" "dist/$library.dmg"
+mkdir -p "$stage" "$library_stage"
+SAMPLE_CLIP=$(tools/sample_clip.sh) tools/make_app.sh "$stage/ActionFootagePlayer.app" "dist/$name/bin" dist/dlogm_hlg.glsl "$version"
+LIBRARY_BIN="dist/$name/bin/ActionFootageLibrary" tools/make_library_app.sh "$library_stage/ActionFootageLibrary.app" "$version"
+# The app at the zip's top: unzipped into Applications
+(cd "$stage" && zip -qry "$OLDPWD/dist/$app.zip" ActionFootagePlayer.app)
+# A disk image: the app and a link to Applications, compressed with LZFSE. hdiutil sometimes finds its device still
+# busy on GitHub's runners: tried again then
+dmg() {
+    ln -s /Applications "$2/Applications"
     for try in 1 2 3; do
-        hdiutil create -quiet -volname "ActionFootagePlayer $version" -srcfolder "$stage" -format ULFO -ov "dist/$app.dmg" && break
+        hdiutil create -quiet -volname "$1" -srcfolder "$2" -format ULFO -ov "$3" && break
         [ "$try" = 3 ] && exit 1
         sleep 5
     done
+    rm -rf "$2"
+}
+# The player's disk image only for main and releases; the Library's always (~4 MB, seconds): a pull request's trial
+# takes the Library from it
+if [ "$packages" != zip ]; then
+    dmg "ActionFootagePlayer $version" "$stage" "dist/$app.dmg"
+else
+    rm -rf "$stage"
 fi
-rm -rf "$stage"
+dmg "ActionFootageLibrary $version" "$library_stage" "dist/$library.dmg"
 
 # A plugin zipped alone gets the shared lists beside its files (the workspace plugin's registry.lua and registry.json:
 # the curves, the export's settings; tests/packaging_test.py): require finds them in the plugin's own folder
@@ -173,7 +188,7 @@ git archive HEAD mpv/scripts/workspace | tar -x --strip-components 2 -C "dist/$w
 (cd "dist/$workspace" && zip -qr "../$workspace.zip" workspace)
 rm -rf "dist/$workspace"
 
-files=("$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$workspace.zip" "$gyroflow.zip")
+files=("$app.zip" "$library.dmg" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$workspace.zip" "$gyroflow.zip")
 [ "$packages" = zip ] || files=("$app.dmg" "${files[@]}" "$name.tar.gz")
 (cd dist && shasum -a 256 "${files[@]}" > SHA256SUMS)
 (cd dist && ls -l "${files[@]}")

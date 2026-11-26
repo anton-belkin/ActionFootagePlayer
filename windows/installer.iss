@@ -6,7 +6,9 @@
 ; ActionFootagePlayer is in Open With for MP4 and MOV videos and in Windows' Default apps; Explorer's menu for them
 ; gets Play in ActionFootagePlayer and Stabilize + LUT. Windows doesn't let an app make itself the default: the
 ; installer opens Settings for it. DJI's LUT is downloaded from DJI. Uninstalling leaves what's yours in
-; %LOCALAPPDATA%\ActionFootagePlayer (DJI's LUT, your default preset).
+; %LOCALAPPDATA%\ActionFootagePlayer (DJI's LUT, your default preset). The sample dive clip is in {app}\sample when
+; the build had it (tools/sample_clip.sh). Action Footage Library is an installer of its own
+; (windows/library-installer.iss), into this same folder.
 
 #ifndef AppVersion
   #define AppVersion "dev"
@@ -62,20 +64,15 @@ Type: filesandordirs; Name: "{app}\vulkan"
 Type: filesandordirs; Name: "{app}\plugins"
 Type: filesandordirs; Name: "{app}\tools"
 Type: filesandordirs; Name: "{app}\licenses"
+Type: filesandordirs; Name: "{app}\sample"
 
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autoprograms}\Action Footage Library"; Filename: "{app}\ActionFootageLibrary.exe"
 
 [Registry]
-; A trip's Project.afproject opens in Action Footage Library
-Root: HKCU; Subkey: "Software\Classes\.afproject"; ValueType: string; ValueData: "{#AppName}.Project"; Flags: uninsdeletevalue
-Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project"; ValueType: string; ValueData: "Action Footage project"; Flags: uninsdeletekey
-Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project\DefaultIcon"; ValueType: string; ValueData: "{app}\ActionFootageLibrary.exe,0"
-Root: HKCU; Subkey: "Software\Classes\{#AppName}.Project\shell\open\command"; ValueType: string; ValueData: """{app}\ActionFootageLibrary.exe"" ""%1"""
 ; The kind of file it opens: Open With, and what Default apps lists for it
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}"; ValueType: string; ValueData: "Video ({#AppName})"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Classes\{#ProgId}\DefaultIcon"; ValueType: string; ValueData: "{app}\{#AppExe},0"
