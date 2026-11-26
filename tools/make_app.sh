@@ -17,6 +17,7 @@
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
+#   Contents/Resources/sample/           with SAMPLE_CLIP (a file, tools/sample_clip.sh's): the sample dive clip
 #   Contents/Helpers/, Frameworks/,      with BUNDLE_RUNTIME: mpv, ffmpeg and what they load, and their licenses and
 #     Resources/ThirdParty/              sources (tools/bundle_runtime.py)
 #
@@ -139,6 +140,10 @@ fi
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
 echo "$version" > "$res/VERSION"
+if [ -n "${SAMPLE_CLIP:-}" ] && [ -f "$SAMPLE_CLIP" ]; then
+    mkdir -p "$res/sample"
+    install -m 644 "$SAMPLE_CLIP" "$res/sample/"
+fi
 install -m 644 macos/setup-offer.lua macos/finder-launch.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"

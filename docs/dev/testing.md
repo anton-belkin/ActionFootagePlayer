@@ -91,7 +91,8 @@ every push to `main`, every `v*` tag, and by hand. A newer push to a PR cancels 
 | `plugins` | ubuntu-latest | `main`, tags, by hand | Bundles all plugins per system. |
 
 A pull request's run is the quick kind: Rust built incrementally (`CARGO_INCREMENTAL=1`, only what changed is
-compiled again), and only the app's zip packed (`AFP_PACKAGES=zip`: no disk image, no tarball). A draft runs only
+compiled again), and only the player's zip and the Library's small disk image packed (`AFP_PACKAGES=zip`: no player disk image, no
+tarball). A draft runs only
 `sh tools/run_tests.sh`; the whole check runs when it's marked ready for review. `main` and tags are built in full.
 `tools/build_mpv.sh` leaves mpv as it is when its lock, script, patches and Homebrew versions haven't changed.
 

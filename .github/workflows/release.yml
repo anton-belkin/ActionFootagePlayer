@@ -200,8 +200,9 @@ jobs:
         run: cd library/ui-tests && npm ci && npm test
 
   # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-<arch>.zip, and on Windows the app with its installer,
-  # ActionFootagePlayer-<version>-windows-<arch>-setup.exe, for x86_64 and arm64 (on GitHub's arm64 runner, built
-  # for it as everything there is). Linux on the oldest Ubuntu runner, so the binaries run with older glibc too
+  # ActionFootagePlayer-<version>-windows-<arch>-setup.exe, and the Library's own, ActionFootageLibrary-<version>-
+  # windows-<arch>-setup.exe, for x86_64 and arm64 (on GitHub's arm64 runner, built for it as everything there is).
+  # Linux on the oldest Ubuntu runner, so the binaries run with older glibc too
   plugin:
     # Not on pull requests: their required checks are macos and tests (on Anton's Mac). Every push to main and every
     # release runs it, so a break on Windows or Linux still shows up the same day
@@ -265,6 +266,8 @@ jobs:
           fi
           bash tools/make_windows_app.sh "$VERSION" ${{ matrix.target }}
           test -f "dist/ActionFootagePlayer-$VERSION-windows-${{ matrix.arch }}-setup.exe"
+          test -f "dist/ActionFootageLibrary-$VERSION-windows-${{ matrix.arch }}-setup.exe"
+          ls -l dist/*-setup.exe
 
       # The installer installs, the mpv in it plays, and the gyroflow plugin's binaries run (their DLLs found), with the
       # PATH ActionFootagePlayer.exe gives them (no GPU here: the stabilization itself isn't run)
@@ -287,10 +290,17 @@ jobs:
           $code = Run $setup @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=', "/LOG=$PWD\install.log") "$PWD\install.log"
           if ($code -ne 0) { throw "the installer failed: $code" }
           $app = "$env:LOCALAPPDATA\Programs\ActionFootagePlayer"
-          foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'vulkan\vulkan-1.dll', 'python\python.exe', 'plugins\gyroflow\gyroflow-gpu-table.exe', 'plugins\gyroflow\ffmpeg.exe', 'plugins\footage-menu\main.lua', 'plugins\highlights\markers.lua', 'plugins\workspace\workspace.lua', 'plugins\workspace\projectfile.lua', 'ActionFootageLibrary.exe',
+          foreach ($f in 'ActionFootagePlayer.exe', 'mpv\mpv.exe', 'vulkan\vulkan-1.dll', 'python\python.exe', 'plugins\gyroflow\gyroflow-gpu-table.exe', 'plugins\gyroflow\ffmpeg.exe', 'plugins\footage-menu\main.lua', 'plugins\highlights\markers.lua', 'plugins\workspace\workspace.lua', 'plugins\workspace\projectfile.lua',
                      'app.conf', 'plugins\dlogm\video_color.lua', 'plugins\dlogm\luts\dlog_hlg.cube', 'plugins\dlogm\luts\gplog_hlg.cube') {
               if (-not (Test-Path "$app\$f")) { throw "not installed: $f" }
           }
+          # The player's installer alone has no Library; the Library's own installer puts it beside the player
+          if (Test-Path "$app\ActionFootageLibrary.exe") { throw "the player's installer installed the Library" }
+          $library = "dist\ActionFootageLibrary-$env:VERSION-windows-${{ matrix.arch }}-setup.exe"
+          $code = Run $library @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$PWD\library.log") "$PWD\library.log"
+          if ($code -ne 0) { throw "the Library's installer failed: $code" }
+          if (-not (Test-Path "$app\ActionFootageLibrary.exe")) { throw "not installed: ActionFootageLibrary.exe" }
+          Write-Host "Sample clip: $(Test-Path "$app\sample\*.mp4")"
           # As ActionFootagePlayer.exe sets it: the runner has no GPU driver, so no Vulkan loader but the app's
           Write-Host "System Vulkan loader: $(Test-Path "$env:SystemRoot\System32\vulkan-1.dll")"
           $env:PATH = "$app\python;$env:PATH;$app\vulkan"
