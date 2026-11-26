@@ -59,16 +59,19 @@ MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release
 ## The sample clip: tools/make_sample_clip.py
 
 The player's downloads carry one sample dive, so a newcomer sees the colour, the stabilization and the denoise without
-footage of their own. It is the asset `Sample dive - Osmo Action 6.mp4` of the release tagged `sample-clips`, which
-the packaging takes as it is. It is made once, from one of Anton's clips, and uploaded only with his OK:
+footage of their own. It is the one asset of the pre-release tagged `sample-clips`, which the packaging takes as it
+is. GitHub names an asset without spaces: it is downloaded as `Sample.dive.-.Osmo.Action.6.mp4` (the label keeps the
+spaces) and saved under its own name, `Sample dive - Osmo Action 6.mp4`. It is made once, from one of Anton's clips,
+and uploaded only with his OK. The one there now (2026-11-26) is `DJI_20261025144924_0106_D.MP4`, 0-25 s:
 
 ```
 python3 tools/make_sample_clip.py <DJI_….MP4> --from 0 --to 25 --crf 23 --out "Sample dive - Osmo Action 6.mp4"
-gh release upload sample-clips "Sample dive - Osmo Action 6.mp4" --clobber
+gh release upload sample-clips "Sample dive - Osmo Action 6.mp4#Sample dive - Osmo Action 6.mp4" --clobber
 ```
 
 - The clip is an Osmo Action 6 one in D-Log M, Wide, EIS off (the lens is in the file), under water without a housing
-  (the camera then records the depth), in dim water so the noise shows.
+  (the camera then records the depth), by day: at night the light and shade hide how grey log is, so the colour step
+  barely shows (Anton, 2026-11-26).
 - `afp-cut` keeps the part; the video alone is encoded to 1080p HEVC Main 10 (libx265 `-tune grain`, keyframes where
   the camera had them, no B-frames); the samples are swapped in natively, every other track kept byte for byte. The
   lens's focal length is scaled with the picture ([gotchas](gotchas.md#exports-and-photos)).
