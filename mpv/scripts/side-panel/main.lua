@@ -46,6 +46,8 @@ local tagchips = require 'tagchips'
 local notify = require 'notify'
 -- The lens dialog (Source › Lens for the mode › Choose…), one of the panel's popovers
 local lensdlg = require 'lensdialog'
+-- The usage trace's part here (docs/design/usage-trace.md): the tab shown, and "Something's wrong here" (Alt+b, the flag)
+local trace = require('trace').install(mp, J, notify)
 
 local o = { shown = false, open = true, tab = "project" }
 options.read_options(o, "side_panel")
@@ -219,6 +221,8 @@ local function icon(u, name, cx, cy, color)
         u:box(cx - 1 * s, cy - 4.75 * s, 10 * s, 1.5 * s, 0, color)
         u:box(cx - 9 * s, cy + 0.75 * s, 18 * s, 1.5 * s, 0, color)
         u:box(cx - 9 * s, cy + 5.25 * s, 18 * s, 1.5 * s, 0, color)
+    elseif name == "mark" then
+        trace.icon(u, cx, cy, color)
     elseif name == "support" then
         u:shape(ui.circle_path(cx, cy, 8 * s), color, stroke)
         u:text(cx, cy + 0.5 * s, "?", { align = 5, size = 12, bold = true, color = color })
@@ -1952,6 +1956,8 @@ local function draw(w, h, s, hovered, final)
         rail_button(i, t[1], t[2], function() choose(t[1]) end, open and tab == t[1], t0 + (8 + (i - 1) * 44) * s)
     end
     rail_button(0, "support", "Support", function() choose("support") end, open and tab == "support", h - (8 + 36) * s)
+    -- With the usage trace on: "Something's wrong here" above it
+    if trace.on() then rail_button(0, "mark", "Something's wrong here", function() trace.drop("panel") end, false, h - (8 + 36 + 44) * s) end
     -- The list open over it all; closed when what it's for isn't there any more (another tab, the export started)
     local where
     if popover == lensdlg.ID then
@@ -2080,6 +2086,7 @@ local function render()
     mp.set_property_number("video-margin-ratio-right", d.w > 0 and width(s) / d.w or 0)
     render_bar()
     notify.set_panel_open(shown and open)
+    trace.tab(shown and (open and tab or "closed") or "hidden")
 end
 
 local function hit_at(x, y)

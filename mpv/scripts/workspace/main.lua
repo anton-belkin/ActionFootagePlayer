@@ -131,11 +131,13 @@ local utils = require 'mp.utils'
 local longpath = require 'longpath'
 longpath.install(utils)
 -- The responsiveness journal (journal.lua, docs/design/responsiveness-journal.md): every plugin's keys and steps by default;
--- this one also keeps the player's own (its start, files opened, seeks, the first frame).
--- Protected, as in the other plugins: the journal never stops this one
+-- this one also keeps the player's own (its start, files opened, seeks, the first frame), and with the usage trace the
+-- settings registry.json lists (docs/design/usage-trace.md). Protected, as in the other plugins: the journal never stops
+-- this one
 do
     local ok, j = pcall(require, 'journal')
-    if ok and type(j) == "table" and j.core then pcall(j.core) end
+    local reg_ok, reg = pcall(require, 'registry')
+    if ok and type(j) == "table" and j.core then pcall(j.core, reg_ok and reg or nil) end
 end
 local sidecar_lib = require 'sidecar'
 local projectfile = require 'projectfile'

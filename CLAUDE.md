@@ -182,6 +182,9 @@ to it rather than around it).
 - **Live rigs are not in CI:** `tests/*_ipc.py`, `tests/*_e2e.py`, `tests/photo_link_frame.py`, `tools/pipebench`,
   the panel render rig. Run them yourself for changes they cover, and say which you ran. How to run each:
   `docs/dev/testing.md`.
+- **Start the player or the Library for a test with `AFP_ACTOR=claude`**, so the usage trace
+  (`docs/design/usage-trace.md`) keeps your clicks apart from Anton's; over IPC into his player, set
+  `user-data/afp/journal/ipc` to `claude` first. When he says "заведи баг" / "file a bug", use the `file-bug` skill.
 - **A long or heavy run on Anton's Mac goes at low priority, with a time limit.** Research tests, benchmarks, batch
   renders, anything you start in the background that may take minutes: `nice -n 20 timeout 30m <command>` (pick
   the limit from how long it should take, with a margin). He works on this Mac meanwhile, and CI's runner shares it:

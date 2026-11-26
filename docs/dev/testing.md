@@ -144,9 +144,9 @@ CI has no GPU, no screen, no NAS and no real clips. Everything below is for you 
 | `gyroflow_conf_test.lua` | gyroflow.conf as defaults, from `gyroflow_conf_cases.json` (also read by cargo in `library/`) | CI |
 | `gyroflow_lens_test.lua` | The output lens over a clip's own Gyroflow project (#196) | CI |
 | `jellyfin_test.py` | `tools/stream/jellyfin.py`: where items go while the catalog is pending | CI |
-| `journal_test.lua` | Responsiveness journal, player part, with mpv stood in for | CI |
+| `journal_test.lua` | Responsiveness journal and usage trace, player part, with mpv stood in for | CI |
 | `journal_mpv_test.sh` (+ `.lua`) | The journal's hooks in a real mpv (`--vo=null`): `$MPV_BIN`, else `build/mpv-afp/out/mpv`, else PATH; skips with none | CI |
-| `journal_report_test.py` | `tools/journal_report.py` on a made-up journal | CI |
+| `journal_report_test.py` | `tools/journal_report.py` and `tools/trace_report.py` on a made-up journal | CI |
 | `librarylist_test.lua` | A list opened from the Library: which files, their head | CI |
 | `link_test.lua` | Link reader over MP4s ffmpeg made and changed; with `GYROFLOW_EXPORT`, over a real preview | CI (twice) |
 | `live_photo_test.lua` | What a photo is: Exif, Motion Photo XMP, Live Photo MOV, chains. `AFP_LIVE_PHOTOS`/`AFP_MOTION_PHOTOS` for real files | CI |
@@ -195,6 +195,10 @@ CI has no GPU, no screen, no NAS and no real clips. Everything below is for you 
   break and before going past the time. Say what will run, for how long, and what he will see. Offer a short run and
   a longer one with room for follow-ups. A go from another session does not count.
 - Headless rigs (`--vo=null`, no window, no focus taken) need no ask. All `tests/*_ipc.py` are headless.
+- **Start the player or the Library for a test with `AFP_ACTOR=claude`** in its environment, so the usage trace
+  (docs/design/usage-trace.md) never takes a session's clicks for Anton's. Driving *his* running player over the agent
+  plugin's socket, say who you are first: `{"command": ["set_property", "user-data/afp/journal/ipc", "claude"]}`, and
+  set it back to `""` when done.
 - **mpv with `vo=gpu-next` hangs while the Mac is locked or its display sleeps.** Check before a windowed run:
 
   ```
@@ -402,5 +406,8 @@ See [tools/edgefill/README.md](../../tools/edgefill/README.md) and
 
 - `tools/journal_report.py [--since 7d] [--json <file>]`: where the waiting is in the responsiveness journal
   (`~/Library/Logs/ActionFootagePlayer/journal`). docs/design/responsiveness-journal.md.
+- `tools/trace_report.py [--marks | --mark last | --last 30m | --since … --until …] [--actor anton] [--app player]`:
+  what happened, as a timeline, from the usage trace (docs/design/usage-trace.md); the file-bug skill
+  (`.claude/skills/file-bug`) turns a stretch of it into an issue.
 - Memory over a session: drive settings changes over IPC (`script-message-to gyroflow …`) and watch
   `footprint -p <mpv pid>`.

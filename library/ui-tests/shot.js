@@ -6,7 +6,8 @@
 //
 // States: unsaved (a tag that couldn't be written), saving (changes still being written, in Tasks), closing (the
 // window closed with changes waiting), tagged (a tag just added, the app not answered yet), catalog (Checks' catalog part
-// after a check against the files), histleft / histback / histfwd (a folder, then the mouse's Back, then its Forward).
+// after a check against the files), histleft / histback / histfwd (a folder, then the mouse's Back, then its Forward),
+// traceoff / trace / tracemark (the usage trace off, on, and Something's wrong here asked: docs/design/usage-trace.md).
 
 const fs = require("fs");
 const os = require("os");
@@ -48,6 +49,10 @@ const STATES = {
                 { path: "/P/Day 1/B.MP4", mode: "GoPro HERO4 Black · wide · 2704x1520 · 29.97 fps", accepted: null, fragments_with_scene: 2,
                   tried: [{ n: "0", name: "GoPro_HERO4 Black___2.7k_16by9_2704x1520-29.97fps", verdict: "poor", fits: false, refraction: 1 }] }] }],
     does: "S.jobs = window.ST_JOBS; S.path = ['Day 1']; showTab('stabilize'); renderAll(); setTimeout(() => sel(['Day 1/A.MP4', 'Day 1/B.MP4']), 300);" },
+  // The usage trace: off (as before it), on (the flag at the bottom left), Something's wrong here's line asked
+  traceoff: { set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4');" },
+  trace: { trace: true, set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4');" },
+  tracemark: { trace: true, set_tags: { never: true }, does: "S.path = ['Day 1']; renderAll(); pick('C.MP4'); setTimeout(() => { Journal.mark('key'); document.getElementById('afpTraceNoteText').value = 'the list jumped to the top'; }, 300);" },
   catalog: { set_tags: { never: true }, care: { kind: "check", busy: false, changes: 2, corrected: ["/P/Day 1/A.afp.json", "/P/Generated/2026-11-01 Moments/Day 1/A m.mp4"],
     unreadable_now: ["/P/Day 1/C.afp.json"] }, does: "S.path = ['Day 1']; showTab('checks'); renderAll(); sel(['Day 1/A.MP4']);" },
 };
@@ -65,6 +70,7 @@ function html(ui, state) {
       snapshot: () => ({ project: ROOT, jobs: ST.jobs || [], close_asked: false, close_waits: !!window.closeWaits, macos: true, changes: 1, quiet_ms: 5000, catalog: "", missing: 0, moving: null }),
       project: () => ({ path: ROOT, name: "Red Sea 2025", legacy: false, clips_flat: false, clips_layout: "tree", moments_alone: false }),
       lens_info: () => ST.lens_info || {}, lens_types: () => [],
+      journal_hello: () => ({ pid: 7, start_a: "L7.start", start_w: Date.now(), trace: !!ST.trace, actor: "anton" }), journal_write: () => null,
       engine: () => "", recent: () => [], catalog_care: () => ST.care || {}, catalog_look: () => null, cached_view: () => null, probes_since: () => ({ version: 1, items: {}, pending: 0 }), thumb: () => null, missing_links: () => [],
       scan: (a) => JSON.parse(JSON.stringify(VIEWS[a.view] || { root: ROOT, view: a.view, dirs: [], items: [] })),
       set_tags: (a) => {
