@@ -156,7 +156,8 @@ to it rather than around it).
   `anton-mac` (`~/actions-runner`, a service under his user, label `afp`). Releases (tags) and fork PRs run on
   GitHub's macOS. The runner keeps its build folders between runs, so prefer CI over a build of your own in a worktree
   (each worktree's `target/` costs 4-20 GB). It only runs while the Mac is awake and Anton is logged in. Required on
-  a PR: `macos` and `tests`. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
+  a PR: `macos` and `tests`; the PR needn't be up to date with `main`. A draft PR runs only the quick tests: mark it
+  ready for review when Anton should try its build. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
   merge, check `main`'s run (`gh run list --branch main`) and fix a break there in its own PR.
 - **Everything CI runs, locally:**
 
@@ -178,6 +179,11 @@ to it rather than around it).
 - **Start the player or the Library for a test with `AFP_ACTOR=claude`**, so the usage trace
   (`docs/design/usage-trace.md`) keeps your clicks apart from Anton's; over IPC into his player, set
   `user-data/afp/journal/ipc` to `claude` first. When he says "заведи баг" / "file a bug", use the `file-bug` skill.
+- **A long or heavy run on Anton's Mac goes at low priority, with a time limit.** Research tests, benchmarks, batch
+  renders, anything you start in the background that may take minutes: `nice -n 20 timeout 30m <command>` (pick
+  the limit from how long it should take, with a margin). He works on this Mac meanwhile, and CI's runner shares it:
+  a test that hung once took 5.5 of its 10 cores for 2 h 40 min (2026-11-26). Check on what you left running before
+  you end your turn.
 - **Ask Anton first before any test that takes the screen** (opens windows in a loop, takes focus, keeps the display
   awake). Ask again after any break. mpv's gpu-next hangs while the Mac is locked.
 - **"Not verified" is a debt, not a footnote.** Every "not tried / not verified" line in a PR gets an issue labelled

@@ -747,6 +747,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_OPENING` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_OPTICAL_APPLIES` | `vs-gyroflow/src/optical.rs` | — |
 | `AFP_OPTICAL_PROJECT` | `vs-gyroflow/src/optical.rs` | — |
+| `AFP_PACKAGES` | `.github/workflows/release.yml` | `tools/make_release.sh` |
 | `AFP_PHOTO` | — | `tests/live_photo_ipc.py` |
 | `AFP_PHOTO_CLIPS` | — | `vs-gyroflow/tests/photo_dates.rs` |
 | `AFP_PHOTO_RENDITIONS` | `vs-gyroflow/src/bin/gyroflow-export/photo.rs` | `tests/uw_export_check.py` |
@@ -769,7 +770,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-78 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+79 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->

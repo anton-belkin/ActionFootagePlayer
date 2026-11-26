@@ -6,7 +6,9 @@
 #
 #   git tag -a v0.2.0 -m "<notes>" && git push origin v0.2.0
 #
-# Pull requests build it as a check; the files are kept as the runs' artifacts.
+# Pull requests build it as a check; the files are kept as the runs' artifacts. A pull request's build is the quick
+# kind (the jobs' env below: Rust built incrementally, the zip alone); a draft runs only the quick tests, and the
+# whole check once it's marked ready for review.
 name: Release
 
 # Also every push to main, so main itself is known to build and pass; a PR's newer push cancels its older run.
@@ -15,6 +17,7 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 concurrency:
@@ -26,6 +29,13 @@ permissions:
 
 jobs:
   macos:
+    # A pull request: Rust built incrementally (only what changed is compiled again, in seconds rather than the 5 min
+    # a release build of vs-gyroflow takes; the binaries a little less optimized, fine to check and try) and the zip
+    # alone. FULL is false for a draft: the quick tests only. Main and releases: built in full
+    env:
+      CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+      AFP_PACKAGES: ${{ github.event_name == 'pull_request' && 'zip' || 'all' }}
+      FULL: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     # Your own branches and main build on Anton's Mac (the self-hosted runner "anton-mac", label afp: its build folders
     # kept between runs, its Homebrew as it is); releases (tags), forks and runs by hand on GitHub's macOS, whose
     # Homebrew bottles give the app the oldest macOS it runs on
@@ -83,11 +93,14 @@ jobs:
       # Every tests/*_test.{lua,py,sh}, found by name (tools/run_tests.sh: a new test needs no list here), and
       # vs-gyroflow's tests; LuaJIT is one of mpv's dependencies. The Library and the catalog: the tests job below
       - name: Tests
-        run: |
-          sh tools/run_tests.sh
-          (cd vs-gyroflow && cargo test --release)
+        run: sh tools/run_tests.sh
+
+      - name: Rust tests
+        if: env.FULL == 'true'
+        run: cd vs-gyroflow && cargo test --release
 
       - name: Build
+        if: env.FULL == 'true'
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then version=${GITHUB_REF_NAME#v}; else version=dev-${GITHUB_SHA::7}; fi
           MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release.sh "$version"
@@ -106,6 +119,7 @@ jobs:
             | while IFS= read -r app; do "$lsregister" -u "$app" || true; echo "unregistered $app"; done
 
       - name: Preview test
+        if: env.FULL == 'true'
         run: GYROFLOW_EXPORT=vs-gyroflow/target/release/gyroflow-export luajit tests/link_test.lua
 
       # For the plugins job (main and releases); a pull request's app stays in dist/ on the Mac
@@ -131,6 +145,13 @@ jobs:
           done
 
   tests:
+    # A pull request: Rust built incrementally (only what changed is compiled again, in seconds rather than the 5 min
+    # a release build of vs-gyroflow takes; the binaries a little less optimized, fine to check and try) and the zip
+    # alone. FULL is false for a draft: the quick tests only. Main and releases: built in full
+    env:
+      CARGO_INCREMENTAL: ${{ github.event_name == 'pull_request' && '1' || '0' }}
+      AFP_PACKAGES: ${{ github.event_name == 'pull_request' && 'zip' || 'all' }}
+      FULL: ${{ !(github.event_name == 'pull_request' && github.event.pull_request.draft) }}
     # Your own branches and main build on Anton's Mac (the self-hosted runner "anton-mac", label afp: its build folders
     # kept between runs, its Homebrew as it is); releases (tags), forks and runs by hand on GitHub's macOS, whose
     # Homebrew bottles give the app the oldest macOS it runs on
@@ -167,12 +188,15 @@ jobs:
           cache-dependency-path: library/ui-tests/package-lock.json
 
       - name: Catalog
+        if: env.FULL == 'true'
         run: cd catalog && cargo test --release
 
       - name: Library
+        if: env.FULL == 'true'
         run: cd library && cargo test
 
       - name: Library page
+        if: env.FULL == 'true'
         run: cd library/ui-tests && npm ci && npm test
 
   # The gyroflow plugin alone, as mpv-gyroflow-<version>-<os>-<arch>.zip, and on Windows the app with its installer,
