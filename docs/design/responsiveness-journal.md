@@ -10,6 +10,10 @@ faster comes from what it records.
 
 Nothing leaves the computer. The journal is a folder of text files on this Mac.
 
+With the usage trace on (a computer's setting, off by default), the same records also say what the actions were
+about — the file and position, the words shown, the settings changed, warnings and errors, markers — and who acted:
+[usage-trace.md](usage-trace.md).
+
 ## Where it is, what it costs on disk
 
 `~/Library/Logs/ActionFootagePlayer/journal/` (Windows: `%LOCALAPPDATA%\ActionFootagePlayer\Logs\journal`, Linux:

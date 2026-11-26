@@ -224,12 +224,7 @@ fn player_defaults() -> Value {
     // (tests never read this computer's player, but those run with one: AFL_PLAYER)
     if cfg!(test) && std::env::var_os("AFL_PLAYER").is_none() { return json!({}); }
     let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
-    let base = || -> Option<PathBuf> {
-        let b = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
-                else if cfg!(windows) { env("LOCALAPPDATA")? }
-                else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
-        Some(b.join("ActionFootagePlayer"))
-    };
+    let base = crate::journal::app_data;
     let written = env("AFL_PLAYER_DEFAULTS").or_else(|| base().map(|b| b.join("gyroflow").join("render-defaults.json")));
     if let Some(v) = written.and_then(|f| index::read_json(&f)).filter(|v| v["defaults"].is_object()) { return v; }
     let conf = env("AFL_PLAYER_OPTS").or_else(|| base().map(|b| b.join("mpv").join("script-opts").join("gyroflow.conf")));

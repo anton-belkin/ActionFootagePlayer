@@ -59,6 +59,7 @@ they're out of date, when a link in any Markdown file is broken, or when a doc i
 | [design/responsiveness-journal.md](design/responsiveness-journal.md) | Built in #266 (v0.14.0) and #278 |
 | [design/seek-and-scrub.md](design/seek-and-scrub.md) | Built in #286, #287 (via #300, untagged); afp-scrub on Windows not built |
 | [design/tags-and-culling.md](design/tags-and-culling.md) | Partly built: own store, Finder tags, culling, comments (v0.14.0); XMP sidecars, Explorer, NAS photo apps not built |
+| [design/usage-trace.md](design/usage-trace.md) | Built in #PR (untagged); the Library's markers have no picture |
 
 Each file's own status line says more, with what isn't built.
 

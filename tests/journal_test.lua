@@ -258,6 +258,126 @@ t0 = os.clock()
 periodic()
 print(string.format("journal.lua: %.1f ms to write %d records", (os.clock() - t0) * 1000, n))
 
+-- The trace off (this first load: no journal.conf, no AFP_TRACE): nothing of it written
+expect("trace off by default", J.trace, false)
+expect("actor by default", J.actor, "user")
+J.say("osd", "x"); J.note("set", { n = "a" })
+expect("trace off: mark gives nothing", J.mark(), nil)
+periodic()
+lines = {}
+for l in io.lines(J.file) do lines[#lines + 1] = l end
+expect("trace off: no texts, notes, markers", count("text") + count("set") + count("mark"), 0)
+expect("trace off: an action carries no file", (find("act", "test/still") or ""):find('"file"') == nil, true)
+
+-- The usage trace on (AFP_TRACE=1, AFP_ACTOR=claude): the journal loaded again, as a plugin of its own
+env.AFP_TRACE, env.AFP_ACTOR = "1", "claude"
+package.loaded.journal = nil
+mp.get_script_name = function() return "traced" end
+local log_events = nil
+mp.enable_messages = function(level) log_events = level end
+local T = require 'journal'
+expect("trace on", T.trace, true)
+expect("actor", T.actor, "claude")
+props.path, props["time-pos"], props.pause = "/Volumes/DJI_Inbox/A.MP4", 12.34567, true
+props["script-opts"] = { ["footage_menu-version"] = "0.14.2" }
+T.core(require 'registry')
+expect("mpv's warnings asked for", log_events, "warn")
+mp.add_key_binding("Ctrl+l", "level", function()
+    mp.osd_message("Level: strong")
+    mp.set_property_native("user-data/gyroflow/level", "strong")
+end)
+mp.set_property_native("user-data/gyroflow/level", "medium")
+clock = 500
+bindings.level()
+-- The same setting published again: not a change
+mp.set_property_native("user-data/gyroflow/level", "strong")
+-- A table setting (the lens): as JSON; the underwater colour from its own table
+mp.set_property_native("user-data/gyroflow/lens", { camera = "GoPro", lens = "Wide" })
+mp.set_property_native("user-data/uwcolor", { uw = true, uw_strength = 0.7, stats = { n = 1 } })
+mp.set_property_native("user-data/uwcolor", { uw = true, uw_strength = 0.5, stats = { n = 2 } })
+-- mpv's log: a warning, the same again, an error; a debug line isn't asked for
+local function logged(level, prefix, text) for _, f in ipairs(events["log-message"] or {}) do f({ level = level, prefix = prefix, text = text }) end end
+logged("warn", "gyroflow", "gpu table late\n")
+logged("warn", "gyroflow", "gpu table late\n")
+logged("error", "cplayer", "Failed to open x.MP4.")
+logged("v", "vo", "chatter")
+-- An IPC client that says who it is: the actions not from a key are its
+mp.set_property_native("user-data/afp/journal/ipc", "ipc")
+T.act("pause", { via = "core" })
+bindings.level()
+mp.set_property_native("user-data/afp/journal/ipc", "")
+T.act("play", { via = "core" })
+T.say("card", "Exported", { kind = "done", a = "P1.gyroflow.9" })
+T.note("answer", { n = "Name this moment", text = "Reef" })
+T.note("tab", { n = "transform" })
+local mid, shot = T.mark({ via = "key" })
+T.mark_note(mid, { note = "the horizon tilts" })
+T.flush()
+lines = {}
+for l in io.lines(T.file) do lines[#lines + 1] = l end
+local function find_s(k, n, s_)
+    for _, l in ipairs(lines) do
+        if field(l, "k") == k and field(l, "s") == (s_ or "traced") and (not n or field(l, "n") == n) then return l end
+    end
+end
+local function count_s(k, n)
+    local c = 0
+    for _, l in ipairs(lines) do if field(l, "k") == k and field(l, "s") == "traced" and (not n or field(l, "n") == n) then c = c + 1 end end
+    return c
+end
+local run = find_s("run")
+expect("run: who acted", run and field(run, "actor"), "claude")
+expect("run: the trace on", run and run:find('"trace":true') ~= nil, true)
+local lvl = find_s("act", "traced/level")
+expect("action: the file", lvl and field(lvl, "file"), "/Volumes/DJI_Inbox/A.MP4")
+expect("action: the position, to the ms", lvl and field(lvl, "pos"), 12.346)
+expect("action: paused", lvl and lvl:find('"paused":true') ~= nil, true)
+expect("IPC: its action", find_s("act", "pause") and field(find_s("act", "pause"), "actor"), "ipc")
+expect("IPC: a key still the run's", (function()
+    local n = 0
+    for _, l in ipairs(lines) do if field(l, "n") == "traced/level" and field(l, "k") == "act" then n = n + 1; if l:find('"actor"') then return "ipc" end end end
+    return n
+end)(), 2)
+expect("IPC: gone, the run's again", find_s("act", "play") and find_s("act", "play"):find('"actor"') == nil, true)
+local osd = find_s("text", "osd")
+expect("the OSD's words", osd and field(osd, "text"), "Level: strong")
+expect("the OSD's words: its action's", osd and field(osd, "a"), lvl and field(lvl, "a"))
+local sets = {}
+for _, l in ipairs(lines) do if field(l, "k") == "set" and field(l, "s") == "traced" then sets[#sets + 1] = l end end
+local function set_of(n, new)
+    for _, l in ipairs(sets) do if field(l, "n") == n and (new == nil or field(l, "new") == new) then return l end end
+end
+expect("a setting first seen", set_of("gyroflow.level", "medium") ~= nil and set_of("gyroflow.level", "medium"):find('"old"') == nil, true)
+local changed = set_of("gyroflow.level", "strong")
+expect("a setting changed: old", changed and field(changed, "old"), "medium")
+expect("a setting changed: by the key's action", changed and field(changed, "a"), lvl and field(lvl, "a"))
+expect("published again: not a change", count_s("set", "gyroflow.level"), 2)
+expect("a table setting as JSON", set_of("gyroflow.lens") ~= nil and set_of("gyroflow.lens"):find("Wide", 1, true) ~= nil, true)
+expect("the underwater colour's strength changed", set_of("uwcolor.uw_strength", 0.5) and field(set_of("uwcolor.uw_strength", 0.5), "old"), 0.7)
+expect("its other keys not again", count_s("set", "uwcolor.uw"), 1)
+expect("its stats not a setting", count_s("set", "uwcolor.stats"), 0)
+local warn = find_s("log")
+expect("a warning", warn and field(warn, "prefix"), "gyroflow")
+expect("its words, the newline off", warn and field(warn, "text"), "gpu table late")
+expect("the same line again: once", count_s("log"), 2)
+expect("the error", find_s("log") and (function() for _, l in ipairs(lines) do if field(l, "k") == "log" and field(l, "level") == "error" then return field(l, "text") end end end)(), "Failed to open x.MP4.")
+local card2 = find_s("text", "card")
+expect("a card's words, for its action", card2 and field(card2, "a"), "P1.gyroflow.9")
+expect("an answer", find_s("answer") and field(find_s("answer"), "text"), "Reef")
+expect("the tab", find_s("tab") and field(find_s("tab"), "n"), "transform")
+local m = find_s("mark")
+expect("a marker", m and field(m, "id"), mid)
+expect("its picture beside the journal", shot and shot:sub(1, #dir) == dir and shot:match("mark%-[%d%-]+%.png$") ~= nil, true)
+expect("the marker: the file and position", m and field(m, "pos"), 12.346)
+expect("the marker: who", m and field(m, "actor"), "claude")
+expect("its note", find_s("mark-note") and field(find_s("mark-note"), "note"), "the horizon tilts")
+expect("the start-file's path", (function()
+    for _, f in ipairs(events["start-file"] or {}) do f() end
+    T.flush()
+    for l in io.lines(T.file) do if field(l, "n") == "start-file" and field(l, "s") == "traced" then return field(l, "path") end end
+end)(), "/Volumes/DJI_Inbox/A.MP4")
+for _, l in ipairs(lines) do expect("a line is an object", l:sub(1, 1) == "{" and l:sub(-1) == "}", true) end
+
 os.execute("rm -rf '" .. dir .. "'")
 print(failures == 0 and ("ok: " .. checks .. " checks") or (failures .. " of " .. checks .. " failed"))
 os.exit(failures == 0 and 0 or 1)

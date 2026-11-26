@@ -502,6 +502,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | side_panel | `bar` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/agent/main.lua` |
 | side_panel | `dump` | `mpv/scripts/side-panel/main.lua` | `tests/afp_motion_ipc.py`, `tests/lens_dialog_ipc.py`, `tests/scrub_ipc.py` |
 | side_panel | `notify` | `mpv/scripts/side-panel/notify.lua` | `mpv/scripts/side-panel/notify_client.lua` |
+| side_panel | `notify-answer` | `mpv/scripts/side-panel/trace.lua` | — |
 | side_panel | `part-a` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | side_panel | `part-b` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | side_panel | `popover` | `mpv/scripts/side-panel/main.lua` | `tests/lens_dialog_ipc.py` |
@@ -559,7 +560,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | workspace | `view-revert` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `view-save` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 
-139 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
+140 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
 <!-- END GENERATED: script-messages -->
 ### user-data keys
 <!-- BEGIN GENERATED: user-data -->
@@ -571,6 +572,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `afp-scrub/shown` | `mpv/scripts/side-panel/scrub.lua` | — |
 | `afp/journal/act` | `mpv/scripts/workspace/journal.lua` | `mpv/scripts/workspace/journal.lua` |
 | `afp/journal/anchor` | `mpv/scripts/workspace/journal.lua` | `mpv/scripts/workspace/journal.lua` |
+| `afp/journal/ipc` | — | `mpv/scripts/workspace/journal.lua` |
 | `afp/journal/net` | `mpv/scripts/workspace/journal.lua` | `mpv/scripts/workspace/journal.lua` |
 | `afp/photo` | `mpv/scripts/live-photo/main.lua` | `mpv/scripts/gyroflow/crop.lua`, `mpv/scripts/gyroflow/platform.lua`, `mpv/scripts/highlights/main.lua`, `mpv/scripts/live-photo/main.lua` and 6 more |
 | `agent` | `mpv/scripts/agent/main.lua` | `mpv/scripts/side-panel/main.lua` |
@@ -673,7 +675,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `library-list` | `mpv/scripts/workspace/librarylist.lua` | `mpv/scripts/side-panel/main.lua` |
 | `osc/visibility` | — | `mpv/scripts/agent/main.lua` |
 | `side_panel/loaded` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/notify_client.lua` |
-| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/main.lua`, `mpv/scripts/workspace/viewsave.lua` |
+| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/journal.lua`, `mpv/scripts/workspace/main.lua` and 1 more |
 | `uwcolor/defaults` | — | `mpv/scripts/gyroflow/bundle.lua`, `mpv/scripts/workspace/transform.lua` |
 | `view360` | `mpv/scripts/view360/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/side-panel/scrub.lua` |
 | `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 13 more |
@@ -694,6 +696,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_360_OUT` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_360_TIMES` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_360_WIDTH` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
+| `AFP_ACTOR` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/journal_mpv_test.sh`, `tests/journal_test.lua` |
 | `AFP_ARGS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_BATCH` | `library/src/batch.rs`, `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua` and 6 more | `tests/agent_test.lua` |
 | `AFP_BIN` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
@@ -761,11 +764,12 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_TEST_CLIP` | — | `vs-gyroflow/tests/table_ahead.rs` |
 | `AFP_TEST_ROOT` | — | `tests/journal_mpv_test.lua`, `tests/journal_mpv_test.sh` |
 | `AFP_TIMES` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs`, `vs-gyroflow/src/bin/gyroflow-export/main.rs`, `vs-gyroflow/src/bin/gyroflow-export/photo.rs`, `vs-gyroflow/src/bin/gyroflow-export/post.rs` and 2 more | — |
+| `AFP_TRACE` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/journal_mpv_test.lua`, `tests/journal_mpv_test.sh`, `tests/journal_test.lua` |
 | `AFP_TV_LOOK` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-76 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+78 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->

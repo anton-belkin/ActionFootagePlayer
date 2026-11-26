@@ -531,6 +531,25 @@ files). Records: `{ k: "act"|"step"|"show"|"io"|"run"|"load"|"cost"|"capped", w:
 and folder (20 MB a file, 200 MB the folder), kept 45 days; `AFP_JOURNAL=0` turns it off. Nothing is sent anywhere. Written by `workspace/journal.lua` and `library/src/journal.rs`;
 read by `tools/journal_report.py`. See [responsiveness-journal.md](../design/responsiveness-journal.md).
 
+**The usage trace** ([usage-trace.md](../design/usage-trace.md)) is the same files with content, written only when
+`<player data>/mpv/script-opts/journal.conf` says `trace=yes` (`AFP_TRACE=1`/`0` over it; `actor=<name>`, and
+`AFP_ACTOR` over that). Every `run` has `actor` (`anton`, `claude`, `user`) and `trace: true` when on. With it on:
+
+| k | what | fields |
+|---|------|--------|
+| `act` (more fields) | the player: where it was; the page: what it was on | `file`, `pos` (s, to the ms), `paused`, `actor` (an IPC client's, `user-data/afp/journal/ipc`); page: `label`, `value` |
+| `step` `start-file` (more) | the file opened | `path` |
+| `text` | words shown | `n`: `osd`, `card` (`kind`, `detail`, `card`, `quiet`), `dialog` (`subtitle`, `value`, `suggestion`; the page: `body`), `toast`, `banner` (`id`); `text`, `a` |
+| `answer` | the name dialog answered | `n` (its title), `text`, `cancelled` |
+| `set` | a setting changed | `n` (`gyroflow.level`, `dlogm.look`, `uwcolor.uw`, `source.rotation`), `old` (absent when first seen), `new`, `clip` (the Library's) |
+| `tab` | the side panel's tab | `n` (a tab, `closed`, `hidden`) |
+| `log` | a warning or an error | `level`, `prefix` (the plugin, mpv's module, `invoke:<cmd>`, `page`, `panic`), `text` |
+| `mark` | "Something's wrong here" | `id` (`M<pid>.<plugin>.<n>`, `L<pid>.m<n>`), `via`, `actor`, `file`, `pos`, `paused`, `shot` (the picture's path) or `no_shot` (the Library: why none), `dialogs`, `toast`, `focus` |
+| `mark-note` | what was said about it | `id`, `note`, `cancelled`, `shot: false` and `error` (the picture failed) |
+
+Beside the journal, `mark-<when>-<pid>-<n>.png`: a player marker's picture of the window, kept and pruned with the
+journal. Read by `tools/trace_report.py`.
+
 ## Data folders on each system
 
 Two names are in use: the player's `ActionFootagePlayer` and the shared `ActionFootage` (catalog, project records,
@@ -548,7 +567,7 @@ recent tags).
 | Shared cache | `~/Library/Caches/ActionFootage/` (`catalog/`, `live/`) | `%LOCALAPPDATA%\ActionFootage\` | `~/.cache/ActionFootage/` |
 | Player cache | `~/Library/Caches/ActionFootagePlayer/` | `%LOCALAPPDATA%\ActionFootagePlayer\cache\` | `~/.cache/ActionFootagePlayer/` |
 | Library app | `~/Library/Application Support/<Library app id>/recent.json`; cache as above | Tauri's | Tauri's |
-| Logs | `~/Library/Logs/ActionFootagePlayer/journal/` | see above | see above |
+| Logs | `~/Library/Logs/ActionFootagePlayer/journal/` (the journal, the usage trace's `mark-*.png`) | see above | see above |
 
 `recent.json` (the Library's projects opened) is a list of `{ path, share?, rel?, hosts?, at_start? }`. `AFP_HOME`
 moves the catalog's data and cache to `<AFP_HOME>/data` and `<AFP_HOME>/cache` (tests, NAS Helper). Windows paths are

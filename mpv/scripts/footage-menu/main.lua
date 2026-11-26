@@ -111,6 +111,7 @@ local KEY_LABELS = {
     { "playlist-prev", "Previous clip in the folder" },
     { "playlist-next", "Next clip in the folder" },
     { "script-binding agent/report", "A note for the agent: areas of the frame and a comment" },
+    { "script-binding side_panel/mark", "Something's wrong here: a marker in the usage trace, a picture of the window and a line about it" },
     { "script-binding footage_menu/menu", "This menu" },
 }
 
@@ -482,11 +483,18 @@ end
 local function app_menu(path, key)
     local items = {
         item("Note for the agent…", "script-binding agent/report", { disabled = not path or not state("agent"), shortcut = key["script-binding agent/report"] }),
+    }
+    -- With the usage trace on (journal.conf trace=yes, docs/design/usage-trace.md): a marker for a bug
+    local j = package.loaded.journal
+    if j and j.trace == true then
+        table.insert(items, item("Something's wrong here…", "script-binding side_panel/mark", { shortcut = key["script-binding side_panel/mark"] }))
+    end
+    for _, it in ipairs({
         SEPARATOR,
         item("Keys…", "script-message-to footage_menu keys"),
         item("Help", "script-message-to footage_menu help"),
         item("Report this camera…", "script-message-to footage_menu report", { disabled = not local_file(path) }),
-    }
+    }) do table.insert(items, it) end
     if o.setup ~= "" then table.insert(items, item("Set up again…", "script-message-to footage_menu setup")) end
     return items
 end

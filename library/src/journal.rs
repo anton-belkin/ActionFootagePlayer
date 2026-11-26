@@ -12,6 +12,12 @@
 //!   let _s = journal::span("thumb", json!({...}));   a step timed until the guard goes (`.add(k, v)` on the way)
 //!   journal::where_(path)                 "nas" or "local": what the record says about a path
 //!   journal::handoff(action, paths)       the player told which Library action opened these (handoff.json)
+//!
+//! The usage trace (docs/design/usage-trace.md): the same journal with what it was about, for a person's own testing.
+//! Off unless this computer's player says so (its journal.conf, `trace=yes`; AFP_TRACE=1/0 over it); the page follows
+//! the app (journal_hello). Every run says who acted (`actor`: AFP_ACTOR, else journal.conf's, else "user").
+//!   journal::tracing()                    whether it's on
+//!   journal::trace(json!({ "k": "set", ... }))   a record only with it on (a setting changed, an error)
 
 use serde_json::{ json, Map, Value };
 use std::io::Write;
@@ -33,6 +39,8 @@ struct Journal {
     file: PathBuf,
     start_a: String,
     start_w: f64,
+    trace: bool,
+    actor: String,
 }
 
 static J: OnceLock<Option<Journal>> = OnceLock::new();
@@ -55,6 +63,36 @@ pub fn dir() -> Option<PathBuf> {
     Some(state.join("ActionFootagePlayer/journal"))
 }
 
+/// This computer's player's own folder (its mpv config, gyroflow data): ~/Library/Application Support/ActionFootagePlayer,
+/// %LOCALAPPDATA%\ActionFootagePlayer, $XDG_CONFIG_HOME/ActionFootagePlayer
+pub fn app_data() -> Option<PathBuf> {
+    let env = |k: &str| std::env::var_os(k).filter(|v| !v.is_empty()).map(PathBuf::from);
+    let b = if cfg!(target_os = "macos") { env("HOME")?.join("Library/Application Support") }
+            else if cfg!(windows) { env("LOCALAPPDATA")? }
+            else { env("XDG_CONFIG_HOME").or_else(|| env("HOME").map(|h| h.join(".config")))? };
+    Some(b.join("ActionFootagePlayer"))
+}
+
+/// The usage trace's options, as the player reads its journal.conf (mpv's options.lua: `key=value`, `#` a comment,
+/// nothing trimmed, a boolean only yes or no), with AFP_TRACE and AFP_ACTOR over them: (trace, actor)
+pub fn trace_options(conf: &str, env_trace: Option<&str>, env_actor: Option<&str>) -> (bool, String) {
+    let (mut trace, mut actor) = (false, String::new());
+    for line in conf.split('\n') {
+        if line.starts_with('#') { continue; }
+        let Some((k, v)) = line.split_once('=') else { continue };
+        match (k, v) {
+            ("trace", "yes") => trace = true,
+            ("trace", "no") => trace = false,
+            ("actor", a) => actor = a.to_string(),
+            _ => {}
+        }
+    }
+    match env_trace { Some("1") | Some("yes") => trace = true, Some("0") | Some("no") => trace = false, _ => {} }
+    if let Some(a) = env_actor.filter(|a| !a.is_empty()) { actor = a.to_string(); }
+    if actor.is_empty() { actor = "user".into(); }
+    (trace, actor)
+}
+
 /// The journal's clock now (ms, Unix time, monotonic)
 pub fn now() -> f64 {
     match J.get() {
@@ -74,6 +112,16 @@ pub fn rec(mut r: Value) {
     if !matches!(J.get(), Some(Some(_))) { return; }
     if let Some(m) = r.as_object_mut() { m.entry("s").or_insert(json!("app")); }
     send(r.to_string());
+}
+
+/// Whether the usage trace is on
+pub fn tracing() -> bool { matches!(J.get(), Some(Some(j)) if j.trace) }
+
+/// A record of the usage trace (its "w" now when not given): only with it on
+pub fn trace(mut r: Value) {
+    if !tracing() { return; }
+    if let Some(m) = r.as_object_mut() { m.entry("w").or_insert(json!(now())); }
+    rec(r);
 }
 
 /// A step of the action going on (the analysis finds which, by its time: the app's commands don't say)
@@ -222,12 +270,26 @@ pub fn init() {
         let (wdir, wfile) = (dir.clone(), file.clone());
         std::thread::Builder::new().name("journal".into()).spawn(move || writer(rx, wdir, wfile)).ok()?;
         let start_a = format!("L{pid}.start");
-        Some(Journal { anchor_ms, t0, tx: Mutex::new(tx), dir, file, start_a, start_w: started.unwrap_or(anchor_ms) })
+        let conf = app_data().map(|d| d.join("mpv").join("script-opts").join("journal.conf"))
+            .and_then(|f| std::fs::read_to_string(f).ok()).unwrap_or_default();
+        let (trace, actor) = trace_options(&conf, std::env::var("AFP_TRACE").ok().as_deref(), std::env::var("AFP_ACTOR").ok().as_deref());
+        Some(Journal { anchor_ms, t0, tx: Mutex::new(tx), dir, file, start_a, start_w: started.unwrap_or(anchor_ms), trace, actor })
     });
     let Some((a, w)) = start() else { return };
+    let (trace, actor) = match J.get() { Some(Some(j)) => (j.trace, j.actor.clone()), _ => (false, String::new()) };
     rec(json!({ "k": "run", "w": now(), "app": "library", "v": 1, "pid": std::process::id(), "start": w,
-                "version": env!("CARGO_PKG_VERSION"), "platform": std::env::consts::OS }));
+                "version": env!("CARGO_PKG_VERSION"), "platform": std::env::consts::OS, "actor": actor,
+                "trace": if trace { Some(true) } else { None } }));
     rec(json!({ "k": "act", "a": a, "n": "library/start", "w": w, "via": "core" }));
+    if trace {
+        // A panic (a command's thread, the app's): an error in the trace, then as before
+        let before = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let text: String = info.to_string().chars().take(500).collect();
+            rec(json!({ "k": "log", "w": now(), "level": "error", "prefix": "panic", "text": text }));
+            before(info);
+        }));
+    }
 }
 
 /// yyyymmdd-hhmmss (UTC) of a Unix time, for the file's name
@@ -304,7 +366,9 @@ pub fn prune(dir: &Path, keep: &Path, cap: u64, keep_days: u64) {
     let mut files: Vec<(SystemTime, u64, PathBuf)> = Vec::new();
     for e in rd.flatten() {
         let p = e.path();
-        if p.extension().is_none_or(|x| x != "jsonl") || p == keep { continue; }
+        // The journal's files and the markers' pictures (the usage trace's mark-*.png)
+        let marked = p.extension().is_some_and(|x| x == "png") && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("mark-"));
+        if (p.extension().is_none_or(|x| x != "jsonl") && !marked) || p == keep { continue; }
         let Ok(m) = e.metadata() else { continue };
         let t = m.modified().unwrap_or(SystemTime::now());
         if t < cutoff { let _ = std::fs::remove_file(&p); continue; }
@@ -332,7 +396,10 @@ pub fn journal_write(lines: Vec<String>) {
 #[tauri::command]
 pub fn journal_hello() -> Value {
     match start() {
-        Some((a, w)) => json!({ "pid": std::process::id(), "start_a": a, "start_w": w, "file": file() }),
+        Some((a, w)) => {
+            let (trace, actor) = match J.get() { Some(Some(j)) => (j.trace, j.actor.clone()), _ => (false, String::new()) };
+            json!({ "pid": std::process::id(), "start_a": a, "start_w": w, "file": file(), "trace": trace, "actor": actor })
+        }
         None => json!({ "pid": std::process::id(), "off": true }),
     }
 }
@@ -365,6 +432,18 @@ mod tests {
     }
 
     #[test]
+    fn trace_options_as_the_player_reads_them() {
+        assert_eq!(trace_options("", None, None), (false, "user".into()));
+        assert_eq!(trace_options("trace=yes\nactor=anton\n", None, None), (true, "anton".into()));
+        // As mpv's options.lua: nothing trimmed, a boolean only yes or no, # a comment
+        assert_eq!(trace_options("trace = yes\n#trace=yes\ntrace=true\n", None, None).0, false);
+        assert_eq!(trace_options("trace=yes\r\n", None, None).0, false);
+        // The environment over the file
+        assert_eq!(trace_options("trace=yes\nactor=anton", Some("0"), Some("claude")), (false, "claude".into()));
+        assert_eq!(trace_options("", Some("1"), Some("")), (true, "user".into()));
+    }
+
+    #[test]
     fn prunes_old_and_over_cap() {
         let dir = std::env::temp_dir().join(format!("afp-journal-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -380,6 +459,11 @@ mod tests {
         std::fs::write(&old, b"x").unwrap();
         std::fs::File::options().write(true).open(&old).unwrap().set_modified(SystemTime::now() - Duration::from_secs(50 * 86400)).unwrap();
         std::fs::write(dir.join("notes.txt"), b"keep").unwrap();
+        // A marker's picture as old as the oldest journal goes with it; another picture stays
+        let shot = dir.join("mark-20000101-000000-1-1.png");
+        std::fs::write(&shot, b"p").unwrap();
+        std::fs::File::options().write(true).open(&shot).unwrap().set_modified(SystemTime::now() - Duration::from_secs(50 * 86400)).unwrap();
+        std::fs::write(dir.join("other.png"), b"p").unwrap();
         let keep = dir.join("library-now.jsonl");
         std::fs::write(&keep, vec![b'y'; 300]).unwrap();
         prune(&dir, &keep, 1200, 45);
@@ -387,6 +471,7 @@ mod tests {
         assert!(!dir.join("player-1.jsonl").exists(), "the oldest, over the cap");
         assert!(dir.join("player-2.jsonl").exists() && dir.join("player-3.jsonl").exists());
         assert!(keep.exists() && dir.join("notes.txt").exists());
+        assert!(!shot.exists() && dir.join("other.png").exists(), "a marker's picture goes after 45 days, nothing else");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

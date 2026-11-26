@@ -175,6 +175,9 @@ to it rather than around it).
 - **Live rigs are not in CI:** `tests/*_ipc.py`, `tests/*_e2e.py`, `tests/photo_link_frame.py`, `tools/pipebench`,
   the panel render rig. Run them yourself for changes they cover, and say which you ran. How to run each:
   `docs/dev/testing.md`.
+- **Start the player or the Library for a test with `AFP_ACTOR=claude`**, so the usage trace
+  (`docs/design/usage-trace.md`) keeps your clicks apart from Anton's; over IPC into his player, set
+  `user-data/afp/journal/ipc` to `claude` first. When he says "заведи баг" / "file a bug", use the `file-bug` skill.
 - **Ask Anton first before any test that takes the screen** (opens windows in a loop, takes focus, keeps the display
   awake). Ask again after any break. mpv's gpu-next hangs while the Mac is locked.
 - **"Not verified" is a debt, not a footnote.** Every "not tried / not verified" line in a PR gets an issue labelled

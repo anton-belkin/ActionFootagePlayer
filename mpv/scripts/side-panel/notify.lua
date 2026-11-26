@@ -367,6 +367,15 @@ local function journal_shown(a, what)
     local j = package.loaded.journal
     if j and j.shown_for and a then j.shown_for(a, what) end
 end
+-- The usage trace (docs/design/usage-trace.md): the words shown, the answer given (recorded only with the trace on)
+local function journal_say(n, text, fields)
+    local j = package.loaded.journal
+    if j and j.trace and j.say then j.say(n, text, fields) end
+end
+local function journal_note(k, fields)
+    local j = package.loaded.journal
+    if j and j.trace and j.note then j.note(k, fields) end
+end
 
 render = function()
     local d = mp.get_property_native("osd-dimensions")
@@ -430,6 +439,12 @@ function M.notify(t)
     local before = drawn
     render()
     if drawn > before then journal_shown(t.journal, "card:" .. kind) end
+    -- Its words, when they're new (not a working card's bar moving)
+    local words = kind .. "\0" .. tostring(c.title or "") .. "\0" .. tostring(c.detail or "")
+    if words ~= c.said then
+        c.said = words
+        journal_say("card", c.title or "", { kind = kind, detail = c.detail, card = c.id, quiet = c.quiet or nil, a = t.journal })
+    end
 end
 
 function M.hide(id)
@@ -460,6 +475,7 @@ answer = function(cancelled)
     if not d then return end
     local text = (d.value:gsub("^%s+", ""):gsub("%s+$", ""))
     close_dialog()
+    journal_note("answer", { n = d.title, text = text, cancelled = cancelled or nil, a = d.journal })
     if d.reply then
         mp.commandv("script-message-to", d.reply, "notify-answer", utils.format_json({ id = d.id, text = cancelled and "" or text, cancelled = cancelled }))
     end
@@ -532,7 +548,7 @@ function M.ask(req)
     dialog = {
         id = req.id, reply = req.reply, title = req.title, subtitle = req.subtitle, suggestion = req.suggestion,
         placeholder = req.placeholder, ok = req.ok, ok_typed = req.ok_typed,
-        names = type(req.names) == "table" and req.names or {}, value = value, cursor = #value + 1,
+        names = type(req.names) == "table" and req.names or {}, value = value, cursor = #value + 1, journal = req.journal,
     }
     for _, k in ipairs(DIALOG_KEYS) do
         mp.add_forced_key_binding(k[1], "notify-dlg-" .. k[1], k[2], { repeatable = k[3] == true })
@@ -547,6 +563,8 @@ function M.ask(req)
     local before = drawn
     render()
     if drawn > before then journal_shown(req.journal, "dialog") end
+    journal_say("dialog", req.title or "", { subtitle = req.subtitle, value = value ~= "" and value or nil,
+                                             suggestion = req.suggestion, a = req.journal })
 end
 
 function M.dialog_open() return dialog ~= nil end
