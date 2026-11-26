@@ -98,8 +98,10 @@ to it rather than around it).
     `tests/gyroflow_conf_cases.json` (`tests/gyroflow_conf_test.lua` and cargo). The conf is read as mpv's
     `options.lua` reads it: nothing trimmed, booleans only `yes`/`no`;
   - the render recipe: `renders.rs` `VERSION` goes with what a recipe holds, and the hashes stay
-    (`the_recipe_goes_with_its_version_and_keeps_its_hash`); the moment renders of before the cache by hash, workspace
-    `main.lua`'s `RENDER_VERSION`/`render_recipe` and `index.rs` `render_recipe_of` (`render_recipe_twin`).
+    (`the_recipe_goes_with_its_version_and_keeps_its_hash`); the moment renders at a moment's path, workspace
+    `renders.lua`'s `RENDER_VERSION`/`render_recipe` and `index.rs` `render_recipe_of` (`render_recipe_twin`). Both
+    take the clip's lens as the probe says it (`lens_info` `from`/`print`, `gyroflow-probe --lens-id`) and its
+    `.afp-motion`'s fingerprint (#318).
 - **Curves** are the registry's. Still apart: `export.lua`'s mapping before `--curve` (a curve the player plays must
   reach the export as one of the registry's), the packagers' `make_hdr_lut.py` curves (each curve's `lut` in `luts/` or
   made), the cameras' `DJI_CURVES`/`GOPRO_CURVES` and `probe.rs`, `catalog/src/range.rs` `log_curve`, gyroflow-export's

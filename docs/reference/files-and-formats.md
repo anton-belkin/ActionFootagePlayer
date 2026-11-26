@@ -44,7 +44,7 @@ this file follows it; where this file and the code disagree, fix this file. Word
   know.
 - **Raise the version when what's kept changes.** `afp_catalog::project::VERSION` and `projectfile.lua` `M.VERSION`
   together (test `what_is_kept_goes_with_the_projects_version`); the probe's answer with `index.rs` `GEOTAG`; the
-  render recipe with workspace `RENDER_VERSION` and `renders.rs` `VERSION`.
+  render recipe with `renders.rs` `VERSION`, and the per-moment one with workspace and `index.rs` `RENDER_VERSION`.
 - **Older programs refuse newer data, never wipe it** (#220, #249). Each format below says how.
 - **Migrations are one-off scripts** in `tools/one_off/` (`photos_to_links.py`, `uw_to_source.py`), run once on
   Anton's library. A few old forms are still read by the product; they are listed in [Old forms](#old-forms-still-read).
@@ -395,7 +395,7 @@ both have one) differs is "measured on another clip" and not used.
 |---|---|---|
 | Lua | `gyroflow/sources.lua`, `gyroflow/measure.lua`, `side-panel/main.lua` (whether there is one) | runs gyroflow-optical / gyroflow-export (Ctrl+m) |
 | Rust (vs-gyroflow) | `afp_motion.rs` `header_for`, `read_for`; `gyroflow-gpu-table`, `gyroflow-probe`, `lib.rs` | `afp_motion.rs` `MotionFile::write`; `gyroflow-optical`, `measure.rs`, `optical.rs` |
-| Rust (Library) | `index.rs`, `changed.rs` (a change re-probes) | through `gyroflow-optical` jobs |
+| Rust (Library) | `index.rs`, `changed.rs` (a change re-probes), `renders.rs` (its fingerprint is in a render's recipe: `motion`) | through `gyroflow-optical` jobs |
 
 ## Gyroflow projects and presets
 
@@ -406,7 +406,9 @@ both have one) differs is "measured on another clip" and not used.
   moment, so a later change to the clip's project doesn't change it). `workspace/places.lua` `own_project`.
 - **The default preset** for clips without a project: Gyroflow's own, then the first of `$GYROFLOW_DATA/default.gyroflow`
   and `<plugin folder>/default.gyroflow`. The plugin also ships `underwater.gyroflow`.
-- A project's fingerprint goes into a render's recipe (`gyroflow`), so editing it makes the render stale.
+- A project's fingerprint goes into a render's recipe (`gyroflow`), so editing it makes the render stale. Without
+  one, the clip's lens (`lens`: what the probe says it plays with) and its `.afp-motion`'s fingerprint (`motion`) go
+  in instead, with the preset's (`preset`).
 
 ## Tags
 

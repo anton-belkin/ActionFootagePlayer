@@ -228,6 +228,11 @@ pub struct LensInfo {
     /// The clip's mode as the player's own database keeps lenses ("GoPro HERO4 Black · medium · 2704x1520 · 29.97 fps"):
     /// what a lens chosen for it is assigned to
     pub mode_key: String,
+    /// The lens profile loaded, by what it says (`lens_print`): it changes whenever the lens the clip plays with does,
+    /// a lens of the same name estimated again too; "" for none or the lens in the file (the clip's own, which stays).
+    /// With `from`, what a render's recipe takes of the lens (`lens_id`; the Library's renders.rs, the player's v2
+    /// render recipe, workspace/renders.lua)
+    pub print: String,
     /// The lenses to choose from (lens_pick::candidates), nearest first: only with --lens
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub candidates: Vec<lens_pick::Candidate>,
@@ -302,6 +307,7 @@ fn lens_read(path: &str) -> Option<LensInfo> {
         None => "",
     }.to_string();
     let mode_key = lens_pick_mode_key(path, &clip);
+    let print = pick.as_ref().map(|p| lens_print(&p.profile)).unwrap_or_default();
     let lens = match pick {
         Some(p) => p.label(),
         None if in_file => "in the file".to_string(),
@@ -316,7 +322,19 @@ fn lens_read(path: &str) -> Option<LensInfo> {
     let curated_file = lists.user_file.as_ref().map(|f| f.to_string_lossy().to_string());
     let project = project_lens_answer(path, &clip);
     Some(LensInfo { chosen: lens_pick::chosen_type(path), recorded, default, focal_only, mode, types, camera, lens, curated_file, curated_error: lists.user_error.clone(), project,
-                    from, mode_key, candidates: Vec::new() })
+                    from, mode_key, print, candidates: Vec::new() })
+}
+
+/// A lens profile by what it says: its JSON as gyroflow-core writes it (its file's path, rating and checksum left
+/// out), the first 16 hex of its SHA-256. The same profile prints the same in every run
+pub fn lens_print(profile: &gyroflow_core::lens_profile::LensProfile) -> String {
+    profile.get_json().map(|j| afp_catalog::workspace::sha256_hex(j.as_bytes())[..16].to_string()).unwrap_or_default()
+}
+
+/// What a render's recipe takes of a clip's lens (`gyroflow-probe --lens-id`, and `lens_info`'s two fields of it in
+/// --library): {"from", "print"}, null where the clip can't be read
+pub fn lens_id(path: &str) -> serde_json::Value {
+    lens_info(path).map(|l| serde_json::json!({ "from": l.from, "print": l.print })).unwrap_or_default()
 }
 
 fn lens_pick_mode_key(path: &str, clip: &lens_pick::Clip) -> String {

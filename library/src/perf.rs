@@ -76,6 +76,8 @@ pub fn build(base: &Path, n: usize) -> Rig {
         }
         // A Gyroflow project beside one clip in fifteen (a render's recipe has its fingerprint)
         if i % 15 == 0 { put(f.join(format!("{dir}/{stem}.gyroflow")), format!(r#"{{"title":"{stem}"}}"#).as_bytes()); }
+        // Motion measured from the picture beside one clip in seven (a render's recipe has its fingerprint)
+        if i % 7 == 0 { put(f.join(format!("{dir}/{stem}.afp-motion")), format!("{{\"format\":\"actionfootageplayer-motion\",\"clip\":\"{stem}\"}}\n").as_bytes()); }
         if i % 5 != 0 { put(p.join(format!("_Clips/{dir}/{stem}.afplink.mp4")), &mp4(&format!(r#"{{"v":1,"kind":"clip","clip":"{tree}","size":8}}"#))); }
         if i % 5 == 0 {
             let rel = format!("_Moments/{dir}/{stem} m1.afplink.mp4");
@@ -101,10 +103,14 @@ pub fn build(base: &Path, n: usize) -> Rig {
         let color = ["dlogm", "hlg", "normal"][i % 3];
         let mode = if i % 4 == 0 { Value::Null } else { json!("default") };
         let marks = if i % 7 == 0 { json!([2.0, 9.5]) } else { json!([]) };
+        let lens_from = ["own", "file", "list"][i % 3];
+        let lens_print = if i % 3 == 1 { String::new() } else { format!("{:016x}", i % 4) };
         known.insert(f.join(&tree).display().to_string(), json!({ "s": 8, "m": mtime, "l": index::lens_list_stamp(), "v": {
             "geotag": index::GEOTAG, "camera": cam, "color": color, "mode": mode,
             "movie": { "duration": 20 + i % 90, "created": 1_735_700_000 + i * 60, "width": 3840, "height": 2160 }, "fps": 59.94,
-            "marks": { "times": marks } } }));
+            "marks": { "times": marks },
+            // (the lens it plays with: a render's recipe has it)
+            "lens_info": { "from": lens_from, "print": lens_print, "mode_key": cam } } }));
         clips.push(tree);
     }
     locations::write_pointers(&p, &locations::locations(&p, &locations::mounts()), &[], &locations::mounts());
@@ -307,15 +313,17 @@ fn where_the_time_goes() {
 }
 
 /// A view's look at the moments' renders from the catalog (renders::Ctx not fresh) finds exactly what the disk would:
-/// the same recipe, the same render found, and asks the share nothing (but each Gyroflow project's fingerprint, once).
+/// the same recipe (the clip's lens from the probes' answers, its measured motion's fingerprint: #318), the same render
+/// found, and asks the share nothing (but each Gyroflow project's and measured motion's fingerprint, once).
 /// Counted on this thread (take_here): the other tests running beside it ask the disk too (#325)
 #[test]
 fn renders_seen_from_the_catalog_are_the_disks() {
     let _one = seen::TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let base = std::env::temp_dir().join(format!("afl-renders-seen-{}", std::process::id()));
     let r = build(&base, 240);
-    let (fresh, view) = (renders::Ctx::with(&r.p, true, json!({})), renders::Ctx::with(&r.p, false, json!({})));
-    let (mut gyroflow, mut own, mut old) = (0, 0, 0);
+    let (fresh, view) = (renders::Ctx::with(&r.p, true, json!({})).with_probes(Some(r.probes.clone())),
+                         renders::Ctx::with(&r.p, false, json!({})).with_probes(Some(r.probes.clone())));
+    let (mut gyroflow, mut own, mut old, mut lens, mut motion) = (0, 0, 0, 0, 0);
     nas::take_here();
     let mut asked_view = [0u64; 3];
     for rel in &r.moments {
@@ -332,15 +340,17 @@ fn renders_seen_from_the_catalog_are_the_disks() {
                 gyroflow += a.recipe["gyroflow"].is_string() as usize;
                 own += a.recipe["settings"].is_object() as usize;
                 old += a.stale.is_some() as usize;
+                lens += a.recipe["lens"].is_object() as usize;
+                motion += a.recipe["motion"].is_string() as usize;
             }
         }
     }
     // (what the rig made: Gyroflow projects, clips with their own file, renders made the old way)
-    assert!(gyroflow >= 8 && own >= 20 && old >= 4, "gyroflow {gyroflow}, own {own}, old {old}");
+    assert!(gyroflow >= 8 && own >= 20 && old >= 4 && lens >= 30 && motion >= 4, "gyroflow {gyroflow}, own {own}, old {old}, lens {lens}, motion {motion}");
     assert_eq!(asked_view[0], 0, "no stat asked of the share: {asked_view:?}");
-    // (the Gyroflow projects there are: beside the moments' clips, beside the moments)
-    let projects = r.moments.iter().filter(|m| r.p.join(m.replace(index::LINK_EXT, ".gyroflow")).is_file()).count()
-        + r.moments.iter().filter_map(|m| renders::item(&r.p, "moment", m).ok()?.link["clip"].as_str().map(|c| r.f.join(c).with_extension("gyroflow").is_file())).filter(|x| *x).count();
+    // (the Gyroflow projects there are: beside the moments' clips, beside the moments; and the measured motions)
+    let beside = |ext: &str| r.moments.iter().filter_map(|m| renders::item(&r.p, "moment", m).ok()?.link["clip"].as_str().map(|c| r.f.join(c).with_extension(ext).is_file())).filter(|x| *x).count();
+    let projects = r.moments.iter().filter(|m| r.p.join(m.replace(index::LINK_EXT, ".gyroflow")).is_file()).count() + beside("gyroflow") + beside("afp-motion");
     assert!(asked_view[1] <= projects as u64, "reads: only the {projects} fingerprints, once: {asked_view:?}");
     // (and counted here at all: the fingerprints are read on this thread)
     assert!(projects == 0 || asked_view[1] > 0, "this thread's reads counted: {asked_view:?}");
