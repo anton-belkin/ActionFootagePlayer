@@ -248,6 +248,7 @@ put mpv/scripts/gyroflow/exportsettings.lua "$GYROFLOW/exportsettings.lua" 644
 put mpv/scripts/gyroflow/settings.lua "$GYROFLOW/settings.lua" 644
 put mpv/scripts/gyroflow/projectwatch.lua "$GYROFLOW/projectwatch.lua" 644
 put mpv/scripts/gyroflow/measure.lua "$GYROFLOW/measure.lua" 644
+put mpv/scripts/gyroflow/compare.lua "$GYROFLOW/compare.lua" 644
 put mpv/scripts/gyroflow/ahead.lua "$GYROFLOW/ahead.lua" 644
 put mpv/scripts/gyroflow/dnstep.lua "$GYROFLOW/dnstep.lua" 644
 # The plugin's parts, which main.lua wires

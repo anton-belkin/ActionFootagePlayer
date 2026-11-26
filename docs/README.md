@@ -40,6 +40,7 @@ they're out of date, when a link in any Markdown file is broken, or when a doc i
 | [design/360-reframe.md](design/360-reframe.md) | Built in #166, #171, #172, #177 (v0.11.0); its "Later" list not built |
 | [design/albums-photos-share-concept.md](design/albums-photos-share-concept.md) | Partly built: albums, photo links, Timeline and Map, Share to a folder over the render cache (v0.14.0); smart albums, Apple Photos and more not built |
 | [design/catalog-safeguards.md](design/catalog-safeguards.md) | Built in #250 (v0.14.0) and #284 |
+| [design/compare-as-recorded.md](design/compare-as-recorded.md) | Built (h, afp-compare); Windows and Linux not tried live |
 | [design/export-gpu-path.md](design/export-gpu-path.md) | Built in #245, #247 (v0.14.0) |
 | [design/export-settings.md](design/export-settings.md) | Built in #254 (v0.14.0) |
 | [design/geolocation.md](design/geolocation.md) | Built in #188, #200, #239; a few parts not built |

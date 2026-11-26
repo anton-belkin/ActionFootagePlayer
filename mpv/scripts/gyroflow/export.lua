@@ -69,6 +69,12 @@ local timer
 local last_export = nil
 
 -- The clip playing: mpv's path, or the original when the file playing is a moment (the workspace plugin)
+-- A picture of the frame on screen is of the clip as it plays, not as recorded (compare.lua's h held or tapped)
+local function compare_off()
+    local ok, compare = pcall(require, 'compare')
+    if ok and compare.off then compare.off() end
+end
+
 local function clip_path()
     local path = mp.get_property("path")
     local ws = mp.get_property_native("user-data/workspace")
@@ -708,6 +714,7 @@ local function gpu_frame()
     local scale = opts.gyroflow_render_scale
     if scale then opts.gyroflow_render_scale = "1"; mp.set_property_native("glsl-shader-opts", opts) end
     local t0 = mp.get_time()
+    compare_off()
     mp.command_native({ "screenshot-to-file", file, "video" })
     if scale then opts.gyroflow_render_scale = scale; mp.set_property_native("glsl-shader-opts", opts) end
     for k, v in pairs(saved) do mp.set_property(k, v) end
@@ -754,6 +761,7 @@ mp.register_script_message("moment-picture", function(json)
     end
     local t0 = mp.get_time()
     os.remove(file)
+    compare_off()
     mp.command_native({ "screenshot-to-file", file, "video" })
     for k, v in pairs(saved) do mp.set_property(k, v) end
     if utils.file_info(file) then
@@ -884,6 +892,7 @@ local function photo()
         saved[k] = mp.get_property(k)
         mp.set_property(k, v)
     end
+    compare_off()
     mp.command_native({ "screenshot-to-file", picture, "video" })
     for k, v in pairs(saved) do mp.set_property(k, v) end
     if not utils.file_info(picture) then picture = nil end

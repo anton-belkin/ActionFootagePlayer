@@ -446,6 +446,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | footage_menu | `report` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | footage_menu | `reveal` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | footage_menu | `setup` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
+| gyroflow | `afp-compare` | `mpv/scripts/gyroflow/compare.lua` | — |
 | gyroflow | `apply-view` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/workspace/viewsave.lua` |
 | gyroflow | `aspect` | `mpv/scripts/gyroflow/main.lua` | `mpv/scripts/side-panel/main.lua`, `tests/sidepanel_test.lua` |
 | gyroflow | `assign-lens` | `mpv/scripts/gyroflow/measure.lua` | `tests/afp_motion_ipc.py` |
@@ -559,7 +560,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | workspace | `view-revert` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `view-save` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 
-139 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
+140 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
 <!-- END GENERATED: script-messages -->
 ### user-data keys
 <!-- BEGIN GENERATED: user-data -->
@@ -591,7 +592,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `dji_telemetry/subtitles` | `mpv/scripts/dji-telemetry/main.lua` | — |
 | `dji_telemetry/units` | `mpv/scripts/dji-telemetry/main.lua` | — |
 | `dji_telemetry/visible` | `mpv/scripts/dji-telemetry/main.lua` | — |
-| `dlogm` | — | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/sdr-check/main.lua`, `mpv/scripts/side-panel/main.lua` |
+| `dlogm` | — | `mpv/scripts/gyroflow/compare.lua`, `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/sdr-check/main.lua` and 1 more |
 | `dlogm/curve` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/dlogm/uwcolor.lua`, `mpv/scripts/gyroflow/export.lua` |
 | `dlogm/denoise` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/dv` | `mpv/scripts/dlogm/main.lua` | — |
@@ -621,6 +622,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `gyroflow/chromatic` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `gyroflow/chromatic_available` | `mpv/scripts/gyroflow/bundle.lua` | — |
 | `gyroflow/chromatic_skip` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/gyroflow/export.lua` |
+| `gyroflow/compare` | `mpv/scripts/gyroflow/compare.lua` | — |
 | `gyroflow/crop` | `mpv/scripts/gyroflow/crop.lua` | `mpv/scripts/gyroflow/denoise.lua`, `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/view360/main.lua` |
 | `gyroflow/defaults` | `mpv/scripts/gyroflow/bundle.lua` | `mpv/scripts/workspace/batch.lua`, `mpv/scripts/workspace/transform.lua` |
 | `gyroflow/denoise` | `mpv/scripts/gyroflow/bundle.lua` | — |
@@ -731,7 +733,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_JELLYFIN_URL` | `tools/nas-helper/compose.yaml`, `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_JELLYFIN_USER` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py` | — |
 | `AFP_JOURNAL` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | — |
-| `AFP_JOURNAL_DIR` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/gyroflow_reload_ipc.py`, `tests/journal_mpv_test.sh`, `tests/journal_test.lua`, `tools/journal_report.py` and 1 more |
+| `AFP_JOURNAL_DIR` | `library/src/journal.rs`, `mpv/scripts/workspace/journal.lua` | `tests/gyroflow_reload_ipc.py`, `tests/journal_mpv_test.sh`, `tests/journal_test.lua`, `tools/compare_latency/run.py` and 2 more |
 | `AFP_JOURNAL_PARENT` | `library/src/batch.rs`, `mpv/scripts/workspace/journal.lua` | — |
 | `AFP_LIBRARY` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_LISTS` | `library/src/lists.rs`, `library/src/main.rs` | `library/ui-tests/lists.js`, `library/ui/albums.js`, `library/ui/share.js`, `library/ui/source.js` and 1 more |
