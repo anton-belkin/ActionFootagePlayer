@@ -154,6 +154,7 @@ CI has no GPU, no screen, no NAS and no real clips. Everything below is for you 
 | `live_photo_ipc.py` | Live photos: hover, Space, chains, lists, HDR stills | Live, headless |
 | `navkeys_ipc.py` | Modifier arrows in a running mpv | Live, headless |
 | `scrub_ipc.py` | Seek bar pictures with `afp-scrub` | Live, headless |
+| `sample_clip_ipc.py` | The sample clip a newcomer gets: stabilized, denoise on, D-Log M, 1080p | Live, headless |
 | `gpu_ahead_e2e.py` | The table kept ahead, real time, against `gyroflow-gpu-table --serve` | Live, headless (a real clip; a share for the real case) |
 | `photo_link_frame.py` | A photo link's frame in the player against Share's render | Live (two pictures you make) |
 | `uw_export_check.py` | Underwater colour in exports against the player's shader | Live, headless (real clips, the app's ffmpeg) |
@@ -200,6 +201,7 @@ python3 tests/librarylist_ipc.py --mpv <mpv> [--afp-cut <afp-cut>] [--work <dir>
 python3 tests/live_photo_ipc.py <folder of live photos in a row> [<a plain photo>]
 python3 tests/navkeys_ipc.py --mpv <mpv> [--work <dir>] [--platform-mac | --platform-other]
 python3 tests/scrub_ipc.py --mpv <mpv> --helper <afp-scrub> --clip <clip with .LRF> [--clip2 <clip without>]
+python3 tests/sample_clip_ipc.py [--keep] <ActionFootagePlayer.app> <Sample dive - Osmo Action 6.mp4>
 ```
 
 - `afp_motion_ipc.py` and `lens_dialog_ipc.py` also copy `vs-gyroflow/target/release` binaries in: build them first

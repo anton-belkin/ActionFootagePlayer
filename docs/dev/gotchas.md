@@ -163,6 +163,10 @@ docs/design/gpu-render.md, "Pipeline builds", has the numbers.
 - **`afp-cut` refuses a track with sample tables beyond** `stsd stts stss stsc stsz stco co64 sdtp sgpd sbgp`
   (`ctts`, for one: Lumix HEVC) (`cut.rs` `read_track`). Share then copies the part with the player's ffmpeg
   (`-c copy`).
+- **A smaller copy of a DJI clip needs its focal length scaled.** Gyroflow's DJI reader takes the lens's
+  calibration size from the video track's `tkhd` and its focal length, in pixels, from the clip header (djmd sample 0,
+  `1.8.1`). Same header, 1080p video: a lens twice as long, and the stabilized picture is off (19.7 dB against the 4K
+  render, 37.5 dB scaled). `tools/make_sample_clip.py` scales it with the picture.
 - **`tools/one_off/photos_to_links.py --move-renders`** puts the old photos in `_Renders/Photos/<path>`, which Clear
   the render cache keeps (not `<hash>.<profile>`) but Share never finds. Change that step before it's run.
 - **A shell variable holding arguments:** zsh doesn't split `$o` into words. Use `${=o}`, or pass arguments one by one.
