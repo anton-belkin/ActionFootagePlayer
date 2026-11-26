@@ -54,6 +54,7 @@ site/            what is served, as is
                  plays), log-grey-color.jpg (grey log | in color), player-marks.jpg (the camera's marks on the
                  seek bar). No people's faces in them
   download.html  the downloads: the app for macOS and Windows, the plugins alone, the release's notes
+  feedback.html  the feedback form (see Feedback form); feedback.css its styles
   download.js    fills download.html in from latest.json: each link straight to its file, its size, the version
   styles.css     shared styles, light and dark
   top.js         measures the sticky header, so links to #anchors land below it with the heading in view; opens a
@@ -150,6 +151,38 @@ after it landed. Nothing to do by hand; the HTML in the repository keeps the pla
 
 The release workflow runs on every pull request, so a site-only pull request also triggers a full build; a
 `paths-ignore: ['website/**']` on its `pull_request` trigger would avoid that.
+
+## Feedback form
+
+`site/feedback.html` (built from `pages/feedback.html`): three short questions and an optional email. The player's
+Send feedback… (the menu, the side panel's Support part, the first-run card) opens it as
+`/feedback?v=…&os=…&camera=…&curve=…&motion=…`; the page shows those fields read-only and sends them with the answers.
+They never hold a clip's name or path (the player's `tests/feedback_test.lua`, its `docs/reference/contracts.md`).
+Linked from the landing (under the downloads, and beside Report a camera), the download page and the divers page.
+
+The page posts to `/api/feedback`. That is **a Worker, not a Pages Function**: Pages Functions can't have the
+`send_email` binding (Cloudflare's list of Pages bindings has no email), so `worker/feedback.js` runs on the routes
+`actionfootageplayer.ch/api/feedback` and `www.…`, in front of the Pages site. It emails each answer through Email
+Routing (from `feedback@actionfootageplayer.ch` to the secret `FEEDBACK_TO`, a verified destination address), with
+the visitor's email as Reply-To. Spam: a honeypot field, 5 sends a minute per address (the `LIMIT` rate-limit
+binding), posts from the site's own pages only, sizes capped. Without script the form still posts, and the Worker
+answers with the thank-you page.
+
+`.github/workflows/website.yml` deploys it in its own job (`feedback-worker`), so the site still deploys when it can't.
+Once, by hand:
+
+1. Cloudflare dashboard, My Profile, API Tokens: edit the token that is GitHub's `CLOUDFLARE_API_TOKEN` (Pages Write)
+   and add **Account / Workers Scripts / Edit**, **Zone / Workers Routes / Edit** and **Zone / Zone / Read** (zone
+   `actionfootageplayer.ch`). Save; the token's value stays the same.
+2. Check that the address `hello@actionfootageplayer.ch` forwards to is **Verified** under actionfootageplayer.ch,
+   Email, Email Routing, Destination addresses.
+3. GitHub, the repository's Settings, Secrets and variables, Actions: a new repository secret `FEEDBACK_TO` with that
+   address.
+4. Run the Website workflow (Actions tab, or any push to `website/`).
+
+To try it on this computer: `cd website/worker && npx wrangler@4 dev --assets ../site`, with a `.dev.vars` holding
+`FEEDBACK_TO="test@example.com"`; open <http://localhost:8787/feedback?v=0.15.0&os=macOS>. The emails it would
+send land as `.eml` files under `.wrangler/tmp/` (named in its log).
 
 ## The visitor's system
 

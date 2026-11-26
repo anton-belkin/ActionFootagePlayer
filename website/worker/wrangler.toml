@@ -1,0 +1,23 @@
+# The feedback form's sender (feedback.js): deployed by .github/workflows/website.yml. Its secret FEEDBACK_TO (Anton's
+# verified Email Routing destination) is set by the workflow from the repository secret of the same name.
+name = "afp-feedback"
+main = "feedback.js"
+compatibility_date = "2025-09-01"
+workers_dev = false
+routes = [
+  { pattern = "actionfootageplayer.ch/api/feedback", zone_name = "actionfootageplayer.ch" },
+  { pattern = "www.actionfootageplayer.ch/api/feedback", zone_name = "actionfootageplayer.ch" },
+]
+
+# Email Routing's sending: only to verified destination addresses; From on the zone
+[[send_email]]
+name = "EMAIL"
+
+# At most 5 sends a minute from one address
+[[ratelimits]]
+name = "LIMIT"
+namespace_id = "1701"
+simple = { limit = 5, period = 60 }
+
+[observability]
+enabled = true

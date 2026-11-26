@@ -220,3 +220,7 @@ button.sp-btn:hover { background: #2e3036; }
 .spec h3 { font: 600 1rem var(--f-body); letter-spacing: 0; }
 .spec p { color: var(--muted); font-size: .9375rem; margin-top: 4px; max-width: 42rem; }
 .spec a { font-weight: 600; text-underline-offset: 3px; }
+
+/* Send feedback, under the hero's downloads (feedback.html) */
+.hero .fb-link { margin-top: 6px; }
+.hero .fb-link a { color: var(--ink); font-weight: 600; text-underline-offset: 3px; }

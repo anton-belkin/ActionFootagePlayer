@@ -17,7 +17,7 @@ GROUPS = [
     ("Guides", [("log", "Log footage"), ("stabilization", "Stabilization"), ("photos", "Photos"),
                 ("360", "360 video"), ("organizing", "Marks and moments"), ("features", "All features")]),
     ("Who it's for", [("divers", "Divers & snorkelers"), ("moments", "Active travelers")]),
-    ("More", [("nas", "NAS Helper"), ("download", "Download"), ("about", "About the maker")]),
+    ("More", [("nas", "NAS Helper"), ("download", "Download"), ("feedback", "Send feedback"), ("about", "About the maker")]),
 ]
 PAGES = [f for _, items in GROUPS for f, _ in items]
 
@@ -108,7 +108,7 @@ def build(page):
 </head>
 <body class="doc-page page-{page}">
 
-{HEADER.format(guides=' aria-current="true"' if page not in ("about", "download") else '', about=' aria-current="page"' if page == "about" else '')}
+{HEADER.format(guides=' aria-current="true"' if page not in ("about", "download", "feedback") else '', about=' aria-current="page"' if page == "about" else '')}
 
 <div class="doc">
 {side(page, toc)}
