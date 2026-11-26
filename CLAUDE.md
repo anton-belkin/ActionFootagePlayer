@@ -176,6 +176,11 @@ to it rather than around it).
 - **Live rigs are not in CI:** `tests/*_ipc.py`, `tests/*_e2e.py`, `tests/photo_link_frame.py`, `tools/pipebench`,
   the panel render rig. Run them yourself for changes they cover, and say which you ran. How to run each:
   `docs/dev/testing.md`.
+- **A long or heavy run on Anton's Mac goes at low priority, with a time limit.** Research tests, benchmarks, batch
+  renders, anything you start in the background that may take minutes: `nice -n 20 timeout 30m <command>` (pick
+  the limit from how long it should take, with a margin). He works on this Mac meanwhile, and CI's runner shares it:
+  a test that hung once took 5.5 of its 10 cores for 2 h 40 min (2026-11-26). Check on what you left running before
+  you end your turn.
 - **Ask Anton first before any test that takes the screen** (opens windows in a loop, takes focus, keeps the display
   awake). Ask again after any break. mpv's gpu-next hangs while the Mac is locked.
 - **"Not verified" is a debt, not a footnote.** Every "not tried / not verified" line in a PR gets an issue labelled
