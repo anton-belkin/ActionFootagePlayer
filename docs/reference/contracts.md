@@ -508,6 +508,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | side_panel | `popover` | `mpv/scripts/side-panel/main.lua` | `tests/lens_dialog_ipc.py` |
 | side_panel | `scrub` | `mpv/scripts/side-panel/main.lua` | — |
 | side_panel | `tab` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/workspace/common.lua`, `tests/afp_motion_ipc.py`, `tests/lens_dialog_ipc.py` |
+| side_panel | `welcome` | `mpv/scripts/side-panel/welcome.lua` | — |
 | view360 | `gesture` | `mpv/scripts/gyroflow/gestures.lua` | — |
 | view360 | `notify-answer` | `mpv/scripts/side-panel/notify_client.lua` | — |
 | view360 | `view360` | `mpv/scripts/view360/main.lua` | — |

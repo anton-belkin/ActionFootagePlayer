@@ -177,7 +177,7 @@ for f in gyroflow-probe.exe gyroflow-project.exe gyroflow-gpu-table.exe gyroflow
 done
 cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$telemetry/"
 cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
-cp mpv/scripts/side-panel/navkeys.lua "$panel/"
+cp mpv/scripts/side-panel/navkeys.lua mpv/scripts/side-panel/welcome.lua "$panel/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
 cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua mpv/scripts/side-panel/trace.lua "$panel/"
 # The seek bar's pictures: scrub.lua, without its helper here yet. afp-scrub (tools/scrub/afp-scrub.c) needs libav's

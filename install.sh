@@ -306,6 +306,7 @@ put mpv/scripts/side-panel/tagchips.lua "$PANEL/tagchips.lua" 644
 put mpv/scripts/side-panel/lensdialog.lua "$PANEL/lensdialog.lua" 644
 put mpv/scripts/side-panel/notify.lua "$PANEL/notify.lua" 644
 put mpv/scripts/side-panel/notify_client.lua "$PANEL/notify_client.lua" 644
+put mpv/scripts/side-panel/welcome.lua "$PANEL/welcome.lua" 644
 put mpv/scripts/side-panel/scrub.lua "$PANEL/scrub.lua" 644
 put mpv/scripts/side-panel/trace.lua "$PANEL/trace.lua" 644
 
