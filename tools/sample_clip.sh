@@ -6,11 +6,14 @@
 #
 # The copy kept is used again while its size matches the release's; a file replaced in the release is downloaded
 # again. SAMPLE_CLIP_URL: another file (a test), SAMPLE_CLIP=none: none.
+#
+# GitHub turns the spaces in an asset's name into dots and keeps the spaced name only as its label, so the URL
+# says Sample.dive.-.Osmo.Action.6.mp4; the copy kept here has the spaced NAME the apps carry.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
 NAME="Sample dive - Osmo Action 6.mp4"
-URL=${SAMPLE_CLIP_URL:-"https://github.com/anton-belkin/ActionFootagePlayer/releases/download/sample-clips/Sample%20dive%20-%20Osmo%20Action%206.mp4"}
+URL=${SAMPLE_CLIP_URL:-"https://github.com/anton-belkin/ActionFootagePlayer/releases/download/sample-clips/Sample.dive.-.Osmo.Action.6.mp4"}
 [ "${SAMPLE_CLIP:-}" != none ] || exit 0
 
 dir=build/sample
