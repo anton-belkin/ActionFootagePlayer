@@ -1455,7 +1455,9 @@ local function support_part(u, x, w, y)
     y = u:button(x, w, y, "keys", "Keys…", "script-message-to footage_menu keys", { disabled = not menu })
     y = u:button(x, w, y, "note", "Note for the agent…", "script-binding agent/report",
                  { disabled = not path or not state("agent"), key = keys["script-binding agent/report"] })
-    y = u:button(x, w, y, "report", "Report this camera…", "script-message-to footage_menu report",
+    y = u:button(x, w, y, "feedback", "Send feedback…", "script-message-to footage_menu afp-feedback", { disabled = not menu })
+    y = u:caption(x, w, y, "A short form on the website: how it went, where you got stuck")
+    y = u:button(x, w, y + 4 * s, "report", "Report this camera…", "script-message-to footage_menu report",
                  { disabled = not menu or not local_file(path) })
     y = u:caption(x, w, y, "Opens an issue on GitHub with what the plugins found in this clip")
     if setup ~= "" then

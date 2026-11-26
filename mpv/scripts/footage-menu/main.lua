@@ -9,8 +9,8 @@
 -- Keys (rebind with `<key> script-binding footage_menu/<name>` in input.conf):
 --   right click, MENU   menu   the menu
 --
--- With the side panel loaded (it has all of this as controls, and runs this plugin's commands: keys, report, setup,
--- reveal, copy-path), right click is left to mpv's own menu (menu=auto).
+-- With the side panel loaded (it has all of this as controls, and runs this plugin's commands: keys, afp-feedback,
+-- report, setup, reveal, copy-path), right click is left to mpv's own menu (menu=auto).
 --
 -- Options (~~/script-opts/footage_menu.conf):
 --   menu=auto  the right-click menu: auto (not while the side panel is loaded), yes or no
@@ -485,6 +485,7 @@ local function app_menu(path, key)
         SEPARATOR,
         item("Keys…", "script-message-to footage_menu keys"),
         item("Help", "script-message-to footage_menu help"),
+        item("Send feedback…", "script-message-to footage_menu afp-feedback"),
         item("Report this camera…", "script-message-to footage_menu report", { disabled = not local_file(path) }),
     }
     if o.setup ~= "" then table.insert(items, item("Set up again…", "script-message-to footage_menu setup")) end
@@ -695,6 +696,49 @@ mp.register_script_message("report", function()
     }
     open_url(REPO .. "/issues/new?title=" .. url_encode("Camera: " .. camera) .. "&body=" .. url_encode(table.concat(lines, "\n")))
     mp.osd_message("A new issue opened on GitHub with what's known about this clip", 3)
+end)
+
+-- Send feedback…: the site's form (website/site/feedback.html), in the browser, with what helps read the answer: the
+-- player's version, the system and, with a clip open, its camera, log curve and kind of motion data. Never the clip's
+-- name or path. Sent by the menu, the side panel's Support part and the first-run card: script-message-to footage_menu
+-- afp-feedback (a plain `script-message afp-feedback` reaches it too)
+local FEEDBACK = "https://actionfootageplayer.ch/feedback"
+
+local function os_name()
+    if platform == "darwin" then
+        local r = mp.command_native({ name = "subprocess", args = { "sw_vers", "-productVersion" }, playback_only = false,
+                                      capture_stdout = true, capture_stderr = true })
+        local v = r and r.status == 0 and (r.stdout or ""):match("^%s*([%d%.]+)") or nil
+        return "macOS" .. (v and (" " .. v) or "")
+    end
+    return platform == "windows" and "Windows" or platform == "linux" and "Linux" or platform
+end
+
+-- The fields, { key, value } in the form's order; a clip's only when one is open
+local function feedback_fields()
+    local fields = {
+        { "v", o.version ~= "" and o.version or ("plugins, " .. (mp.get_property("mpv-version") or "mpv")) },
+        { "os", os_name() },
+    }
+    if mp.get_property("path") then
+        local d, g, t = state("dlogm"), state("gyroflow"), state("dji_telemetry")
+        local camera = t and t.model and t.model ~= "" and (CAMERAS[t.model] or (t.model:find("^dvtm_") and "DJI" or t.model))
+        if not camera and g and type(g.lens) == "table" and (g.lens.camera or "") ~= "" then camera = (g.lens.camera:gsub("^%s+", "")) end
+        if camera then table.insert(fields, { "camera", camera }) end
+        if d then
+            table.insert(fields, { "curve", d.log and ((CURVE_NAMES[d.curve] or d.curve) .. (d.curve ~= d.recorded and " (by hand)" or ""))
+                                            or (d.hdr and d.hdr ~= "" and ("HDR (" .. d.hdr:upper() .. ")")) or "not log" })
+        end
+        if g then table.insert(fields, { "motion", g.available and (KIND_LABELS[g.kind] or g.kind or "gyro") or "none" }) end
+    end
+    return fields
+end
+
+mp.register_script_message("afp-feedback", function()
+    local query = {}
+    for _, f in ipairs(feedback_fields()) do table.insert(query, f[1] .. "=" .. url_encode(f[2])) end
+    open_url(FEEDBACK .. "?" .. table.concat(query, "&"))
+    mp.notify({ id = "feedback", kind = "info", title = "The feedback form opened in your browser", seconds = 4 })
 end)
 
 mp.register_script_message("setup", function()

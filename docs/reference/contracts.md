@@ -411,6 +411,25 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
   writes over a file (`Turtle 2.mov`): it copies to `.<name>.part` and renames. A new destination is a line in
   `share.rs` `DESTINATIONS`, one in `share.js` `SHARE_DESTS` and an arm in `share::deliver`.
 
+## Send feedback… (player → website)
+
+`script-message-to footage_menu afp-feedback` (the right-click menu, the side panel's Support part, the first-run
+card) opens `https://actionfootageplayer.ch/feedback?…` in the browser. The page (`website/site/feedback.html` on the
+`website` branch) shows these fields read-only and sends them with the answers to `/api/feedback`: a Worker on that
+route (`website/worker/feedback.js`), which emails them to Anton through Email Routing (`website/README.md`, "Feedback
+form").
+
+| Key | Value | When |
+|---|---|---|
+| `v` | the app's version (`footage_menu-version`), or `plugins, <mpv-version>` in someone's own mpv | always |
+| `os` | `macOS <sw_vers -productVersion>`, `Windows`, `Linux` | always |
+| `camera` | DJI's telemetry model (named), else Gyroflow's lens camera | a clip open and a camera known |
+| `curve` | the log curve playing (`(by hand)` when picked), `HDR (HLG)`, or `not log` | a clip open, dlogm loaded |
+| `motion` | `gyro`, `Gyroflow project`, … or `none` | a clip open, gyroflow loaded |
+
+Never the clip's name or path (`tests/feedback_test.lua`). A field the page doesn't know is ignored; one more needs
+the page and the function changed with it.
+
 ## Generated lists
 
 ### Script messages
@@ -439,6 +458,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | dlogm | `remember` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | dlogm | `uw-color` | `mpv/scripts/dlogm/main.lua` | — |
 | dlogm | `uw-set` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/viewsave.lua`, `tests/sidepanel_test.lua`, `tools/pipebench/live_starts.py` |
+| footage_menu | `afp-feedback` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | footage_menu | `copy-path` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 | footage_menu | `help` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua` |
 | footage_menu | `keys` | `mpv/scripts/footage-menu/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
@@ -559,7 +579,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | workspace | `view-revert` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/side-panel/main.lua` |
 | workspace | `view-save` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/main.lua` |
 
-139 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
+140 messages in 10 plugins. A message with no sender by name is sent by the panel's or menu's tables, a forwarding helper, or the Library's IPC with a computed name.
 <!-- END GENERATED: script-messages -->
 ### user-data keys
 <!-- BEGIN GENERATED: user-data -->
