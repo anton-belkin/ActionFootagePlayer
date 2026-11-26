@@ -60,7 +60,10 @@ for f in "dist/$name/bin/"*; do
     codesign --force -s - "$f"
 done
 
-tar -C dist -czf "dist/$name.tar.gz" "$name"
+# AFP_PACKAGES=zip (a pull request's check, .github/workflows/release.yml): the zip alone, the app Anton tries;
+# the tarball and the disk image only for main and releases (each ~100 MB, written and compressed: ~1 min)
+packages=${AFP_PACKAGES:-all}
+[ "$packages" = zip ] || tar -C dist -czf "dist/$name.tar.gz" "$name"
 
 # Built from the tarball's tree, which is HEAD's
 python3 -I tools/cube_to_glsl.py shaders/dlogm_hlg.glsl.in luts/dlogm_hlg.cube "dist/dlogm_hlg.glsl"
@@ -75,12 +78,14 @@ LIBRARY_BIN="dist/$name/bin/ActionFootageLibrary" tools/make_library_app.sh "$st
 (cd "$stage" && zip -qry "$OLDPWD/dist/$app.zip" ActionFootagePlayer.app ActionFootageLibrary.app)
 # The disk image: the app and a link to Applications, compressed with LZFSE. hdiutil sometimes finds its device
 # still busy on GitHub's runners: tried again then
-ln -s /Applications "$stage/Applications"
-for try in 1 2 3; do
-    hdiutil create -quiet -volname "ActionFootagePlayer $version" -srcfolder "$stage" -format ULFO -ov "dist/$app.dmg" && break
-    [ "$try" = 3 ] && exit 1
-    sleep 5
-done
+if [ "$packages" != zip ]; then
+    ln -s /Applications "$stage/Applications"
+    for try in 1 2 3; do
+        hdiutil create -quiet -volname "ActionFootagePlayer $version" -srcfolder "$stage" -format ULFO -ov "dist/$app.dmg" && break
+        [ "$try" = 3 ] && exit 1
+        sleep 5
+    done
+fi
 rm -rf "$stage"
 
 # A plugin zipped alone gets the shared lists beside its files (the workspace plugin's registry.lua and registry.json:
@@ -168,6 +173,8 @@ git archive HEAD mpv/scripts/workspace | tar -x --strip-components 2 -C "dist/$w
 (cd "dist/$workspace" && zip -qr "../$workspace.zip" workspace)
 rm -rf "dist/$workspace"
 
-(cd dist && shasum -a 256 "$app.dmg" "$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$workspace.zip" "$gyroflow.zip" "$name.tar.gz" > SHA256SUMS)
-ls -l "dist/$app.dmg" "dist/$app.zip" "dist/$dlogm.zip" "dist/$telemetry.zip" "dist/$highlights.zip" "dist/$menu.zip" "dist/$panel.zip" "dist/$workspace.zip" "dist/$gyroflow.zip" "dist/$name.tar.gz"
+files=("$app.zip" "$dlogm.zip" "$telemetry.zip" "$highlights.zip" "$menu.zip" "$panel.zip" "$workspace.zip" "$gyroflow.zip")
+[ "$packages" = zip ] || files=("$app.dmg" "${files[@]}" "$name.tar.gz")
+(cd dist && shasum -a 256 "${files[@]}" > SHA256SUMS)
+(cd dist && ls -l "${files[@]}")
 cat dist/SHA256SUMS
