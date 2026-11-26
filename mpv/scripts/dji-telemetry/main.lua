@@ -31,7 +31,7 @@
 --   Ctrl+t  toggle     the overlay off/on, for this file and the next
 --   v       subtitles  the subtitles off/on (mpv's own v only hides or shows the track picked: here one is picked)
 --
--- Script messages (`script-message-to dji_telemetry <message>`, what the right-click menu runs; mpv/menu.conf):
+-- Script messages (`script-message-to dji_telemetry <message>`, what the right-click menu runs; the footage-menu plugin):
 --   position <corner>          where it shows: top-left, top-right, bottom-left, bottom-right
 --   units metric|imperial
 --   field <name> [yes|no]      show a field or not (without yes or no: the other way round); a field shown anew
@@ -251,7 +251,7 @@ local track = nil
 local overlay = mp.create_osd_overlay("ass-events")
 local shown = nil
 
--- For the right-click menu (mpv/menu.conf)
+-- For the right-click menu (the footage-menu plugin)
 local function publish()
     local state = { available = track ~= nil, model = track and track.model or "", visible = visible, position = corner,
                     units = imperial and "imperial" or "metric" }

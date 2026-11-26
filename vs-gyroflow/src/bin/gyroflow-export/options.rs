@@ -334,7 +334,7 @@ pub(crate) fn parse_args(mut args: impl Iterator<Item = String>) -> (Options, Ve
             "--horizon-lock" => opts.horizon_lock = Some(value("--horizon-lock").parse::<f64>().ok().filter(|v| (0.0..=100.0).contains(v))
                 .unwrap_or_else(|| fail("--horizon-lock takes 0-100"))),
             "--underwater" => opts.underwater = Underwater::parse(&value("--underwater")).unwrap_or_else(|| fail("--underwater takes yes, no, auto or project")),
-            // The ranges the VapourSynth filter takes them in (lib.rs)
+            // The ranges the player takes them in (lib.rs)
             "--wide" => opts.fov = Fov::Wide,
             "--level" => { let v = value("--level"); opts.level = Level::parse(&v).unwrap_or_else(|| fail(&format!("unknown level {v} (weak, medium, strong)"))); }
             "--fov" => opts.fov = Fov::Set(value("--fov").parse::<f64>().ok().filter(|v| *v > 0.0)

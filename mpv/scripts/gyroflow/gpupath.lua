@@ -118,7 +118,6 @@ local function gpu_user_data(source)
     ud.gpu_denoise = still.enabled()
     ud.gpu_translation = o.translation and true or false
     ud.translation_rev = S.trans_rev > 0 and S.trans_rev or nil
-    ud.lookahead = o.lookahead
     return ud
 end
 
