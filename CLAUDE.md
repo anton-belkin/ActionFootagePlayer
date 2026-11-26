@@ -156,7 +156,8 @@ to it rather than around it).
   `anton-mac` (`~/actions-runner`, a service under his user, label `afp`). Releases (tags) and fork PRs run on
   GitHub's macOS. The runner keeps its build folders between runs, so prefer CI over a build of your own in a worktree
   (each worktree's `target/` costs 4-20 GB). It only runs while the Mac is awake and Anton is logged in. Required on
-  a PR: `macos` and `tests`. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
+  a PR: `macos` and `tests`; the PR needn't be up to date with `main`. A draft PR runs only the quick tests: mark it
+  ready for review when Anton should try its build. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
   merge, check `main`'s run (`gh run list --branch main`) and fix a break there in its own PR.
 - **Anton stops and starts the runner himself** (AFP Runner in his menu bar, `tools/ci-runner/`). A job stuck in
   "Waiting for a runner" or one failed with "The runner has received a shutdown signal": ask
