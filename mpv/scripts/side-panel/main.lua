@@ -271,7 +271,7 @@ local function passport(d, g, t, h)
         elseif d.hdr and d.hdr ~= "" then table.insert(parts, "HDR (" .. d.hdr:upper() .. ")")
         else table.insert(parts, "not log") end
     end
-    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or type(g.optical) == "table" and "motion from the picture" or g.motion and "gyro" or "no motion data") end
+    if g then table.insert(parts, g.kind == "project" and "Gyroflow project" or type(g.optical) == "table" and (g.optical.in_camera_turn and "gyro + HyperSmooth's turn" or "motion from the picture") or g.motion and "gyro" or "no motion data") end
     if t and t.available then table.insert(parts, "telemetry")
     elseif t and type(t.subtitles) == "table" and t.subtitles.camera then table.insert(parts, "camera data as subtitles") end
     if h and h.times and #h.times > 0 then table.insert(parts, #h.times == 1 and "1 mark" or (#h.times .. " marks")) end
@@ -426,7 +426,9 @@ local function source_part(u, x, w, y)
                            -- No profile: the lens type it was recorded in (or given) when it's named, and the camera's own
                            -- number for the mode, for trying lenses on it
                            or l.type_label and ("No ready lens (" .. l.type_label .. (l.mode and (", mode " .. l.mode) or "") .. ")") or l.mode and ("No ready lens (mode " .. l.mode .. ")") or "No ready lens" },
-                       { "Motion data", project and "Gyroflow project" or measured and ("Measured from the picture" .. (measured.in_water and ", in water" or ", in air"))
+                       { "Motion data", project and "Gyroflow project"
+                           or measured and measured.in_camera_turn and ("Gyro, on top of HyperSmooth: its turn from the picture" .. (measured.in_water and ", in water" or ", in air"))
+                           or measured and ("Measured from the picture" .. (measured.in_water and ", in water" or ", in air"))
                            or g.motion and "Gyro, in-camera stabilization off"
                            or "none" .. ((l.camera or "") ~= "" and g.kind ~= "lens" and ": the camera stabilized it (EIS)" or "") } }
         for _, r in ipairs(rows) do
@@ -1196,7 +1198,8 @@ local function transform_part(u, x, w, y)
         y = u:select_row(x, w, y + 2 * s, "level", "Level", choices(LEVELS, "script-message-to gyroflow level"), g.level,
                          { key = keys["script-binding gyroflow/level"], disabled = off, saved = saved and saved.level or nil })
         y = u:caption(x, w, y, LEVEL_NOTES[g.level] or "")
-        local optical = type(g.optical) == "table"
+        -- Motion measured from the picture has no gravity in it; a HERO7's HyperSmooth turn on top of its gyro has
+        local optical = type(g.optical) == "table" and not g.optical.in_camera_turn
         y = u:select_row(x, w, y + 2 * s, "horizon", "Horizon", choices(HORIZONS, "script-message-to gyroflow horizon-lock"), optical and "no" or g.horizon_lock,
                          { disabled = off or optical, saved = (not optical and saved) and saved.horizon_lock or nil })
         if optical then y = u:caption(x, w, y, "Motion measured from the picture has no gravity in it: no horizon to lock") end

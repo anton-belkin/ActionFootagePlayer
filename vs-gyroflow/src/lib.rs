@@ -30,6 +30,7 @@ pub mod still;
 pub mod lists;
 pub mod levels;
 pub mod in_camera;
+pub mod in_camera_turn;
 pub mod smoothing;
 pub mod motion;
 pub mod dovi;
@@ -450,6 +451,8 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     let mut motion = None;
     // Motion measured from the picture: the refraction it was measured with is the one it plays with
     let mut measured_motion = false;
+    // ... and none of the file's own: no gravity to lock the horizon with
+    let mut measured_without_gravity = false;
     let project_json = if is_project_file(project) {
         let data = std::fs::read(project).map_err(|e| format!("Can't read {project}: {e}"))?;
         let mut json: serde_json::Value = serde_json::from_slice(&data).map_err(|e| format!("Can't load {project}: {e}"))?;
@@ -465,13 +468,6 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
         if let Some(v) = json.pointer_mut("/stabilization/max_zoom_iterations") { *v = iterations.into(); }
         Some(json)
     } else {
-        // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays; or a
-        // stretch of it (`range`, the GPU warp's first table)
-        let (m, size) = motion::Motion::open_range(project, &url, lookahead, range).map_err(|e| format!("Can't open {project}: {e}"))?;
-        m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
-        // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
-        // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
-        lens_pick::apply(&stab, project);
         // Motion measured from the picture, kept beside the clip (afp_motion.rs): what it plays with when its own motion
         // data is none or of no use (the camera stabilized the picture), as gyro would be. Its lens, readout and
         // refraction come with it, after the preset: the motion was measured with them. Left aside where the clip's own
@@ -487,6 +483,17 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
                 None => None,
             }
         };
+        // A HERO7's HyperSmooth turn (in_camera_turn.rs) is a correction of the gyro's orientations over the whole clip:
+        // all of its gyro read before it plays
+        let turn = measured.as_ref().is_some_and(|m| m.header.in_camera_turn.is_some());
+        let (lookahead, range) = if turn { (0.0, None) } else { (lookahead, range) };
+        // The camera's file, its motion data read ahead (prefetch.rs): the first seconds, the rest as it plays; or a
+        // stretch of it (`range`, the GPU warp's first table)
+        let (m, size) = motion::Motion::open_range(project, &url, lookahead, range).map_err(|e| format!("Can't open {project}: {e}"))?;
+        m.with_file(|file| stab.load_video_file(file, size, &url, None, true)).map_err(|e| format!("Can't load {project}: {e:?}"))?;
+        // Gyroflow loaded a profile only on an exact match of its identifier, and the first of several with it: the best
+        // of the camera and lens mode in its database instead, as the probe decided (lens_pick.rs). The lens in the file stays
+        lens_pick::apply(&stab, project);
         if lens_only && stab.lens.read().fisheye_params.camera_matrix.len() != 3 {
             return Err(format!("{project}: no lens profile to correct the lens with"));
         }
@@ -507,6 +514,8 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
             // All of it is here: nothing of the file's own to read as it plays, only the level to follow
             m.freeze();
             measured_motion = true;
+            // The gyro kept under HyperSmooth's turn has the gravity in it: its horizon can be locked
+            measured_without_gravity = !turn;
         }
         if lens_only {
             log::info!("{project}: the lens alone, nothing smoothed");
@@ -520,7 +529,7 @@ pub fn load_manager(project: &str, preset: Option<&str>, horizon_lock: Option<f6
     // so apply them before smoothing (same as the frei0r plugin)
     stab.recompute_gyro();
     // Motion measured from the picture has no gravity in it, so no horizon to lock: none, whatever the preset says
-    let horizon_lock = if measured_motion { Some(0.0) } else { horizon_lock };
+    let horizon_lock = if measured_without_gravity { Some(0.0) } else { horizon_lock };
     if let Some(amount) = horizon_lock {
         // The project's roll, pitch and turn settings stay; only the amount is the player's
         let h = stab.smoothing.read().horizon_lock.clone();

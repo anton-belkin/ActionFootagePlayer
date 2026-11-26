@@ -372,6 +372,9 @@ _renders _cache moments clips exports stabilized _actionfootageplayer generated`
 
 **What:** a clip's motion measured from its picture (Gyroflow's optical correction), for clips without usable gyro
 data. With it the clip plays stabilized without a Gyroflow project ([optical-without-gyroflow.md](../design/optical-without-gyroflow.md)).
+A HERO7 Black's with HyperSmooth on is HyperSmooth's turn measured on top of its gyro instead (`ignore_file_motion`
+false, `in_camera_turn` in the header; [hero7-hypersmooth-iori.md](../design/hero7-hypersmooth-iori.md)): played, the
+same turn goes to gyroflow-core as the clip's image orientations, as a HERO12's IORI.
 
 **Path:** `<clip stem>.afp-motion` beside the clip (`afp_motion.rs` `path_for`).
 
@@ -385,16 +388,22 @@ zlib'd CBOR, as Gyroflow's projects keep it.
   "lens": {}, "lens_name": "…", "readout_ms": 15.5, "readout_direction": "TopToBottom", "refraction": 1.33,
   "frame_offset": 0, "offsets": {}, "ignore_file_motion": false,
   "measured": { "how": "measured", "from": "", "at": 1732540000, "tool": "…", "tracking": "klt", "strength": 1.0,
-                "per_frame": true, "frames": 3656, "measured_frames": 3600, "rms_deg": 0.2 } }
+                "per_frame": true, "frames": 3656, "measured_frames": 3600, "rms_deg": 0.2 },
+  "in_camera_turn": { "stabilizer": "HyperSmooth (HS EIS)", "integration": 2, "model_sigma_s": 0.5, "model_delay_s": 0.2,
+                      "rms_deg": 1.1, "p95_deg": 2.3, "from_picture_rms_deg": 0.6, "rounds_deg": [2.1, 0.08, 0.01],
+                      "measured_share": 0.97 } }
 ```
 
-**Version rule:** `version` above 1 is refused ("update the player"). A file whose `clip.size` (and `created`, when
+`in_camera_turn` only in a HERO7's (`in_camera_turn.rs` `Turn`), which is then version 2.
+
+**Version rule:** `version` above 2 is refused ("update the player"); a player before 2026-11-26 refuses 2 as well.
+Written: 2 with `in_camera_turn`, else 1. A file whose `clip.size` (and `created`, when
 both have one) differs is "measured on another clip" and not used.
 
 | Language | Read | Written |
 |---|---|---|
 | Lua | `gyroflow/sources.lua`, `gyroflow/measure.lua`, `side-panel/main.lua` (whether there is one) | runs gyroflow-optical / gyroflow-export (Ctrl+m) |
-| Rust (vs-gyroflow) | `afp_motion.rs` `header_for`, `read_for`; `gyroflow-gpu-table`, `gyroflow-probe`, `lib.rs` | `afp_motion.rs` `MotionFile::write`; `gyroflow-optical`, `measure.rs`, `optical.rs` |
+| Rust (vs-gyroflow) | `afp_motion.rs` `header_for`, `read_for`, `apply` (with `in_camera_turn.rs`); `gyroflow-gpu-table`, `gyroflow-probe`, `lib.rs` | `afp_motion.rs` `MotionFile::write`; `gyroflow-optical`, `measure.rs` (`in_camera_turn::fit`), `optical.rs` |
 | Rust (Library) | `index.rs`, `changed.rs` (a change re-probes), `renders.rs` (its fingerprint is in a render's recipe: `motion`) | through `gyroflow-optical` jobs |
 
 ## Gyroflow projects and presets
@@ -518,7 +527,7 @@ All can be deleted; they are rebuilt.
 | Library | `~/Library/Caches/<Library app id>/`: `thumbs/`, `views/<hash>-<view>.json`, `lists/`, `maps/`, `probes.json`, `places.json` | — | `library/src/browsing.rs`, `playing.rs`, `settings.rs`, `albums.rs`, `geo.rs` |
 | GPU path prefetch | `$TMPDIR/vs-gyroflow-prefetch-*.bin` | — | `prefetch.rs` |
 
-The Library's probe answers are kept only while `index.rs` `GEOTAG` (9) is the same; raise it when what the probe
+The Library's probe answers are kept only while `index.rs` `GEOTAG` (11) is the same; raise it when what the probe
 answers changes (#227). The Library page's `localStorage` keeps only this window's choices (`afl.*` keys: tab, side
 panel, layout, hide rejected, the Share look, …).
 

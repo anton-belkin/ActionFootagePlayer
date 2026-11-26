@@ -126,7 +126,7 @@ end
 -- Level (locked) or Free; "project", from before, as the preset has it
 function M.horizon_lock(value)
     if project_owns("the horizon") then return end
-    if (S.current_source and S.current_source.optical) then
+    if (S.current_source and S.current_source.optical and not S.current_source.optical.in_camera_turn) then
         return mp.notify({ id = "gyroflow:horizon", kind = "info", seconds = 4, title = "No horizon to lock",
                            detail = "This clip's motion was measured from the picture: it has no gravity in it" })
     end

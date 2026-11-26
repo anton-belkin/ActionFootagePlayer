@@ -314,7 +314,7 @@ JSON line.
 - `--library <video>` (the Library's index, `library/src/index.rs`, one clip at a time in the background): all of the
   plain answer, plus `camera`, `movie {duration, created, width, height, turn}`, `marks {camera, times}`,
   `clock {utc, basis, zone_min, why}`, `gps {lat, lon, alt, t}`, and `geotag` (its version). The Library keeps answers
-  per file by size and time; an answer with `geotag` below `index.rs` `GEOTAG` (now 10) is asked again. Change both
+  per file by size and time; an answer with `geotag` below `index.rs` `GEOTAG` (now 11) is asked again. Change both
   together: the test `geotag_goes_with_what_the_probe_answers` checks it. `AFL_PROBE` overrides where the tool is.
 
 ## gyroflow-optical (from the Library)
@@ -762,11 +762,15 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_TEST_CLIP` | — | `vs-gyroflow/tests/table_ahead.rs` |
 | `AFP_TEST_ROOT` | — | `tests/journal_mpv_test.lua`, `tests/journal_mpv_test.sh` |
 | `AFP_TIMES` | `vs-gyroflow/src/bin/gyroflow-export/gpu.rs`, `vs-gyroflow/src/bin/gyroflow-export/main.rs`, `vs-gyroflow/src/bin/gyroflow-export/photo.rs`, `vs-gyroflow/src/bin/gyroflow-export/post.rs` and 2 more | — |
+| `AFP_TURN_CLIP` | `vs-gyroflow/src/in_camera_turn.rs` | — |
+| `AFP_TURN_DUMP` | `vs-gyroflow/src/in_camera_turn.rs` | — |
+| `AFP_TURN_STEADY` | `vs-gyroflow/src/in_camera_turn.rs` | — |
+| `AFP_TURN_WATER` | `vs-gyroflow/src/in_camera_turn.rs` | — |
 | `AFP_TV_LOOK` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_VERSION` | `.github/workflows/release.yml`, `tools/nas-helper/compose.yaml` | — |
 | `AFP_WARP_TEMPLATE` | `vs-gyroflow/src/gpu_table.rs` | — |
 
-77 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
+81 variables, found by name in code and comments (not docs/). Not variables: `AFP_NS`, an XML namespace constant (albums.rs); `AFP_RPU`, the afp-rpu path in dlogm/main.lua.
 <!-- END GENERATED: env -->
 ### The settings' keys
 <!-- BEGIN GENERATED: settings-json -->

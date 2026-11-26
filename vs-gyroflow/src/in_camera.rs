@@ -7,7 +7,9 @@
 // (docs.gyroflow.xyz/app/getting-started/supported-cameras/gopro) lists HyperSmooth as supported from the HERO8 on,
 // but only the HERO12 and later are taken here: Anton's call on PR #201 (HERO11 and older aren't re-stabilized; they
 // play as recorded with HyperSmooth on), and only HERO12 Black clips were tried. The HERO5, 6 and 7 Black don't
-// record IORI at all: their gyro is the camera's, of a picture HyperSmooth already turned (probe.rs).
+// record IORI at all: their gyro is the camera's, of a picture HyperSmooth already turned (probe.rs). A HERO7 Black's
+// turn is measured from the picture instead, by Stabilize optically (in_camera_turn.rs), and kept in its .afp-motion;
+// with it the clip is stabilized as a HERO12's.
 //
 // Under water behind a flat port the turn is applied inside the housing (gyroflow/gyroflow#1302, in our fork; warp.glsl's
 // texel 16): the port refracts about the camera body's axis, and HyperSmooth turned the picture inside it. Not with
@@ -29,8 +31,11 @@ use gyroflow_core::StabilizationManager;
 pub const CROP_SHARE: f64 = 0.5;
 
 /// Whether the clip's motion data is the turn of a picture the camera stabilized itself: a GoPro whose HyperSmooth was
-/// on (its EISA, as Gyroflow reads it for the lens profile) and that recorded how it turned the picture (IORI)
+/// on (its EISA, as Gyroflow reads it for the lens profile) and that recorded how it turned the picture (IORI), or whose
+/// turn was measured from the picture (a HERO7 Black's)
 pub fn stabilized(stab: &StabilizationManager) -> bool {
+    // A HERO7 Black's HyperSmooth turn, measured from the picture (in_camera_turn.rs): the same, from its .afp-motion
+    if crate::in_camera_turn::measured_here(stab) { return true; }
     let on = stab.camera_id.read().as_ref().is_some_and(|id| id.brand == "GoPro" && hypersmooth_on(&id.additional) && restabilized_model(&id.model));
     on && stab.gyro.read().file_metadata.read().image_orientations.as_ref().is_some_and(|io| !io.is_empty())
 }

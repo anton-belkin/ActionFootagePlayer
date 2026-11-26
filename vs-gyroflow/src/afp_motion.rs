@@ -13,6 +13,11 @@
 // the clip it was measured on (its size and the time its MP4 says it was made), so a file of another clip with the same
 // name isn't taken for it.
 //
+// A HERO7 Black's with HyperSmooth on is measured on top of its gyro (in_camera_turn.rs): the correction is the turn
+// HyperSmooth gave the picture, the gyro is kept (`ignore_file_motion` false), and `in_camera_turn` says so. It plays as
+// a HERO12's does: the same turn goes to gyroflow-core as the clip's image orientations. Such a file is version 2, which
+// a player before it refuses (it would play the turn without the refraction inside the housing and the crop share).
+//
 // Two lines of text: the header (JSON, `Header`), readable with `head -1`; then the correction, base91 of zlib'd CBOR as
 // Gyroflow's projects have it. Read whole: ~60 bytes a frame, 2-4 MB for the longest clips, read cold from the NAS in
 // 11-38 ms (measured 2026-11-24): there's nothing to gain from reading it in parts.
@@ -25,7 +30,8 @@ use serde_json::Value;
 
 pub const EXT: &str = "afp-motion";
 pub const FORMAT: &str = "actionfootageplayer-motion";
-pub const VERSION: u32 = 1;
+/// The newest version read. Written: 2 with `in_camera_turn`, else 1 (what a player before it reads)
+pub const VERSION: u32 = 2;
 
 /// The clip's file of measured motion: `<stem>.afp-motion` beside it, as its `<stem>.afp.json`
 pub fn path_for(video: &Path) -> PathBuf {
@@ -118,6 +124,9 @@ pub struct Header {
     /// The file's own motion data set aside: it was of the picture before the camera stabilized it, or there's none
     pub ignore_file_motion: bool,
     pub measured: Measured,
+    /// The correction is the turn the camera's own stabilizer gave the picture, on top of its gyro (in_camera_turn.rs)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub in_camera_turn: Option<crate::in_camera_turn::Turn>,
 }
 
 impl Header {
@@ -157,7 +166,7 @@ impl MotionFile {
     pub fn to_text(&self) -> String {
         let mut header = self.header.clone();
         header.format = FORMAT.into();
-        header.version = VERSION;
+        header.version = if header.in_camera_turn.is_some() { 2 } else { 1 };
         format!("{}\n{}\n", serde_json::to_string(&header).unwrap_or_default(), self.stored)
     }
 
@@ -271,6 +280,12 @@ pub fn apply(stab: &StabilizationManager, m: &MotionFile) -> Result<Applied, Str
     if !h.offsets.is_empty() {
         stab.gyro.write().set_offsets(h.offsets.clone());
     }
+    if let Some(turn) = &h.in_camera_turn {
+        // The gyro integrated as it was measured against, and the turn as the clip's image orientations, before the
+        // correction's context is taken
+        if stab.gyro.read().integration_method != turn.integration { stab.set_integration_method(turn.integration); }
+        crate::in_camera_turn::set_image_orientations(stab, &m.correction);
+    }
     stab.recompute_undistortion();
     let mut correction = m.correction.clone();
     correction.enabled = true;
@@ -306,7 +321,8 @@ pub fn from_project(project: &Value, project_path: &Path, video: &Path) -> Resul
     }
     let header = Header {
         format: FORMAT.into(),
-        version: VERSION,
+        version: 1,
+        in_camera_turn: None,
         clip,
         lens_name: lens.get("name").and_then(Value::as_str).unwrap_or_default().to_string(),
         lens,

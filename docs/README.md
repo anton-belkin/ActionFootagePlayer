@@ -45,6 +45,7 @@ they're out of date, when a link in any Markdown file is broken, or when a doc i
 | [design/geolocation.md](design/geolocation.md) | Built in #188, #200, #239; a few parts not built |
 | [design/gpu-render.md](design/gpu-render.md) | Built from #144 (v0.10.0) on; the player's only render path since #304 |
 | [design/gpu-table-ahead.md](design/gpu-table-ahead.md) | Built in #272 (v0.14.0) and #279 |
+| [design/hero7-hypersmooth-iori.md](design/hero7-hypersmooth-iori.md) | Built (2026-11-26): HyperSmooth's turn inside the housing under water, a HERO7's turn measured from the picture into its `.afp-motion`; the run over Anton's clips under way |
 | [design/library-management.md](design/library-management.md) | Partly built: locations, pointers, the project is its files (§8, #182), the catalog (§9); Apple Photos and more not built |
 | [design/library-responsiveness.md](design/library-responsiveness.md) | Built in #236, #237, #248, #260 (v0.14.0) |
 | [design/live-photos.md](design/live-photos.md) | Built in #267 (v0.14.0); HDR stills on Windows and Linux not built |

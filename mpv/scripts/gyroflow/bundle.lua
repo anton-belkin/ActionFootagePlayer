@@ -127,7 +127,7 @@ local function take(b)
     -- & Quality's Off leaves it out whatever this says (still.lua)
     if type(b.denoise) == "boolean" then still.set(b.denoise) else still.set(session.denoise) end
     if dn_sync then dn_sync() end
-    if (S.current_source and S.current_source.optical) then S.horizon = false end
+    if (S.current_source and S.current_source.optical and not S.current_source.optical.in_camera_turn) then S.horizon = false end
     return b.view == "off"
 end
 
@@ -152,8 +152,10 @@ local function clip_settings(source)
     if has_project(source) then
         S.horizon, S.underwater = nil, "project"
     elseif (source and source.optical) then
-        -- The refraction the motion was measured with: the measured motion's own, as a project's
-        S.horizon, S.underwater = false, "project"
+        -- The refraction the motion was measured with: the measured motion's own, as a project's. A HERO7's HyperSmooth
+        -- turn on top of its gyro keeps the horizon the clip's settings say (its gyro has the gravity in it)
+        S.underwater = "project"
+        if not source.optical.in_camera_turn then S.horizon = false end
     else
         S.underwater = (UNDERWATER_LABELS[i.underwater] and i.underwater ~= "project") and i.underwater or default_underwater
     end
