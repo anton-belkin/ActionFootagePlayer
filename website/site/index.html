@@ -39,7 +39,7 @@
         <a class="btn dl-mac" href="download.html#mac"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Mac</span></a>
         <a class="btn dl-win" href="download.html#windows"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg><span><small>Download for</small>Windows <i>alpha</i></span></a>
       </div>
-      <p class="meta">Free and open source · v0.13.0 · macOS 15 or later, Windows 10 and 11 · GoPro, DJI, Insta360</p>
+      <p class="meta">Free and open source · v<span data-release="version">0.14.0</span> · macOS 15 or later, Windows 10 and 11 · GoPro, DJI, Insta360</p>
       <div class="hero-shot">
         <div class="cams" role="img" aria-label="Drawings of the cameras whose footage plays: a DJI action camera and a GoPro on the left, an Insta360 360 camera and a drone on the right.">
           <figure class="cam c-dji"><svg viewBox="0 0 100 72" aria-hidden="true"><rect x="14" y="0" width="18" height="7" rx="2.5" fill="#c8402f"/><rect x="2" y="4" width="96" height="66" rx="11" fill="#2f3136"/><rect x="2" y="4" width="96" height="66" rx="11" fill="none" stroke="#45484f" stroke-width="1.5"/><rect x="10" y="18" width="30" height="30" rx="4" fill="#0e0f11" stroke="#3d4046"/><circle cx="68" cy="37" r="25" fill="#17181b"/><circle cx="68" cy="37" r="20" fill="none" stroke="#4a4d54" stroke-width="2"/><circle cx="68" cy="37" r="14" fill="#0b1626"/><circle cx="68" cy="37" r="7.7" fill="#16304f"/><circle cx="63.1" cy="32.1" r="2.8" fill="#8fb4e6" opacity=".8"/></svg><figcaption>DJI</figcaption></figure>
@@ -339,6 +339,21 @@
   </div>
   <a class="more" href="360.html">360 video ›</a>
 </dialog>
+<script>
+  // The version in the hero: the latest release's, from latest.json, which the deploy writes as for the download page
+  // (download.js); the one written above stays where there's none, as in a local preview
+  (function () {
+    if (!window.fetch) return;
+    fetch("/latest.json", { cache: "no-cache" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(function (r) {
+        var v = String(r.tag_name || "").replace(/^v/, "");
+        if (!/^[0-9][0-9A-Za-z.\-]*$/.test(v)) return;
+        document.querySelectorAll('[data-release="version"]').forEach(function (el) { el.textContent = v; });
+      })
+      .catch(function () { /* stays as written */ });
+  })();
+</script>
 <script src="view360.js"></script>
 <script>
   // The 360 view opens in a pop-up from the feature list; a click outside it closes it
