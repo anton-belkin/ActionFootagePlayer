@@ -159,6 +159,12 @@ to it rather than around it).
   a PR: `macos` and `tests`; the PR needn't be up to date with `main`. A draft PR runs only the quick tests: mark it
   ready for review when Anton should try its build. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
   merge, check `main`'s run (`gh run list --branch main`) and fix a break there in its own PR.
+- **Anton stops and starts the runner himself** (AFP Runner in his menu bar, `tools/ci-runner/`). A job stuck in
+  "Waiting for a runner" or one failed with "The runner has received a shutdown signal": ask
+  `~/Applications/AFP\ Runner.app/Contents/MacOS/AFPRunner --status` (or read `~/actions-runner/control.json`) first.
+  `"stopped_by_anton": true` means he stopped it on purpose: never start it (no `launchctl`, no `svc.sh`), tell him the
+  jobs wait, and carry on with other work; Start reruns the jobs his Stop cut short. Stopped without that, the Mac
+  may be asleep or the service down: say so, don't restart it unasked.
 - **Everything CI runs, locally:**
 
   ```
