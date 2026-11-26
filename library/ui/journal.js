@@ -18,6 +18,16 @@
 //   Journal.step(name[, fields])  a point in the action going on (fields.d: how long it took, ms)
 //   Journal.current()             the id of the action going on (for a command that hands it on: open_items)
 //   Journal.invoke(cmd, args)     the app's command, journaled (absent when the journal is off: ask the app directly)
+//
+// The usage trace (docs/design/usage-trace.md), when the app says it's on (journal_hello's "trace": this computer's
+// journal.conf trace=yes): what the actions were about, in the same records. Each action's element by its words
+// (`label`; a choice's or a box's value), the dialogs, the toast and the banners as they show (`text` records), a
+// command's error and the page's own (`log`), and "Something's wrong here" (Cmd/Ctrl+Shift+B, the flag at the bottom
+// left: a `mark` record with what the page showed, then a line about it). No picture of the window here: capturing
+// it would need the Screen Recording permission (the player's markers have one).
+//   Journal.trace                 whether it's on (after the app answered)
+//   Journal.say(n, text, fields)  a text shown (with it on)
+//   Journal.mark(via)             a marker, as the key
 "use strict";
 (function () {
   const VERSION = 2; // 2: commands through Journal.invoke (the real window's core is frozen)
@@ -48,7 +58,8 @@
     cost.rec_ms += performance.now() - t0;
   }
 
-  const api = { act: () => null, step() {}, current: () => null, enabled, now, _rec: rec, _open: open };
+  const api = { act: () => null, step() {}, current: () => null, enabled, now, _rec: rec, _open: open, trace: false,
+                say() {}, mark() {} };
   window.Journal = api;
   if (!enabled) return;
 
@@ -164,6 +175,8 @@
   function begin(e) {
     let name;
     const t = e.target;
+    // The usage trace's own note box: not an action of the Library's
+    if (t && t.closest && t.closest("#afpTraceNote")) return;
     if (e.type === "keydown") {
       if (["Shift", "Meta", "Control", "Alt", "CapsLock"].includes(e.key)) return;
       // A letter typed in a box is its input event's action
@@ -179,6 +192,7 @@
     const fields = { via: e.type, delay: round(now() - asked) };
     const el = t && t.closest && t.closest("[data-a]");
     if (el && el.dataset.v) fields.v = String(el.dataset.v).slice(0, 120);
+    if (api.trace) traceFields(e, t, fields);
     const act = newAct(name, fields, asked);
     live.set(e, { act, t0: now() });
     afterPaint(() => { act.paint = now(); rec({ k: "show", a: act.a, n: "paint", w: act.paint }); maybeSettle(act); });
@@ -203,19 +217,24 @@
   const HANDS_ON = new Set(["open_items", "open_list", "add_job"]);
   const journaled = function (cmd, args, options) {
     const act = !BACKGROUND.has(cmd) && !inBackground ? owner() : null;
-    if (!act) return rawInvoke(cmd, args, options);
+    if (!act) {
+      const p = rawInvoke(cmd, args, options);
+      if (api.trace && cmd !== "journal_write") p.catch((e) => failed(cmd, e, null));
+      return p;
+    }
     const start = now();
     act.pending++;
     touched(act);
     const withId = HANDS_ON.has(cmd) && args && typeof args === "object" && !Array.isArray(args) ? Object.assign({ journal: act.a }, args) : args;
     const p = rawInvoke(cmd, withId, options);
-    const finish = (ok) => {
+    const finish = (ok, e) => {
       part(act, "invoke:" + cmd, start, now() - start);
       if (!ok) rec({ k: "step", a: act.a, n: "invoke-failed:" + cmd, w: now() });
+      if (!ok && api.trace) failed(cmd, e, act);
       // After what the caller does with the answer (its .then / await, queued before this task)
       setTimeoutRaw(() => { act.pending--; touched(act); maybeSettle(act); }, 0);
     };
-    p.then(() => finish(true), () => finish(false));
+    p.then(() => finish(true), (e) => finish(false, e));
     return p;
   };
   // The page's scripts ask for commands through Journal.invoke (state.js's `invoke`): the app's own object is frozen in the
@@ -275,6 +294,177 @@
     }
   }
 
+  // ---- the usage trace (docs/design/usage-trace.md): only once the app said it's on
+
+  const TEXT_MAX = 500;
+  const clip = (x, n) => { x = String(x == null ? "" : x).replace(/\s+/g, " ").trim(); n = n || TEXT_MAX; return x.length > n ? x.slice(0, n) + "…" : x; };
+  function say(n, text, fields) {
+    if (!api.trace) return;
+    const act = owner();
+    rec(Object.assign({ k: "text", n, text: clip(text), w: now(), a: act ? act.a : undefined }, fields || {}));
+  }
+  api.say = say;
+  let lastFailure = { key: "", w: 0 };
+  function failed(cmd, e, act) {
+    const text = clip(e && e.message ? e.message : e);
+    const key = cmd + "\u0000" + text;
+    // The same failure again within 10 s (a poll's): written once
+    if (key === lastFailure.key && now() - lastFailure.w < 10000) return;
+    lastFailure = { key, w: now() };
+    rec({ k: "log", level: "error", prefix: "invoke:" + cmd, text, w: now(), a: act ? act.a : undefined });
+  }
+
+  // What the action was on, in the words it shows: a button's or a tab's, a box's name; a choice's or a box's value
+  function words(el) {
+    if (!el) return "";
+    const own = el.getAttribute && (el.getAttribute("aria-label") || el.getAttribute("title"));
+    if (own) return own;
+    if (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) {
+      const lab = el.id && document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]');
+      return (lab && lab.textContent) || el.getAttribute("placeholder") || el.name || el.id || el.tagName.toLowerCase();
+    }
+    return el.textContent || "";
+  }
+  function traceFields(e, t, fields) {
+    if (!t || !t.closest) return;
+    const el = t.closest("button, a, [role=tab], [role=menuitem], [role=option], [data-a], label, input, select, textarea") || t;
+    const label = clip(words(el), 80);
+    if (label) fields.label = label;
+    if ((e.type === "change" || e.type === "input") && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) {
+      fields.value = t.type === "checkbox" || t.type === "radio" ? !!t.checked : clip(t.value, 120);
+    }
+  }
+
+  // The dialogs, the toast and the banners, as they show: checked once a task after the page changed
+  const shownNow = new Set();
+  let checking = false;
+  function visible(el) { return el && el.isConnected && !el.closest("[hidden]"); }
+  function dialogTitle(d) {
+    const id = d.getAttribute("aria-labelledby");
+    const h = (id && document.getElementById(id)) || d.querySelector("h1, h2, h3, header");
+    return clip(h ? h.textContent : d.textContent, 160);
+  }
+  function check() {
+    checking = false;
+    const now_ = new Set();
+    for (const d of document.querySelectorAll('[role="dialog"], [role="alertdialog"]')) {
+      if (d.id === "afpTraceNote" || !visible(d)) continue;
+      const title = dialogTitle(d);
+      const key = "dialog\u0000" + title;
+      now_.add(key);
+      if (!shownNow.has(key)) {
+        const body = d.querySelector(".sb");
+        say("dialog", title, { body: body ? clip(body.textContent, 300) : undefined });
+      }
+    }
+    for (const [n, id, textId] of [["toast", "toast", "toastMsg"], ["banner", "error"], ["banner", "engine"], ["banner", "unsaved"]]) {
+      const el = document.getElementById(id);
+      if (!visible(el)) continue;
+      const text = clip((textId && document.getElementById(textId) || el).textContent);
+      if (!text) continue;
+      const key = n + "\u0000" + id + "\u0000" + text;
+      now_.add(key);
+      if (!shownNow.has(key)) say(n, text, n === "banner" ? { id } : undefined);
+    }
+    shownNow.clear();
+    for (const k of now_) shownNow.add(k);
+  }
+  function changed() {
+    if (checking) return;
+    checking = true;
+    setTimeoutRaw(check, 0);
+  }
+
+  // "Something's wrong here": a marker with what the page showed, written at once; then a line about it
+  let marks = 0;
+  function mark(via) {
+    if (!api.trace) return null;
+    const act = owner();
+    const id = "L" + pid + ".m" + (++marks);
+    const dialogs = [...shownNow].filter((k) => k.startsWith("dialog\u0000")).map((k) => k.split("\u0000")[1]);
+    const toast = document.getElementById("toast");
+    rec({ k: "mark", id, w: now(), a: act ? act.a : undefined, via, actor: api.actor, title: document.title,
+          dialogs: dialogs.length ? dialogs : undefined,
+          toast: visible(toast) ? clip(toast.textContent, 300) : undefined,
+          focus: document.activeElement && document.activeElement !== document.body ? clip(words(document.activeElement), 80) : undefined,
+          shot: null, no_shot: "the Library's window isn't captured (it would need the Screen Recording permission)" });
+    flush();
+    askNote(id);
+    return id;
+  }
+  api.mark = mark;
+  function askNote(id) {
+    const old = document.getElementById("afpTraceNote");
+    if (old) old.remove();
+    const box = document.createElement("div");
+    box.id = "afpTraceNote";
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "Something's wrong here");
+    box.style.cssText = "position:fixed;left:16px;bottom:56px;z-index:10000;width:340px;padding:12px;border-radius:10px;" +
+      "background:var(--surface,#fff);color:var(--fg,#1c1c1f);border:1px solid var(--line,#ddd);box-shadow:0 6px 24px rgba(0,0,0,.3);font:13px var(--font,system-ui)";
+    box.innerHTML = '<div style="font-weight:600;margin-bottom:6px">Something’s wrong here</div>' +
+      '<div style="color:var(--muted,#5e5e65);margin-bottom:8px">Marked in the usage trace. A line about it for the bug, if you like.</div>' +
+      '<input type="text" id="afpTraceNoteText" placeholder="What’s wrong?" style="width:100%;box-sizing:border-box;padding:6px 8px;border-radius:6px;border:1px solid var(--line,#ddd);background:var(--win,transparent);color:inherit;-webkit-user-select:text;user-select:text">' +
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">' +
+      '<button type="button" class="btn" data-a="trace-note-skip">No note</button><button type="button" class="btn pri" data-a="trace-note-keep">Keep</button></div>';
+    document.body.appendChild(box);
+    const input = box.querySelector("input");
+    const done = (keep) => {
+      const text = keep ? clip(input.value) : "";
+      rec({ k: "mark-note", id, w: now(), note: text || undefined, cancelled: keep ? undefined : true });
+      flush();
+      box.remove();
+    };
+    box.addEventListener("click", (e) => {
+      const b = e.target.closest && e.target.closest("[data-a]");
+      if (b && b.dataset.a === "trace-note-keep") done(true);
+      else if (b && b.dataset.a === "trace-note-skip") done(false);
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); done(true); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); done(false); }
+      else e.stopPropagation();
+    });
+    try { input.focus(); } catch (e) { /* no focus in a test */ }
+  }
+  function markButton() {
+    if (document.getElementById("afpTraceMark")) return;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.id = "afpTraceMark";
+    b.dataset.a = "trace-mark";
+    b.title = "Something’s wrong here (" + (/Mac/.test(navigator.platform || "") ? "⇧⌘B" : "Ctrl+Shift+B") + ")";
+    b.setAttribute("aria-label", "Something’s wrong here");
+    b.textContent = "⚑";
+    b.style.cssText = "position:fixed;left:12px;bottom:12px;z-index:9999;width:32px;height:32px;border-radius:16px;border:1px solid var(--line,#ddd);" +
+      "background:var(--surface,#fff);color:var(--muted,#5e5e65);font-size:16px;line-height:1;cursor:pointer;padding:0";
+    b.addEventListener("click", () => mark("click"));
+    document.body.appendChild(b);
+  }
+
+  function startTrace(actor) {
+    api.trace = true;
+    api.actor = actor || "user";
+    // Cmd+Shift+B (Ctrl+Shift+B elsewhere): after begin() made it an action
+    window.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && (e.key === "b" || e.key === "B")) {
+        e.preventDefault();
+        e.stopPropagation();
+        mark("key");
+      }
+    }, true);
+    window.addEventListener("error", (e) => rec({ k: "log", level: "error", prefix: "page", text: clip(e.message + (e.filename ? " (" + String(e.filename).split("/").pop() + ":" + e.lineno + ")" : "")), w: now() }));
+    window.addEventListener("unhandledrejection", (e) => rec({ k: "log", level: "error", prefix: "page", text: clip(e.reason && e.reason.message ? e.reason.message : e.reason), w: now() }));
+    const go = () => {
+      markButton();
+      try {
+        new MutationObserver(changed).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["hidden"] });
+      } catch (e) { /* no observer: no texts */ }
+      check();
+    };
+    if (document.body) go(); else document.addEventListener("DOMContentLoaded", go);
+  }
+
   // ---- the start: from the app's process starting (journal.rs) to the page usable
 
   let startAct = null;
@@ -282,6 +472,7 @@
     rawInvoke("journal_hello").then((h) => {
       if (!h || h.off) return;
       pid = String(h.pid || "");
+      if (h.trace) startTrace(h.actor);
       rec({ k: "load", w: performance.timeOrigin, v: VERSION, page: true, invokes: true, core: coreJournaled });
       rec({ k: "step", a: h.start_a, n: "page-start", w: performance.timeOrigin });
       // The start is an action the app opened (its id from journal.rs): the page's work until it settles is its

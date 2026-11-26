@@ -30,6 +30,17 @@
 -- Cheap by design: a record is a Lua table turned into a line (utils.format_json, ~3 µs) and put in a list; the list is
 -- written every 2 s from a timer, in one write, not where the record is made. Nothing is recorded per frame. It
 -- measures itself: a "cost" record every minute and at the end says how much time it took.
+--
+-- The usage trace (docs/design/usage-trace.md) is the same journal with what it was about: the file and the position at
+-- each action, the texts the player showed (OSD messages, cards, dialogs and the answers), the settings changed (old
+-- and new), the side panel's tab, mpv's warnings and errors, and the markers ("something's wrong here"). Off unless
+-- this computer's journal.conf says trace=yes (or AFP_TRACE=1); every run says who acted (AFP_ACTOR, journal.conf's
+-- actor). Functions that only record with the trace on:
+--   J.trace                        whether it's on
+--   J.say(n, text[, fields])       a text shown: n is osd, card, dialog...
+--   J.note(k, fields)              a record of kind k (answer, tab, set...) for the action going on
+--   J.mark()                       a marker: returns its id and the picture's path (the caller takes the screenshot)
+--   J.mark_note(id, fields)        what was said about it (its note, the picture's fate)
 
 local M = {}
 
@@ -58,10 +69,30 @@ local needs = { "get_time", "observe_property", "set_property_native", "get_prop
 M.enabled = mp ~= nil and os.getenv("AFP_JOURNAL") ~= "0" and utils ~= nil and utils.format_json ~= nil
 for _, k in ipairs(needs) do if M.enabled and type(mp[k]) ~= "function" then M.enabled = false end end
 
-local api = { "act", "label", "step", "span", "shown", "shown_for", "core", "flush", "owner" }
+-- The usage trace and who acts (docs/design/usage-trace.md): journal.conf (~~/script-opts/, this computer's, as every
+-- plugin's options are read), AFP_TRACE and AFP_ACTOR over it
+local function trace_options()
+    local o = { trace = false, actor = "" }
+    local ok, options = pcall(require, 'mp.options')
+    if ok and type(options) == "table" and options.read_options and mp and mp.find_config_file then
+        pcall(options.read_options, o, "journal")
+    end
+    local env = os.getenv("AFP_TRACE")
+    if env == "1" or env == "yes" then o.trace = true elseif env == "0" or env == "no" then o.trace = false end
+    local actor = os.getenv("AFP_ACTOR")
+    if actor and actor ~= "" then o.actor = actor end
+    if o.actor == "" then o.actor = "user" end
+    return o
+end
+local topts = trace_options()
+M.trace = M.enabled and topts.trace == true
+M.actor = topts.actor
+
+local api = { "act", "label", "step", "span", "shown", "shown_for", "core", "flush", "owner", "say", "note", "mark_note" }
 if not M.enabled then
     for _, k in ipairs(api) do M[k] = noop end
     M.span = function() return noop end
+    M.mark = function() return nil end
     M.now = function() return os.time() * 1000 end
     return M
 end
@@ -306,11 +337,22 @@ mp.observe_property("user-data/afp/journal/act", "native", safe(function(_, v)
     if type(v) == "table" and v.a and (not last or v.a ~= last.a) then last = v end
 end))
 
+-- An IPC client that says who it is (user-data/afp/journal/ipc, set over the IPC: "claude", "ipc"): with the trace, the
+-- actions not from a key or a click while it's set are its (docs/design/usage-trace.md, "Who acted")
+local ipc_actor = nil
+mp.observe_property("user-data/afp/journal/ipc", "native", safe(function(_, v)
+    ipc_actor = type(v) == "string" and v ~= "" and v or nil
+end))
+
 local function act_begin(name, fields, w, alone)
     local a = new_id()
     local asked = w or now()
     local r = { k = "act", a = a, n = name, w = asked }
     if fields then for k, v in pairs(fields) do if r[k] == nil then r[k] = v end end end
+    if M.trace then
+        M._where_now(r)
+        if ipc_actor and r.via ~= "key" then r.actor = ipc_actor end
+    end
     publish(a, name, asked)
     if alone then rec(r) end
     return a, r, asked
@@ -399,6 +441,76 @@ show = function(a, by_window, what, fields)
     local r = { k = "show", n = what, w = now(), a = a, weak = by_window or nil }
     if fields then for k, v in pairs(fields) do if r[k] == nil then r[k] = v end end end
     rec(r)
+end
+
+---------------------------------------------------------------------------------------------------------------------
+-- The usage trace (docs/design/usage-trace.md): what the actions were about. Records only with the trace on
+
+local SEP = windows and "\\" or "/"
+M.dir = DIR
+-- A text this long at most (a card's detail, an mpv warning): what a person reads, not a dump
+local TEXT_MAX = 500
+local function clip_text(v)
+    if type(v) ~= "string" then v = tostring(v) end
+    if #v > TEXT_MAX then v = v:sub(1, TEXT_MAX) .. "…" end
+    return v
+end
+
+-- The file playing, where in it, paused: on an action's record (and a marker's)
+function M._where_now(r)
+    local path = mp.get_property_native("path")
+    if type(path) == "string" then r.file = path end
+    local pos = mp.get_property_native("time-pos")
+    if type(pos) == "number" then r.pos = math.floor(pos * 1000 + 0.5) / 1000 end
+    local paused = mp.get_property_native("pause")
+    if type(paused) == "boolean" then r.paused = paused end
+end
+
+local function trace_rec(r, fields)
+    if fields then
+        for k, v in pairs(fields) do
+            -- (a given action: the card's, handed over by notify_client)
+            if k == "a" and type(v) == "string" and v ~= "" then r.a, r.weak = v, nil
+            elseif r[k] == nil then r[k] = type(v) == "string" and clip_text(v) or v end
+        end
+    end
+    rec(r)
+end
+
+-- A text shown to the person: n is what showed it (osd, card, dialog)
+function M.say(n, text, fields)
+    if not M.trace then return end
+    local a, weak = owner()
+    trace_rec({ k = "text", n = n, text = clip_text(text or ""), w = now(), a = a, weak = weak or nil }, fields)
+end
+
+-- A record of kind k for the action going on (answer, tab, set, log)
+function M.note(k, fields)
+    if not M.trace then return end
+    local a, weak = owner()
+    trace_rec({ k = k, w = now(), a = a, weak = weak or nil }, fields)
+end
+
+-- "Something's wrong here": a marker, written at once; its picture's path (the window's screenshot, beside the journal:
+-- the caller takes it) and its id, for the note that follows
+local marks = 0
+function M.mark(fields)
+    if not M.trace then return nil end
+    marks = marks + 1
+    local id = string.format("M%d.%s.%d", pid, script, marks)
+    local shot = DIR and (DIR .. SEP .. string.format("mark-%s-%d-%d.png", os.date("%Y%m%d-%H%M%S"), pid, marks)) or nil
+    local r = { k = "mark", id = id, w = now(), a = owner(), shot = shot, actor = M.actor }
+    M._where_now(r)
+    trace_rec(r, fields)
+    flush()
+    return id, shot
+end
+
+-- What was said about a marker: its note (or none), whether its picture was saved
+function M.mark_note(id, fields)
+    if not M.trace then return end
+    trace_rec({ k = "mark-note", id = id, w = now() }, fields)
+    flush()
 end
 
 ---------------------------------------------------------------------------------------------------------------------
@@ -578,10 +690,13 @@ if create_overlay then
     end
 end
 local osd_message = mp.osd_message
-local osd_shown = safe(function() M.shown("osd") end)
+local osd_shown = safe(function(text)
+    M.shown("osd")
+    if M.trace and text ~= nil and tostring(text) ~= "" then M.say("osd", text) end
+end)
 mp.osd_message = function(...)
     local res = pack(osd_message(...))
-    osd_shown()
+    osd_shown((...))
     return unpack(res, 1, res.n)
 end
 
@@ -639,14 +754,15 @@ local function find_shares()
     end))
 end
 
--- The folder kept: files older than KEEP_DAYS go, then the oldest until it's under DIR_CAP
+-- The folder kept: files older than KEEP_DAYS go, then the oldest until it's under DIR_CAP (the markers' pictures too)
 local function prune()
     if not DIR then return end
     local names = utils.readdir(DIR, "files") or {}
     local files, total = {}, 0
     local cutoff = os.time() - KEEP_DAYS * 86400
     for _, n in ipairs(names) do
-        if n:match("%.jsonl$") then
+        -- The journal's files and the markers' pictures (the usage trace's mark-*.png)
+        if n:match("%.jsonl$") or (n:match("^mark%-") and n:match("%.png$")) then
             local p = DIR .. (windows and "\\" or "/") .. n
             local info = utils.file_info(p)
             if info then
@@ -690,15 +806,103 @@ local function handoff(path)
     return h
 end
 
+-- With the trace: the settings as the plugins publish them (user-data/<plugin>/<key>), each change with its old and new
+-- value; and mpv's warnings and errors, every plugin's and mpv's own
+local SET_MAX = 300
+local function setting_value(v)
+    if type(v) ~= "table" then return v end
+    local ok, j = pcall(encode, v)
+    if not ok or type(j) ~= "string" or #j > SET_MAX then return nil, true end
+    return j
+end
+-- reg: registry.lua's lists, the workspace plugin's (the journal goes into every plugin, zipped alone too: it doesn't
+-- read registry.json itself)
+local function watch_settings(reg)
+    local names, uw = {}, {}
+    if type(reg) == "table" and type(reg.settings) == "table" then
+        -- registry.json's settings, where the plugins publish them: the gyroflow plugin's transform and this computer's
+        -- options, dlogm's curve
+        for _, s in ipairs(reg.settings) do
+            if type(s.key) == "string" then
+                names[#names + 1] = "gyroflow/" .. s.key
+                names[#names + 1] = "dlogm/" .. s.key
+            end
+        end
+        if type(reg.keys) == "function" then
+            for _, k in ipairs(reg.keys("uw") or {}) do uw[#uw + 1] = k end
+        end
+    end
+    -- What a person changes besides: the lens corrected or not, the sideways jerks, the stabilization's resolution, the
+    -- look and the screen it's made for
+    for _, n in ipairs({ "gyroflow/lens_mode", "gyroflow/translation", "gyroflow/resolution", "dlogm/look", "dlogm/screen" }) do
+        names[#names + 1] = n
+    end
+    local had = {}
+    local function changed(name, v)
+        local val, big = setting_value(v)
+        if big then return end
+        local before = had[name]
+        if before == val then return end
+        had[name] = val
+        -- Gone (no file, the plugin's state cleared): not a change anyone made
+        if val == nil then return end
+        M.note("set", { n = name, old = before, new = val })
+    end
+    for _, n in ipairs(names) do
+        local name = (n:gsub("/", "."))
+        mp.observe_property("user-data/" .. n, "native", safe(function(_, v) changed(name, v) end))
+    end
+    if #uw > 0 then
+        -- The underwater colour: one table (dlogm/uwcolor.lua)
+        mp.observe_property("user-data/uwcolor", "native", safe(function(_, v)
+            for _, k in ipairs(uw) do changed("uwcolor." .. k, type(v) == "table" and v[k] or nil) end
+        end))
+    end
+end
+
+local LOG_PER_MINUTE = 120
+local function watch_log()
+    if type(mp.enable_messages) ~= "function" then return end
+    local recent, minute, in_minute, left_out = {}, now(), 0, 0
+    mp.enable_messages("warn")
+    mp.register_event("log-message", safe(function(e)
+        if type(e) ~= "table" or (e.level ~= "warn" and e.level ~= "error" and e.level ~= "fatal") then return end
+        local text = clip_text((tostring(e.text or ""):gsub("%s+$", "")))
+        local t = now()
+        -- The same line again within 10 s: counted on the first, not written again
+        local line = tostring(e.prefix) .. "\0" .. text
+        local seen_at = recent[line]
+        if seen_at and t - seen_at.w < 10000 then
+            seen_at.n = seen_at.n + 1
+            return
+        end
+        if t - minute > 60000 then
+            if left_out > 0 then M.note("log", { level = "warn", prefix = "journal", text = left_out .. " more left out" }) end
+            minute, in_minute, left_out = t, 0, 0
+            recent = {}
+        end
+        in_minute = in_minute + 1
+        if in_minute > LOG_PER_MINUTE then left_out = left_out + 1; return end
+        recent[line] = { w = t, n = 0 }
+        M.note("log", { level = e.level, prefix = e.prefix, text = text })
+    end))
+end
+
 local cored = false
-function M.core()
+-- reg: registry.lua's lists (the workspace plugin hands them over): the settings the trace watches
+function M.core(reg)
     if cored then return end
     cored = true
     local batch = kind == "batch"
     rec({ k = "run", w = now(), app = "player", v = VERSION, pid = pid, start = started, batch = batch or nil,
           parent = os.getenv("AFP_JOURNAL_PARENT"), version = (prop("script-opts") or {})["footage_menu-version"],
-          mpv = prop("mpv-version"), platform = jit and jit.os or nil, precise = precise or nil })
+          mpv = prop("mpv-version"), platform = jit and jit.os or nil, precise = precise or nil,
+          actor = M.actor, trace = M.trace or nil })
     find_shares()
+    if M.trace then
+        watch_settings(reg)
+        watch_log()
+    end
     mp.add_timeout(20, safe(prune))
     -- The start: from the process starting (or this plugin loading) to the first frame
     local start_a = M.act("player/start", { via = "core", batch = batch or nil }, started or now())
@@ -747,7 +951,8 @@ function M.core()
         else file = { a = a, w = now(), first = false, path = path } end
         local again = opened[path or ""]
         opened[path or ""] = true
-        rec({ k = "step", n = "start-file", a = a, w = now(), nth = files, where = where(path), again = again or nil })
+        rec({ k = "step", n = "start-file", a = a, w = now(), nth = files, where = where(path), again = again or nil,
+              path = M.trace and path or nil })
     end))
     mp.register_event("file-loaded", safe(function()
         if not file then return end
@@ -802,7 +1007,7 @@ function M.core()
 end
 
 -- What plugins call: protected, so a fault of the journal's never reaches them
-for _, k in ipairs({ "label", "step", "shown", "shown_for", "owner", "where", "flush", "core" }) do M[k] = safe(M[k]) end
+for _, k in ipairs({ "label", "step", "shown", "shown_for", "owner", "where", "flush", "core", "say", "note", "mark", "mark_note" }) do M[k] = safe(M[k]) end
 do
     local span = safe(M.span)
     M.span = function(...)

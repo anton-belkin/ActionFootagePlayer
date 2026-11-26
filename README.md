@@ -160,7 +160,7 @@ From the [latest release](https://github.com/anton-belkin/ActionFootagePlayer/re
 
 | For | File |
 |---|---|
-| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.dmg`: the app, with all the plugins and their menu, mpv and ffmpeg in it (or the same app as `-macos-arm64.zip`) |
+| a Mac with Apple Silicon (macOS 15 or later) | `ActionFootagePlayer-<version>-macos-arm64.dmg`: the app, with all the plugins and their menu, mpv and ffmpeg in it, and a sample dive clip (or the same app as `-macos-arm64.zip`) |
 | a Windows 10 or 11 PC (x86-64) | `ActionFootagePlayer-<version>-windows-x86_64-setup.exe`: the app, with all the plugins and their menu, mpv and ffmpeg in it |
 | a Windows 11 PC with an ARM processor (Snapdragon) | `ActionFootagePlayer-<version>-windows-arm64-setup.exe`: the same, built for it (the x86-64 one runs there too, emulated and slower). Exports encode on the CPU (x265) |
 | all the plugins in your own mpv, in one zip | `mpv-plugins-<version>-macos-arm64.zip` (Homebrew's mpv), `-linux-x86_64.zip`, `-windows-x86_64.zip`, `-windows-arm64.zip` |
@@ -322,6 +322,7 @@ as the mouse moves; with the panel open it's below the video, always there. It's
 | `v` | Subtitles off/on: the clip's own, or the camera's data that DJI's drones write as subtitles, which is off when a clip starts (see Telemetry); the camera's turned on sticks for the next clips | `dji_telemetry/subtitles` |
 | `Ctrl+]` / `Ctrl+[` | The next highlight the camera marked, and the one before, landing a couple of seconds before it (`before=`); `Ctrl+[` again right after goes on to the one before that. mpv's chapter keys, `Page Up` / `Page Down`, go to them too, at the mark itself | `highlights/next`, `highlights/prev` |
 | `Ctrl+r` | A note for an AI agent: the areas of the frame you mean and a comment, saved with what's on the screen and what the player is doing (see [Notes for an AI agent](#notes-for-an-ai-agent)) | `agent/report` |
+| `Alt+b` | Something's wrong here: with the usage trace on (off by default, [docs/design/usage-trace.md](docs/design/usage-trace.md)), a marker in this computer's journal with a picture of the window and a line about it, for filing a bug later | `side_panel/mark` |
 | drag, wheel | On a 360° clip (stitched, with spherical metadata: Insta360 Studio's, DJI Studio's, GoPro Player's exports), the view to look around in: a drag, or two fingers on a trackpad, turns your head, what's under the mouse staying under it; the wheel or a pinch zooms; `Alt`+drag or a two-finger rotation turns the horizon; a double click or `Backspace` looks ahead again. Paused as playing. The window isn't dragged by the video meanwhile | |
 | `Alt+v` | A 360° clip: the view to look around in, or the sphere as recorded, unrolled flat | `view360/toggle` |
 | `Alt+p` | A 360° clip: the projection, auto (straight lines straight up to 100°, the whole sphere from 160°) → rectilinear → stereographic → little planet | `view360/projection` |
@@ -997,7 +998,8 @@ them in [Action Footage Library](#action-footage-library): select clips in **Ori
 
 The player plays; what's made for a whole trip is made in **Action Footage Library**, an app beside it
 (`ActionFootageLibrary.app` next to the player in Applications; `ActionFootageLibrary.exe` in the player's folder on
-Windows). It opens a project: double-click the trip's `Project.afproject`, drop it on its window, choose it with
+Windows). It's a download of its own, from the same release: `ActionFootageLibrary-<version>-macos-arm64.dmg`, or
+`ActionFootageLibrary-<version>-windows-<arch>-setup.exe`, run after the player's installer. It opens a project: double-click the trip's `Project.afproject`, drop it on its window, choose it with
 **Open…**, or **Open in Action Footage Library** in the player (the side panel's Project tab, or right click →
 Project). Then, as buttons:
 

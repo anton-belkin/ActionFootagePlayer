@@ -508,10 +508,12 @@ macos/
   icon/                        AppIcon.svg, AppIcon.icns
 windows/
   launcher/                    ActionFootagePlayer.exe (Rust): starts mpv, the IPC pipe, --batch, --export
-  setup.py, installer.iss, AppIcon.ico, THIRD-PARTY.txt
+  setup.py, installer.iss (the player), library-installer.iss (the Library, into the player's folder),
+  AppIcon.ico, THIRD-PARTY.txt
 tools/
   build_mpv.sh, mpv.lock       our mpv build; mpv-patches/, libplacebo-patches/ its patches
   dev_app.sh                   a trial app built as the release does, into ~/Applications
+  sample_clip.sh               the sample dive clip the apps carry, from the sample-clips release
   make_app.sh, make_library_app.sh, make_windows_app.sh, make_release.sh, make_plugin_zip.sh,
   make_plugin_bundles.py, bundle_runtime.py, make_icon.sh, make_library_icon.sh, png_to_ico.py,
   make_workflow.py             packaging, icons, Finder Quick Actions

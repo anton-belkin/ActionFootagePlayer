@@ -159,6 +159,12 @@ to it rather than around it).
   a PR: `macos` and `tests`; the PR needn't be up to date with `main`. A draft PR runs only the quick tests: mark it
   ready for review when Anton should try its build. The Windows, Linux and NAS builds run only on pushes to `main` and on releases: after a
   merge, check `main`'s run (`gh run list --branch main`) and fix a break there in its own PR.
+- **Anton stops and starts the runner himself** (AFP Runner in his menu bar, `tools/ci-runner/`). A job stuck in
+  "Waiting for a runner" or one failed with "The runner has received a shutdown signal": ask
+  `~/Applications/AFP\ Runner.app/Contents/MacOS/AFPRunner --status` (or read `~/actions-runner/control.json`) first.
+  `"stopped_by_anton": true` means he stopped it on purpose: never start it (no `launchctl`, no `svc.sh`), tell him the
+  jobs wait, and carry on with other work; Start reruns the jobs his Stop cut short. Stopped without that, the Mac
+  may be asleep or the service down: say so, don't restart it unasked.
 - **Everything CI runs, locally:**
 
   ```
@@ -176,6 +182,9 @@ to it rather than around it).
 - **Live rigs are not in CI:** `tests/*_ipc.py`, `tests/*_e2e.py`, `tests/photo_link_frame.py`, `tools/pipebench`,
   the panel render rig. Run them yourself for changes they cover, and say which you ran. How to run each:
   `docs/dev/testing.md`.
+- **Start the player or the Library for a test with `AFP_ACTOR=claude`**, so the usage trace
+  (`docs/design/usage-trace.md`) keeps your clicks apart from Anton's; over IPC into his player, set
+  `user-data/afp/journal/ipc` to `claude` first. When he says "заведи баг" / "file a bug", use the `file-bug` skill.
 - **A long or heavy run on Anton's Mac goes at low priority, with a time limit.** Research tests, benchmarks, batch
   renders, anything you start in the background that may take minutes: `nice -n 20 timeout 30m <command>` (pick
   the limit from how long it should take, with a margin). He works on this Mac meanwhile, and CI's runner shares it:

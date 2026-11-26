@@ -1,7 +1,11 @@
 """tools/journal_report.py on a journal written here: the times per action (median, p90, worst, the waiting), the
 result taken from the right show, a Library double-click joined to the player's first frame, the app's own steps
 given to the page's action they fall in, what the slow ones have in common, and the JSON. From the repository's
-folder: python3 tests/journal_report_test.py"""
+folder: python3 tests/journal_report_test.py
+
+And tools/trace_report.py (the usage trace, docs/design/usage-trace.md): the timeline of a stretch with who acted,
+the words shown, the settings changed, the warnings, the markers with their notes and pictures; by actor, by app,
+around a marker."""
 
 import json
 import os
@@ -11,6 +15,7 @@ import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))
 import journal_report as jr  # noqa: E402
+import trace_report as tr  # noqa: E402
 
 T = 1_795_000_000_000.0
 
@@ -121,6 +126,99 @@ class Report(unittest.TestCase):
         now = T
         self.assertEqual(jr.parse_when("2d", now), T - 2 * 86400 * 1000)
         self.assertIsNone(jr.parse_when(None, now))
+
+
+class Trace(unittest.TestCase):
+    """tools/trace_report.py: a player run by anton with the trace on, a Library run by claude, two markers"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.shot = os.path.join(self.dir, "mark-20261126-140000-1-1.png")
+        open(self.shot, "wb").write(b"png")
+        p = [
+            {"k": "run", "w": T, "app": "player", "pid": 1, "version": "0.14.2", "actor": "anton", "trace": True, "s": "workspace"},
+            {"k": "act", "a": "P1.gyroflow.1", "n": "gyroflow/level", "w": T + 1000, "via": "key", "key": "Ctrl+l",
+             "file": "/Volumes/DJI_Inbox/DJI_0042.MP4", "pos": 83.5, "paused": False, "s": "gyroflow"},
+            {"k": "text", "n": "osd", "text": "Level: strong", "a": "P1.gyroflow.1", "w": T + 1010, "s": "gyroflow"},
+            {"k": "set", "n": "gyroflow.level", "old": "medium", "new": "strong", "a": "P1.gyroflow.1", "w": T + 1020, "s": "workspace"},
+            {"k": "log", "level": "warn", "prefix": "gyroflow", "text": "gpu table late", "w": T + 1500, "s": "workspace"},
+            {"k": "act", "a": "P1.side_panel.1", "n": "side_panel/mark", "w": T + 2000, "via": "key", "key": "Alt+b", "s": "side_panel"},
+            {"k": "mark", "id": "M1.side_panel.1", "a": "P1.side_panel.1", "w": T + 2001, "shot": self.shot, "actor": "anton",
+             "file": "/Volumes/DJI_Inbox/DJI_0042.MP4", "pos": 84.0, "s": "side_panel"},
+            {"k": "text", "n": "dialog", "text": "Something's wrong here", "a": "P1.side_panel.1", "w": T + 2100, "s": "side_panel"},
+            {"k": "mark-note", "id": "M1.side_panel.1", "note": "the horizon tilts after Ctrl+l", "w": T + 6000, "s": "side_panel"},
+            {"k": "show", "n": "frame", "a": "P1.gyroflow.1", "w": T + 1100, "s": "workspace"},
+            # A key while an IPC client said who it is: its action
+            {"k": "act", "a": "P1.workspace.9", "n": "pause", "w": T + 7000, "via": "core", "actor": "ipc", "s": "workspace"},
+        ]
+        write(self.dir, "player-20261126-140000-1.jsonl", p)
+        lib = [
+            {"k": "run", "w": T + 500, "app": "library", "pid": 2, "version": "0.1.0", "actor": "claude", "trace": True, "s": "app"},
+            {"k": "act", "a": "L2.p1", "n": "click:view", "label": "Sources", "w": T + 3000, "via": "click", "s": "page"},
+            {"k": "text", "n": "toast", "text": "Taken in: 3 files", "a": "L2.p1", "w": T + 3100, "s": "page"},
+            {"k": "log", "level": "error", "prefix": "invoke:recent", "text": "the share isn't there", "w": T + 3200, "s": "page"},
+            {"k": "set", "n": "source.rotation", "clip": "Day 1/A.MP4", "old": None, "new": 90, "w": T + 3300, "s": "app"},
+            {"k": "mark", "id": "L2.m1", "w": T + 60 * 60000, "via": "click", "actor": "claude", "shot": None, "no_shot": "no picture here", "s": "page"},
+        ]
+        write(self.dir, "library-20261126-140000-2.jsonl", lib)
+
+    def run_report(self, *args):
+        import contextlib
+        import io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = tr.main(["--dir", self.dir, *args])
+        return code, out.getvalue()
+
+    def test_marks_newest_first(self):
+        marks = tr.markers(self.dir)
+        self.assertEqual([m["id"] for m in marks], ["L2.m1", "M1.side_panel.1"])
+        self.assertEqual(marks[1]["note_note"], "the horizon tilts after Ctrl+l")
+        self.assertTrue(marks[1]["shot_exists"])
+        code, out = self.run_report("--marks")
+        self.assertEqual(code, 0)
+        self.assertIn("M1.side_panel.1", out)
+        self.assertIn(self.shot, out)
+
+    def test_around_a_marker(self):
+        code, out = self.run_report("--mark", "2", "--before", "5m", "--after", "1m")
+        self.assertEqual(code, 0, out)
+        # Who, which app, what: the key and the file and position, the words shown, the setting, the warning
+        self.assertIn("anton    player   ▶ gyroflow/level [Ctrl+l] on DJI_0042.MP4 at 1:23.5", out)
+        self.assertIn("says (osd): “Level: strong”", out)
+        self.assertIn("set gyroflow.level: medium → strong", out)
+        self.assertIn("⚠ warn [gyroflow] gpu table late", out)
+        self.assertIn("⚑ MARKER M1.side_panel.1: “the horizon tilts after Ctrl+l”", out)
+        self.assertIn("picture: " + self.shot, out)
+        self.assertIn("claude   library  ▶ click:view “Sources”", out)
+        self.assertIn("says (toast): “Taken in: 3 files”", out)
+        self.assertIn("✖ error [invoke:recent] the share isn't there", out)
+        self.assertIn("set source.rotation (A.MP4): — → 90", out)
+        self.assertIn("ipc      player   ▶ pause (core)", out)
+        self.assertIn("version 0.14.2", out)
+        self.assertIn("/Volumes/DJI_Inbox/DJI_0042.MP4", out.split("Files:")[1])
+        # The timings stay journal_report's: no shows
+        self.assertNotIn("frame", out.split("Files:")[0].replace("first frame", ""))
+        # The Library's marker an hour later is outside
+        self.assertNotIn("L2.m1", out)
+
+    def test_by_actor_and_app(self):
+        code, out = self.run_report("--since", "100000d", "--actor", "anton")
+        self.assertEqual(code, 0)
+        self.assertIn("gyroflow/level", out)
+        self.assertNotIn("click:view", out)
+        self.assertNotIn("▶ pause", out)
+        code, out = self.run_report("--since", "100000d", "--app", "library", "--json", os.path.join(self.dir, "t.json"))
+        self.assertEqual(code, 0)
+        self.assertNotIn("gyroflow/level", out)
+        d = json.load(open(os.path.join(self.dir, "t.json")))
+        self.assertEqual(d["actors"], ["claude"])
+        self.assertTrue(all(r["app_"] == "library" for r in d["records"]))
+
+    def test_no_marker(self):
+        code, out = self.run_report("--mark", "9")
+        self.assertEqual(code, 1)
+        self.assertIn("No marker 9", out)
 
 
 if __name__ == "__main__":

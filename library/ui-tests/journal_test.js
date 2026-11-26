@@ -123,6 +123,79 @@ test("a slow command is a record of its own; a failing one is said", async () =>
   assert.ok(rs.some((r) => r.k === "step" && r.a === act.a && r.n === "invoke-failed:recent"));
 });
 
+// The usage trace (docs/design/usage-trace.md): on when the app says so
+const traced = (o) => start(Object.assign({}, o || {}, {
+  commands: Object.assign({ journal_hello: () => ({ pid: 77, start_a: "L77.start", start_w: Date.now() - 500, trace: true, actor: "claude" }) },
+                          (o && o.commands) || {}),
+}));
+
+test("the trace off (the default): no words, no texts, no flag", async () => {
+  const { page, records } = await start();
+  await ended(page);
+  page.click('[data-a="view"][data-v="sources"]');
+  page.get('toast("Saved")');
+  await ended(page);
+  const rs = await records();
+  assert.equal(page.window.Journal.trace, false);
+  assert.ok(!rs.find((r) => r.k === "act" && r.n === "click:view").label, "no label");
+  assert.ok(!rs.some((r) => r.k === "text" || r.k === "log" || r.k === "mark"), "no trace records");
+  assert.equal(page.window.document.getElementById("afpTraceMark"), null, "no flag");
+});
+
+test("the trace on: what was clicked in its words, the toast and a dialog's text, a command's error", async () => {
+  const { page, records } = await traced({ delay: { scan: 40, recent: 5 }, commands: { recent: () => { throw new Error("the share isn't there"); } } });
+  await ended(page);
+  assert.equal(page.window.Journal.trace, true);
+  page.click('[data-a="view"][data-v="sources"]');
+  await ended(page);
+  page.get('toast("Taken in: 3 files")');
+  await sleep(5);
+  page.get('$("ask").hidden = false');
+  await sleep(5);
+  page.click('[data-a="menu"]');
+  await ended(page);
+  const rs = await records();
+  const act = rs.find((r) => r.k === "act" && r.n === "click:view");
+  const el = page.window.document.querySelector('[data-a="view"][data-v="sources"]');
+  assert.equal(act.label, (el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent).replace(/\s+/g, " ").trim().slice(0, 80));
+  assert.ok(act.label, "a label");
+  assert.ok(rs.some((r) => r.k === "text" && r.n === "toast" && r.text.startsWith("Taken in: 3 files")), "the toast's words");
+  assert.ok(rs.some((r) => r.k === "text" && r.n === "dialog" && r.text === "Jobs are still in the queue" && /Closing the window/.test(r.body)), "the dialog's title and words");
+  const err = rs.find((r) => r.k === "log" && r.prefix === "invoke:recent");
+  assert.ok(err && err.level === "error" && /the share isn't there/.test(err.text), "the command's error, in its words");
+  // Written once though shown on: the toast is one record
+  assert.equal(rs.filter((r) => r.k === "text" && r.n === "toast").length, 1);
+});
+
+test("the trace on: a choice's value; Something's wrong here by its key, then its note", async () => {
+  const { page, records } = await traced();
+  await ended(page);
+  const w = page.window;
+  assert.ok(w.document.getElementById("afpTraceMark"), "the flag");
+  w.dispatchEvent(new w.KeyboardEvent("keydown", { key: "B", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  const input = w.document.getElementById("afpTraceNoteText");
+  assert.ok(input, "a line asked");
+  input.value = "the list jumped to the top";
+  input.dispatchEvent(new w.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  assert.equal(w.document.getElementById("afpTraceNote"), null, "the box gone");
+  // The flag clicked, and Esc: a marker with no note
+  w.document.getElementById("afpTraceMark").dispatchEvent(new w.MouseEvent("click", { bubbles: true, cancelable: true }));
+  w.document.getElementById("afpTraceNoteText").dispatchEvent(new w.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+  await ended(page);
+  const rs = await records();
+  const marks = rs.filter((r) => r.k === "mark");
+  assert.equal(marks.length, 2);
+  assert.equal(marks[0].via, "key");
+  assert.equal(marks[0].actor, "claude");
+  assert.equal(marks[1].via, "click");
+  assert.match(marks[0].id, /^L77\.m1$/);
+  const note = rs.find((r) => r.k === "mark-note" && r.id === marks[0].id);
+  assert.equal(note.note, "the list jumped to the top");
+  assert.equal(rs.find((r) => r.k === "mark-note" && r.id === marks[1].id).cancelled, true);
+  assert.ok(rs.some((r) => r.k === "act" && r.n === "key:Meta+Shift+B"), "the key is an action");
+  assert.ok(!rs.some((r) => r.k === "act" && /afpTraceNote/.test(r.n)), "typing the note isn't the Library's action");
+});
+
 test("cost: a record takes microseconds; the page doesn't write, the app does (every 2 s)", async () => {
   const { page } = await start();
   const J = page.window.Journal;

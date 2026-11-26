@@ -21,6 +21,7 @@ c = Checks("user-data")
 # Keys ours read that someone else writes
 EXTERNAL = {
     "osc/visibility": "mpv's osc.lua",
+    "afp/journal/ipc": "an IPC client saying who it is (docs/design/usage-trace.md, 'Who acted')",
 }
 
 LITERAL_WRITE = re.compile(r'(?:set_property(?:_native|_number|_bool)?)\(\s*"user-data/([^"]+)"\s*(\.\.)?')

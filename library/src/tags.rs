@@ -526,6 +526,16 @@ pub fn set_source(root: &Path, entries: &[(String, serde_json::Map<String, Value
         let (own, clip) = match clip_own_in(&locs, tree) { Ok(x) => x, Err(e) => { problems.push(e); continue } };
         let had = locations::read_json(&own);
         if had.is_none() && change.values().all(Value::is_null) { continue; }
+        // The usage trace (docs/design/usage-trace.md): each setting changed, with what it was
+        if crate::journal::tracing() {
+            let was = had.as_ref().and_then(|d| d.get("source")).cloned().unwrap_or(Value::Null);
+            for (k, v) in change {
+                let old = was.get(k).cloned().unwrap_or(Value::Null);
+                if &old != v {
+                    crate::journal::trace(json!({ "k": "set", "n": format!("source.{k}"), "clip": tree, "old": old, "new": v }));
+                }
+            }
+        }
         let mut doc = had.unwrap_or(json!({ "format": "actionfootageplayer-clip", "version": 1 }));
         if doc.get("format").and_then(Value::as_str).is_some_and(|f| f != "actionfootageplayer-clip" && f != "actionfootageplayer-marks") {
             problems.push(format!("{}: not the player's file, left alone", own.display())); continue;

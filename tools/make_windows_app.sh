@@ -2,12 +2,17 @@
 # tools/make_windows_app.sh <version> [<rust target>]: into dist/
 #   ActionFootagePlayer-<version>-windows-<arch>-setup.exe   the Windows app's installer: ActionFootagePlayer with
 #                                                            everything it needs in its folder (no mpv or Python to
-#                                                            install), for the user alone (no admin)
+#                                                            install), for the user alone (no admin); with the
+#                                                            sample dive clip when the sample-clips release has it
+#                                                            (tools/sample_clip.sh). The download the site offers
+#   ActionFootageLibrary-<version>-windows-<arch>-setup.exe  Action Footage Library's own installer
+#                                                            (windows/library-installer.iss), into the player's folder
 #
 # The app (windows/launcher/src/main.rs has its layout): the launcher, mpv, Python for the setup, a Vulkan loader,
 # ffmpeg for exports, the plugins (and their right-click menu) and the setup.
 # What it carries from elsewhere is downloaded once into build/windows-deps/, at the versions pinned here, and
-# checked; build/windows-app/ is the app's folder as installed. The installer is windows/installer.iss, made with
+# checked; build/windows-app/ is the app's folder as installed (build/windows-library/ the Library's part of it). The
+# installers are windows/installer.iss and windows/library-installer.iss, made with
 # Inno Setup 6 or 7 (ISCC.exe, in PATH or where its installer puts it; without it, the folder is made and the
 # installer isn't).
 #
@@ -179,7 +184,7 @@ cp mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/telemetry.lua "$
 cp mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 cp mpv/scripts/side-panel/navkeys.lua "$panel/"
 cp mpv/scripts/footage-menu/main.lua "$menu/"
-cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+cp mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua mpv/scripts/side-panel/trace.lua "$panel/"
 # The seek bar's pictures: scrub.lua, without its helper here yet. afp-scrub (tools/scrub/afp-scrub.c) needs libav's
 # DLLs, which this mpv (built statically) doesn't have beside it, and its IPC over mpv's named pipe; until then the bar
 # has no pictures on Windows
@@ -208,7 +213,6 @@ fi
 
 echo "== The launcher and the setup"
 cp "$launcher_bin/ActionFootagePlayer.exe" "$app/"
-cp "$library_bin/ActionFootageLibrary.exe" "$app/"
 $set_icon "$app/ActionFootagePlayer.exe" windows/AppIcon.ico
 mkdir -p "$app/tools"
 cp windows/setup.py tools/cube_to_glsl.py shaders/dlogm_lut3d.glsl.in "$app/tools/"
@@ -230,6 +234,19 @@ find "$tmp/ffmpeg" -maxdepth 2 \( -name LICENSE -o -name LICENSE.txt \) -exec cp
 echo "$version" > "$app/VERSION"
 rm -rf "$tmp"
 
+echo "== The sample clip"
+sample=$(tools/sample_clip.sh)
+if [ -n "$sample" ]; then
+    mkdir -p "$app/sample"
+    cp "$sample" "$app/sample/"
+fi
+
+# Action Footage Library, an installer of its own: it goes into the player's folder
+library_app=build/windows-library
+rm -rf "$library_app"
+mkdir -p "$library_app"
+cp "$library_bin/ActionFootageLibrary.exe" "$library_app/"
+
 iscc=$(command -v ISCC || true)
 for candidate in "/c/Program Files (x86)/Inno Setup "*/ISCC.exe "/c/Program Files/Inno Setup "*/ISCC.exe; do
     if [ -z "$iscc" ] && [ -x "$candidate" ]; then iscc=$candidate; fi
@@ -244,4 +261,6 @@ win() { cygpath -w "$1" 2>/dev/null || echo "$1"; }
 # Git Bash would take /D... for paths and rewrite them
 MSYS2_ARG_CONV_EXCL='*' "$iscc" /Q "/DAppVersion=$version" "/DAppArch=$arch" "/DSourceDir=$(win "$PWD/$app")" \
     "/O$(win "$PWD/dist")" "$(win "$PWD/windows/installer.iss")"
-ls -l "dist/ActionFootagePlayer-$version-windows-$arch-setup.exe"
+MSYS2_ARG_CONV_EXCL='*' "$iscc" /Q "/DAppVersion=$version" "/DAppArch=$arch" "/DSourceDir=$(win "$PWD/$library_app")" \
+    "/O$(win "$PWD/dist")" "$(win "$PWD/windows/library-installer.iss")"
+ls -l "dist/ActionFootagePlayer-$version-windows-$arch-setup.exe" "dist/ActionFootageLibrary-$version-windows-$arch-setup.exe"

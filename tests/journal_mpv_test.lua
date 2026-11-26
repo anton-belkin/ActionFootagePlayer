@@ -26,6 +26,10 @@ local function finish()
 end
 
 expect("journal on", J.enabled, true)
+-- The usage trace (journal_mpv_test.sh sets AFP_TRACE=1): the run's header, the settings and mpv's warnings watched
+expect("trace on", J.trace, true)
+J.core(require 'registry')
+msg.warn("trace test warning")
 
 -- An overlay: drawn, its result back, nothing of the journal's on it, removed
 local ov = mp.create_osd_overlay("ass-events")
@@ -99,6 +103,15 @@ mp.add_timeout(0.5, function()
         expect("journal: the overlay drawn", has('"n":"overlay:' .. script .. '"'), true)
         expect("journal: the subprocess", has('"n":"proc:echo"'), true)
         expect("journal: no trouble of its own", J._troubles(), 0)
+        -- The usage trace: who ran it, the OSD's words, mpv's warning (a plugin's, through log-message), a marker
+        expect("trace: the run's actor", has('"actor":"claude"'), true)
+        expect("trace: the OSD's words", has('"k":"text"') and has('"text":"journal test"'), true)
+        expect("trace: mpv's warning", has('"k":"log"') and has('"text":"trace test warning"'), true)
+        local id = J.mark({ via = "test" })
+        J.flush()
+        f = io.open(J.file, "rb")
+        if f then text = f:read("*a") f:close() end
+        expect("trace: a marker", id ~= nil and has('"id":"' .. id .. '"'), true)
         finish()
     end)
 end)

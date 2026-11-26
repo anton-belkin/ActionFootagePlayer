@@ -91,7 +91,8 @@ every push to `main`, every `v*` tag, and by hand. A newer push to a PR cancels 
 | `plugins` | ubuntu-latest | `main`, tags, by hand | Bundles all plugins per system. |
 
 A pull request's run is the quick kind: Rust built incrementally (`CARGO_INCREMENTAL=1`, only what changed is
-compiled again), and only the app's zip packed (`AFP_PACKAGES=zip`: no disk image, no tarball). A draft runs only
+compiled again), and only the player's zip and the Library's small disk image packed (`AFP_PACKAGES=zip`: no player disk image, no
+tarball). A draft runs only
 `sh tools/run_tests.sh`; the whole check runs when it's marked ready for review. `main` and tags are built in full.
 `tools/build_mpv.sh` leaves mpv as it is when its lock, script, patches and Homebrew versions haven't changed.
 
@@ -101,6 +102,26 @@ runner that reran every open PR after each merge); `main`'s own run after the me
 together. The Windows, Linux and NAS jobs don't run on
 pull requests; they run on every push to `main` and every release, so after a merge look at `main`'s run
 (`gh run list --branch main`) for a break there, and fix it in a PR of its own.
+
+### The runner on Anton's Mac
+
+`~/actions-runner`, a LaunchAgent (`actions.runner.anton-belkin-ActionFootagePlayer.anton-mac`) at the lowest CPU and
+disk priority (`Nice` 20, `LowPriorityIO`; `ProcessType` Standard, not Background, which would hold it to the
+efficiency cores). Re-running the runner's `svc.sh install` writes that plist anew: set those keys again.
+
+Anton controls it from the menu bar with **AFP Runner** (`tools/ci-runner/RunnerBar.swift`; build and install with
+`tools/ci-runner/make_runner_bar.sh`). Its panel shows the Mac's CPU and memory, the job running here, the jobs waiting
+on GitHub, and Stop / Start:
+
+- **Stop** disables the LaunchAgent and unloads it, so the runner stays stopped after a restart. With a job running
+  it asks: *Stop now* (the job fails; its run is kept in `interrupted_runs`) or *After this job* (a detached shell
+  waits for the job, so quitting the app doesn't cancel it).
+- **Start** enables and loads the runner again and reruns the failed jobs of the runs Stop now cut short.
+- The decision goes into `~/actions-runner/control.json` (`state`, `by`, `at`, `reason`, `interrupted_runs`).
+  `AFPRunner --status` prints the whole picture as JSON: the service, the job here, GitHub's view of the runner, every
+  job running or waiting.
+
+While it's stopped, jobs for this repository's branches wait on GitHub; there is no fallback to GitHub's runners.
 
 CI has no GPU, no screen, no NAS and no real clips. Everything below is for you to run.
 
@@ -124,9 +145,9 @@ CI has no GPU, no screen, no NAS and no real clips. Everything below is for you 
 | `gyroflow_conf_test.lua` | gyroflow.conf as defaults, from `gyroflow_conf_cases.json` (also read by cargo in `library/`) | CI |
 | `gyroflow_lens_test.lua` | The output lens over a clip's own Gyroflow project (#196) | CI |
 | `jellyfin_test.py` | `tools/stream/jellyfin.py`: where items go while the catalog is pending | CI |
-| `journal_test.lua` | Responsiveness journal, player part, with mpv stood in for | CI |
+| `journal_test.lua` | Responsiveness journal and usage trace, player part, with mpv stood in for | CI |
 | `journal_mpv_test.sh` (+ `.lua`) | The journal's hooks in a real mpv (`--vo=null`): `$MPV_BIN`, else `build/mpv-afp/out/mpv`, else PATH; skips with none | CI |
-| `journal_report_test.py` | `tools/journal_report.py` on a made-up journal | CI |
+| `journal_report_test.py` | `tools/journal_report.py` and `tools/trace_report.py` on a made-up journal | CI |
 | `librarylist_test.lua` | A list opened from the Library: which files, their head | CI |
 | `link_test.lua` | Link reader over MP4s ffmpeg made and changed; with `GYROFLOW_EXPORT`, over a real preview | CI (twice) |
 | `live_photo_test.lua` | What a photo is: Exif, Motion Photo XMP, Live Photo MOV, chains. `AFP_LIVE_PHOTOS`/`AFP_MOTION_PHOTOS` for real files | CI |
@@ -175,6 +196,10 @@ CI has no GPU, no screen, no NAS and no real clips. Everything below is for you 
   break and before going past the time. Say what will run, for how long, and what he will see. Offer a short run and
   a longer one with room for follow-ups. A go from another session does not count.
 - Headless rigs (`--vo=null`, no window, no focus taken) need no ask. All `tests/*_ipc.py` are headless.
+- **Start the player or the Library for a test with `AFP_ACTOR=claude`** in its environment, so the usage trace
+  (docs/design/usage-trace.md) never takes a session's clicks for Anton's. Driving *his* running player over the agent
+  plugin's socket, say who you are first: `{"command": ["set_property", "user-data/afp/journal/ipc", "claude"]}`, and
+  set it back to `""` when done.
 - **mpv with `vo=gpu-next` hangs while the Mac is locked or its display sleeps.** Check before a windowed run:
 
   ```
@@ -382,5 +407,8 @@ See [tools/edgefill/README.md](../../tools/edgefill/README.md) and
 
 - `tools/journal_report.py [--since 7d] [--json <file>]`: where the waiting is in the responsiveness journal
   (`~/Library/Logs/ActionFootagePlayer/journal`). docs/design/responsiveness-journal.md.
+- `tools/trace_report.py [--marks | --mark last | --last 30m | --since … --until …] [--actor anton] [--app player]`:
+  what happened, as a timeline, from the usage trace (docs/design/usage-trace.md); the file-bug skill
+  (`.claude/skills/file-bug`) turns a stretch of it into an issue.
 - Memory over a session: drive settings changes over IPC (`script-message-to gyroflow …`) and watch
   `footprint -p <mpv pid>`.

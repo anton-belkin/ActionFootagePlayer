@@ -31,8 +31,8 @@ What each job builds:
 
 | Job | Runner | Makes |
 |---|---|---|
-| `macos` | macos-15 (Apple Silicon) | `tools/build_mpv.sh` (cached), then `tools/make_release.sh` with `BUNDLE_RUNTIME`: the `.dmg` and `.zip` (player + Library), the source `.tar.gz` with prebuilt `bin/`, and one zip per mpv plugin. |
-| `plugin` | ubuntu-22.04, windows-2022, windows-11-arm | `tools/make_plugin_zip.sh`: `mpv-gyroflow-<v>-<os>-<arch>.zip`. On Windows also `tools/make_windows_app.sh`: `ActionFootagePlayer-<v>-windows-<arch>-setup.exe`, then a smoke test. |
+| `macos` | macos-15 (Apple Silicon) | `tools/build_mpv.sh` (cached), then `tools/make_release.sh` with `BUNDLE_RUNTIME`: the player's `.dmg` and `.zip`, the Library's own `ActionFootageLibrary-<v>-macos-arm64.dmg`, the source `.tar.gz` with prebuilt `bin/`, and one zip per mpv plugin. |
+| `plugin` | ubuntu-22.04, windows-2022, windows-11-arm | `tools/make_plugin_zip.sh`: `mpv-gyroflow-<v>-<os>-<arch>.zip`. On Windows also `tools/make_windows_app.sh`: `ActionFootagePlayer-<v>-windows-<arch>-setup.exe` and the Library's own `ActionFootageLibrary-<v>-windows-<arch>-setup.exe`, then a smoke test of both. |
 | `nas-helper` | ubuntu-latest | `tools/nas-helper/Dockerfile`: `ActionFootageNASHelper-<v>-linux-x86_64.tar.gz` (`docker save`) and `ActionFootageNASHelper-<v>-compose.yaml`. |
 | `plugins` | ubuntu-latest | `tools/make_plugin_bundles.py`: `mpv-plugins-<v>-<os>-<arch>.zip`, all plugins per system. |
 | `tests` | macos-15 | The catalog, Library and Library page tests (not a build). |
@@ -51,6 +51,13 @@ MPV_BIN=build/mpv-afp/out/mpv BUNDLE_RUNTIME=$(brew --prefix) tools/make_release
 
 - Builds `vs-gyroflow` and `library` in release, from HEAD. It refuses uncommitted changes in `vs-gyroflow`.
 - The app is `tools/make_app.sh`; the Library is `tools/make_library_app.sh`.
+- **The player and the Library are separate downloads** (Anton, 2026-11-26: the site offers the player only, for
+  divers). The player's `.dmg` and `.zip` hold `ActionFootagePlayer.app` alone; `ActionFootageLibrary-<v>-macos-arm64.dmg`
+  holds the Library, which goes beside it in Applications. The site's `download.js` finds the player's files by
+  names starting with `ActionFootagePlayer-`: keep the Library's starting with `ActionFootageLibrary-`.
+- **The sample dive clip** (`Sample dive - Osmo Action 6.mp4`, the `sample-clips` release) goes into
+  `Contents/Resources/sample/` (Windows: `{app}\sample\`) through `tools/sample_clip.sh`, which keeps it in
+  `build/sample/` and skips it quietly when the release doesn't have it. It adds its size to the download.
 - With `BUNDLE_RUNTIME`, `tools/bundle_runtime.py` copies mpv, ffmpeg, what they link and Python into the app, so it
   needs no Homebrew. The bottles set the oldest macOS the app runs on.
 - Binaries are stripped and signed ad hoc. Nothing is notarized.
@@ -92,8 +99,9 @@ branch by hand: `gh workflow run release.yml --ref <branch>`, which runs on GitH
 ```
 gh run download <run id> -n release-macos -D <scratch folder>      # ~1.5 GB, seconds here
 ditto -x -k <scratch folder>/ActionFootagePlayer-dev-<sha>-macos-arm64.zip <scratch folder>/x
-# the current apps to build/*-previous.app, then ditto x/ActionFootagePlayer.app and x/ActionFootageLibrary.app
-# into ~/Applications; delete the download
+hdiutil attach -nobrowse -readonly -mountpoint <scratch folder>/lib <scratch folder>/ActionFootageLibrary-dev-<sha>-macos-arm64.dmg
+# the current apps to build/*-previous.app, then ditto x/ActionFootagePlayer.app and lib/ActionFootageLibrary.app
+# into ~/Applications; hdiutil detach <scratch folder>/lib; delete the download
 ```
 
 Then the Launch Services check below (other copies unregistered, an MP4 opens `~/Applications`'). The artifact may
@@ -174,6 +182,10 @@ again: repeat after live tests.
 - It builds `vs-gyroflow`, `windows/launcher` and `library`, then downloads what the app carries into
   `build/windows-deps/`, each checked against a pinned SHA-256: mpv (shinchiro's build), Python (NuGet), the Vulkan
   loader, ffmpeg (BtbN's GPL build). The installer is `windows/installer.iss`, per user, no admin.
+- The Library is an installer of its own, `windows/library-installer.iss`: it installs `ActionFootageLibrary.exe`
+  into the player's folder (the Library looks for `ActionFootagePlayer.exe` beside itself, `library/src/batch.rs`)
+  and refuses where the player isn't installed. A player installed by an older installer keeps the
+  `ActionFootageLibrary.exe` it had until the Library's installer replaces it.
 - To update a dependency, download it, update URL and SHA-256 in the script, for **both** architectures.
 - You can't build it on the Mac. Take the `release-windows-*` artifact of a PR run.
 - Anton has used the x86-64 app (alpha, little testing). Don't call Windows untried.

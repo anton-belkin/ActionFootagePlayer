@@ -17,6 +17,7 @@
 #   Contents/Resources/setup.sh         the setup (offered at first launch by setup-offer.lua), and the export script
 #                                        of the Stabilize + LUT Quick Action
 #   Contents/Resources/tools/            what the setup runs
+#   Contents/Resources/sample/           with SAMPLE_CLIP (a file, tools/sample_clip.sh's): the sample dive clip
 #   Contents/Helpers/, Frameworks/,      with BUNDLE_RUNTIME: mpv, ffmpeg and what they load, and their licenses and
 #     Resources/ThirdParty/              sources (tools/bundle_runtime.py)
 #
@@ -113,7 +114,7 @@ install -m 644 mpv/scripts/dji-telemetry/main.lua mpv/scripts/dji-telemetry/tele
 install -m 644 mpv/scripts/highlights/main.lua mpv/scripts/highlights/markers.lua "$highlights/"
 install -m 644 mpv/scripts/side-panel/navkeys.lua "$panel/"
 install -m 644 mpv/scripts/footage-menu/main.lua "$menu/"
-install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua "$panel/"
+install -m 644 mpv/scripts/side-panel/main.lua mpv/scripts/side-panel/ui.lua mpv/scripts/side-panel/bar.lua mpv/scripts/side-panel/timeline.lua mpv/scripts/side-panel/exportkind.lua mpv/scripts/side-panel/tagchips.lua mpv/scripts/side-panel/lensdialog.lua mpv/scripts/side-panel/notify.lua mpv/scripts/side-panel/notify_client.lua mpv/scripts/side-panel/trace.lua "$panel/"
 install -m 644 mpv/scripts/side-panel/scrub.lua "$panel/"
 install -m 644 mpv/scripts/agent/main.lua "$agent/"
 install -m 644 mpv/scripts/any-layout/main.lua "$anylayout/"
@@ -139,6 +140,10 @@ fi
 install -m 755 macos/setup.sh macos/export-finder.sh "$res/"
 install -m 644 mpv/app.conf "$res/"
 echo "$version" > "$res/VERSION"
+if [ -n "${SAMPLE_CLIP:-}" ] && [ -f "$SAMPLE_CLIP" ]; then
+    mkdir -p "$res/sample"
+    install -m 644 "$SAMPLE_CLIP" "$res/sample/"
+fi
 install -m 644 macos/setup-offer.lua macos/finder-launch.lua "$res/"
 mkdir -p "$res/tools"
 install -m 644 tools/cube_to_glsl.py tools/make_workflow.py macos/default-app.py shaders/dlogm_lut3d.glsl.in "$res/tools/"
