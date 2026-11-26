@@ -375,14 +375,19 @@ What talks on it:
 - **How a file plays, asked of the player:** `afp_stream.py` runs `mpv --no-config --config-dir=<player config>
   --load-scripts=no` with the player's `workspace`, `gyroflow` and `dlogm` plugins and
   `--script-opts-append=gyroflow-render_args=<file> -- <clip>`. After the first frame the gyroflow plugin writes
-  `{clip, offset, length, moment {name, in, out, missing}, render {stabilize, kind, user_data}, dlogm {curve, look, log},
-  title, duration}` and quits. `render.user_data` is the `gyroflow-gpu-table --player` request above; the stream passes
+  `{clip, offset, length, moment {name, in, out, missing}, render {stabilize, kind, user_data, settings}, dlogm {curve, look,
+  log, uw_strength, uw_highlights}, title, duration}` (the underwater colour's two only with the curve `uw`, as
+  `gyroflow/settings.lua` `uw_of` makes them for the export too) and quits. `render.user_data` is the `gyroflow-gpu-table --player` request above; the stream passes
   it to `gyroflow-gpu-table` itself, then `afp-render` (`tools/stream/afp-render.c`) renders HLS.
 - **What the stream takes of it:** the look from `dlogm.curve` (any log curve in registry.json: the dlogm plugin's
   `<curve>_hlg.glsl`, its `hdr`, which the image bakes for each with `tools/stream/make_looks.py`); the temporal
   denoise from `render.settings` (`denoise`, `temporal_denoise`, `denoise_strong`, `denoise_grain`) when
   `AFP_DENOISE=player`: `gpu_denoise` in the table's request, `afp-render -behind <frames> -set gyroflow_dn_…=<v>`
-  (the shown frame that many behind the newest, as gyroflow-export's GPU path renders it); the footage without the
+  (the shown frame that many behind the newest, as gyroflow-export's GPU path renders it); the underwater colour for
+  the curve `uw` (#335): the player's `underwater_hlg.glsl` (made HLG like a log look) with `afp-render --hlg -uw -`,
+  its numbers per frame piped in from `afp-uw <source> <from> <to> --strength <s> --highlights yes|no --hwaccel vaapi`
+  (one line per 50 ms tick, `<clock> uw_dr uw_db uw_k uw_ev uw_s uw_hp`; a frame takes the last line at or before it),
+  measured and eased by `uwcolor.rs` as an export from the render's start; the footage without the
   project's own folders (registry.json's `own_folders` at a project's top, `stabilized/` anywhere).
 - **HTTP** (`AFP_PORT`, 8099): `/`, `/playlist.m3u`, `/clip/<id>/index.m3u8`, `/clip/<id>/<segment>`,
   `/watch/<id>`, `/prerender?folder=…&what=opening|whole` (only when asked), `/status`, `/catalog.json`,
@@ -673,7 +678,7 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `library-list` | `mpv/scripts/workspace/librarylist.lua` | `mpv/scripts/side-panel/main.lua` |
 | `osc/visibility` | — | `mpv/scripts/agent/main.lua` |
 | `side_panel/loaded` | `mpv/scripts/side-panel/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/footage-menu/main.lua`, `mpv/scripts/side-panel/notify_client.lua` |
-| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/main.lua`, `mpv/scripts/workspace/viewsave.lua` |
+| `uwcolor` | `mpv/scripts/dlogm/uwcolor.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/gyroflow/main.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/workspace/main.lua` and 1 more |
 | `uwcolor/defaults` | — | `mpv/scripts/gyroflow/bundle.lua`, `mpv/scripts/workspace/transform.lua` |
 | `view360` | `mpv/scripts/view360/main.lua` | `mpv/scripts/gyroflow/export.lua`, `mpv/scripts/side-panel/main.lua`, `mpv/scripts/side-panel/scrub.lua` |
 | `workspace` | `mpv/scripts/workspace/main.lua` | `mpv/scripts/agent/main.lua`, `mpv/scripts/dji-telemetry/main.lua`, `mpv/scripts/dlogm/main.lua`, `mpv/scripts/dlogm/uwcolor.lua` and 13 more |

@@ -327,6 +327,9 @@ jobs:
           docker run --rm -v "$PWD/t/Trip:/projects/Trip" -v "$PWD/t/Trip:/library/Trip:ro" -v "$PWD/t/video:/shares/video:ro" \
             -v "$PWD/t/data:/data" -v "$PWD/t/config:/config" actionfootage-nas-helper:latest --check
           docker run --rm --entrypoint mpv actionfootage-nas-helper:latest --version | head -1
+          # The underwater colour's numbers for the stream (afp-uw, ffmpeg's own decoder here: no GPU), from a made clip
+          docker run --rm --entrypoint sh actionfootage-nas-helper:latest -c \
+            'ffmpeg -v error -f lavfi -i testsrc2=size=1280x720:rate=30 -t 3 -c:v mpeg4 /tmp/t.mp4 && /opt/afp/bin/afp-uw /tmp/t.mp4 0 2 > /tmp/uw && tail -1 /tmp/uw && test "$(wc -l < /tmp/uw)" -gt 40'
 
       - name: Save
         run: |

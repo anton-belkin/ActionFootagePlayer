@@ -101,9 +101,10 @@ class Stream(unittest.TestCase):
     def test_no_curve_or_not_log(self):
         cmd = self.render(args_of("", denoise=False))
         self.assertNotIn("--hlg", cmd)
-        cmd = self.render(args_of("uw", denoise=False))
+        # (the underwater colour has its look since #335: tests/stream_uw_test.py)
+        cmd = self.render(args_of("hlgcam", denoise=False))
         self.assertNotIn("--hlg", cmd)
-        self.assertTrue(any("no look for the curve uw" in x for x in self.logged))
+        self.assertTrue(any("no look for the curve hlgcam" in x for x in self.logged))
 
     def test_catalog_says_hdr_for_every_log_curve(self):
         for curve in LOG:

@@ -5,7 +5,8 @@
 # Runs on the NAS (tools/stream/README.md): for each clip in the library folders, an HLS stream (HEVC Main10, HLG,
 # fMP4 segments) rendered on the GPU by afp-render as it's asked for, with the Gyroflow warp gyroflow-gpu-table writes
 # for it as the player plays it (below), the look to HLG for a log clip (every log curve the player plays: registry.json's
-# curves) and, with AFP_DENOISE=player, the clip's temporal denoise.
+# curves), the underwater colour for a clip that has it on (its numbers per frame from afp-uw) and, with
+# AFP_DENOISE=player, the clip's temporal denoise.
 #
 #   GET /                      the clips, each with its stream (Safari plays HLS by itself)
 #   GET /playlist.m3u          every clip as a channel: Jellyfin's Live TV takes it as an M3U tuner
@@ -92,6 +93,9 @@ RECYCLE_BINS = set(REGISTRY["recycle_bins"])
 # The log curves the player plays, each with its look to HLG (its `hdr`: the dlogm plugin's shader, which the NAS
 # Helper's image bakes for every one of them, tools/stream/make_looks.py)
 LOG_CURVES = {c["id"]: c for c in REGISTRY["curves"] if c.get("log")}
+# The underwater colour (the dlogm plugin's curve uw, not log): its shader made HLG like a log curve's look, with its
+# numbers per frame from afp-uw (measured and eased as gyroflow-export does: vs-gyroflow's uwcolor.rs)
+UW = next(c for c in REGISTRY["curves"] if c["id"] == "uw")
 
 jobs = {}  # key -> {proc, dir, started}
 # When a player last asked for each clip's segments: a render nobody asks for any more (the player went to another
@@ -184,7 +188,9 @@ def player_args(clip):
                 a = json.load(f)
         except (OSError, ValueError):
             a = None
-    if a is not None and all(stamp(p) == s for p, s in a.get("deps", {}).items()):
+    # (an answer from before the stream took the underwater colour lacks its strength and highlights: asked again)
+    dl = (a or {}).get("dlogm") or {}
+    if a is not None and all(stamp(p) == s for p, s in a.get("deps", {}).items()) and not (dl.get("curve") == "uw" and "uw_strength" not in dl):
         _args[clip["id"]] = a
         return a if a.get("clip") else None
     with args_lock:
@@ -217,7 +223,7 @@ def ask_player(clip):
         a = {"error": (err or "no reply")[-300:]}
     if a.get("moment", {}) and a["moment"].get("missing"):
         a = {"error": "the original isn't there"}
-    deps = [clip["path"], os.path.join(PLAYER_CONFIG, "script-opts", "gyroflow.conf"), os.path.join(PLAYER_CONFIG, "script-opts", "dlogm.conf")]
+    deps = [clip["path"]] + [os.path.join(PLAYER_CONFIG, "script-opts", f) for f in ("gyroflow.conf", "dlogm.conf", "uwcolor.conf")]
     deps += sidecars(clip["path"])
     if a.get("clip"):
         deps += [a["clip"]] + sidecars(a["clip"])
@@ -475,13 +481,26 @@ def shader_for(clip, out, i):
 
 
 def curve_shader(curve):
-    """A log curve's look to HLG (the dlogm plugin's shader for it, registry.json's `hdr`), None: not a log curve the
-    player plays, or its shader isn't there"""
-    c = LOG_CURVES.get(curve)
+    """A curve's look to HLG (the dlogm plugin's shader for it, registry.json's `hdr`): a log curve's, or the underwater
+    colour's (uw, its numbers per frame: uw_track). None: not a curve the player plays so, or its shader isn't there"""
+    c = LOG_CURVES.get(curve) or (UW if curve == "uw" else None)
     if not c or not c.get("hdr"):
         return None
     path = os.path.join(PLAYER, "dlogm", c["hdr"])
     return path if os.path.exists(path) else None
+
+
+def uw_track(i, start, end):
+    """afp-uw's command for the underwater colour's numbers of a render from `start` to `end` (seconds in the file), as
+    gyroflow-export has them for an export of that part: the clip's strength and highlights as the player has them
+    (render_args' dlogm.uw_strength, uw_highlights: the source's, else uwcolor.conf's), decoded on the GPU here"""
+    dl = i["args"].get("dlogm") or {}
+    strength = dl.get("uw_strength")
+    cmd = [os.path.join(BIN, "afp-uw"), i["source"], f"{start:.6f}", f"{end:.6f}",
+           "--strength", f"{1.0 if strength is None else float(strength):g}", "--highlights", "yes" if dl.get("uw_highlights") else "no"]
+    if os.path.exists("/dev/dri/renderD128"):
+        cmd += ["--hwaccel", "vaapi"]
+    return cmd
 
 
 def denoise_of(args):
@@ -575,13 +594,15 @@ def start_render(clip, n, upto=None, background=False):
     elif denoise_of(i["args"]) and DENOISE != "player":
         log("the clip's temporal denoise left out of", clip["name"], "(AFP_DENOISE=off)")
     # The log curve, as the player's dlogm plugin takes it (by the camera's metadata or set by hand for the source): its
-    # look to HLG, as the player's hdr look. A curve without one (the underwater colour, the player's per frame): as
-    # recorded, said in the log
+    # look to HLG, as the player's hdr look. The underwater colour (uw: a plain clip's, the source's setting) the same
+    # way, its shader's numbers per frame from afp-uw (below). A curve without one: as recorded, said in the log
     curve = (i["args"].get("dlogm") or {}).get("curve") or ""
     look = curve_shader(curve)
     if look:
         shaders.append(look)
         args.append("--hlg")
+        if curve == "uw":
+            args += ["-uw", "-"]
         # The look variants (a TV that shows HLG wrong): the player's nbcu look in SDR, or HDR10; highlights expanded
         m = LOOK.match(clip.get("look") or "hlg")
         if m and m.group(2):
@@ -611,8 +632,22 @@ def start_render(clip, n, upto=None, background=False):
             args += ["-every", str(every)]
     args += [i["source"], out] + shaders
     logf = open(os.path.join(out, "render.log"), "a")
-    proc = subprocess.Popen(args, stdout=logf, stderr=subprocess.STDOUT, env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"),
-                            preexec_fn=(lambda: os.nice(10)) if background else None)
+    nice = (lambda: os.nice(10)) if background else None
+    # The underwater colour's numbers, from the render's first frame to its last (in the file), piped in as afp-uw
+    # measures them: it decodes the clip a second time (on the GPU), a step ahead of the render, which waits for it.
+    # It ends with the render (its pipe closed)
+    uw = None
+    if look and curve == "uw":
+        start = off + n * i["seg"]
+        uw = subprocess.Popen(uw_track(i, start, off + (min(end, i["duration"]) if end is not None else i["duration"])),
+                              stdout=subprocess.PIPE, stderr=logf, preexec_fn=nice)
+    proc = subprocess.Popen(args, stdin=uw.stdout if uw else None, stdout=logf, stderr=subprocess.STDOUT,
+                            env=dict(os.environ, LD_LIBRARY_PATH="/opt/pl/lib"), preexec_fn=nice)
+    if uw:
+        uw.stdout.close()
+        threading.Thread(target=uw.wait, daemon=True).start()
+    # (the renders write it themselves)
+    logf.close()
     log("rendering", clip["name"], "from segment", n, "to", upto if upto is not None else "the end", ":", reply.get("mode", "no warp"),
         "(in the background)" if background else "")
     j = {"proc": proc, "dir": out, "started": time.time(), "from": n, "background": background, "clip": clip["id"]}

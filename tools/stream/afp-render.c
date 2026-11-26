@@ -36,6 +36,13 @@
 //                              is given n more times, as gyroflow-export's GPU path does. -every then encodes every n-th
 //                              frame shown, but all are rendered (the denoise needs them in a row)
 //     -set <name>=<value>      a shader's parameter (//!PARAM) set before the first frame, e.g. gyroflow_dn_radius=3
+//     -uw <file>               the underwater colour (shaders/underwater_hlg.glsl, with --hlg): its numbers per frame
+//                              from afp-uw's lines (`-`: stdin), `<clock> uw_dr uw_db uw_k uw_ev uw_s uw_hp`, each frame
+//                              shown taking the last line whose clock is at most its time (waiting for the next line
+//                              to know); the video decoded with the file's own YUV matrix, as the player does it (the
+//                              dlogm plugin tags only its transfer and primaries), not --hlg's BT.2020
+//
+// 8-bit sources (NV12 surfaces) are imported as 8-bit planes, 10-bit ones (P010) as 16-bit.
 //
 // Build: cc -O2 afp-render.c -o afp-render $(pkg-config --cflags --libs libplacebo libavformat libavcodec libavutil libva libva-drm)
 
@@ -77,7 +84,8 @@ static int num_mapped[2];
 static pl_gpu gpu;
 static VADisplay va;
 
-static pl_tex *map_surface(int pool, VASurfaceID id, int w, int h, bool write)
+// (eight: NV12's 8-bit planes, else P010's 16-bit ones)
+static pl_tex *map_surface(int pool, VASurfaceID id, int w, int h, bool write, bool eight)
 {
     for (int i = 0; i < num_mapped[pool]; i++)
         if (mapped[pool][i].id == id) return mapped[pool][i].tex;
@@ -86,10 +94,10 @@ static pl_tex *map_surface(int pool, VASurfaceID id, int w, int h, bool write)
     VAStatus st = vaExportSurfaceHandle(va, id, VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME_2,
         (write ? VA_EXPORT_SURFACE_WRITE_ONLY : VA_EXPORT_SURFACE_READ_ONLY) | VA_EXPORT_SURFACE_SEPARATE_LAYERS, &desc);
     if (st != VA_STATUS_SUCCESS) DIE("vaExportSurfaceHandle: %s", vaErrorStr(st));
-    if (desc.num_layers != 2) DIE("expected 2 layers (P010), got %d", desc.num_layers);
+    if (desc.num_layers != 2) DIE("expected 2 layers (NV12 or P010), got %d", desc.num_layers);
     struct mapped *m = &mapped[pool][num_mapped[pool]++];
     m->id = id;
-    const char *fmts[2] = { "r16", "rg16" };
+    const char *fmts[2] = { eight ? "r8" : "r16", eight ? "rg8" : "rg16" };
     for (int n = 0; n < 2; n++) {
         int obj = desc.layers[n].object_index[0];
         uint32_t size = desc.objects[obj].size;
@@ -147,7 +155,41 @@ struct render {
     struct { AVFrame *src, *out; pl_tex tex; bool emit; } queue[DEPTH]; int qn;
     // The times of the frames rendered (nin of them), the last frame shown, and how many were encoded
     double hist[HIST]; int64_t nin; double last_shown; int64_t frames; double tstart;
+    // -uw: the lines read (the one in use, the next), the shaders' uw_* parameters (UW_PARAMS' order) to set
+    FILE *uw; double uw_cur[7], uw_next[7]; bool uw_started, uw_more; union pl_var_data *uw_vars[6][16]; int nuw[6];
 };
+
+static const char *const UW_PARAMS[6] = { "uw_dr", "uw_db", "uw_k", "uw_ev", "uw_s", "uw_hp" };
+
+// A line of afp-uw's: its clock and the six numbers
+static bool uw_line(FILE *f, double v[7])
+{
+    char line[512];
+    while (fgets(line, sizeof line, f))
+        if (sscanf(line, "%lf %lf %lf %lf %lf %lf %lf", &v[0], &v[1], &v[2], &v[3], &v[4], &v[5], &v[6]) == 7) return true;
+    return false;
+}
+
+// The underwater colour's numbers for the frame shown at `t`: the last line at or before it (the next one read to
+// know, which waits for afp-uw to have measured that far)
+static void uw_at(struct render *r, double t)
+{
+    if (!r->uw_started) {
+        // The first two lines, at the first frame: afp-uw measures while the decoder starts. None: the shader's own
+        // numbers (the camera's colour, made HLG)
+        r->uw_started = true;
+        double none[7] = { -1e300, 0, 0, 0, 0, 1, 1 };
+        memcpy(r->uw_cur, none, sizeof none);
+        if (uw_line(r->uw, r->uw_cur)) r->uw_more = uw_line(r->uw, r->uw_next);
+        else fprintf(stderr, "afp-render: no underwater colour from -uw: the camera's colour\n");
+    }
+    while (r->uw_more && r->uw_next[0] <= t + 1e-9) {
+        memcpy(r->uw_cur, r->uw_next, sizeof r->uw_cur);
+        r->uw_more = uw_line(r->uw, r->uw_next);
+    }
+    for (int k = 0; k < 6; k++)
+        for (int i = 0; i < r->nuw[k]; i++) r->uw_vars[k][i]->f = (float) r->uw_cur[k + 1];
+}
 
 static void drain_one(struct render *r)
 {
@@ -179,13 +221,16 @@ static void render(struct render *r, AVFrame *f, double pts)
 
     // The shaders find the frame by mpv's PTS: the file's time from its start
     for (int i = 0; i < r->npts; i++) r->pts_vars[i]->f = (float) (pts - r->offset);
+    // (the underwater colour follows the warp: its numbers are the frame shown's)
+    if (r->uw) uw_at(r, shown);
     VASurfaceID sid = (VASurfaceID) (uintptr_t) f->data[3];
     vaSyncSurface(va, sid);
-    pl_tex *src_tex = map_surface(0, sid, f->width, f->height, false);
+    bool eight = f->hw_frames_ctx && ((AVHWFramesContext *) f->hw_frames_ctx->data)->sw_format == AV_PIX_FMT_NV12;
+    pl_tex *src_tex = map_surface(0, sid, f->width, f->height, false, eight);
     AVFrame *of = av_frame_alloc();
     if (av_hwframe_get_buffer(r->ef, of, 0) < 0) DIE("no encoder surface");
     VASurfaceID oid = (VASurfaceID) (uintptr_t) of->data[3];
-    pl_tex *dst_tex = map_surface(1, oid, r->W, r->H, true);
+    pl_tex *dst_tex = map_surface(1, oid, r->W, r->H, true, false);
 
     struct pl_frame src = {
         .num_planes = 2,
@@ -193,8 +238,9 @@ static void render(struct render *r, AVFrame *f, double pts)
             { .texture = src_tex[0], .components = 1, .component_mapping = { PL_CHANNEL_Y } },
             { .texture = src_tex[1], .components = 2, .component_mapping = { PL_CHANNEL_CB, PL_CHANNEL_CR } },
         },
-        .repr = { .sys = r->hlg ? PL_COLOR_SYSTEM_BT_2020_NC : pl_system_from_av(f->colorspace), .levels = pl_levels_from_av(f->color_range),
-                  .bits = { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 } },
+        .repr = { .sys = r->hlg && !r->uw ? PL_COLOR_SYSTEM_BT_2020_NC : pl_system_from_av(f->colorspace), .levels = pl_levels_from_av(f->color_range),
+                  .bits = eight ? (struct pl_bit_encoding) { .sample_depth = 8, .color_depth = 8 }
+                                : (struct pl_bit_encoding) { .sample_depth = 16, .color_depth = 10, .bit_shift = 6 } },
         .color = r->color,
     };
     if (src.repr.sys == PL_COLOR_SYSTEM_UNKNOWN) src.repr.sys = PL_COLOR_SYSTEM_BT_709;
@@ -265,7 +311,7 @@ static void set_param(const struct pl_hook **hooks, int nhooks, const char *assi
 int main(int argc, char **argv)
 {
     int W = 1920, H = 1080, start_number = 0; double start = 0, duration = 0, seg = 1.0, offset = 0; int every = 1; const char *bitrate = "12M"; bool hlg = false, realtime = false, sdr = false, pq = false;
-    int behind = 0; const char *sets[16]; int nsets = 0;
+    int behind = 0; const char *sets[16]; int nsets = 0; const char *uw = NULL;
     const char *pos[64]; int npos = 0;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-w") && i + 1 < argc) W = atoi(argv[++i]);
@@ -283,9 +329,12 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--realtime")) realtime = true;
         else if (!strcmp(argv[i], "-behind") && i + 1 < argc) { behind = atoi(argv[++i]); if (behind < 0 || behind > 16) DIE("-behind: 0 to 16"); }
         else if (!strcmp(argv[i], "-set") && i + 1 < argc) { if (nsets == 16) DIE("too many -set"); sets[nsets++] = argv[++i]; }
+        else if (!strcmp(argv[i], "-uw") && i + 1 < argc) uw = argv[++i];
         else if (npos < 64) pos[npos++] = argv[i];
     }
-    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -every N -b RATE -behind N -set NAME=VALUE --hlg --sdr --pq --realtime] <in> <out dir> [shader.glsl ...]");
+    if (npos < 2) DIE("usage: afp-render [-w W -h H -ss S -t T -offset O -every N -b RATE -behind N -set NAME=VALUE -uw LINES --hlg --sdr --pq --realtime] <in> <out dir> [shader.glsl ...]");
+    FILE *uw_file = NULL;
+    if (uw && !(uw_file = strcmp(uw, "-") ? fopen(uw, "r") : stdin)) DIE("can't read %s", uw);
     W &= ~1; H &= ~1;
     const char *in = pos[0], *outdir = pos[1];
     mkdir(outdir, 0755);
@@ -425,6 +474,15 @@ int main(int argc, char **argv)
                         .npts = npts, .start = start, .duration = duration, .offset = offset, .fps = fps, .every = every, .behind = behind,
                         .ec = ec, .oc = oc, .ovs = ovs, .opkt = av_packet_alloc(), .last_shown = -1e9, .tstart = now() };
     memcpy(R.pts_vars, pts_vars, sizeof pts_vars);
+    if (uw_file) {
+        R.uw = uw_file;
+        for (int i = 0; i < nhooks; i++)
+            for (int p = 0; p < hooks[i]->num_parameters; p++)
+                for (int k = 0; k < 6; k++)
+                    if (!strcmp(hooks[i]->parameters[p].name, UW_PARAMS[k]) && hooks[i]->parameters[p].type == PL_VAR_FLOAT && R.nuw[k] < 16)
+                        R.uw_vars[k][R.nuw[k]++] = hooks[i]->parameters[p].data;
+        if (!R.nuw[0]) DIE("-uw: no shader has uw_dr (shaders/underwater_hlg.glsl)");
+    }
     R.params = pl_render_fast_params;
     R.params.hooks = hooks; R.params.num_hooks = nhooks;
     R.params.upscaler = &pl_filter_bilinear; R.params.downscaler = &pl_filter_bilinear;

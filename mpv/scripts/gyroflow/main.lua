@@ -353,6 +353,9 @@ if o.render_args ~= "" then
         local out = { clip = clip_path(), offset = ws.offset, length = ws.length, moment = moment, render = S.render_dump,
                       dlogm = { curve = dl.curve or "", look = dl.look or "", log = dl.log == true },
                       title = mp.get_property("media-title"), duration = mp.get_property_number("duration") }
+        -- The underwater colour's strength and highlights as it plays (the source's, else uwcolor.conf's), by the
+        -- settings JSON's names, as export.lua hands them to gyroflow-export: the stream's afp-uw takes them
+        if dl.curve == "uw" then require('settings').uw_of(out.dlogm, mp.get_property_native("user-data/uwcolor")) end
         local f = io.open(o.render_args, "w")
         if f then
             f:write(utils.format_json(out))
