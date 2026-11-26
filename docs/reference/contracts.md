@@ -81,6 +81,7 @@ A `share` item (`library/src/share.rs` `plan`, read by `render_moments`):
 | `clip` | The original, absolute |
 | `t`, `crop`, `camera` | A photo's time, crop and Save frame camera |
 | `sdr` | The SDR profile |
+| `dv` | An HDR render with the player's Dolby Vision RPU for this transfer: `hlg` (8.4), `pq` (8.1), `uw` (the underwater colour's RPU); absent: none (SDR, a photo, a clip with Dolby Vision of its own or that can't be read). `renders.rs` `dolby_vision` |
 | `out` | The render's file in the cache, `_Renders/<hash>.<profile>.mov` (a photo's without extension) |
 | `link` | What the render carries: its recipe and hash (`renders.rs`) |
 | `view` | The recipe's render settings; when present the player renders with them, not its own |
@@ -293,7 +294,7 @@ Between the workspace and gyroflow plugins (all `script-message-to gyroflow <msg
 | Message | Request keys | Answer |
 |---|---|---|
 | `preview` | `id, clip, from, to, at, link, dates, output, force, view, project, alone, reply, done` | `preview-done` `{ok, error}` |
-| `export-batch` | `id, clip, view, project, alone, from, to, output, link, sdr, export, progress, reply, done` | `export-batch-done` `{ok, error, out}` |
+| `export-batch` | `id, clip, view, project, alone, from, to, output, link, sdr, dv, export, progress, reply, done` (`dv`: the settings' `dv_rpu` from `user-data/dlogm/dv_rpu[dv]`, `dv_live_l1` from `user-data/dlogm/dv_live`) | `export-batch-done` `{ok, error, out}` |
 | `export-batch-stop` | `<id>` | the job's answer, `error: "cancelled"` |
 | `photo-at` | `id, clip, t, view, crop, camera, link, still, export, out_dir, reply, done` | `photo-done` `{ok, error, out}` |
 | `export-name` → `export-start` | gyroflow asks workspace for the name and place; workspace answers `export-start` | — |
@@ -596,10 +597,11 @@ The page calls the Rust side's Tauri commands (`library/src/main.rs`'s `invoke_h
 | `dlogm/denoise` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/dv` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/dv_custom` | `mpv/scripts/dlogm/main.lua` | — |
-| `dlogm/dv_live` | `mpv/scripts/dlogm/main.lua` | — |
+| `dlogm/dv_live` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `dlogm/dv_neutral` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/dv_own` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `dlogm/dv_profile` | `mpv/scripts/dlogm/main.lua` | — |
+| `dlogm/dv_rpu` | `mpv/scripts/dlogm/main.lua` | `mpv/scripts/gyroflow/export.lua` |
 | `dlogm/dv_trims` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/hdr` | `mpv/scripts/dlogm/main.lua` | — |
 | `dlogm/log` | `mpv/scripts/dlogm/main.lua` | — |
@@ -695,7 +697,7 @@ A key read with nothing listed as its writer is covered by a key above or below 
 | `AFP_360_TIMES` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_360_WIDTH` | `vs-gyroflow/src/sphere360.rs` | `tools/sphere360/horizon.py` |
 | `AFP_ARGS` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
-| `AFP_BATCH` | `library/src/batch.rs`, `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua` and 6 more | `tests/agent_test.lua` |
+| `AFP_BATCH` | `library/src/batch.rs`, `library/src/main.rs`, `macos/player.sh`, `mpv/scripts/agent/main.lua` and 7 more | `tests/agent_test.lua` |
 | `AFP_BIN` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_BITRATE` | `tools/nas-helper/helper.py`, `tools/nas-helper/nas_settings.py`, `tools/stream/afp_stream.py` | — |
 | `AFP_CACHE` | `tools/nas-helper/helper.py`, `tools/stream/afp_stream.py` | — |

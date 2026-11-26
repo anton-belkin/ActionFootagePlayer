@@ -109,8 +109,8 @@ left out there.
 |---|---|---|---|---|---|---|---|
 | Look (hdr, dv, dvsdr, tonemap, nbcu, maker, off) | session; start look `dlogm.conf:hdr_screen`, `sdr_screen` | dlogm shaders and target | `--sdr` (maker), `--nbcu`, `--dv-rpu`; `--curve none` for off | still: `--sdr-image maker\|macos\|nbcu`; motion as export | preview is SDR | profile `look` (HDR, SDR, Photo); SDR → `req.sdr` → `--nbcu` | look variants by URL (hlg, sdr, pq), every log curve |
 | SDR look for SDR exports | `user-data/dlogm/sdr_look` | n/a | Export SDR, `--youtube <look>` | n/a | n/a | always nbcu | n/a |
-| Dolby Vision trims | `$DLOGM_DATA/dv` (the user's), else `dv/nbcu_fit.rpu` | `macos-dovi-rpu-file` | `--dv-rpu` with the same file | motion only | n/a | **gap**: `export-batch` never passes `--dv-rpu`, though `renders.rs` `PROFILES` says the HDR look is HLG + Dolby Vision 8.4 | n/a |
-| Live L1 | `dlogm.conf:dv_live_l1` | `macos-dovi-live-l1` | `--dv-live-l1` | motion only | n/a | **gap**, as above | n/a |
+| Dolby Vision trims | `$DLOGM_DATA/dv` (the user's), else `dv/nbcu_fit.rpu` (`.81.rpu` for PQ; the underwater colour's own `look.uw.*.rpu`) | `macos-dovi-rpu-file` | `dv_rpu` with the same file | motion only | n/a | HDR renders: Share asks `dv` (`renders.rs` `dolby_vision`: hlg for log and HLG clips, pq, uw; none for SDR, photos, a clip with its own Dolby Vision or one that can't be read); `export-batch` sets `dv_rpu` from `user-data/dlogm/dv_rpu` (published by the dlogm plugin, empty where mpv has no dv look). Not in the recipe: trims changed later don't make a render stale. The `render` and `export` batches (no Library button) carry none | n/a |
+| Live L1 | `dlogm.conf:dv_live_l1` | `macos-dovi-live-l1` | `dv_live_l1` | motion only | n/a | `dv_live_l1` from `user-data/dlogm/dv_live` with the RPU, as above | n/a |
 
 ## Frame, photo and 360
 

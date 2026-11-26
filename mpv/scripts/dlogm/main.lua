@@ -431,6 +431,10 @@ local function publish()
         prim = hdr and hdr.prim or "", dv_profile = hdr and (hdr.dovi and "5" or hdr.dv_signaled and ("8." .. (hdr.trc == "pq" and "1" or "4"))) or "",
         -- A plain SDR clip, which the underwater colour can take (or has)
         uw_ok = base ~= nil and not hdr and recorded == nil and (curve == nil or curve == UW),
+        -- The RPU files the dv look attaches, by what's made: hlg (8.4), pq (8.1), uw (the underwater colour's, else
+        -- hlg's while it's made), "" none; for exports of a clip not playing (the Library's HDR renders, export.lua's
+        -- batch `dv`). Empty where mpv has no dv look
+        dv_rpu = DV_OK and { hlg = our_rpu("hlg") or "", pq = our_rpu("pq") or "", uw = (uw_rpu and uw_rpu(true)) or our_rpu("hlg") or "" } or {},
     }
     for k, v in pairs(state) do mp.set_property_native("user-data/dlogm/" .. k, v) end
 end
@@ -1048,13 +1052,15 @@ local function make_uw_rpu()
         local mf = io.open(utils.join_path(DV_USER, "look.uw.json"), "w")
         if mf then mf:write(utils.format_json({ made = key, rpu = next })); mf:close() end
         uw_made = { key = key, path = out }
-        if curve == UW and DV_LOOKS[current] then apply(current) end
+        if curve == UW and DV_LOOKS[current] then apply(current) else publish() end
     end)
 end
--- The RPU for an underwater clip now (nil: not made yet for these trims, the dv look's own meanwhile)
-uw_rpu = function()
+-- The RPU for an underwater clip now (nil: not made yet for these trims, the dv look's own meanwhile); made if it
+-- isn't, unless `peek`
+uw_rpu = function(peek)
     local _, key = uw_wanted_look()
     if uw_made and uw_made.key == key and file_exists(uw_made.path) then return uw_made.path end
+    if peek then return nil end
     make_uw_rpu()
     return uw_made and uw_made.key == key and uw_made.path or nil
 end
@@ -1108,3 +1114,8 @@ mp.register_script_message("remember", function()
                               .. " on SDR screens (dlogm.conf)")
                    or "Couldn't write dlogm.conf", 3)
 end)
+
+-- What the dv look attaches, said before any file plays (user-data/dlogm/dv_rpu): a batch run (the Library's renders,
+-- AFP_BATCH) plays none, and has the underwater colour's RPU made for its renders first
+if DV_OK and (os.getenv("AFP_BATCH") or "") ~= "" then uw_rpu() end
+publish()

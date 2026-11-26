@@ -110,6 +110,37 @@ expect("batch SDR: NBCU's", s.sdr, "nbcu")
 expect("batch: a moment's own project in the settings", s.project, "/m/own.gyroflow")
 expect("batch: off as recorded, nothing done", s.lens, "off")
 
+-- The Library's HDR renders with Dolby Vision (#316): `dv` (renders.rs dolby_vision) picks the RPU the dlogm plugin's
+-- dv look attaches for that transfer, with each frame's L1 where the player measures it; never in SDR
+local function batch_dv(dv, sdr)
+    requests.req = { id = 1, clip = "/clips/a.MP4", output = "/out/a.mov", reply = "workspace", view = {}, dv = dv, sdr = sdr }
+    messages["export-batch"]("req")
+    no_settings_flag("batch dv")
+    return sent()
+end
+props["user-data/dlogm/dv_rpu"] = { hlg = "/dv/fit.rpu", pq = "/dv/fit.81.rpu", uw = "/dv/look.uw.a.rpu" }
+props["user-data/dlogm/dv_live"] = true
+s = batch_dv("hlg")
+expect("batch HDR, HLG: the 8.4 RPU", s.dv_rpu, "/dv/fit.rpu")
+expect("batch HDR, HLG: each frame's L1", s.dv_live_l1, true)
+expect("batch HDR, HLG: not SDR", s.sdr, nil)
+expect("batch HDR, PQ: the 8.1 RPU", batch_dv("pq").dv_rpu, "/dv/fit.81.rpu")
+expect("batch HDR, underwater colour: its RPU", batch_dv("uw").dv_rpu, "/dv/look.uw.a.rpu")
+s = batch_dv("hlg", true)
+expect("batch SDR: no RPU", s.dv_rpu, nil)
+expect("batch SDR: no L1", s.dv_live_l1, nil)
+expect("batch SDR: NBCU's still", s.sdr, "nbcu")
+s = batch_dv(nil)
+expect("batch HDR without dv (own Dolby Vision, unread): no RPU", s.dv_rpu == nil and s.dv_live_l1 == nil, true)
+expect("batch: a dv that isn't a transfer", batch_dv("bogus").dv_rpu, nil)
+props["user-data/dlogm/dv_live"] = false
+s = batch_dv("hlg")
+expect("batch HDR, dv_live_l1=no: the RPU's own L1", s.dv_rpu == "/dv/fit.rpu" and s.dv_live_l1 == nil, true)
+props["user-data/dlogm/dv_rpu"] = {}
+expect("batch HDR where mpv has no dv look: no RPU", batch_dv("hlg").dv_rpu, nil)
+props["user-data/dlogm/dv_rpu"], props["user-data/dlogm/dv_live"] = nil, nil
+expect("batch HDR, dlogm not there: no RPU", batch_dv("hlg").dv_rpu, nil)
+
 -- Shift+E on the clip playing: the gyroflow plugin's settings as they are, whatever the session says
 local playing = { project = "/clips/b.MP4", level = "strong", lens = "stabilized", edges = "sphere", edges_blur = 2, denoise = true,
                   temporal_denoise = "full", denoise_strong = false, denoise_grain = 0.25, chromatic = true, translation = true, aspect = "9:16" }

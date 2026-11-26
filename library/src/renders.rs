@@ -10,6 +10,7 @@
 // count as current while that recipe is the moment's.
 
 use crate::index::{ self, same, trimmed };
+use afp_catalog::range::Range;
 use serde_json::{ json, Value };
 use std::cell::RefCell;
 use std::collections::{ HashMap, HashSet };
@@ -24,7 +25,8 @@ pub const VERSION: u64 = 5;
 pub struct Profile {
     pub name: &'static str,
     pub photo: bool,
-    /// What the player renders it with: hdr (HLG + Dolby Vision 8.4), nbcu (SDR), photo (a still with a gain map)
+    /// What the player renders it with: hdr (HLG, PQ for a PQ clip, with the player's Dolby Vision RPU where
+    /// `dolby_vision` says), nbcu (SDR), photo (a still with a gain map)
     pub look: &'static str,
     /// The files it can be (a photo is a HEIC where the system writes one, else a JPEG)
     pub exts: &'static [&'static str],
@@ -84,7 +86,7 @@ pub struct Ctx {
     /// The lens list's stamp (index::lens_list_stamp) once per look, and each clip's lens (lens_id) as found
     lenses: RefCell<Option<String>>,
     lens_of: RefCell<HashMap<PathBuf, Value>>,
-    ranges: RefCell<HashMap<String, Option<afp_catalog::range::Range>>>,
+    ranges: RefCell<HashMap<String, Option<(Range, bool)>>>,
 }
 
 impl Ctx {
@@ -584,14 +586,35 @@ impl Ctx {
     }
 
     /// Whether the clip an item is of is SDR (not log, not HLG or PQ): None where it can't be told
-    pub fn is_sdr(&self, item: &Item) -> Option<bool> {
+    pub fn is_sdr(&self, item: &Item) -> Option<bool> { self.range(item).map(|(r, _)| r == Range::Sdr) }
+
+    /// What the clip an item is of is, and whether it carries Dolby Vision of its own: None where it can't be told
+    fn range(&self, item: &Item) -> Option<(Range, bool)> {
         let tree = item.tree()?;
-        if let Some(r) = self.ranges.borrow().get(tree) { return r.map(|r| r == afp_catalog::range::Range::Sdr); }
+        if let Some(r) = self.ranges.borrow().get(tree) { return *r; }
         let facts = self.clip(tree);
         let curve = facts.doc["source"]["curve"].as_str().or(facts.doc["view"]["curve"].as_str());
-        let r = facts.file.as_deref().and_then(|f| afp_catalog::range::of(f, curve));
+        let r = facts.file.as_deref().and_then(|f| afp_catalog::range::with_dolby_vision(f, curve));
         self.ranges.borrow_mut().insert(tree.to_string(), r);
-        r.map(|r| r == afp_catalog::range::Range::Sdr)
+        r
+    }
+}
+
+/// The Dolby Vision an item's render in `profile` (resolve's) carries: the player's RPU on every frame (export.lua's
+/// batch `dv`), as Shift+E exports in the dv look. "hlg" (profile 8.4) for a log clip or an HLG one, "uw" (8.4, the
+/// underwater colour's own RPU) with the underwater colour on, "pq" (8.1) for a PQ one; none in SDR or for a photo,
+/// for a clip with Dolby Vision of its own (its RPU is for the frames as recorded, not as made here: the player's
+/// dv_own), or for one that can't be read (its render might be SDR, where gyroflow-export refuses an RPU). Whether the
+/// RPU goes in is then the player's: where its mpv has the dv look (macOS), with the user's trims and dlogm.conf's live
+/// L1 (dv_live_l1). Not part of the recipe: it follows from the profile and the clip, which the recipe has, and
+/// leaves the HLG or PQ picture as it is (the trims and live L1, this computer's, are as the player's looks are)
+pub fn dolby_vision(ctx: &Ctx, item: &Item, profile: &Profile) -> Option<&'static str> {
+    if profile.name != "HDR" || item.kind == Kind::Photo { return None; }
+    if ctx.underwater_colour(item) { return Some("uw"); }
+    match ctx.range(item)? {
+        (Range::Log(_), _) => Some("hlg"),
+        (Range::Hdr(t), false) => Some(t),
+        _ => None,
     }
 }
 
@@ -756,7 +779,7 @@ pub fn clear(root: &Path) -> (Value, Vec<String>) {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn temp(name: &str) -> PathBuf {
@@ -815,6 +838,61 @@ mod tests {
         // Its own log curve: HDR is HDR
         std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
         assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "HDR");
+        std::fs::remove_dir_all(&root).ok();
+    }
+
+    /// An MP4 (a moov alone) whose video's sample entry has a colr with `transfer` (1 SDR, 16 PQ, 18 HLG) and, with
+    /// `dv`, Dolby Vision of its own (a dvvC box): what afp_catalog::range reads
+    pub(crate) fn video_mp4(transfer: u16, dv: bool) -> Vec<u8> {
+        fn bx(t: &[u8; 4], content: &[u8]) -> Vec<u8> { [&(content.len() as u32 + 8).to_be_bytes()[..], t, content].concat() }
+        let colr = bx(b"colr", &[&b"nclx"[..], &9u16.to_be_bytes(), &transfer.to_be_bytes(), &9u16.to_be_bytes(), &[0]].concat());
+        let mut entry = [vec![0u8; 78], colr].concat();
+        if dv { entry.extend(bx(b"dvvC", &[1, 0, 0x10, 0x35, 0x40, 0, 0, 0])); }
+        let stsd = bx(b"stsd", &[&[0u8; 4][..], &1u32.to_be_bytes(), &bx(b"hvc1", &entry)].concat());
+        let hdlr = bx(b"hdlr", &[&[0u8; 8][..], b"vide", &[0u8; 13]].concat());
+        bx(b"moov", &bx(b"trak", &bx(b"mdia", &[hdlr, bx(b"minf", &bx(b"stbl", &stsd))].concat())))
+    }
+
+    // An HDR render carries the player's Dolby Vision RPU where its dv look would (#316): a log clip's and an HLG one's
+    // 8.4, a PQ one's 8.1, the underwater colour's own; none in SDR, for a photo, a clip with Dolby Vision of its own,
+    // one that can't be read. Not in the recipe: the renders made since VERSION 5 keep their hash
+    #[test]
+    fn an_hdr_render_carries_dolby_vision_as_the_dv_look_exports() {
+        let (root, moment, photo, clip) = project("dolby-vision");
+        let (hdr, sdr, still) = (profile("HDR").unwrap(), profile("SDR").unwrap(), profile("Photo").unwrap());
+        let dv = |item: &Item, p: &'static Profile| { let ctx = look(&root, true); dolby_vision(&ctx, item, resolve(&ctx, item, p)) };
+        // The test's clip can't be read: its render might be SDR, where gyroflow-export refuses an RPU
+        assert_eq!(dv(&moment, hdr), None);
+        let before = hash(&recipe(&look(&root, true), &moment, hdr));
+        // D-Log M (the clip's own file says so): HLG, 8.4
+        std::fs::write(root.join("Day 1/A.MP4"), video_mp4(1, false)).unwrap();
+        for item in [&moment, &clip] {
+            assert_eq!(dv(item, hdr), Some("hlg"));
+            assert_eq!(dv(item, sdr), None, "SDR: NBCU's, no RPU");
+        }
+        assert_eq!(dv(&photo, still), None, "a still has no RPU");
+        assert_eq!(dolby_vision(&look(&root, true), &photo, hdr), None, "a photo isn't a video render");
+        // Recorded in HLG, PQ, SDR (no log curve)
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"}}"#).unwrap();
+        for (transfer, want) in [(18, Some("hlg")), (16, Some("pq")), (1, None)] {
+            std::fs::write(root.join("Day 1/A.MP4"), video_mp4(transfer, false)).unwrap();
+            assert_eq!(dv(&moment, hdr), want, "transfer {transfer}");
+        }
+        assert_eq!(resolve(&look(&root, true), &moment, hdr).name, "SDR", "an SDR clip's HDR is its SDR render, without an RPU");
+        // With Dolby Vision of its own (a phone's HLG): not replaced, not carried
+        std::fs::write(root.join("Day 1/A.MP4"), video_mp4(18, true)).unwrap();
+        assert_eq!(dv(&moment, hdr), None);
+        // ...unless a log curve makes the picture anew
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
+        assert_eq!(dv(&moment, hdr), Some("hlg"));
+        // The underwater colour on a plain clip: HLG, with its own RPU
+        std::fs::write(root.join("Day 1/A.MP4"), video_mp4(1, false)).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"uw":true}}"#).unwrap();
+        assert_eq!(dv(&moment, hdr), Some("uw"));
+        assert_eq!(dv(&moment, sdr), None);
+        // The recipe doesn't change with it: the same hash as before the clip could be read
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"view":{"view":"wide","level":"medium"},"source":{"curve":"dlogm"}}"#).unwrap();
+        assert_eq!(hash(&recipe(&look(&root, true), &moment, hdr)), before, "Dolby Vision isn't part of the recipe");
         std::fs::remove_dir_all(&root).ok();
     }
 

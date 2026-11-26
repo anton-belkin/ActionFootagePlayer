@@ -122,6 +122,8 @@ pub fn plan_in(ctx: &renders::Ctx, items: &[Value], look: &str, settings: &Value
                 "of": item.kind.name(), "name": shown, "file": item.file.as_ref().map(|f| f.display().to_string()), "clip": original.display().to_string(),
                 "t": item.link["t"], "crop": item.link["crop"], "camera": item.link["camera"], "sdr": profile.name == "SDR", "out": made,
                 "view": renders::render_view(&found.recipe), "alone": found.recipe["alone"], "export": export,
+                // HDR with the player's Dolby Vision RPU, for this transfer (hlg, pq, uw), as Shift+E's dv look
+                "dv": renders::dolby_vision(ctx, &item, profile),
                 "link": renders::link(ctx, &item, profile, &found) })));
         }
         let part = (item.kind == Kind::Moment).then(|| (item.link["in"].as_f64(), item.link["out"].as_f64())).and_then(|(a, b)| Some((a?, b?)));
@@ -379,5 +381,38 @@ mod tests {
         assert_eq!(it.state, "failed");
         let _ = std::fs::remove_dir_all(&root);
         let _ = std::fs::remove_dir_all(&dest);
+    }
+
+    // The player is asked for an HDR render with Dolby Vision as its dv look exports (#316): `dv`, the transfer whose
+    // RPU it takes (export.lua's batch); an SDR one and a still without
+    #[test]
+    fn an_hdr_render_is_asked_with_dolby_vision() {
+        let root = temp("dv");
+        std::fs::write(root.join("Project.afproject"), r#"{"format":"actionfootageplayer-project","version":1}"#).unwrap();
+        for d in ["Day 1", "_Moments/Reef", "_Stills"] { std::fs::create_dir_all(root.join(d)).unwrap(); }
+        std::fs::write(root.join("Day 1/A.MP4"), renders::tests::video_mp4(1, false)).unwrap();
+        std::fs::write(root.join("Day 1/A.afp.json"), r#"{"source":{"curve":"dlogm"}}"#).unwrap();
+        std::fs::write(root.join("Day 1/P.MP4"), renders::tests::video_mp4(16, false)).unwrap();
+        std::fs::write(root.join("Day 1/I.MOV"), renders::tests::video_mp4(18, true)).unwrap();
+        std::fs::write(root.join("_Moments/Reef/Turtle.afplink.mp4"),
+                       crate::index::tests::tests_mp4_with_link(r#"{"v":1,"kind":"moment","clip":"Day 1/A.MP4","in":1,"out":3}"#)).unwrap();
+        let link = json!({ "v": 1, "kind": "photo", "clip": "Day 1/A.MP4", "t": 2.5 });
+        std::fs::write(root.join("_Stills/A_2.50s.afplink.jpg"), crate::albums::photo_file(&crate::albums::tests::jpeg(16, 8, [9, 9, 9]), &link.to_string()).unwrap()).unwrap();
+        let sel = vec![
+            json!({ "kind": "moment", "path": "_Moments/Reef/Turtle.afplink.mp4", "name": "Turtle" }),
+            json!({ "kind": "clip", "path": "Day 1/A.MP4", "name": "A.MP4" }),
+            json!({ "kind": "clip", "path": "Day 1/P.MP4", "name": "P.MP4" }),
+            json!({ "kind": "clip", "path": "Day 1/I.MOV", "name": "I.MOV" }),
+            json!({ "kind": "photo", "path": "_Stills/A_2.50s.afplink.jpg", "name": "A_2.50s" }),
+        ];
+        let ctx = renders::Ctx::with(&root, true, json!({}));
+        let (_, asked) = plan_in(&ctx, &sel, "HDR", &Value::Null);
+        let dv: Vec<Value> = asked.iter().map(|a| a.get("dv").cloned().unwrap_or(Value::Null)).collect();
+        // D-Log M's moment and clip: HLG, 8.4; PQ: 8.1; a phone's own Dolby Vision: none; a still: none
+        assert_eq!(dv, [json!("hlg"), json!("hlg"), json!("pq"), Value::Null, Value::Null]);
+        assert!(asked.iter().all(|a| a["sdr"] == json!(false)));
+        let (_, asked) = plan_in(&ctx, &sel, "SDR", &Value::Null);
+        assert!(asked.iter().all(|a| a.get("dv").is_none()), "SDR renders carry no RPU");
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
