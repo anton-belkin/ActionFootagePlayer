@@ -90,8 +90,15 @@ every push to `main`, every `v*` tag, and by hand. A newer push to a PR cancels 
 | `nas-helper` | ubuntu-latest | `main`, tags, by hand | Builds the Docker image; smoke test: `--help`, `--check` on a fake project, `mpv --version` inside. |
 | `plugins` | ubuntu-latest | `main`, tags, by hand | Bundles all plugins per system. |
 
+A pull request's run is the quick kind: Rust built incrementally (`CARGO_INCREMENTAL=1`, only what changed is
+compiled again), and only the app's zip packed (`AFP_PACKAGES=zip`: no disk image, no tarball). A draft runs only
+`sh tools/run_tests.sh`; the whole check runs when it's marked ready for review. `main` and tags are built in full.
+`tools/build_mpv.sh` leaves mpv as it is when its lock, script, patches and Homebrew versions haven't changed.
+
 `publish` and `website` run only for a tag ([release.md](release.md)). `main` is protected (admins too): a change
-goes in by a PR, up to date with `main`, with `macos` and `tests` green. The Windows, Linux and NAS jobs don't run on
+goes in by a PR with `macos` and `tests` green. It needn't be up to date with `main` (since 2026-11-26: on one
+runner that reran every open PR after each merge); `main`'s own run after the merge catches two PRs that only break
+together. The Windows, Linux and NAS jobs don't run on
 pull requests; they run on every push to `main` and every release, so after a merge look at `main`'s run
 (`gh run list --branch main`) for a break there, and fix it in a PR of its own.
 
