@@ -43,6 +43,8 @@
 --                     or off: the clip's transform keeps it (still.lua; warp.glsl's dn_ passes)
 --   Ctrl+a   fringes  the water's color fringes taken out, or left as recorded; only where the lens is under water
 --                     (above water nothing moves either way, and the lens stays as it is). It sticks for the next clips
+--   h        compare  the clip as the camera recorded it (no log conversion, stabilization or denoise): held, until
+--                     it's let go; tapped, until h again (compare.lua; script message afp-compare [on|off|toggle])
 --   Shift+E  export   the clip as it plays (export.lua)
 --   Ctrl+e   edit     open the clip's project in Gyroflow, writing one next to it first when it plays without one,
 --                     as it plays: in the view (the wider one's FOV, with Gyroflow's zoom off) and with the horizon
@@ -69,7 +71,9 @@
 --                           (quality.lua)
 --   remember                the view, level, horizon lock, lens, color fringes, edges and clean still frame as the defaults,
 --                           in gyroflow.conf (the view, level, horizon lock and lens: those of clips without a project)
--- and export.lua's. The state is in user-data/gyroflow/ for the menu: available (it can be stabilized: a
+--   afp-compare [on|off|toggle]  the clip as recorded, or as it plays (h; compare.lua). Sent as `script-message
+--                           afp-compare` too: only this plugin takes it
+-- and export.lua's. The state is in user-data/gyroflow/ for the menu: compare (shown as recorded: h), available (it can be stabilized: a
 -- project, motion data, or a lens profile alone), kind (project, default: the preset, lens: no motion data, the lens
 -- alone), motion (there's motion data), lens_mode (corrected, as-recorded), filter (stabilized, recorded, only, "":
 -- what the warp does), project (the .gyroflow it plays with, "" for none), view (normal, wide, off), level, still (Ctrl+p),
@@ -364,6 +368,9 @@ if o.render_args ~= "" then
     mp.register_event("playback-restart", function() mp.add_timeout(0.05, dump) end)
     mp.register_event("end-file", function() dump() end)
 end
+
+-- h (held or tapped) and afp-compare: the clip as recorded against how it plays (compare.lua)
+require('compare').setup(W)
 
 -- Ctrl+m: the clip's motion measured from its picture into its .afp-motion (measure.lua), then played again with it
 require('measure').setup({ source = function() return S.current_source end, path = clip_path, again = function() play_again() end, notify = mp.notify, options = o })

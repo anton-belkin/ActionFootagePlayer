@@ -346,6 +346,18 @@ python3 tools/latency360/summarize.py <log>
 patch 0010's `--macos-latency-log`. `--hz=N` makes synthetic two-finger scrolls; without it, real fingers.
 `--screen` takes the NSScreen name (for example "Built-in Retina Display").
 
+### tools/compare_latency (the as-recorded switch, input to light)
+
+```
+tools/compare_latency/run.py <ActionFootagePlayer.app> <out dir> <clip> [<clip> ...] [--cycles N] [--gap S]
+```
+
+**Takes the screen** (~30 s a clip): ask first. Clones the app with this checkout's gyroflow and footage-menu Lua and
+the look shaders baked again from `shaders/*.glsl.in`, then per clip switches as recorded on and off N times playing
+and N paused (`drive.lua`), and prints the time from the ask to the first frame drawn and shown with it (patch 0010's
+`--macos-latency-log`; the ask's host time goes in as `afp_input_time`). Also leaves `<clip>-plays.png` and
+`<clip>-recorded.png`, the window both ways. Unregister the clone after.
+
 ### tools/scrub (seek bar pictures)
 
 ```

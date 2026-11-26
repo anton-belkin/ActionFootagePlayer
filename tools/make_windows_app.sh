@@ -168,7 +168,7 @@ for nbcu in 3-NBCU_HLG2SDR_DL_v1.2:nbcu_hlg2sdr 5-NBCU_PQ2SDR_DL_v1.2:nbcu_pq2sd
 done
 cp luts/3-NBCU_HLG2SDR_DL_v1.2.cube luts/5-NBCU_PQ2SDR_DL_v1.2.cube "$dlogm/luts/"
 cp mpv/scripts/gyroflow/main.lua mpv/scripts/gyroflow/export.lua mpv/scripts/gyroflow/platform.lua \
-    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/settings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
+    mpv/scripts/gyroflow/still.lua mpv/scripts/gyroflow/crop.lua mpv/scripts/gyroflow/gestures.lua mpv/scripts/gyroflow/quality.lua mpv/scripts/gyroflow/exportsettings.lua mpv/scripts/gyroflow/settings.lua mpv/scripts/gyroflow/projectwatch.lua mpv/scripts/gyroflow/measure.lua mpv/scripts/gyroflow/compare.lua mpv/scripts/gyroflow/ahead.lua mpv/scripts/gyroflow/dnstep.lua \
     mpv/scripts/gyroflow/sources.lua mpv/scripts/gyroflow/framing.lua mpv/scripts/gyroflow/denoise.lua mpv/scripts/gyroflow/translation.lua mpv/scripts/gyroflow/bundle.lua mpv/scripts/gyroflow/shaders.lua mpv/scripts/gyroflow/gpupath.lua mpv/scripts/gyroflow/camera360.lua mpv/scripts/gyroflow/play.lua mpv/scripts/gyroflow/controls.lua mpv/scripts/gyroflow/gyroflowapp.lua \
     mpv/scripts/gyroflow/gpu_hold.glsl "$gyroflow/"
 cp mpv/scripts/gyroflow/underwater.gyroflow "$gyroflow/default.gyroflow"

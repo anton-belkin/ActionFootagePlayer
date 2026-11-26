@@ -101,6 +101,7 @@ local KEY_LABELS = {
     { "script-binding dlogm/hdr", "Log in HDR" },
     { "script-binding dlogm/off", "Log handling off for this clip" },
     { "script-binding dlogm/curve", "The next log curve, by hand (saved with the source)" },
+    { "script-binding gyroflow/compare", "As recorded while held (tapped: until again): no colour, stabilization or denoise" },
     { "script-binding gyroflow/toggle", "Stabilization on, wider view, off" },
     { "script-binding gyroflow/edges", "What fills the edges" },
     { "script-binding gyroflow/still", "Temporal denoise on / off" },

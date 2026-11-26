@@ -41,6 +41,10 @@ These apply to `shaders/gyroflow/warp.glsl`, `shaders/*.glsl`, `mpv/scripts/*/*.
 - **PARAMs work in `WIDTH`, `HEIGHT` and `WHEN`**, DYNAMIC ones too. `OUTPUT` there is libplacebo's target rectangle.
 - **`HOOKED_raw` × `HOOKED_mul` is not always code / (2^depth − 1).** 10-bit limited range reads ×65472/65535. It is
   linear, so read known black and white codes and scale by them (the 360 stamp does).
+- **Every pass of the warp has `//!WHEN gyroflow_gpu_on`.** The export counts frames by it (below) and the
+  as-recorded switch (`h`, `gyroflow/compare.lua`) skips the whole warp and denoise by setting it to 0. A new pass in
+  `gpu_table.rs` without it keeps running in as recorded, on a frame that wasn't warped. The look shaders' as-recorded
+  branch is their `afp_recorded` parameter: a new look shader needs it too (`tests/compare_test.lua` lists them).
 - **Per-clip values in the shader's text cost seconds** (next section). Pass them as `//!PARAM` (DYNAMIC) or a texture.
 - **A DYNAMIC parameter change doesn't redraw the frame** in a stock mpv: libplacebo's frame cache hashes the hooks,
   not their values, so the view moves only with the next video frame. Our mpv has patch 0011. A shader that must react

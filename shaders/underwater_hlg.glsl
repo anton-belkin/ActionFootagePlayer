@@ -38,6 +38,12 @@
 //!MAXIMUM 2.0
 1.0
 
+//!PARAM afp_recorded
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 1
+0
+
 //!PARAM uw_hp
 //!TYPE DYNAMIC float
 //!MINIMUM 1.0
@@ -70,6 +76,11 @@ vec4 hook() {
     vec4 c = HOOKED_texOff(0);
     // linear Rec.2020, SDR white = 1
     vec3 cam = pow(max(c.rgb, 0.0), vec3(2.4)) * M709_2020;
+    // As recorded (the gyroflow plugin's compare.lua): the camera's colour, none of the correction
+    if (afp_recorded != 0) {
+        vec3 r = clamp(cam * SDR_WHITE, 0.0, 1.0);
+        return vec4(hlg(r.r), hlg(r.g), hlg(r.b), c.a);
+    }
     float Y = dot(cam, LUM);
     vec3 l = log(max(cam, EPS));
     float rg = l.r - l.g, bg = l.b - l.g;

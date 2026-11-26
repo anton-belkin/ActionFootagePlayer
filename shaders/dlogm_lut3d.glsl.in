@@ -8,6 +8,12 @@
 // The @LUT_SIZE@x@LUT_SIZE@x@LUT_SIZE@ .cube is embedded below as a 3D rgba16 (unorm16) texture;
 // GPU hardware trilinear sampling does the interpolation in one tap.
 
+//!PARAM afp_recorded
+//!TYPE DYNAMIC int
+//!MINIMUM 0
+//!MAXIMUM 1
+0
+
 //!TEXTURE DLOGLUT
 //!SIZE @LUT_SIZE@ @LUT_SIZE@ @LUT_SIZE@
 //!FORMAT rgba16
@@ -22,6 +28,8 @@
 
 vec4 hook() {
     vec4 color = HOOKED_tex(HOOKED_pos);
+    // As recorded (compare.lua): the code values shown as Rec.709, as the file is tagged
+    if (afp_recorded != 0) return color;
     vec3 c = clamp(color.rgb, 0.0, 1.0);
     const float N = @LUT_SIZE@.0;
     vec3 lut_coord = c * ((N - 1.0) / N) + (0.5 / N);
