@@ -95,6 +95,26 @@ goes in by a PR, up to date with `main`, with `macos` and `tests` green. The Win
 pull requests; they run on every push to `main` and every release, so after a merge look at `main`'s run
 (`gh run list --branch main`) for a break there, and fix it in a PR of its own.
 
+### The runner on Anton's Mac
+
+`~/actions-runner`, a LaunchAgent (`actions.runner.anton-belkin-ActionFootagePlayer.anton-mac`) at the lowest CPU and
+disk priority (`Nice` 20, `LowPriorityIO`; `ProcessType` Standard, not Background, which would hold it to the
+efficiency cores). Re-running the runner's `svc.sh install` writes that plist anew: set those keys again.
+
+Anton controls it from the menu bar with **AFP Runner** (`tools/ci-runner/RunnerBar.swift`; build and install with
+`tools/ci-runner/make_runner_bar.sh`). Its panel shows the Mac's CPU and memory, the job running here, the jobs waiting
+on GitHub, and Stop / Start:
+
+- **Stop** disables the LaunchAgent and unloads it, so the runner stays stopped after a restart. With a job running
+  it asks: *Stop now* (the job fails; its run is kept in `interrupted_runs`) or *After this job* (a detached shell
+  waits for the job, so quitting the app doesn't cancel it).
+- **Start** enables and loads the runner again and reruns the failed jobs of the runs Stop now cut short.
+- The decision goes into `~/actions-runner/control.json` (`state`, `by`, `at`, `reason`, `interrupted_runs`).
+  `AFPRunner --status` prints the whole picture as JSON: the service, the job here, GitHub's view of the runner, every
+  job running or waiting.
+
+While it's stopped, jobs for this repository's branches wait on GitHub; there is no fallback to GitHub's runners.
+
 CI has no GPU, no screen, no NAS and no real clips. Everything below is for you to run.
 
 ## What each file in tests/ covers
